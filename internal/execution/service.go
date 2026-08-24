@@ -1,0 +1,586 @@
+package execution
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"strings"
+	"sync"
+
+	"github.com/oklog/ulid/v2"
+
+	"codelphi/internal/billing"
+	"codelphi/internal/dbgen"
+	"codelphi/internal/execution/adapters/llm"
+	"codelphi/internal/execution/adapters/pptcreator"
+	"codelphi/internal/storage"
+)
+
+// lesson 拓扑硬编码（设计 §2.1 约束：不做 DAG、不做用户自定义工作流）：
+// design → outline → awaiting_confirm → ppt+script。每个 step 独立 authorize/settle（§4）。
+var (
+	// ErrIllegalTransition：状态机非法迁移（条件 UPDATE rows=0）。
+	ErrIllegalTransition = errors.New("execution: illegal job status transition")
+	// ErrMaterialKindUnsupported：P0 只支持 text 材料；pdf/docx/image 的文本提取不在本工单。
+	ErrMaterialKindUnsupported = errors.New("execution: material kind not supported (P0 text only)")
+	// ErrRebuildKind：script 只能随 ppt 整份重出（§8 第 9 条讲稿对齐约束）。
+	ErrRebuildKind = errors.New("execution: script rebuilds with ppt, not alone")
+)
+
+// Config 可调项；默认值即可用于生产。
+type Config struct {
+	LLMMaxTokens float64 // design/outline 的估计值（token 上限），默认 8000
+	// DeepSeek 公开价（deepseek-chat，CNY/百万 token），env 可覆盖；vendor 可换是设计要求。
+	LLMPriceIn  float64
+	LLMPriceOut float64
+	// InFlightPerKey：并发公平按 (org, platform) 的信号量容量，默认 2。
+	InFlightPerKey int
+}
+
+func defaultConfig() Config {
+	return Config{LLMMaxTokens: 8000, LLMPriceIn: 2, LLMPriceOut: 8, InFlightPerKey: 2}
+}
+
+// Service 是 lesson 权威状态机。对 billing 只走 Authorize/Settle，不直接碰配额表（设计 §2 边界）。
+type Service struct {
+	db      *sql.DB
+	billing *billing.Service
+	store   storage.Store
+	llm     *llm.Client
+	ppt     *pptcreator.Client
+	cfg     Config
+
+	mu   sync.Mutex
+	sems map[string]chan struct{}
+}
+
+type Option func(*Service)
+
+func WithConfig(cfg Config) Option { return func(s *Service) { s.cfg = cfg } }
+
+func New(db *sql.DB, billingSvc *billing.Service, store storage.Store, llmClient *llm.Client, pptClient *pptcreator.Client, opts ...Option) *Service {
+	s := &Service{db: db, billing: billingSvc, store: store, llm: llmClient, ppt: pptClient, cfg: defaultConfig(), sems: make(map[string]chan struct{})}
+	for _, o := range opts {
+		o(s)
+	}
+	return s
+}
+
+// SubmitInput 的 org/member/unit 由调用方从 identity.Context 来，绝不由模型填写（设计 §5）。
+type SubmitInput struct {
+	OrgID     string
+	MemberID  string
+	UnitID    string // 可空
+	ProjectID string
+	Title     string // 章标题
+	Note      string // 教师补充说明（表单字段）
+}
+
+// Lesson 是 SubmitLesson/ConfirmLesson 的返回快照。
+type Lesson struct {
+	LessonJobID string
+	PackageID   string
+	Status      string // jobs.status
+}
+
+// SubmitLesson 建 lesson job + CoursePackage，顺序跑 design、outline 两个 step，
+// 然后停在 awaiting_confirm（确认门是正式状态，等待期间不持有任何预扣）。
+//
+// 返回的 error 只在系统性失败（DB / billing 不可用，fail-closed）时非 nil；
+// 业务性 step 失败（deny、adapter 故障）体现在 Lesson.Status = failed。
+func (s *Service) SubmitLesson(ctx context.Context, in SubmitInput) (*Lesson, error) {
+	q := dbgen.New(s.db)
+	project, err := q.GetProject(ctx, in.ProjectID)
+	if err != nil {
+		return nil, fmt.Errorf("execution: project: %w", err)
+	}
+	if project.OrgID != in.OrgID {
+		return nil, errors.New("execution: project not in org")
+	}
+	texts, err := s.loadMaterialTexts(ctx, in.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+
+	lessonID, packageID := ulid.Make().String(), ulid.Make().String()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	qt := q.WithTx(tx)
+	if err := qt.InsertJob(ctx, dbgen.InsertJobParams{
+		ID: lessonID, OrgID: in.OrgID, ProjectID: in.ProjectID,
+		PackageID: sql.NullString{String: packageID, Valid: true},
+		Kind:      dbgen.JobsKindLesson, Status: dbgen.JobsStatusQueued,
+	}); err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+	if err := qt.InsertCoursePackage(ctx, dbgen.InsertCoursePackageParams{
+		ID: packageID, ProjectID: in.ProjectID,
+		Status:      dbgen.CoursePackagesStatusBuilding,
+		LessonJobID: sql.NullString{String: lessonID, Valid: true},
+	}); err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	lesson := &Lesson{LessonJobID: lessonID, PackageID: packageID}
+	if err := s.transition(ctx, lessonID, dbgen.JobsStatusQueued, dbgen.JobsStatusRunning); err != nil {
+		return lesson, err
+	}
+
+	// design → outline；任一失败即 lesson failed、package partial。
+	for _, kind := range []llm.Kind{llm.KindDesign, llm.KindOutline} {
+		if err := s.runLLMStep(ctx, in, project, lessonID, packageID, kind, texts, in.Note, ""); err != nil {
+			return s.failLesson(ctx, lesson, err)
+		}
+	}
+
+	if err := s.transition(ctx, lessonID, dbgen.JobsStatusRunning, dbgen.JobsStatusAwaitingConfirm); err != nil {
+		return lesson, err
+	}
+	lesson.Status = string(dbgen.JobsStatusAwaitingConfirm)
+	return lesson, nil
+}
+
+// ConfirmLesson 是教师点「通过，继续」后的状态迁移：awaiting_confirm → 提交 ppt step。
+// 幂等安全：重复调用（条件 UPDATE 抢不到行）直接返回当前状态，不产生第二个 ppt step。
+func (s *Service) ConfirmLesson(ctx context.Context, lessonID string) (*Lesson, error) {
+	q := dbgen.New(s.db)
+	job, err := q.GetJob(ctx, lessonID)
+	if err != nil {
+		return nil, fmt.Errorf("execution: lesson: %w", err)
+	}
+	if job.Kind != dbgen.JobsKindLesson {
+		return nil, errors.New("execution: not a lesson job")
+	}
+	lesson := &Lesson{LessonJobID: lessonID, PackageID: job.PackageID.String, Status: string(job.Status)}
+	if job.Status != dbgen.JobsStatusAwaitingConfirm {
+		return lesson, nil // 幂等：已确认/已终态，不再动作
+	}
+	if err := s.transition(ctx, lessonID, dbgen.JobsStatusAwaitingConfirm, dbgen.JobsStatusRunning); err != nil {
+		if errors.Is(err, ErrIllegalTransition) {
+			return lesson, nil // 并发重复确认：对方已迁移
+		}
+		return lesson, err
+	}
+
+	project, err := q.GetProject(ctx, job.ProjectID)
+	if err != nil {
+		return lesson, err
+	}
+	texts, err := s.loadMaterialTexts(ctx, job.ProjectID)
+	if err != nil {
+		return lesson, err
+	}
+	in := SubmitInput{
+		OrgID: job.OrgID, MemberID: project.OwnerMemberID,
+		UnitID: project.UnitID.String, ProjectID: project.ID, Title: project.Title,
+	}
+	if err := s.runPPTStep(ctx, in, lessonID, lesson.PackageID, composeDocument(texts), "", ""); err != nil {
+		return s.failLesson(ctx, lesson, err)
+	}
+	if err := s.transition(ctx, lessonID, dbgen.JobsStatusRunning, dbgen.JobsStatusSucceeded); err != nil {
+		return lesson, err
+	}
+	if err := q.UpdatePackageStatus(ctx, dbgen.UpdatePackageStatusParams{
+		Status: dbgen.CoursePackagesStatusReady, ID: lesson.PackageID,
+	}); err != nil {
+		return lesson, err
+	}
+	lesson.Status = string(dbgen.JobsStatusSucceeded)
+	return lesson, nil
+}
+
+// Rebuild 单件重试/缺件后补（设计 §2.2：P0 整份重出，无单页重生）。
+// 新 step job、新预扣；成功后产生新版本 artifact，is_current 迁移，旧版本保留。
+// kind 只接受 design/outline/ppt；script 随 ppt 整份重出。
+func (s *Service) Rebuild(ctx context.Context, packageID, kind, critique string) error {
+	q := dbgen.New(s.db)
+	pkg, err := q.GetCoursePackage(ctx, packageID)
+	if err != nil {
+		return fmt.Errorf("execution: package: %w", err)
+	}
+	if !pkg.LessonJobID.Valid {
+		return errors.New("execution: package has no lesson")
+	}
+	lesson, err := q.GetJob(ctx, pkg.LessonJobID.String)
+	if err != nil {
+		return err
+	}
+	project, err := q.GetProject(ctx, pkg.ProjectID)
+	if err != nil {
+		return err
+	}
+	texts, err := s.loadMaterialTexts(ctx, pkg.ProjectID)
+	if err != nil {
+		return err
+	}
+	in := SubmitInput{
+		OrgID: lesson.OrgID, MemberID: project.OwnerMemberID,
+		UnitID: project.UnitID.String, ProjectID: project.ID, Title: project.Title,
+	}
+
+	if err := q.UpdatePackageStatus(ctx, dbgen.UpdatePackageStatusParams{
+		Status: dbgen.CoursePackagesStatusBuilding, ID: packageID,
+	}); err != nil {
+		return err
+	}
+
+	switch kind {
+	case "design", "outline":
+		err = s.runLLMStep(ctx, in, project, lesson.ID, packageID, llm.Kind(kind), texts, "", critique)
+	case "ppt":
+		err = s.runPPTStep(ctx, in, lesson.ID, packageID, composeDocument(texts), "", critique)
+	case "script":
+		return ErrRebuildKind
+	default:
+		return fmt.Errorf("execution: unknown artifact kind %q", kind)
+	}
+	if err != nil {
+		// 业务性失败：package 停在 partial，错误已落 step job cost_report。
+		_ = q.UpdatePackageStatus(ctx, dbgen.UpdatePackageStatusParams{
+			Status: dbgen.CoursePackagesStatusPartial, ID: packageID,
+		})
+		return err
+	}
+	return s.refreshPackageStatus(ctx, packageID)
+}
+
+// --- step 执行 ---
+
+// runLLMStep 跑 design/outline step：authorize（estimated = token 上限）→ LLM →
+// 落 storage + artifact 版本 → settle（actual = 实际 token 数，vendor_cost 按可配单价）。
+func (s *Service) runLLMStep(ctx context.Context, in SubmitInput, project dbgen.Project, lessonID, packageID string, kind llm.Kind, texts []string, note, critique string) error {
+	stepID := ulid.Make().String()
+	if err := s.insertStep(ctx, stepID, in, lessonID, packageID, string(kind), "llm"); err != nil {
+		return err
+	}
+	release := s.acquire(ctx, in.OrgID, "llm")
+	defer release()
+	if err := s.transition(ctx, stepID, dbgen.JobsStatusQueued, dbgen.JobsStatusRunning); err != nil {
+		return err
+	}
+
+	d, err := s.billing.Authorize(ctx, billing.AuthorizeInput{
+		OrgID: in.OrgID, UnitID: in.UnitID, MemberID: in.MemberID, ProjectID: in.ProjectID,
+		Capability: string(kind), EstimatedAmount: s.cfg.LLMMaxTokens,
+		JobID: stepID, Unit: billing.UnitCount,
+	})
+	if err != nil {
+		// billing 自身故障：fail-closed，不提交平台调用（设计 §4：billing_unavailable 才整体 fail-closed）。
+		s.failStep(ctx, stepID, "billing_unavailable", err.Error())
+		return err
+	}
+	if !d.Allowed {
+		s.failStep(ctx, stepID, string(d.Reason), "authorize deny")
+		return fmt.Errorf("execution: authorize deny: %s", d.Reason)
+	}
+
+	res, err := s.llm.Generate(ctx, llm.GenerateRequest{
+		Kind: kind, Title: in.Title, Materials: texts, Note: note, Critique: critique,
+	})
+	if err != nil {
+		// adapter 故障只 fail 该 step，预扣退回。
+		s.settleFailure(ctx, d.ReservationID, stepID)
+		s.failStep(ctx, stepID, "llm_error", err.Error())
+		return err
+	}
+
+	if err := s.storeLLMArtifacts(ctx, in.OrgID, packageID, stepID, kind, res); err != nil {
+		s.settleFailure(ctx, d.ReservationID, stepID)
+		s.failStep(ctx, stepID, "storage_error", err.Error())
+		return err
+	}
+	tokens := float64(res.PromptTokens + res.CompletionTokens)
+	cost := float64(res.PromptTokens)/1e6*s.cfg.LLMPriceIn + float64(res.CompletionTokens)/1e6*s.cfg.LLMPriceOut
+	if err := s.billing.Settle(ctx, billing.SettleInput{
+		ReservationID: d.ReservationID, JobID: stepID,
+		ActualAmount: tokens, VendorCost: &cost, Outcome: billing.OutcomeSuccess,
+	}); err != nil {
+		return err
+	}
+	return s.transition(ctx, stepID, dbgen.JobsStatusRunning, dbgen.JobsStatusSucceeded)
+}
+
+// runPPTStep 跑 ppt step（estimated = actual = 1 份）。成功 = 同时产出 ppt 和 script
+// 两个 artifact；notes 为空/页数不齐由 adapter 按 C4 报 notes_missing，这里即 step failed。
+func (s *Service) runPPTStep(ctx context.Context, in SubmitInput, lessonID, packageID, document, note, critique string) error {
+	stepID := ulid.Make().String()
+	if err := s.insertStep(ctx, stepID, in, lessonID, packageID, "ppt", "pptcreator"); err != nil {
+		return err
+	}
+	release := s.acquire(ctx, in.OrgID, "pptcreator")
+	defer release()
+	if err := s.transition(ctx, stepID, dbgen.JobsStatusQueued, dbgen.JobsStatusRunning); err != nil {
+		return err
+	}
+
+	d, err := s.billing.Authorize(ctx, billing.AuthorizeInput{
+		OrgID: in.OrgID, UnitID: in.UnitID, MemberID: in.MemberID, ProjectID: in.ProjectID,
+		Capability: "ppt", EstimatedAmount: 1, JobID: stepID, Unit: billing.UnitCount,
+	})
+	if err != nil {
+		s.failStep(ctx, stepID, "billing_unavailable", err.Error())
+		return err
+	}
+	if !d.Allowed {
+		s.failStep(ctx, stepID, string(d.Reason), "authorize deny")
+		return fmt.Errorf("execution: authorize deny: %s", d.Reason)
+	}
+
+	res, err := s.ppt.Generate(ctx, pptcreator.GenerateRequest{
+		JobID: stepID, OrgID: in.OrgID, MemberID: in.MemberID,
+		Title: in.Title, Document: document, Note: note, Critique: critique,
+	})
+	if err != nil {
+		s.settleFailure(ctx, d.ReservationID, stepID)
+		code := "partner_error"
+		if pe, ok := err.(*pptcreator.Error); ok {
+			code = pe.Code
+		}
+		s.failStep(ctx, stepID, code, err.Error())
+		return err
+	}
+
+	if err := s.storePPTArtifacts(ctx, in.OrgID, packageID, stepID, res); err != nil {
+		s.settleFailure(ctx, d.ReservationID, stepID)
+		s.failStep(ctx, stepID, "storage_error", err.Error())
+		return err
+	}
+	if err := s.billing.Settle(ctx, billing.SettleInput{
+		ReservationID: d.ReservationID, JobID: stepID,
+		ActualAmount: 1, VendorCost: &res.VendorCost, Outcome: billing.OutcomeSuccess,
+	}); err != nil {
+		return err
+	}
+	return s.transition(ctx, stepID, dbgen.JobsStatusRunning, dbgen.JobsStatusSucceeded)
+}
+
+// --- 内部件 ---
+
+func (s *Service) insertStep(ctx context.Context, stepID string, in SubmitInput, lessonID, packageID, capability, platform string) error {
+	return dbgen.New(s.db).InsertJob(ctx, dbgen.InsertJobParams{
+		ID: stepID, OrgID: in.OrgID, ProjectID: in.ProjectID,
+		PackageID:  sql.NullString{String: packageID, Valid: true},
+		ParentID:   sql.NullString{String: lessonID, Valid: true},
+		Kind:       dbgen.JobsKindStep,
+		Capability: sql.NullString{String: capability, Valid: true},
+		Platform:   sql.NullString{String: platform, Valid: true},
+		Status:     dbgen.JobsStatusQueued,
+	})
+}
+
+// storeLLMArtifacts 落 JSON + 渲染 Markdown，artifact 版本迁移同事务。
+func (s *Service) storeLLMArtifacts(ctx context.Context, orgID, packageID, stepID string, kind llm.Kind, res *llm.GenerateResult) error {
+	version, err := s.nextVersion(ctx, packageID, dbgen.ArtifactsKind(kind))
+	if err != nil {
+		return err
+	}
+	base := fmt.Sprintf("org/%s/package/%s/%s-v%d", orgID, packageID, kind, version)
+	jsonKey := base + ".json"
+	if err := s.store.Put(ctx, jsonKey, strings.NewReader(string(res.JSON)), "application/json"); err != nil {
+		return err
+	}
+	if err := s.store.Put(ctx, base+".md", strings.NewReader(res.Markdown), "text/markdown"); err != nil {
+		return err
+	}
+	return s.insertArtifact(ctx, packageID, dbgen.ArtifactsKind(kind), version, stepID, jsonKey)
+}
+
+// storePPTArtifacts 回拷 pptx 与逐页 notes 到本侧 storage（不转手平台临时链，C3），
+// ppt / script 两个 artifact 各升一个版本。
+func (s *Service) storePPTArtifacts(ctx context.Context, orgID, packageID, stepID string, res *pptcreator.Result) error {
+	pptx, err := s.ppt.Fetch(ctx, res.PptxURL)
+	if err != nil {
+		return err
+	}
+	pptVersion, err := s.nextVersion(ctx, packageID, dbgen.ArtifactsKindPpt)
+	if err != nil {
+		return err
+	}
+	scriptVersion, err := s.nextVersion(ctx, packageID, dbgen.ArtifactsKindScript)
+	if err != nil {
+		return err
+	}
+	pptKey := fmt.Sprintf("org/%s/package/%s/ppt-v%d.pptx", orgID, packageID, pptVersion)
+	if err := s.store.Put(ctx, pptKey, strings.NewReader(string(pptx)), "application/vnd.openxmlformats-officedocument.presentationml.presentation"); err != nil {
+		return err
+	}
+	scriptKey := fmt.Sprintf("org/%s/package/%s/script-v%d.json", orgID, packageID, scriptVersion)
+	if err := s.store.Put(ctx, scriptKey, strings.NewReader(string(res.Notes)), "application/json"); err != nil {
+		return err
+	}
+	// 可选整份 script docx（契约 C4 可选附）。
+	if res.ScriptURL != "" {
+		if docx, err := s.ppt.Fetch(ctx, res.ScriptURL); err == nil {
+			_ = s.store.Put(ctx, fmt.Sprintf("org/%s/package/%s/script-v%d.docx", orgID, packageID, scriptVersion),
+				strings.NewReader(string(docx)), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+		}
+	}
+	if err := s.insertArtifact(ctx, packageID, dbgen.ArtifactsKindPpt, pptVersion, stepID, pptKey); err != nil {
+		return err
+	}
+	return s.insertArtifact(ctx, packageID, dbgen.ArtifactsKindScript, scriptVersion, stepID, scriptKey)
+}
+
+func (s *Service) nextVersion(ctx context.Context, packageID string, kind dbgen.ArtifactsKind) (int32, error) {
+	return dbgen.New(s.db).NextArtifactVersion(ctx, dbgen.NextArtifactVersionParams{PackageID: packageID, Kind: kind})
+}
+
+// insertArtifact 同事务清旧 is_current + 插新版本行（旧版本保留可下载，设计 §3）。
+func (s *Service) insertArtifact(ctx context.Context, packageID string, kind dbgen.ArtifactsKind, version int32, stepID, storageKey string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	qt := dbgen.New(s.db).WithTx(tx)
+	if err := qt.ClearCurrentArtifact(ctx, dbgen.ClearCurrentArtifactParams{PackageID: packageID, Kind: kind}); err != nil {
+		return err
+	}
+	if err := qt.InsertArtifact(ctx, dbgen.InsertArtifactParams{
+		ID: ulid.Make().String(), PackageID: packageID, Kind: kind, Version: version,
+		Status:     dbgen.ArtifactsStatusReady,
+		StepJobID:  sql.NullString{String: stepID, Valid: true},
+		StorageRef: sql.NullString{String: storageKey, Valid: true},
+		IsCurrent:  true,
+	}); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// loadMaterialTexts 读项目全部材料。P0 只支持 text；其它 kind 明确报错（文本提取不在本工单）。
+func (s *Service) loadMaterialTexts(ctx context.Context, projectID string) ([]string, error) {
+	materials, err := dbgen.New(s.db).ListProjectMaterials(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	if len(materials) == 0 {
+		return nil, errors.New("execution: project has no materials")
+	}
+	texts := make([]string, 0, len(materials))
+	for _, m := range materials {
+		if m.Kind != dbgen.MaterialsKindText {
+			return nil, fmt.Errorf("%w: material %s is %s", ErrMaterialKindUnsupported, m.ID, m.Kind)
+		}
+		rc, err := s.store.Open(ctx, m.StorageRef)
+		if err != nil {
+			return nil, err
+		}
+		data, err := io.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			return nil, err
+		}
+		texts = append(texts, string(data))
+	}
+	return texts, nil
+}
+
+// composeDocument 方向二预合成单文档：多份 text 材料拼接 + 明确分隔标题（契约 C2 过渡期）。
+func composeDocument(texts []string) string {
+	var sb strings.Builder
+	for i, t := range texts {
+		fmt.Fprintf(&sb, "## 材料 %d\n\n%s\n\n", i+1, t)
+	}
+	return sb.String()
+}
+
+// refreshPackageStatus：四个 P0 必齐构件（design/outline/ppt/script）都有 current ready 版本 → ready，否则 partial。
+func (s *Service) refreshPackageStatus(ctx context.Context, packageID string) error {
+	arts, err := dbgen.New(s.db).ListCurrentArtifacts(ctx, packageID)
+	if err != nil {
+		return err
+	}
+	ready := map[dbgen.ArtifactsKind]bool{}
+	for _, a := range arts {
+		if a.Status == dbgen.ArtifactsStatusReady {
+			ready[a.Kind] = true
+		}
+	}
+	status := dbgen.CoursePackagesStatusPartial
+	if ready[dbgen.ArtifactsKindDesign] && ready[dbgen.ArtifactsKindOutline] &&
+		ready[dbgen.ArtifactsKindPpt] && ready[dbgen.ArtifactsKindScript] {
+		status = dbgen.CoursePackagesStatusReady
+	}
+	return dbgen.New(s.db).UpdatePackageStatus(ctx, dbgen.UpdatePackageStatusParams{Status: status, ID: packageID})
+}
+
+// legalTransitions 是状态机的合法迁移集（设计 §7 job 状态机）。
+// 集合是 lesson 与 step 的并集：lesson 多 awaiting_confirm 一跳，step 没有。
+var legalTransitions = map[dbgen.JobsStatus]map[dbgen.JobsStatus]bool{
+	dbgen.JobsStatusQueued:          {dbgen.JobsStatusRunning: true},
+	dbgen.JobsStatusRunning:         {dbgen.JobsStatusAwaitingConfirm: true, dbgen.JobsStatusSucceeded: true, dbgen.JobsStatusFailed: true},
+	dbgen.JobsStatusAwaitingConfirm: {dbgen.JobsStatusRunning: true},
+}
+
+// transition 状态机迁移守卫：先查合法迁移集，再条件 UPDATE（前态不符 = 已被并发抢走）。
+func (s *Service) transition(ctx context.Context, jobID string, from, to dbgen.JobsStatus) error {
+	if !legalTransitions[from][to] {
+		return fmt.Errorf("%w: %s !-> %s", ErrIllegalTransition, from, to)
+	}
+	rows, err := dbgen.New(s.db).TransitionJob(ctx, dbgen.TransitionJobParams{Status: to, ID: jobID, Status_2: from})
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("%w: %s !-> %s", ErrIllegalTransition, from, to)
+	}
+	return nil
+}
+
+// failLesson：step 失败后 lesson → failed、package → partial。错误已落在 step 上。
+func (s *Service) failLesson(ctx context.Context, lesson *Lesson, stepErr error) (*Lesson, error) {
+	_ = dbgen.New(s.db).UpdatePackageStatus(ctx, dbgen.UpdatePackageStatusParams{
+		Status: dbgen.CoursePackagesStatusPartial, ID: lesson.PackageID,
+	})
+	// lesson 可能处于 running；迁移失败（已终态）不掩盖 step 错误。
+	if err := s.transition(ctx, lesson.LessonJobID, dbgen.JobsStatusRunning, dbgen.JobsStatusFailed); err == nil {
+		lesson.Status = string(dbgen.JobsStatusFailed)
+	}
+	return lesson, nil
+}
+
+// failStep 把 step 置 failed 并落诊断 JSON（error code + message）。
+func (s *Service) failStep(ctx context.Context, stepID, code, message string) {
+	report, _ := json.Marshal(map[string]string{"error_code": code, "message": message})
+	raw := json.RawMessage(report)
+	_ = dbgen.New(s.db).SetJobCostReport(ctx, dbgen.SetJobCostReportParams{CostReport: &raw, ID: stepID})
+	_ = s.transition(ctx, stepID, dbgen.JobsStatusRunning, dbgen.JobsStatusFailed)
+}
+
+// settleFailure 全额退回预扣；billing 故障只记日志语义——这里直接忽略错误，
+// 残留预扣由 TTL 扫尾兜底（设计 §4 生产语义）。
+func (s *Service) settleFailure(ctx context.Context, reservationID, stepID string) {
+	_ = s.billing.Settle(ctx, billing.SettleInput{
+		ReservationID: reservationID, JobID: stepID, Outcome: billing.OutcomeFailure,
+	})
+}
+
+// acquire 按 (org, platform) 取信号量（并发公平，设计 §7）。进程内实现，默认每键 2。
+func (s *Service) acquire(ctx context.Context, orgID, platform string) (release func()) {
+	key := orgID + "|" + platform
+	s.mu.Lock()
+	sem, ok := s.sems[key]
+	if !ok {
+		sem = make(chan struct{}, s.cfg.InFlightPerKey)
+		s.sems[key] = sem
+	}
+	s.mu.Unlock()
+	select {
+	case sem <- struct{}{}:
+	case <-ctx.Done():
+		// 调用方 ctx 取消：返回 no-op release，由上层错误路径收尾。
+		return func() {}
+	}
+	return func() { <-sem }
+}

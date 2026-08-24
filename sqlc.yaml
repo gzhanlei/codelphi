@@ -1,0 +1,26 @@
+version: "2"
+sql:
+  - engine: "mysql"
+    schema: "db/migrations"
+    queries: "db/queries"
+    gen:
+      go:
+        package: "dbgen"
+        out: "internal/dbgen"
+        emit_json_tags: true
+        # DECIMAL 映射 float64：配额/计量是内部护栏数值，float64 精度足够；
+        # paid_amount 等合同金额只读展示，不参与运算。
+        overrides:
+          - db_type: "decimal"
+            go_type: "float64"
+          - db_type: "decimal"
+            nullable: true
+            go_type:
+              import: "database/sql"
+              type: "NullFloat64"
+          # 可空 JSON 列扫描 NULL 需要指针类型（sql.RawMessage 不接 nil）。
+          - column: "jobs.cost_report"
+            go_type:
+              import: "encoding/json"
+              type: "RawMessage"
+              pointer: true
