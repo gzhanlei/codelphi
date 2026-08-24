@@ -44,8 +44,35 @@ func (q *Queries) ClearCurrentArtifact(ctx context.Context, arg ClearCurrentArti
 	return err
 }
 
+const countLessonMaterials = `-- name: CountLessonMaterials :one
+SELECT COUNT(*) FROM materials WHERE lesson_id = ?
+`
+
+func (q *Queries) CountLessonMaterials(ctx context.Context, lessonID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countLessonMaterials, lessonID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const getCourseLesson = `-- name: GetCourseLesson :one
+SELECT id, project_id, title, created_at FROM course_lessons WHERE id = ? LIMIT 1
+`
+
+func (q *Queries) GetCourseLesson(ctx context.Context, id string) (CourseLesson, error) {
+	row := q.db.QueryRowContext(ctx, getCourseLesson, id)
+	var i CourseLesson
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Title,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getCoursePackage = `-- name: GetCoursePackage :one
-SELECT id, project_id, status, lesson_job_id, created_at, updated_at, preset_id FROM course_packages WHERE id = ? LIMIT 1
+SELECT id, project_id, status, lesson_job_id, created_at, updated_at, preset_id, lesson_id FROM course_packages WHERE id = ? LIMIT 1
 `
 
 func (q *Queries) GetCoursePackage(ctx context.Context, id string) (CoursePackage, error) {
@@ -59,6 +86,38 @@ func (q *Queries) GetCoursePackage(ctx context.Context, id string) (CoursePackag
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.PresetID,
+		&i.LessonID,
+	)
+	return i, err
+}
+
+const getInFlightLessonByCourseLesson = `-- name: GetInFlightLessonByCourseLesson :one
+SELECT j.id, j.org_id, j.project_id, j.package_id, j.parent_id, j.kind, j.capability, j.platform, j.platform_job_id, j.status, j.spec_ref, j.cost_report, j.created_at, j.updated_at
+FROM jobs j
+INNER JOIN course_packages p ON p.lesson_job_id = j.id
+WHERE p.lesson_id = ? AND j.kind = 'lesson' AND j.status IN ('queued', 'running', 'awaiting_confirm')
+ORDER BY j.created_at DESC
+LIMIT 1
+`
+
+func (q *Queries) GetInFlightLessonByCourseLesson(ctx context.Context, lessonID string) (Job, error) {
+	row := q.db.QueryRowContext(ctx, getInFlightLessonByCourseLesson, lessonID)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.ProjectID,
+		&i.PackageID,
+		&i.ParentID,
+		&i.Kind,
+		&i.Capability,
+		&i.Platform,
+		&i.PlatformJobID,
+		&i.Status,
+		&i.SpecRef,
+		&i.CostReport,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -117,8 +176,28 @@ func (q *Queries) GetJob(ctx context.Context, id string) (Job, error) {
 	return i, err
 }
 
+const getLatestPackageByLesson = `-- name: GetLatestPackageByLesson :one
+SELECT id, project_id, status, lesson_job_id, created_at, updated_at, preset_id, lesson_id FROM course_packages WHERE lesson_id = ? ORDER BY created_at DESC LIMIT 1
+`
+
+func (q *Queries) GetLatestPackageByLesson(ctx context.Context, lessonID string) (CoursePackage, error) {
+	row := q.db.QueryRowContext(ctx, getLatestPackageByLesson, lessonID)
+	var i CoursePackage
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Status,
+		&i.LessonJobID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PresetID,
+		&i.LessonID,
+	)
+	return i, err
+}
+
 const getLatestPackageByProject = `-- name: GetLatestPackageByProject :one
-SELECT id, project_id, status, lesson_job_id, created_at, updated_at, preset_id FROM course_packages WHERE project_id = ? ORDER BY created_at DESC LIMIT 1
+SELECT id, project_id, status, lesson_job_id, created_at, updated_at, preset_id, lesson_id FROM course_packages WHERE project_id = ? ORDER BY created_at DESC LIMIT 1
 `
 
 func (q *Queries) GetLatestPackageByProject(ctx context.Context, projectID string) (CoursePackage, error) {
@@ -132,6 +211,7 @@ func (q *Queries) GetLatestPackageByProject(ctx context.Context, projectID strin
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.PresetID,
+		&i.LessonID,
 	)
 	return i, err
 }
@@ -186,13 +266,29 @@ func (q *Queries) InsertArtifact(ctx context.Context, arg InsertArtifactParams) 
 	return err
 }
 
+const insertCourseLesson = `-- name: InsertCourseLesson :exec
+INSERT INTO course_lessons (id, project_id, title) VALUES (?, ?, ?)
+`
+
+type InsertCourseLessonParams struct {
+	ID        string `json:"id"`
+	ProjectID string `json:"project_id"`
+	Title     string `json:"title"`
+}
+
+func (q *Queries) InsertCourseLesson(ctx context.Context, arg InsertCourseLessonParams) error {
+	_, err := q.db.ExecContext(ctx, insertCourseLesson, arg.ID, arg.ProjectID, arg.Title)
+	return err
+}
+
 const insertCoursePackage = `-- name: InsertCoursePackage :exec
-INSERT INTO course_packages (id, project_id, preset_id, status, lesson_job_id) VALUES (?, ?, ?, ?, ?)
+INSERT INTO course_packages (id, project_id, lesson_id, preset_id, status, lesson_job_id) VALUES (?, ?, ?, ?, ?, ?)
 `
 
 type InsertCoursePackageParams struct {
 	ID          string               `json:"id"`
 	ProjectID   string               `json:"project_id"`
+	LessonID    string               `json:"lesson_id"`
 	PresetID    string               `json:"preset_id"`
 	Status      CoursePackagesStatus `json:"status"`
 	LessonJobID sql.NullString       `json:"lesson_job_id"`
@@ -202,6 +298,7 @@ func (q *Queries) InsertCoursePackage(ctx context.Context, arg InsertCoursePacka
 	_, err := q.db.ExecContext(ctx, insertCoursePackage,
 		arg.ID,
 		arg.ProjectID,
+		arg.LessonID,
 		arg.PresetID,
 		arg.Status,
 		arg.LessonJobID,
@@ -245,22 +342,26 @@ func (q *Queries) InsertJob(ctx context.Context, arg InsertJobParams) error {
 }
 
 const insertMaterial = `-- name: InsertMaterial :exec
-INSERT INTO materials (id, project_id, kind, storage_ref, uploaded_by) VALUES (?, ?, ?, ?, ?)
+INSERT INTO materials (id, project_id, lesson_id, kind, filename, storage_ref, uploaded_by) VALUES (?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertMaterialParams struct {
-	ID         string        `json:"id"`
-	ProjectID  string        `json:"project_id"`
-	Kind       MaterialsKind `json:"kind"`
-	StorageRef string        `json:"storage_ref"`
-	UploadedBy string        `json:"uploaded_by"`
+	ID         string         `json:"id"`
+	ProjectID  string         `json:"project_id"`
+	LessonID   string         `json:"lesson_id"`
+	Kind       MaterialsKind  `json:"kind"`
+	Filename   sql.NullString `json:"filename"`
+	StorageRef string         `json:"storage_ref"`
+	UploadedBy string         `json:"uploaded_by"`
 }
 
 func (q *Queries) InsertMaterial(ctx context.Context, arg InsertMaterialParams) error {
 	_, err := q.db.ExecContext(ctx, insertMaterial,
 		arg.ID,
 		arg.ProjectID,
+		arg.LessonID,
 		arg.Kind,
+		arg.Filename,
 		arg.StorageRef,
 		arg.UploadedBy,
 	)
@@ -315,6 +416,38 @@ func (q *Queries) ListArtifactsByPackage(ctx context.Context, packageID string) 
 			&i.IsCurrent,
 			&i.CreatedAt,
 			&i.Kind,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCourseLessonsByProject = `-- name: ListCourseLessonsByProject :many
+SELECT id, project_id, title, created_at FROM course_lessons WHERE project_id = ? ORDER BY created_at
+`
+
+func (q *Queries) ListCourseLessonsByProject(ctx context.Context, projectID string) ([]CourseLesson, error) {
+	rows, err := q.db.QueryContext(ctx, listCourseLessonsByProject, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CourseLesson
+	for rows.Next() {
+		var i CourseLesson
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.Title,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -413,8 +546,44 @@ func (q *Queries) ListJobsByStatuses(ctx context.Context, arg ListJobsByStatuses
 	return items, nil
 }
 
+const listLessonMaterials = `-- name: ListLessonMaterials :many
+SELECT id, project_id, kind, storage_ref, uploaded_by, created_at, filename, lesson_id FROM materials WHERE lesson_id = ? ORDER BY created_at
+`
+
+func (q *Queries) ListLessonMaterials(ctx context.Context, lessonID string) ([]Material, error) {
+	rows, err := q.db.QueryContext(ctx, listLessonMaterials, lessonID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Material
+	for rows.Next() {
+		var i Material
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.Kind,
+			&i.StorageRef,
+			&i.UploadedBy,
+			&i.CreatedAt,
+			&i.Filename,
+			&i.LessonID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listProjectMaterials = `-- name: ListProjectMaterials :many
-SELECT id, project_id, kind, storage_ref, uploaded_by, created_at FROM materials WHERE project_id = ? ORDER BY created_at
+SELECT id, project_id, kind, storage_ref, uploaded_by, created_at, filename, lesson_id FROM materials WHERE project_id = ? ORDER BY created_at
 `
 
 func (q *Queries) ListProjectMaterials(ctx context.Context, projectID string) ([]Material, error) {
@@ -433,6 +602,8 @@ func (q *Queries) ListProjectMaterials(ctx context.Context, projectID string) ([
 			&i.StorageRef,
 			&i.UploadedBy,
 			&i.CreatedAt,
+			&i.Filename,
+			&i.LessonID,
 		); err != nil {
 			return nil, err
 		}
@@ -606,6 +777,22 @@ func (q *Queries) ListStepJobs(ctx context.Context, parentID sql.NullString) ([]
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockCourseLesson = `-- name: LockCourseLesson :one
+SELECT id, project_id, title, created_at FROM course_lessons WHERE id = ? FOR UPDATE
+`
+
+func (q *Queries) LockCourseLesson(ctx context.Context, id string) (CourseLesson, error) {
+	row := q.db.QueryRowContext(ctx, lockCourseLesson, id)
+	var i CourseLesson
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Title,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
 const nextArtifactVersion = `-- name: NextArtifactVersion :one

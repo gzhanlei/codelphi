@@ -28,7 +28,7 @@
 
 ## 关键事实
 
-- **产品名词**：工作台叫「我的项目」（路由 `/projects`）。卖的是 **预设包**（License.presets），不是 `org.industry`。P0 只卖 `digital_lesson`；多包时只在新建选一次。内核改进见 `PLAN-p0-development.md` §2.1 M5b、设计 §2.3
+- **产品名词**：工作台叫「我的课程」（路由仍是 `/projects`）。一个项目是一套课程，一课是项目内单元。卖的是 **预设包**（License.presets），不是 `org.industry`。P0 只卖 `digital_lesson`；多包时只在新建选一次。内核改进见 `PLAN-p0-development.md` §2.1 M5b、设计 §2.3
 - **生产机**：124.156.160.168（VM-32-3，ssh root 直连，本机有密钥）。旧机 101.32.49.240（VM-16-7）已挂，弃用
 - **域名**：`https://app.codelphi.com` → nginx → `127.0.0.1:18080` → systemd 服务 `codelphi-gateway`（二进制 `/data/www/codelphi/gateway`，不用 Docker；8080–8084 被该机别的服务占用，故用 18080）
 - **部署**：`./scripts/deploy.sh` 网关；`./scripts/deploy-web.sh` 工作台。nginx 已切 `deploy/nginx-codelphi-m5.conf`（证书行保留）。Next 听 `127.0.0.1:13000`（3000 是 chandler）
@@ -43,16 +43,17 @@
 鉴权：`Authorization: Bearer <chandler JWT>` + 可选 `X-Org-Id` / `X-Unit-Id`。`GET /v1/me` 只验签、列出 memberships（多机构时不 403，供选择器）。其余 `/v1/*` 与 `POST /mcp` 走 identity 中间件。
 
 - `GET /v1/me`
-- `GET|POST /v1/projects` · `GET /v1/projects/{id}` · `POST /v1/projects/{id}/materials` · `POST /v1/projects/{id}/submit`（202，后台跑）
-- `POST /v1/lessons/{id}/confirm`（202）· `GET /v1/packages/{id}`（签名 URL，无文件字节）
-- `POST /mcp` JSON-RPC：`tools/list`、`tools/call`（`get_package` / `submit_lesson`；submit 无 project_id 且非 rebuild → `project_unspecified`）
+- `GET|POST /v1/projects` · `GET /v1/projects/{id}`（含 `lessons[]`）· `POST /v1/projects/{id}/lessons` · `GET /v1/projects/{id}/lessons/{lid}`
+- `POST /v1/projects/{id}/lessons/{lid}/materials`（pdf/docx/md/txt，每课最多 5 份）· `POST /v1/projects/{id}/lessons/{lid}/submit`（202）
+- `POST /v1/lessons/{id}/confirm`（202，id 是 job）· `GET /v1/packages/{id}`（签名 URL，无文件字节）
+- `POST /mcp` JSON-RPC：`tools/list`、`tools/call`（`get_package` / `submit_lesson`；submit 无 `lesson_id` 且非 rebuild → `project_unspecified`）
 - 启动时 `RecoverInFlight`：残留 queued/running → failed，package partial；预扣靠 billing TTL
 - viewer 角色写接口 403 `forbidden`
 
 ## 下一步（按序）
 
 1. **提供生产 MySQL DSN** 写进 `/data/www/codelphi/gateway.env`（必须 `loc=Local`），`systemctl restart codelphi-gateway`，`/healthz` 应变 `db:ok`，`/v1` 才会挂上。没有这一步，登录后工作台调不了 API
-2. **联调**：配 `PPTCREATOR_PARTNER_BASE_URL`（站点根，不要带 `/mcp`）和 `PPTCREATOR_PARTNER_KEY`。网关直调 `create_ppt_from_documents` + `get_generation_status`。真机跑一条过 C6。对方默认 `verify-partner-mode.ts` 主路径仍是 `create_ppt_from_text`，材料包要用 `--multi-doc`。
+2. **联调**：生产已配 `PPTCREATOR_PARTNER_BASE_URL=https://app.easymakeppt.com`（站点根，请求打到 `/mcp`）和 `PPTCREATOR_PARTNER_KEY`。网关直调 `create_ppt_from_documents` + `get_generation_status`，四个 C1 头都带。真机跑一条过 C6。对方默认 `verify-partner-mode.ts` 主路径仍是 `create_ppt_from_text`，材料包要用 `--multi-doc`。
 3. **M4 运营后台**：License pending→active（双人确认）、CSV 导入成员、成员用量 Top 报表、成本预警（按 capability 拆）。没有这条，试点教师进不来（完工定义 1–2）
 4. DSH 返工对话后嵌（空聊天不上线）
 

@@ -17,6 +17,7 @@ import (
 	"codelphi/internal/dbgen"
 	"codelphi/internal/execution/adapters/llm"
 	"codelphi/internal/execution/adapters/pptcreator"
+	"codelphi/internal/extract"
 	"codelphi/internal/preset"
 	"codelphi/internal/storage"
 )
@@ -26,13 +27,40 @@ import (
 var (
 	// ErrIllegalTransition：状态机非法迁移（条件 UPDATE rows=0）。
 	ErrIllegalTransition = errors.New("execution: illegal job status transition")
-	// ErrMaterialKindUnsupported：P0 只支持 text 材料；pdf/docx/image 的文本提取不在本工单。
-	ErrMaterialKindUnsupported = errors.New("execution: material kind not supported (P0 text only)")
+	// ErrMaterialKindUnsupported：image 等无法抽文本的种类。
+	ErrMaterialKindUnsupported = errors.New("execution: material kind not supported")
+	// ErrCourseLessonRequired：做课必须绑到一课，不能绑在课程项目上。
+	ErrCourseLessonRequired = errors.New("execution: course lesson required")
 	// ErrRebuildKind：script 只能随 ppt 整份重出（§8 第 9 条讲稿对齐约束）。
 	ErrRebuildKind = errors.New("execution: script rebuilds with ppt, not alone")
 	// ErrUnknownPreset：Project.preset_id 不在目录里，submit 失败。
 	ErrUnknownPreset = errors.New("execution: unknown preset")
+	// ErrNoMaterials：这一课还没有材料。
+	ErrNoMaterials = errors.New("execution: lesson has no materials")
+	// ErrNoExtractableText：有文件但抽不出文字（扫描件 PDF、空 docx）。
+	ErrNoExtractableText = errors.New("execution: no extractable text")
+	// ErrMaterialExtractFailed：pdf/docx 损坏或无法解析。
+	ErrMaterialExtractFailed = errors.New("execution: material extract failed")
+	// ErrMaterialTooLarge：单份材料超过 extract.MaxBytes。
+	ErrMaterialTooLarge = errors.New("execution: material too large")
+	// ErrTooManyMaterials：超过每课上限。
+	ErrTooManyMaterials = errors.New("execution: too many materials")
+	// ErrLessonInFlight：该课已有 queued/running/awaiting_confirm 的 lesson job。
+	ErrLessonInFlight = errors.New("execution: lesson already in flight")
 )
+
+// InFlightError 带上已有 job，供 HTTP/MCP 幂等返回 200。
+type InFlightError struct {
+	JobID     string
+	PackageID string
+	Status    string
+}
+
+func (e *InFlightError) Error() string { return ErrLessonInFlight.Error() }
+func (e *InFlightError) Unwrap() error { return ErrLessonInFlight }
+
+// MaxMaterialsPerLesson 是教师上传上限。PPT 材料包另有 5 槽（课文+设计+大纲优先）。
+const MaxMaterialsPerLesson = 5
 
 // Config 可调项；默认值即可用于生产。
 type Config struct {
@@ -76,12 +104,13 @@ func New(db *sql.DB, billingSvc *billing.Service, store storage.Store, llmClient
 
 // SubmitInput 的 org/member/unit 由调用方从 identity.Context 来，绝不由模型填写（设计 §5）。
 type SubmitInput struct {
-	OrgID     string
-	MemberID  string
-	UnitID    string // 可空
-	ProjectID string
-	Title     string // 章标题
-	Note      string // 教师补充说明（表单字段）
+	OrgID          string
+	MemberID       string
+	UnitID         string // 可空
+	ProjectID      string
+	CourseLessonID string // 课（course_lessons），材料与套件都挂在这上面
+	Title          string // 课名
+	Note           string // 教师补充说明（表单字段）
 }
 
 // Lesson 是 SubmitLesson/ConfirmLesson 的返回快照。
@@ -170,6 +199,9 @@ type preparedLesson struct {
 }
 
 func (s *Service) prepareLesson(ctx context.Context, in SubmitInput) (*preparedLesson, error) {
+	if in.CourseLessonID == "" {
+		return nil, ErrCourseLessonRequired
+	}
 	q := dbgen.New(s.db)
 	project, err := q.GetProject(ctx, in.ProjectID)
 	if err != nil {
@@ -178,11 +210,21 @@ func (s *Service) prepareLesson(ctx context.Context, in SubmitInput) (*preparedL
 	if project.OrgID != in.OrgID {
 		return nil, errors.New("execution: project not in org")
 	}
+	cl, err := q.GetCourseLesson(ctx, in.CourseLessonID)
+	if err != nil {
+		return nil, fmt.Errorf("execution: course lesson: %w", err)
+	}
+	if cl.ProjectID != in.ProjectID {
+		return nil, errors.New("execution: course lesson not in project")
+	}
+	if in.Title == "" {
+		in.Title = cl.Title
+	}
 	spec, err := lookupProjectPreset(project)
 	if err != nil {
 		return nil, err
 	}
-	texts, err := s.loadMaterialTexts(ctx, in.ProjectID)
+	texts, err := s.loadMaterialTexts(ctx, in.CourseLessonID)
 	if err != nil {
 		return nil, err
 	}
@@ -193,6 +235,19 @@ func (s *Service) prepareLesson(ctx context.Context, in SubmitInput) (*preparedL
 		return nil, err
 	}
 	qt := q.WithTx(tx)
+	if _, err := qt.LockCourseLesson(ctx, in.CourseLessonID); err != nil {
+		tx.Rollback()
+		return nil, fmt.Errorf("execution: lock course lesson: %w", err)
+	}
+	if existing, err := qt.GetInFlightLessonByCourseLesson(ctx, in.CourseLessonID); err == nil {
+		tx.Rollback()
+		return nil, &InFlightError{
+			JobID: existing.ID, PackageID: existing.PackageID.String, Status: string(existing.Status),
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		tx.Rollback()
+		return nil, err
+	}
 	if err := qt.InsertJob(ctx, dbgen.InsertJobParams{
 		ID: lessonID, OrgID: in.OrgID, ProjectID: in.ProjectID,
 		PackageID: sql.NullString{String: packageID, Valid: true},
@@ -202,7 +257,7 @@ func (s *Service) prepareLesson(ctx context.Context, in SubmitInput) (*preparedL
 		return nil, err
 	}
 	if err := qt.InsertCoursePackage(ctx, dbgen.InsertCoursePackageParams{
-		ID: packageID, ProjectID: in.ProjectID, PresetID: spec.ID,
+		ID: packageID, ProjectID: in.ProjectID, LessonID: in.CourseLessonID, PresetID: spec.ID,
 		Status:      dbgen.CoursePackagesStatusBuilding,
 		LessonJobID: sql.NullString{String: lessonID, Valid: true},
 	}); err != nil {
@@ -259,7 +314,15 @@ func (s *Service) prepareConfirm(ctx context.Context, lessonID string) (p *prepa
 	if err != nil {
 		return nil, lesson, err
 	}
-	texts, err := s.loadMaterialTexts(ctx, job.ProjectID)
+	pkg, err := q.GetCoursePackage(ctx, job.PackageID.String)
+	if err != nil {
+		return nil, lesson, err
+	}
+	cl, err := q.GetCourseLesson(ctx, pkg.LessonID)
+	if err != nil {
+		return nil, lesson, err
+	}
+	texts, err := s.loadMaterialTexts(ctx, pkg.LessonID)
 	if err != nil {
 		return nil, lesson, err
 	}
@@ -269,7 +332,8 @@ func (s *Service) prepareConfirm(ctx context.Context, lessonID string) (p *prepa
 	}
 	in := SubmitInput{
 		OrgID: job.OrgID, MemberID: project.OwnerMemberID,
-		UnitID: project.UnitID.String, ProjectID: project.ID, Title: project.Title,
+		UnitID: project.UnitID.String, ProjectID: project.ID,
+		CourseLessonID: pkg.LessonID, Title: cl.Title,
 	}
 	return &preparedLesson{in: in, project: project, spec: spec, texts: texts, lessonID: lessonID, packageID: job.PackageID.String}, nil, nil
 }
@@ -316,13 +380,20 @@ func (s *Service) Rebuild(ctx context.Context, packageID, kind, critique string)
 	if err != nil {
 		return err
 	}
-	texts, err := s.loadMaterialTexts(ctx, pkg.ProjectID)
+	texts, err := s.loadMaterialTexts(ctx, pkg.LessonID)
 	if err != nil {
 		return err
 	}
+	var title string
+	if cl, err := q.GetCourseLesson(ctx, pkg.LessonID); err == nil {
+		title = cl.Title
+	} else {
+		title = project.Title
+	}
 	in := SubmitInput{
 		OrgID: lesson.OrgID, MemberID: project.OwnerMemberID,
-		UnitID: project.UnitID.String, ProjectID: project.ID, Title: project.Title,
+		UnitID: project.UnitID.String, ProjectID: project.ID,
+		CourseLessonID: pkg.LessonID, Title: title,
 	}
 	spec, err := lookupProjectPreset(project)
 	if err != nil {
@@ -555,37 +626,54 @@ func (s *Service) insertArtifact(ctx context.Context, packageID string, kind str
 	return tx.Commit()
 }
 
-// loadMaterialTexts 读项目全部材料。P0 只支持 text；其它 kind 明确报错（文本提取不在本工单）。
-func (s *Service) loadMaterialTexts(ctx context.Context, projectID string) ([]string, error) {
-	materials, err := dbgen.New(s.db).ListProjectMaterials(ctx, projectID)
+// loadMaterialTexts 读该课全部材料并抽文本。pdf/docx/md/txt 可抽。
+func (s *Service) loadMaterialTexts(ctx context.Context, courseLessonID string) ([]string, error) {
+	materials, err := dbgen.New(s.db).ListLessonMaterials(ctx, courseLessonID)
 	if err != nil {
 		return nil, err
 	}
 	if len(materials) == 0 {
-		return nil, errors.New("execution: project has no materials")
+		return nil, ErrNoMaterials
+	}
+	if len(materials) > MaxMaterialsPerLesson {
+		return nil, ErrTooManyMaterials
 	}
 	texts := make([]string, 0, len(materials))
 	for _, m := range materials {
-		if m.Kind != dbgen.MaterialsKindText {
+		kind := string(m.Kind)
+		if kind == "image" {
 			return nil, fmt.Errorf("%w: material %s is %s", ErrMaterialKindUnsupported, m.ID, m.Kind)
 		}
 		rc, err := s.store.Open(ctx, m.StorageRef)
 		if err != nil {
 			return nil, err
 		}
-		data, err := io.ReadAll(rc)
+		data, err := io.ReadAll(io.LimitReader(rc, extract.MaxBytes+1))
 		rc.Close()
 		if err != nil {
 			return nil, err
 		}
-		texts = append(texts, string(data))
+		if int64(len(data)) > extract.MaxBytes {
+			return nil, fmt.Errorf("%w: material %s", ErrMaterialTooLarge, m.ID)
+		}
+		text, err := extract.Text(kind, data)
+		if err != nil {
+			return nil, fmt.Errorf("%w: material %s: %v", ErrMaterialExtractFailed, m.ID, err)
+		}
+		if strings.TrimSpace(text) == "" {
+			continue
+		}
+		texts = append(texts, text)
+	}
+	if len(texts) == 0 {
+		return nil, ErrNoExtractableText
 	}
 	return texts, nil
 }
 
 // packPPTDocuments 组 create_ppt_from_documents 材料包（契约 C2 方向一）。
-// 第一份可用材料 = textbook；当前 design = teaching_design；其余材料与大纲 = reference。
-// PPTCreator 上限 5 份、content 至少 10 字符；短材料丢弃。超额时保 textbook + teaching_design。
+// 槽位优先：textbook → teaching_design → outline → 其余材料作 reference。
+// PPTCreator 上限 5 份、content 至少 10 字符；短材料丢弃。
 func packPPTDocuments(texts []string, design, outline string) []pptcreator.Doc {
 	const maxDocs, minLen = 5, 10
 	docs := make([]pptcreator.Doc, 0, maxDocs)
@@ -611,10 +699,10 @@ func packPPTDocuments(texts []string, design, outline string) []pptcreator.Doc {
 	}
 	appendDoc("textbook", "课文", textbook)
 	appendDoc("teaching_design", "课程设计", design)
+	appendDoc("reference", "大纲", outline)
 	for i, t := range extras {
 		appendDoc("reference", fmt.Sprintf("材料 %d", i+2), t)
 	}
-	appendDoc("reference", "大纲", outline)
 	return docs
 }
 

@@ -3,6 +3,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -16,6 +17,7 @@ import (
 
 	"codelphi/internal/dbgen"
 	"codelphi/internal/execution"
+	"codelphi/internal/extract"
 	"codelphi/internal/identity"
 	"codelphi/internal/preset"
 	"codelphi/internal/storage"
@@ -63,8 +65,10 @@ func New(d Deps) http.Handler {
 	mux.Handle("GET /v1/projects", auth(http.HandlerFunc(s.listProjects)))
 	mux.Handle("POST /v1/projects", auth(http.HandlerFunc(s.createProject)))
 	mux.Handle("GET /v1/projects/{id}", auth(http.HandlerFunc(s.getProject)))
-	mux.Handle("POST /v1/projects/{id}/materials", auth(http.HandlerFunc(s.uploadMaterial)))
-	mux.Handle("POST /v1/projects/{id}/submit", auth(http.HandlerFunc(s.submit)))
+	mux.Handle("POST /v1/projects/{id}/lessons", auth(http.HandlerFunc(s.createCourseLesson)))
+	mux.Handle("GET /v1/projects/{id}/lessons/{lid}", auth(http.HandlerFunc(s.getCourseLesson)))
+	mux.Handle("POST /v1/projects/{id}/lessons/{lid}/materials", auth(http.HandlerFunc(s.uploadMaterial)))
+	mux.Handle("POST /v1/projects/{id}/lessons/{lid}/submit", auth(http.HandlerFunc(s.submit)))
 	mux.Handle("GET /v1/lessons/{id}", auth(http.HandlerFunc(s.getLesson)))
 	mux.Handle("POST /v1/lessons/{id}/confirm", auth(http.HandlerFunc(s.confirm)))
 	mux.Handle("GET /v1/packages/{id}", auth(http.HandlerFunc(s.getPackage)))
@@ -271,10 +275,28 @@ func (s *server) getProject(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "internal", err.Error())
 		return
 	}
+	rows, err := dbgen.New(s.db).ListCourseLessonsByProject(r.Context(), p.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	lessons := make([]map[string]any, 0, len(rows))
+	for _, cl := range rows {
+		item := map[string]any{"id": cl.ID, "title": cl.Title}
+		if pkg, err := dbgen.New(s.db).GetLatestPackageByLesson(r.Context(), cl.ID); err == nil {
+			item["package_id"] = pkg.ID
+			item["package_status"] = string(pkg.Status)
+			if pkg.LessonJobID.Valid {
+				item["lesson_job_id"] = pkg.LessonJobID.String
+			}
+		}
+		lessons = append(lessons, item)
+	}
+	out["lessons"] = lessons
 	writeJSON(w, http.StatusOK, out)
 }
 
-func (s *server) uploadMaterial(w http.ResponseWriter, r *http.Request) {
+func (s *server) createCourseLesson(w http.ResponseWriter, r *http.Request) {
 	c := s.ictx(r)
 	if !s.requireWriter(w, c) {
 		return
@@ -283,16 +305,82 @@ func (s *server) uploadMaterial(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := r.ParseMultipartForm(20 << 20); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid_request", "multipart form required")
+	var in struct {
+		Title string `json:"title"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&in); err != nil || strings.TrimSpace(in.Title) == "" {
+		writeErr(w, http.StatusBadRequest, "invalid_request", "title required")
 		return
 	}
-	kind := r.FormValue("kind")
-	if kind == "" {
-		kind = "text"
+	id := ulid.Make().String()
+	if err := dbgen.New(s.db).InsertCourseLesson(r.Context(), dbgen.InsertCourseLessonParams{
+		ID: id, ProjectID: p.ID, Title: strings.TrimSpace(in.Title),
+	}); err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal", err.Error())
+		return
 	}
-	if kind != "text" && kind != "pdf" && kind != "docx" && kind != "image" {
-		writeErr(w, http.StatusBadRequest, "invalid_request", "kind must be text/pdf/docx/image")
+	writeJSON(w, http.StatusCreated, map[string]string{"id": id, "project_id": p.ID, "title": strings.TrimSpace(in.Title)})
+}
+
+func (s *server) getCourseLesson(w http.ResponseWriter, r *http.Request) {
+	c := s.ictx(r)
+	cl, p, ok := s.loadCourseLesson(w, r, c)
+	if !ok {
+		return
+	}
+	out := map[string]any{
+		"lesson":  map[string]string{"id": cl.ID, "project_id": p.ID, "title": cl.Title},
+		"project": projectToJSON(p),
+	}
+	mats, err := dbgen.New(s.db).ListLessonMaterials(r.Context(), cl.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	list := make([]map[string]any, 0, len(mats))
+	for _, m := range mats {
+		item := map[string]any{"id": m.ID, "kind": string(m.Kind)}
+		if m.Filename.Valid {
+			item["filename"] = m.Filename.String
+		}
+		list = append(list, item)
+	}
+	out["materials"] = list
+	if pkg, err := dbgen.New(s.db).GetLatestPackageByLesson(r.Context(), cl.ID); err == nil {
+		out["package_id"] = pkg.ID
+		out["package_status"] = string(pkg.Status)
+		if pkg.LessonJobID.Valid {
+			out["lesson_job_id"] = pkg.LessonJobID.String
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *server) loadCourseLesson(w http.ResponseWriter, r *http.Request, c *identity.Context) (dbgen.CourseLesson, dbgen.Project, bool) {
+	p, ok := s.loadProject(w, r, r.PathValue("id"), c)
+	if !ok {
+		return dbgen.CourseLesson{}, dbgen.Project{}, false
+	}
+	cl, err := dbgen.New(s.db).GetCourseLesson(r.Context(), r.PathValue("lid"))
+	if err != nil || cl.ProjectID != p.ID {
+		writeErr(w, http.StatusNotFound, "not_found", "lesson not found")
+		return dbgen.CourseLesson{}, dbgen.Project{}, false
+	}
+	return cl, p, true
+}
+
+func (s *server) uploadMaterial(w http.ResponseWriter, r *http.Request) {
+	c := s.ictx(r)
+	if !s.requireWriter(w, c) {
+		return
+	}
+	cl, p, ok := s.loadCourseLesson(w, r, c)
+	if !ok {
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, extract.MaxBytes)
+	if err := r.ParseMultipartForm(extract.MaxBytes); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid_request", "multipart form required 或文件过大")
 		return
 	}
 	file, header, err := r.FormFile("file")
@@ -301,6 +389,36 @@ func (s *server) uploadMaterial(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
+	kind := r.FormValue("kind")
+	if kind == "" {
+		if k, ok := extract.KindFromFilename(header.Filename); ok {
+			kind = k
+		}
+	}
+	if kind != "text" && kind != "pdf" && kind != "docx" {
+		writeErr(w, http.StatusBadRequest, "invalid_request", "请上传 pdf、docx、md 或 txt")
+		return
+	}
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	defer tx.Rollback()
+	q := dbgen.New(s.db).WithTx(tx)
+	if _, err := q.LockCourseLesson(r.Context(), cl.ID); err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	n, err := q.CountLessonMaterials(r.Context(), cl.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	if n >= int64(execution.MaxMaterialsPerLesson) {
+		writeErr(w, http.StatusBadRequest, "too_many_materials", "每课最多 5 份材料")
+		return
+	}
 	matID := ulid.Make().String()
 	key := "org/" + c.OrgID + "/material/" + matID
 	if header.Filename != "" {
@@ -310,17 +428,32 @@ func (s *server) uploadMaterial(w http.ResponseWriter, r *http.Request) {
 	if ct == "" {
 		ct = "application/octet-stream"
 	}
-	if err := s.store.Put(r.Context(), key, file, ct); err != nil {
+	data, err := io.ReadAll(io.LimitReader(file, extract.MaxBytes+1))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid_request", "读取文件失败")
+		return
+	}
+	if int64(len(data)) > extract.MaxBytes {
+		writeErr(w, http.StatusBadRequest, "invalid_request", "单份材料超过 20MB")
+		return
+	}
+	if err := s.store.Put(r.Context(), key, bytes.NewReader(data), ct); err != nil {
 		writeErr(w, http.StatusInternalServerError, "storage_error", err.Error())
 		return
 	}
-	if err := dbgen.New(s.db).InsertMaterial(r.Context(), dbgen.InsertMaterialParams{
-		ID: matID, ProjectID: p.ID, Kind: dbgen.MaterialsKind(kind), StorageRef: key, UploadedBy: c.MemberID,
+	fname := sql.NullString{String: header.Filename, Valid: header.Filename != ""}
+	if err := q.InsertMaterial(r.Context(), dbgen.InsertMaterialParams{
+		ID: matID, ProjectID: p.ID, LessonID: cl.ID, Kind: dbgen.MaterialsKind(kind),
+		Filename: fname, StorageRef: key, UploadedBy: c.MemberID,
 	}); err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]string{"id": matID, "kind": kind, "storage_ref": key})
+	if err := tx.Commit(); err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]string{"id": matID, "kind": kind, "filename": header.Filename, "storage_ref": key})
 }
 
 func (s *server) submit(w http.ResponseWriter, r *http.Request) {
@@ -328,7 +461,7 @@ func (s *server) submit(w http.ResponseWriter, r *http.Request) {
 	if !s.requireWriter(w, c) {
 		return
 	}
-	p, ok := s.loadProject(w, r, r.PathValue("id"), c)
+	cl, p, ok := s.loadCourseLesson(w, r, c)
 	if !ok {
 		return
 	}
@@ -351,17 +484,15 @@ func (s *server) submit(w http.ResponseWriter, r *http.Request) {
 	if r.Body != nil && r.ContentLength != 0 {
 		_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&in)
 	}
-	if existing, err := dbgen.New(s.db).GetInFlightLessonByProject(r.Context(), p.ID); err == nil {
-		writeJSON(w, http.StatusOK, lessonJSON(existing.ID, existing.PackageID.String, string(existing.Status)))
-		return
-	} else if !errors.Is(err, sql.ErrNoRows) {
-		writeErr(w, http.StatusInternalServerError, "internal", err.Error())
-		return
-	}
 	lesson, err := s.exec.StartLesson(r.Context(), execution.SubmitInput{
 		OrgID: c.OrgID, MemberID: c.MemberID, UnitID: c.UnitID,
-		ProjectID: p.ID, Title: p.Title, Note: in.Note,
+		ProjectID: p.ID, CourseLessonID: cl.ID, Title: cl.Title, Note: in.Note,
 	})
+	var inflight *execution.InFlightError
+	if errors.As(err, &inflight) {
+		writeJSON(w, http.StatusOK, lessonJSON(inflight.JobID, inflight.PackageID, inflight.Status))
+		return
+	}
 	if err != nil {
 		s.writeExecErr(w, err)
 		return
@@ -497,14 +628,24 @@ func (s *server) loadPackage(w http.ResponseWriter, r *http.Request, id string, 
 func (s *server) writeExecErr(w http.ResponseWriter, err error) {
 	msg := err.Error()
 	switch {
+	case errors.Is(err, execution.ErrCourseLessonRequired):
+		writeErr(w, http.StatusBadRequest, "invalid_request", "请先选定一课")
 	case errors.Is(err, execution.ErrMaterialKindUnsupported):
-		writeErr(w, http.StatusBadRequest, "material_kind_unsupported", "P0 仅支持文本材料")
+		writeErr(w, http.StatusBadRequest, "material_kind_unsupported", "不支持该文件类型，请上传 pdf、docx、md 或 txt")
+	case errors.Is(err, execution.ErrNoMaterials):
+		writeErr(w, http.StatusBadRequest, "invalid_request", "请先上传本课材料")
+	case errors.Is(err, execution.ErrNoExtractableText):
+		writeErr(w, http.StatusBadRequest, "no_extractable_text", "无法从材料抽出文本（扫描件 PDF 需要有文字层）")
+	case errors.Is(err, execution.ErrMaterialExtractFailed):
+		writeErr(w, http.StatusBadRequest, "material_extract_failed", "材料无法解析，请检查 pdf/docx 是否损坏")
+	case errors.Is(err, execution.ErrMaterialTooLarge):
+		writeErr(w, http.StatusBadRequest, "invalid_request", "单份材料超过 20MB")
+	case errors.Is(err, execution.ErrTooManyMaterials):
+		writeErr(w, http.StatusBadRequest, "too_many_materials", "每课最多 5 份材料")
 	case errors.Is(err, execution.ErrRebuildKind):
 		writeErr(w, http.StatusBadRequest, "invalid_request", msg)
 	case errors.Is(err, execution.ErrUnknownPreset):
 		writeErr(w, http.StatusBadRequest, "invalid_request", "未知的预设包")
-	case strings.Contains(msg, "project has no materials"):
-		writeErr(w, http.StatusBadRequest, "invalid_request", "请先上传章材料")
 	case strings.Contains(msg, "project not in org"):
 		writeErr(w, http.StatusNotFound, "not_found", "project not found")
 	default:
@@ -613,6 +754,12 @@ func adminHint(code string) string {
 		return "本套餐不含此能力，联系销售"
 	case "preset_forbidden":
 		return "本套餐不含此套件，联系销售"
+	case "too_many_materials":
+		return "每课最多 5 份材料"
+	case "no_extractable_text":
+		return "请换有文字层的 PDF，或改传 Word / Markdown / 文本"
+	case "material_extract_failed":
+		return "请检查文件是否损坏，或另存为 pdf/docx 后再传"
 	default:
 		return "联系本机构管理员"
 	}

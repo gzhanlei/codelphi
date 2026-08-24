@@ -17,17 +17,23 @@ var (
 )
 
 type Copy struct {
-	ListTitle      string            `json:"list_title"`
-	ListHint       string            `json:"list_hint"`
-	CreateCTA      string            `json:"create_cta"`
-	CreateTitle    string            `json:"create_title"`
-	TitleLabel     string            `json:"title_label"`
-	TitleHint      string            `json:"title_hint"`
-	SubmitCTA      string            `json:"submit_cta"`
-	ConfirmCTA     string            `json:"confirm_cta"`
-	ConfirmHint    string            `json:"confirm_hint"`
-	EmptyList      string            `json:"empty_list"`
-	ArtifactLabels map[string]string `json:"artifact_labels"`
+	ListTitle        string            `json:"list_title"`
+	ListHint         string            `json:"list_hint"`
+	CreateCTA        string            `json:"create_cta"`
+	CreateTitle      string            `json:"create_title"`
+	TitleLabel       string            `json:"title_label"`
+	TitleHint        string            `json:"title_hint"`
+	LessonCTA        string            `json:"lesson_cta"`
+	LessonTitle      string            `json:"lesson_title"`
+	LessonTitleLabel string            `json:"lesson_title_label"`
+	LessonTitleHint  string            `json:"lesson_title_hint"`
+	EmptyLessons     string            `json:"empty_lessons"`
+	MaterialsHint    string            `json:"materials_hint"`
+	SubmitCTA        string            `json:"submit_cta"`
+	ConfirmCTA       string            `json:"confirm_cta"`
+	ConfirmHint      string            `json:"confirm_hint"`
+	EmptyList        string            `json:"empty_list"`
+	ArtifactLabels   map[string]string `json:"artifact_labels"`
 }
 
 type Step struct {

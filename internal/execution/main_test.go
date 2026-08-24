@@ -65,7 +65,7 @@ func resetTables(t *testing.T) {
 	}
 	for _, table := range []string{
 		"audit_logs", "usage_records", "member_units", "artifacts", "jobs", "course_packages",
-		"materials", "projects", "quota_pools", "licenses", "package_templates",
+		"materials", "course_lessons", "projects", "quota_pools", "licenses", "package_templates",
 		"members", "org_units", "orgs",
 	} {
 		if _, err := testDB.Exec("TRUNCATE TABLE " + table); err != nil {
@@ -96,13 +96,14 @@ var (
 // fixture 是一套现成的计费链 + 项目 + text 材料：
 // org/member/project + license（快照含 design/outline/ppt）+ 三个根池 + 两份 text 材料（已落 storage）。
 type fixture struct {
-	orgID       string
-	memberID    string
-	projectID   string
-	pptPool     string
-	designPool  string
-	outlinePool string
-	store       *storage.Local
+	orgID          string
+	memberID       string
+	projectID      string
+	courseLessonID string
+	pptPool        string
+	designPool     string
+	outlinePool    string
+	store          *storage.Local
 }
 
 func newFixture(t *testing.T) fixture {
@@ -127,15 +128,18 @@ func newFixture(t *testing.T) fixture {
 	f.outlinePool = insertPool(t, f.orgID, licenseID, "outline", 1000000)
 	f.pptPool = insertPool(t, f.orgID, licenseID, "ppt", 100)
 	execSQL(t, "INSERT INTO projects (id, org_id, owner_member_id, title) VALUES (?, ?, ?, ?)",
-		f.projectID, f.orgID, f.memberID, "高等数学 · 第 3 章 导数")
+		f.projectID, f.orgID, f.memberID, "高等数学")
+	f.courseLessonID = ulidStr()
+	execSQL(t, "INSERT INTO course_lessons (id, project_id, title) VALUES (?, ?, ?)",
+		f.courseLessonID, f.projectID, "第 3 章 导数")
 
 	for i, text := range []string{"导数的定义：差商的极限……", "几何意义：切线斜率……"} {
 		key := fmt.Sprintf("org/%s/material/%d.txt", f.orgID, i)
 		if err := f.store.Put(t.Context(), key, stringReader(text), "text/plain"); err != nil {
 			t.Fatal(err)
 		}
-		execSQL(t, "INSERT INTO materials (id, project_id, kind, storage_ref, uploaded_by) VALUES (?, ?, 'text', ?, ?)",
-			ulidStr(), f.projectID, key, f.memberID)
+		execSQL(t, "INSERT INTO materials (id, project_id, lesson_id, kind, filename, storage_ref, uploaded_by) VALUES (?, ?, ?, 'text', ?, ?, ?)",
+			ulidStr(), f.projectID, f.courseLessonID, fmt.Sprintf("%d.txt", i), key, f.memberID)
 	}
 	return f
 }

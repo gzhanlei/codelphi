@@ -11,7 +11,7 @@ func TestLookupDigitalLesson(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Copy.SubmitCTA == "" || p.Copy.CreateCTA == "" {
+	if p.Copy.SubmitCTA == "" || p.Copy.CreateCTA == "" || p.Copy.LessonCTA == "" {
 		t.Fatal("digital_lesson copy incomplete")
 	}
 	if len(p.Steps) == 0 || len(p.Artifacts) == 0 {

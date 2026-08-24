@@ -209,10 +209,50 @@ func TestMeListsMemberships(t *testing.T) {
 	}
 }
 
+func (e *apiEnv) createLesson(t *testing.T, projectID, title string) string {
+	t.Helper()
+	rec := e.do(t, http.MethodPost, "/v1/projects/"+projectID+"/lessons", map[string]string{"title": title})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create lesson code = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.ID == "" {
+		t.Fatal("lesson id empty")
+	}
+	return created.ID
+}
+
+func (e *apiEnv) uploadMaterial(t *testing.T, projectID, lessonID, filename, content, kind string) *httptest.ResponseRecorder {
+	t.Helper()
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	if kind != "" {
+		_ = w.WriteField("kind", kind)
+	}
+	fw, err := w.CreateFormFile("file", filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.WriteString(fw, content)
+	_ = w.Close()
+	req := httptest.NewRequest(http.MethodPost, "/v1/projects/"+projectID+"/lessons/"+lessonID+"/materials", &buf)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+e.token)
+	req.Header.Set("X-Org-Id", e.orgID)
+	rec := httptest.NewRecorder()
+	e.h.ServeHTTP(rec, req)
+	return rec
+}
+
 func TestCreateProjectUploadSubmitConfirm(t *testing.T) {
 	e := newAPIEnv(t)
 
-	rec := e.do(t, http.MethodPost, "/v1/projects", map[string]string{"title": "高等数学 · 第 3 章 导数"})
+	rec := e.do(t, http.MethodPost, "/v1/projects", map[string]string{"title": "高等数学"})
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create project code = %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -223,30 +263,17 @@ func TestCreateProjectUploadSubmitConfirm(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
 		t.Fatal(err)
 	}
-	if created.Title != "高等数学 · 第 3 章 导数" || created.ID == "" {
+	if created.Title != "高等数学" || created.ID == "" {
 		t.Fatalf("created = %+v", created)
 	}
 
-	var buf bytes.Buffer
-	w := multipart.NewWriter(&buf)
-	_ = w.WriteField("kind", "text")
-	fw, err := w.CreateFormFile("file", "note.txt")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _ = fw.Write([]byte("导数的定义：差商的极限"))
-	_ = w.Close()
-	req := httptest.NewRequest(http.MethodPost, "/v1/projects/"+created.ID+"/materials", &buf)
-	req.Header.Set("Content-Type", w.FormDataContentType())
-	req.Header.Set("Authorization", "Bearer "+e.token)
-	req.Header.Set("X-Org-Id", e.orgID)
-	up := httptest.NewRecorder()
-	e.h.ServeHTTP(up, req)
+	lessonID := e.createLesson(t, created.ID, "第 3 章 导数")
+	up := e.uploadMaterial(t, created.ID, lessonID, "note.txt", "导数的定义：差商的极限", "text")
 	if up.Code != http.StatusCreated {
 		t.Fatalf("upload code = %d body=%s", up.Code, up.Body.String())
 	}
 
-	rec = e.do(t, http.MethodPost, "/v1/projects/"+created.ID+"/submit", map[string]string{"note": "2 学时"})
+	rec = e.do(t, http.MethodPost, "/v1/projects/"+created.ID+"/lessons/"+lessonID+"/submit", map[string]string{"note": "2 学时"})
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("submit code = %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -274,6 +301,23 @@ func TestCreateProjectUploadSubmitConfirm(t *testing.T) {
 		t.Fatalf("artifacts = %v", pkg["artifacts"])
 	}
 
+	got := e.do(t, http.MethodGet, "/v1/projects/"+created.ID, nil)
+	if got.Code != http.StatusOK {
+		t.Fatalf("get project code = %d body=%s", got.Code, got.Body.String())
+	}
+	var detail struct {
+		Lessons []struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+		} `json:"lessons"`
+	}
+	if err := json.Unmarshal(got.Body.Bytes(), &detail); err != nil {
+		t.Fatal(err)
+	}
+	if len(detail.Lessons) != 1 || detail.Lessons[0].ID != lessonID || detail.Lessons[0].Title != "第 3 章 导数" {
+		t.Fatalf("lessons = %+v", detail.Lessons)
+	}
+
 	list := e.do(t, http.MethodGet, "/v1/projects", nil)
 	if list.Code != http.StatusOK {
 		t.Fatalf("list code = %d", list.Code)
@@ -289,20 +333,13 @@ func TestQuotaExhaustedHasAdminHint(t *testing.T) {
 		ID string `json:"id"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+	lessonID := e.createLesson(t, created.ID, "第 1 课")
+	up := e.uploadMaterial(t, created.ID, lessonID, "a.txt", "材料", "text")
+	if up.Code != http.StatusCreated {
+		t.Fatalf("upload code = %d body=%s", up.Code, up.Body.String())
+	}
 
-	var buf bytes.Buffer
-	w := multipart.NewWriter(&buf)
-	_ = w.WriteField("kind", "text")
-	fw, _ := w.CreateFormFile("file", "a.txt")
-	_, _ = io.WriteString(fw, "材料")
-	_ = w.Close()
-	req := httptest.NewRequest(http.MethodPost, "/v1/projects/"+created.ID+"/materials", &buf)
-	req.Header.Set("Content-Type", w.FormDataContentType())
-	req.Header.Set("Authorization", "Bearer "+e.token)
-	req.Header.Set("X-Org-Id", e.orgID)
-	e.h.ServeHTTP(httptest.NewRecorder(), req)
-
-	rec = e.do(t, http.MethodPost, "/v1/projects/"+created.ID+"/submit", map[string]string{})
+	rec = e.do(t, http.MethodPost, "/v1/projects/"+created.ID+"/lessons/"+lessonID+"/submit", map[string]string{})
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("submit code = %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -450,26 +487,95 @@ func TestSubmitRevokedPresetForbidden(t *testing.T) {
 		ID string `json:"id"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+	lessonID := e.createLesson(t, created.ID, "第 1 课")
 	execSQL(t, `UPDATE licenses SET presets = '["other_pack"]'`)
 
-	var buf bytes.Buffer
-	w := multipart.NewWriter(&buf)
-	_ = w.WriteField("kind", "text")
-	fw, _ := w.CreateFormFile("file", "a.txt")
-	_, _ = io.WriteString(fw, "材料")
-	_ = w.Close()
-	req := httptest.NewRequest(http.MethodPost, "/v1/projects/"+created.ID+"/materials", &buf)
-	req.Header.Set("Content-Type", w.FormDataContentType())
-	req.Header.Set("Authorization", "Bearer "+e.token)
-	req.Header.Set("X-Org-Id", e.orgID)
-	e.h.ServeHTTP(httptest.NewRecorder(), req)
+	up := e.uploadMaterial(t, created.ID, lessonID, "a.txt", "材料", "text")
+	if up.Code != http.StatusCreated {
+		t.Fatalf("upload code = %d body=%s", up.Code, up.Body.String())
+	}
 
-	rec = e.do(t, http.MethodPost, "/v1/projects/"+created.ID+"/submit", map[string]string{})
+	rec = e.do(t, http.MethodPost, "/v1/projects/"+created.ID+"/lessons/"+lessonID+"/submit", map[string]string{})
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("code = %d body=%s", rec.Code, rec.Body.String())
 	}
 	if decodeErr(t, rec) != "preset_forbidden" {
 		t.Fatalf("err = %s", decodeErr(t, rec))
+	}
+}
+
+func TestMCPSubmitRevokedPresetForbidden(t *testing.T) {
+	e := newAPIEnv(t)
+	rec := e.do(t, http.MethodPost, "/v1/projects", map[string]string{"title": "x"})
+	var created struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+	lessonID := e.createLesson(t, created.ID, "第 1 课")
+	up := e.uploadMaterial(t, created.ID, lessonID, "a.txt", "材料内容足够长", "text")
+	if up.Code != http.StatusCreated {
+		t.Fatalf("upload code = %d body=%s", up.Code, up.Body.String())
+	}
+	execSQL(t, `UPDATE licenses SET presets = '["other_pack"]'`)
+
+	rec = e.do(t, http.MethodPost, "/mcp", map[string]any{
+		"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+		"params": map[string]any{"name": "submit_lesson", "arguments": map[string]any{"lesson_id": lessonID}},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("mcp code = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var rpc struct {
+		Error *struct {
+			Data struct {
+				Code string `json:"code"`
+			} `json:"data"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &rpc); err != nil {
+		t.Fatal(err)
+	}
+	if rpc.Error == nil || rpc.Error.Data.Code != "preset_forbidden" {
+		t.Fatalf("want preset_forbidden, got %+v body=%s", rpc.Error, rec.Body.String())
+	}
+}
+
+func TestUploadInfersKindAndCapsAtFive(t *testing.T) {
+	e := newAPIEnv(t)
+	rec := e.do(t, http.MethodPost, "/v1/projects", map[string]string{"title": "高等数学"})
+	var created struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+	lessonID := e.createLesson(t, created.ID, "第 3 章 导数")
+
+	up := e.uploadMaterial(t, created.ID, lessonID, "课文.md", "# 导数", "")
+	if up.Code != http.StatusCreated {
+		t.Fatalf("md upload code = %d body=%s", up.Code, up.Body.String())
+	}
+	var mat struct {
+		Kind     string `json:"kind"`
+		Filename string `json:"filename"`
+	}
+	if err := json.Unmarshal(up.Body.Bytes(), &mat); err != nil {
+		t.Fatal(err)
+	}
+	if mat.Kind != "text" || mat.Filename != "课文.md" {
+		t.Fatalf("inferred material = %+v", mat)
+	}
+
+	for i := 0; i < 4; i++ {
+		up = e.uploadMaterial(t, created.ID, lessonID, fmt.Sprintf("n%d.txt", i), "材料内容足够长", "text")
+		if up.Code != http.StatusCreated {
+			t.Fatalf("upload %d code = %d body=%s", i, up.Code, up.Body.String())
+		}
+	}
+	sixth := e.uploadMaterial(t, created.ID, lessonID, "extra.txt", "第六份", "text")
+	if sixth.Code != http.StatusBadRequest {
+		t.Fatalf("sixth upload code = %d body=%s", sixth.Code, sixth.Body.String())
+	}
+	if decodeErr(t, sixth) != "too_many_materials" {
+		t.Fatalf("err = %s body=%s", decodeErr(t, sixth), sixth.Body.String())
 	}
 }
 

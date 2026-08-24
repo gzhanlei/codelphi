@@ -62,7 +62,7 @@ func resetTables(t *testing.T) {
 	}
 	for _, table := range []string{
 		"audit_logs", "usage_records", "artifacts", "jobs", "course_packages",
-		"materials", "projects", "quota_pools", "licenses", "package_templates",
+		"materials", "course_lessons", "projects", "quota_pools", "licenses", "package_templates",
 		"members", "org_units", "orgs",
 	} {
 		if _, err := testDB.Exec("TRUNCATE TABLE " + table); err != nil {

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Banner, Button } from "@/components/ui";
-import type { APIError, Lesson, PackageSnap, PresetCopy } from "@/lib/gateway";
+import type { APIError, Lesson, LessonMaterial, PackageSnap, PresetCopy } from "@/lib/gateway";
 
 const fallbackLabels: Record<string, string> = {
   design: "课程设计",
@@ -11,69 +11,100 @@ const fallbackLabels: Record<string, string> = {
   script: "讲稿",
 };
 
-export function ProjectWorkbench({
+const acceptTypes = ".pdf,.docx,.md,.txt,.markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/markdown,text/plain";
+const maxMaterials = 5;
+
+export function LessonWorkbench({
   projectId,
+  lessonId,
   canWrite,
-  initialPackageId,
   copy,
 }: {
   projectId: string;
+  lessonId: string;
   canWrite: boolean;
-  initialPackageId?: string;
   copy?: PresetCopy;
 }) {
   const [pkg, setPkg] = useState<PackageSnap | null>(null);
+  const [materials, setMaterials] = useState<LessonMaterial[]>([]);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [uploadMsg, setUploadMsg] = useState("");
   const [err, setErr] = useState<APIError | null>(null);
 
-  const load = useCallback(
-    async (packageId: string) => {
-      const res = await fetch(`/api/gw/v1/packages/${packageId}`, { cache: "no-store" });
-      const data = await res.json();
-      if (!res.ok) {
-        setErr(data.error || { code: "http_error", message: "读取套件失败" });
-        return;
-      }
-      setPkg(data);
-      setErr(data.error || null);
-    },
-    [],
-  );
+  const loadPackage = useCallback(async (packageId: string) => {
+    const res = await fetch(`/api/gw/v1/packages/${packageId}`, { cache: "no-store" });
+    const data = await res.json();
+    if (!res.ok) {
+      setErr(data.error || { code: "http_error", message: "读取套件失败" });
+      return;
+    }
+    setPkg(data);
+    setErr(data.error || null);
+  }, []);
+
+  const loadLesson = useCallback(async () => {
+    const res = await fetch(`/api/gw/v1/projects/${projectId}/lessons/${lessonId}`, { cache: "no-store" });
+    const data = await res.json();
+    if (!res.ok) {
+      setErr(data.error || { code: "http_error", message: "读取课失败" });
+      return;
+    }
+    setMaterials(data.materials || []);
+    if (data.package_id) {
+      await loadPackage(data.package_id);
+    }
+  }, [projectId, lessonId, loadPackage]);
 
   useEffect(() => {
-    if (initialPackageId) void load(initialPackageId);
-  }, [initialPackageId, load]);
+    void loadLesson();
+  }, [loadLesson]);
 
   useEffect(() => {
     const status = pkg?.lesson_status;
     if (!pkg?.id || !status) return;
     if (status !== "running" && status !== "queued") return;
-    const t = setInterval(() => void load(pkg.id), 1500);
+    const t = setInterval(() => void loadPackage(pkg.id), 1500);
     return () => clearInterval(t);
-  }, [pkg?.id, pkg?.lesson_status, load]);
+  }, [pkg?.id, pkg?.lesson_status, loadPackage]);
 
-  async function upload(file: File) {
-    const fd = new FormData();
-    fd.set("kind", "text");
-    fd.set("file", file);
-    setBusy(true);
-    setUploadMsg("");
-    const res = await fetch(`/api/gw/v1/projects/${projectId}/materials`, { method: "POST", body: fd });
-    setBusy(false);
-    if (!res.ok) {
-      const data = await res.json();
-      setErr(data.error || { code: "upload", message: "上传失败" });
+  async function uploadFiles(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    const remaining = maxMaterials - materials.length;
+    if (remaining <= 0) {
+      setErr({ code: "too_many_materials", message: "每课最多 5 份材料" });
       return;
     }
-    setUploadMsg(`已上传 ${file.name}（P0 仅文本）`);
+    const picked = Array.from(files).slice(0, remaining);
+    setBusy(true);
+    setUploadMsg("");
+    setErr(null);
+    const names: string[] = [];
+    for (const file of picked) {
+      const fd = new FormData();
+      fd.set("file", file);
+      const res = await fetch(`/api/gw/v1/projects/${projectId}/lessons/${lessonId}/materials`, {
+        method: "POST",
+        body: fd,
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setBusy(false);
+        setErr(data.error || { code: "upload", message: "上传失败" });
+        await loadLesson();
+        return;
+      }
+      names.push(file.name);
+    }
+    setBusy(false);
+    setUploadMsg(`已上传 ${names.join("、")}`);
+    await loadLesson();
   }
 
   async function submit() {
     setBusy(true);
     setErr(null);
-    const res = await fetch(`/api/gw/v1/projects/${projectId}/submit`, {
+    const res = await fetch(`/api/gw/v1/projects/${projectId}/lessons/${lessonId}/submit`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ note }),
@@ -84,7 +115,7 @@ export function ProjectWorkbench({
       setErr(data.error || { code: "submit", message: "提交失败" });
       return;
     }
-    await load(data.package_id);
+    await loadPackage(data.package_id);
   }
 
   async function confirm() {
@@ -97,35 +128,56 @@ export function ProjectWorkbench({
       setErr(data.error || { code: "confirm", message: "确认失败" });
       return;
     }
-    await load(pkg.id);
+    await loadPackage(pkg.id);
   }
 
   const lesson = pkg?.lesson_status;
+  const canUpload = canWrite && (!pkg || lesson === "failed");
+  const slots = maxMaterials - materials.length;
 
   return (
     <div className="mt-8 space-y-8">
       {err ? <Banner code={err.code} message={err.message} hint={err.admin_hint} /> : null}
 
-      {canWrite && (!pkg || lesson === "failed") ? (
+      {canUpload ? (
         <section className="space-y-4 border border-line bg-card p-5">
           <h2 className="font-serif text-lg">材料与说明</h2>
-          <p className="text-sm text-muted">P0 只收文本材料。pdf/docx 提取稍后做。</p>
-          <input
-            type="file"
-            accept=".txt,text/plain"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) void upload(f);
-            }}
-          />
+          <p className="text-sm text-muted">
+            {copy?.materials_hint || "每课最多 5 份。支持 PDF、Word（.docx）、Markdown、纯文本。"}
+          </p>
+          {materials.length > 0 ? (
+            <ul className="space-y-1 text-sm">
+              {materials.map((m) => (
+                <li key={m.id} className="text-muted">
+                  {m.filename || m.id}
+                  <span className="ml-2 text-xs">{m.kind}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {slots > 0 ? (
+            <input
+              type="file"
+              multiple
+              accept={acceptTypes}
+              disabled={busy}
+              onChange={(e) => {
+                const files = e.target.files;
+                void uploadFiles(files);
+                e.target.value = "";
+              }}
+            />
+          ) : (
+            <p className="text-sm text-muted">已满 5 份，不能再传。</p>
+          )}
           {uploadMsg ? <p className="text-sm text-muted">{uploadMsg}</p> : null}
           <textarea
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            placeholder="补充说明（选填）。当前数字课试点可写学时、专业、风格"
+            placeholder="补充说明（选填）。可写学时、专业、风格"
             className="h-24 w-full border border-line bg-paper px-3 py-2 text-sm outline-none focus:border-ink"
           />
-          <Button onClick={() => void submit()} disabled={busy}>
+          <Button onClick={() => void submit()} disabled={busy || materials.length === 0}>
             {busy ? "提交中…" : copy?.submit_cta || "做课"}
           </Button>
         </section>

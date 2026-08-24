@@ -180,10 +180,25 @@ func newEnv(t *testing.T) *env {
 	return &env{fixture: f, exec: svc, llm: fl, ppt: fp}
 }
 
+func (e *env) extraLesson(t *testing.T, title string) string {
+	t.Helper()
+	id := ulidStr()
+	execSQL(t, "INSERT INTO course_lessons (id, project_id, title) VALUES (?, ?, ?)", id, e.projectID, title)
+	for i, text := range []string{"导数的定义：差商的极限……", "几何意义：切线斜率……"} {
+		key := fmt.Sprintf("org/%s/material/%s/%d.txt", e.orgID, id, i)
+		if err := e.store.Put(context.Background(), key, stringReader(text), "text/plain"); err != nil {
+			t.Fatal(err)
+		}
+		execSQL(t, "INSERT INTO materials (id, project_id, lesson_id, kind, filename, storage_ref, uploaded_by) VALUES (?, ?, ?, 'text', ?, ?, ?)",
+			ulidStr(), e.projectID, id, fmt.Sprintf("%d.txt", i), key, e.memberID)
+	}
+	return id
+}
+
 func (e *env) submit(t *testing.T) *Lesson {
 	t.Helper()
 	lesson, err := e.exec.SubmitLesson(context.Background(), SubmitInput{
-		OrgID: e.orgID, MemberID: e.memberID, ProjectID: e.projectID, Title: "导数", Note: "2 学时",
+		OrgID: e.orgID, MemberID: e.memberID, ProjectID: e.projectID, CourseLessonID: e.courseLessonID, Title: "导数", Note: "2 学时",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -310,11 +325,11 @@ func TestPackPPTDocuments(t *testing.T) {
 	if docs[1].Role != "teaching_design" {
 		t.Fatalf("design = %#v", docs[1])
 	}
-	if docs[2].Role != "reference" || !strings.Contains(docs[2].Content, "几何意义") {
-		t.Fatalf("extra material = %#v", docs[2])
+	if docs[2].Role != "reference" || !strings.Contains(docs[2].Content, "条目") {
+		t.Fatalf("outline = %#v", docs[2])
 	}
-	if docs[3].Role != "reference" || !strings.Contains(docs[3].Content, "条目") {
-		t.Fatalf("outline = %#v", docs[3])
+	if docs[3].Role != "reference" || !strings.Contains(docs[3].Content, "几何意义") {
+		t.Fatalf("extra material = %#v", docs[3])
 	}
 
 	many := make([]string, 8)
@@ -327,6 +342,9 @@ func TestPackPPTDocuments(t *testing.T) {
 	}
 	if capped[0].Role != "textbook" || capped[1].Role != "teaching_design" {
 		t.Fatalf("priority lost: %#v", capped)
+	}
+	if capped[2].Role != "reference" || !strings.Contains(capped[2].Content, "条目") {
+		t.Fatalf("outline dropped when extras fill the cap: %#v", capped)
 	}
 }
 
@@ -502,6 +520,11 @@ func TestSemaphoreFairness(t *testing.T) {
 	release := e.llm.block
 
 	const n = 5
+	lessons := make([]string, n)
+	lessons[0] = e.courseLessonID
+	for i := 1; i < n; i++ {
+		lessons[i] = e.extraLesson(t, fmt.Sprintf("第 %d 课", i+1))
+	}
 	var wg sync.WaitGroup
 	errs := make([]error, n)
 	for i := 0; i < n; i++ {
@@ -509,7 +532,7 @@ func TestSemaphoreFairness(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			_, errs[i] = e.exec.SubmitLesson(context.Background(), SubmitInput{
-				OrgID: e.orgID, MemberID: e.memberID, ProjectID: e.projectID, Title: "导数",
+				OrgID: e.orgID, MemberID: e.memberID, ProjectID: e.projectID, CourseLessonID: lessons[i], Title: "导数",
 			})
 		}(i)
 	}
@@ -561,7 +584,7 @@ func TestLLMSchemaViolation(t *testing.T) {
 	e.llm.badJSON.Store(true)
 
 	lesson, err := e.exec.SubmitLesson(context.Background(), SubmitInput{
-		OrgID: e.orgID, MemberID: e.memberID, ProjectID: e.projectID, Title: "导数",
+		OrgID: e.orgID, MemberID: e.memberID, ProjectID: e.projectID, CourseLessonID: e.courseLessonID, Title: "导数",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -577,14 +600,78 @@ func TestLLMSchemaViolation(t *testing.T) {
 	}
 }
 
-// 非 text 材料：明确报错（pdf/docx 文本提取不在本工单）。
-func TestMaterialKindUnsupported(t *testing.T) {
+func TestNoExtractableText(t *testing.T) {
 	e := newEnv(t)
-	execSQL(t, "INSERT INTO materials (id, project_id, kind, storage_ref, uploaded_by) VALUES (?, ?, 'pdf', 'x.pdf', ?)",
-		ulidStr(), e.projectID, e.memberID)
+	execSQL(t, "DELETE FROM materials WHERE lesson_id = ?", e.courseLessonID)
+	key := fmt.Sprintf("org/%s/material/empty.txt", e.orgID)
+	if err := e.store.Put(context.Background(), key, stringReader("   \n  "), "text/plain"); err != nil {
+		t.Fatal(err)
+	}
+	execSQL(t, "INSERT INTO materials (id, project_id, lesson_id, kind, filename, storage_ref, uploaded_by) VALUES (?, ?, ?, 'text', 'empty.txt', ?, ?)",
+		ulidStr(), e.projectID, e.courseLessonID, key, e.memberID)
 
 	_, err := e.exec.SubmitLesson(context.Background(), SubmitInput{
-		OrgID: e.orgID, MemberID: e.memberID, ProjectID: e.projectID, Title: "导数",
+		OrgID: e.orgID, MemberID: e.memberID, ProjectID: e.projectID, CourseLessonID: e.courseLessonID, Title: "导数",
+	})
+	if !errors.Is(err, ErrNoExtractableText) {
+		t.Fatalf("want ErrNoExtractableText, got %v", err)
+	}
+}
+
+func TestStartLessonConcurrentIdempotent(t *testing.T) {
+	e := newEnv(t)
+	e.llm.block = make(chan struct{})
+
+	type result struct {
+		lesson *Lesson
+		err    error
+	}
+	ch := make(chan result, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			lesson, err := e.exec.StartLesson(context.Background(), SubmitInput{
+				OrgID: e.orgID, MemberID: e.memberID, ProjectID: e.projectID, CourseLessonID: e.courseLessonID, Title: "导数",
+			})
+			ch <- result{lesson, err}
+		}()
+	}
+	a, b := <-ch, <-ch
+	close(e.llm.block)
+
+	var created, skipped result
+	switch {
+	case a.err == nil && errors.As(b.err, new(*InFlightError)):
+		created, skipped = a, b
+	case b.err == nil && errors.As(a.err, new(*InFlightError)):
+		created, skipped = b, a
+	default:
+		t.Fatalf("want one created and one in-flight, got %v / %v", a.err, b.err)
+	}
+	var inflight *InFlightError
+	if !errors.As(skipped.err, &inflight) {
+		t.Fatal("skipped is not InFlightError")
+	}
+	if created.lesson.LessonJobID != inflight.JobID || created.lesson.PackageID != inflight.PackageID {
+		t.Fatalf("created=%+v inflight=%+v", created.lesson, inflight)
+	}
+	var n int
+	if err := testDB.QueryRow("SELECT COUNT(*) FROM jobs WHERE project_id = ? AND kind = 'lesson'", e.projectID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("lesson jobs = %d, want 1", n)
+	}
+	waitJobStatus(t, created.lesson.LessonJobID, "awaiting_confirm")
+}
+
+// image 材料无法抽文本：明确报错。pdf/docx/md 走 extract。
+func TestMaterialKindUnsupported(t *testing.T) {
+	e := newEnv(t)
+	execSQL(t, "INSERT INTO materials (id, project_id, lesson_id, kind, storage_ref, uploaded_by) VALUES (?, ?, ?, 'image', 'x.png', ?)",
+		ulidStr(), e.projectID, e.courseLessonID, e.memberID)
+
+	_, err := e.exec.SubmitLesson(context.Background(), SubmitInput{
+		OrgID: e.orgID, MemberID: e.memberID, ProjectID: e.projectID, CourseLessonID: e.courseLessonID, Title: "导数",
 	})
 	if err == nil || !strings.Contains(err.Error(), "not supported") {
 		t.Fatalf("want ErrMaterialKindUnsupported, got %v", err)
@@ -598,7 +685,7 @@ func TestStartLessonReturnsImmediately(t *testing.T) {
 
 	start := time.Now()
 	lesson, err := e.exec.StartLesson(context.Background(), SubmitInput{
-		OrgID: e.orgID, MemberID: e.memberID, ProjectID: e.projectID, Title: "导数",
+		OrgID: e.orgID, MemberID: e.memberID, ProjectID: e.projectID, CourseLessonID: e.courseLessonID, Title: "导数",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -620,8 +707,8 @@ func TestRecoverInFlightAbortsRunning(t *testing.T) {
 	lessonID, packageID, stepID := ulidStr(), ulidStr(), ulidStr()
 	execSQL(t, `INSERT INTO jobs (id, org_id, project_id, package_id, kind, status) VALUES (?, ?, ?, ?, 'lesson', 'running')`,
 		lessonID, e.orgID, e.projectID, packageID)
-	execSQL(t, `INSERT INTO course_packages (id, project_id, status, lesson_job_id) VALUES (?, ?, 'building', ?)`,
-		packageID, e.projectID, lessonID)
+	execSQL(t, `INSERT INTO course_packages (id, project_id, lesson_id, status, lesson_job_id) VALUES (?, ?, ?, 'building', ?)`,
+		packageID, e.projectID, e.courseLessonID, lessonID)
 	execSQL(t, `INSERT INTO jobs (id, org_id, project_id, package_id, parent_id, kind, capability, status) VALUES (?, ?, ?, ?, ?, 'step', 'design', 'running')`,
 		stepID, e.orgID, e.projectID, packageID, lessonID)
 
@@ -710,7 +797,7 @@ func TestUnknownPresetSubmitFails(t *testing.T) {
 	e := newEnv(t)
 	execSQL(t, "UPDATE projects SET preset_id = 'no_such_pack' WHERE id = ?", e.projectID)
 	_, err := e.exec.SubmitLesson(context.Background(), SubmitInput{
-		OrgID: e.orgID, MemberID: e.memberID, ProjectID: e.projectID, Title: "导数",
+		OrgID: e.orgID, MemberID: e.memberID, ProjectID: e.projectID, CourseLessonID: e.courseLessonID, Title: "导数",
 	})
 	if !errors.Is(err, ErrUnknownPreset) {
 		t.Fatalf("err=%v, want ErrUnknownPreset", err)

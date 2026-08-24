@@ -19,7 +19,7 @@ UPDATE jobs SET status = ? WHERE id = ? AND status = ?;
 UPDATE jobs SET cost_report = ? WHERE id = ?;
 
 -- name: InsertCoursePackage :exec
-INSERT INTO course_packages (id, project_id, preset_id, status, lesson_job_id) VALUES (?, ?, ?, ?, ?);
+INSERT INTO course_packages (id, project_id, lesson_id, preset_id, status, lesson_job_id) VALUES (?, ?, ?, ?, ?, ?);
 
 -- name: GetCoursePackage :one
 SELECT * FROM course_packages WHERE id = ? LIMIT 1;
@@ -32,6 +32,12 @@ SELECT * FROM projects WHERE id = ? LIMIT 1;
 
 -- name: ListProjectMaterials :many
 SELECT * FROM materials WHERE project_id = ? ORDER BY created_at;
+
+-- name: ListLessonMaterials :many
+SELECT * FROM materials WHERE lesson_id = ? ORDER BY created_at;
+
+-- name: CountLessonMaterials :one
+SELECT COUNT(*) FROM materials WHERE lesson_id = ?;
 
 -- Artifact 留版本（设计 §3）：新版本行 + is_current 指针迁移，同事务。
 -- name: NextArtifactVersion :one
@@ -59,16 +65,39 @@ SELECT * FROM projects WHERE org_id = ? ORDER BY created_at DESC;
 -- name: ListProjectsByOwner :many
 SELECT * FROM projects WHERE org_id = ? AND owner_member_id = ? ORDER BY created_at DESC;
 
+-- name: InsertCourseLesson :exec
+INSERT INTO course_lessons (id, project_id, title) VALUES (?, ?, ?);
+
+-- name: GetCourseLesson :one
+SELECT * FROM course_lessons WHERE id = ? LIMIT 1;
+
+-- name: LockCourseLesson :one
+SELECT * FROM course_lessons WHERE id = ? FOR UPDATE;
+
+-- name: ListCourseLessonsByProject :many
+SELECT * FROM course_lessons WHERE project_id = ? ORDER BY created_at;
+
 -- name: InsertMaterial :exec
-INSERT INTO materials (id, project_id, kind, storage_ref, uploaded_by) VALUES (?, ?, ?, ?, ?);
+INSERT INTO materials (id, project_id, lesson_id, kind, filename, storage_ref, uploaded_by) VALUES (?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetLatestPackageByProject :one
 SELECT * FROM course_packages WHERE project_id = ? ORDER BY created_at DESC LIMIT 1;
+
+-- name: GetLatestPackageByLesson :one
+SELECT * FROM course_packages WHERE lesson_id = ? ORDER BY created_at DESC LIMIT 1;
 
 -- name: GetInFlightLessonByProject :one
 SELECT * FROM jobs
 WHERE project_id = ? AND kind = 'lesson' AND status IN ('queued', 'running', 'awaiting_confirm')
 ORDER BY created_at DESC LIMIT 1;
+
+-- name: GetInFlightLessonByCourseLesson :one
+SELECT j.*
+FROM jobs j
+INNER JOIN course_packages p ON p.lesson_job_id = j.id
+WHERE p.lesson_id = ? AND j.kind = 'lesson' AND j.status IN ('queued', 'running', 'awaiting_confirm')
+ORDER BY j.created_at DESC
+LIMIT 1;
 
 -- 重启恢复/超时收敛：queued 与 running 都可能是上一进程残留。
 -- name: AbortJob :execrows

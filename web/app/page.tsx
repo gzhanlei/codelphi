@@ -48,12 +48,12 @@ export default async function HomePage() {
       <div className="flex items-end justify-between">
         <div>
           <h1 className="font-serif text-2xl">{copy?.list_title || "我的项目"}</h1>
-          <p className="mt-1 text-sm text-muted">{copy?.list_hint || "一个项目一份材料、一套产物。"}</p>
+          <p className="mt-1 text-sm text-muted">{copy?.list_hint || "一个项目是一套课程。每一课各自上传材料、各自出套件。"}</p>
         </div>
         {org.role !== "viewer" ? <Button href="/projects/new">{createLabel}</Button> : null}
       </div>
       {projects.length === 0 ? (
-        <p className="mt-16 text-center text-muted">{copy?.empty_list || "还没有项目。点右上角建第一个。"}</p>
+        <p className="mt-16 text-center text-muted">{copy?.empty_list || "还没有课程。点右上角建第一套。"}</p>
       ) : (
         <ul className="mt-8 divide-y divide-line border-y border-line">
           {projects.map((p) => (

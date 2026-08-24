@@ -80,11 +80,31 @@ export type PresetCopy = {
   create_title: string;
   title_label: string;
   title_hint: string;
+  lesson_cta: string;
+  lesson_title: string;
+  lesson_title_label: string;
+  lesson_title_hint: string;
+  empty_lessons: string;
+  materials_hint: string;
   submit_cta: string;
   confirm_cta: string;
   confirm_hint: string;
   empty_list: string;
   artifact_labels: Record<string, string>;
+};
+
+export type CourseLesson = {
+  id: string;
+  title: string;
+  package_id?: string;
+  package_status?: string;
+  lesson_job_id?: string;
+};
+
+export type LessonMaterial = {
+  id: string;
+  kind: string;
+  filename?: string;
 };
 
 export type Preset = {

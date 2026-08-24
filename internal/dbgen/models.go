@@ -684,6 +684,14 @@ type AuditLog struct {
 	CreatedAt  time.Time       `json:"created_at"`
 }
 
+type CourseLesson struct {
+	ID        string `json:"id"`
+	ProjectID string `json:"project_id"`
+	// 课名，如「第 3 章 导数」
+	Title     string    `json:"title"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type CoursePackage struct {
 	ID          string               `json:"id"`
 	ProjectID   string               `json:"project_id"`
@@ -692,6 +700,7 @@ type CoursePackage struct {
 	CreatedAt   time.Time            `json:"created_at"`
 	UpdatedAt   time.Time            `json:"updated_at"`
 	PresetID    string               `json:"preset_id"`
+	LessonID    string               `json:"lesson_id"`
 }
 
 type Job struct {
@@ -736,9 +745,11 @@ type Material struct {
 	ProjectID string        `json:"project_id"`
 	Kind      MaterialsKind `json:"kind"`
 	// 对象存储 key，org 前缀
-	StorageRef string    `json:"storage_ref"`
-	UploadedBy string    `json:"uploaded_by"`
-	CreatedAt  time.Time `json:"created_at"`
+	StorageRef string         `json:"storage_ref"`
+	UploadedBy string         `json:"uploaded_by"`
+	CreatedAt  time.Time      `json:"created_at"`
+	Filename   sql.NullString `json:"filename"`
+	LessonID   string         `json:"lesson_id"`
 }
 
 type Member struct {

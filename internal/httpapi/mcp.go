@@ -6,11 +6,11 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strings"
 
 	"codelphi/internal/dbgen"
 	"codelphi/internal/execution"
 	"codelphi/internal/identity"
+	"codelphi/internal/preset"
 )
 
 // handleMCP 是 JSON-RPC 2.0 入口。P0 只挂 get_package / submit_lesson（计划 G）。
@@ -90,27 +90,49 @@ func (s *server) mcpCall(w http.ResponseWriter, r *http.Request, c *identity.Con
 			writeRPC(w, req.ID, rpcResult(map[string]string{"package_id": packageID, "status": "building"}))
 			return
 		}
-		projectID, _ := args["project_id"].(string)
-		if projectID == "" {
-			writeRPC(w, req.ID, rpcErr(-32000, "project_unspecified", "project_unspecified", "工作台先建课；agent 返工时必须绑定 Project"))
+		lessonID, _ := args["lesson_id"].(string)
+		if lessonID == "" {
+			writeRPC(w, req.ID, rpcErr(-32000, "project_unspecified", "project_unspecified", "工作台先建课；agent 返工时必须绑定一课"))
 			return
 		}
-		p, err := orgProject(s, r.Context(), projectID, c.OrgID)
+		cl, err := dbgen.New(s.db).GetCourseLesson(r.Context(), lessonID)
+		if err != nil {
+			writeRPC(w, req.ID, rpcErr(-32000, "not_found", "not_found", "lesson not found"))
+			return
+		}
+		p, err := orgProject(s, r.Context(), cl.ProjectID, c.OrgID)
 		if err != nil {
 			writeRPC(w, req.ID, rpcErr(-32000, "not_found", "not_found", "project not found"))
+			return
+		}
+		entitled, err := s.entitledPresetIDs(r.Context(), c.OrgID)
+		if err != nil {
+			writeRPC(w, req.ID, rpcErr(-32000, err.Error(), "internal", err.Error()))
+			return
+		}
+		pid := p.PresetID
+		if pid == "" {
+			pid = preset.DigitalLesson
+		}
+		if !preset.Contains(entitled, pid) {
+			writeRPC(w, req.ID, rpcErr(-32000, "preset_forbidden", "preset_forbidden", "本授权不含此套件"))
 			return
 		}
 		note, _ := args["note"].(string)
 		lesson, err := s.exec.StartLesson(r.Context(), execution.SubmitInput{
 			OrgID: c.OrgID, MemberID: c.MemberID, UnitID: c.UnitID,
-			ProjectID: p.ID, Title: p.Title, Note: note,
+			ProjectID: p.ID, CourseLessonID: cl.ID, Title: cl.Title, Note: note,
 		})
+		var inflight *execution.InFlightError
+		if errors.As(err, &inflight) {
+			writeRPC(w, req.ID, rpcResult(map[string]string{
+				"lesson_job_id": inflight.JobID, "package_id": inflight.PackageID, "status": inflight.Status,
+			}))
+			return
+		}
 		if err != nil {
-			code := "internal"
-			if strings.Contains(err.Error(), "no materials") {
-				code = "invalid_request"
-			}
-			writeRPC(w, req.ID, rpcErr(-32000, err.Error(), code, err.Error()))
+			code, msg := mcpExecCode(err)
+			writeRPC(w, req.ID, rpcErr(-32000, msg, code, err.Error()))
 			return
 		}
 		writeRPC(w, req.ID, rpcResult(map[string]string{
@@ -118,6 +140,23 @@ func (s *server) mcpCall(w http.ResponseWriter, r *http.Request, c *identity.Con
 		}))
 	default:
 		writeRPC(w, req.ID, rpcErr(-32601, "unknown tool", "", params.Name))
+	}
+}
+
+func mcpExecCode(err error) (code, msg string) {
+	switch {
+	case errors.Is(err, execution.ErrNoMaterials):
+		return "invalid_request", "请先上传本课材料"
+	case errors.Is(err, execution.ErrNoExtractableText):
+		return "no_extractable_text", "无法从材料抽出文本（扫描件 PDF 需要有文字层）"
+	case errors.Is(err, execution.ErrMaterialExtractFailed):
+		return "material_extract_failed", "材料无法解析，请检查 pdf/docx 是否损坏"
+	case errors.Is(err, execution.ErrMaterialKindUnsupported):
+		return "material_kind_unsupported", "不支持该文件类型"
+	case errors.Is(err, execution.ErrTooManyMaterials):
+		return "too_many_materials", "每课最多 5 份材料"
+	default:
+		return "internal", err.Error()
 	}
 }
 
@@ -163,11 +202,11 @@ func mcpTools() []map[string]any {
 		},
 		{
 			"name":        "submit_lesson",
-			"description": "提交做课或 rebuild。必须绑定 project_id；rebuild 时带 package_id + rebuild + critique。不建课。",
+			"description": "提交做课或 rebuild。必须绑定 lesson_id（课程内的一课）；rebuild 时带 package_id + rebuild + critique。不建课、不建课程。",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"project_id": map[string]string{"type": "string"},
+					"lesson_id":  map[string]string{"type": "string"},
 					"note":       map[string]string{"type": "string"},
 					"package_id": map[string]string{"type": "string"},
 					"rebuild":    map[string]string{"type": "string", "description": "design|outline|ppt"},

@@ -29,7 +29,7 @@ export default async function NewProjectPage() {
 
   return (
     <Shell orgName={org?.org_name}>
-      <h1 className="font-serif text-2xl">{copy?.create_title || "新建项目"}</h1>
+      <h1 className="font-serif text-2xl">{copy?.create_title || "新建课程"}</h1>
       <form action={create} className="mt-8 max-w-lg space-y-5">
         {multi ? (
           <fieldset className="space-y-2">
@@ -43,11 +43,11 @@ export default async function NewProjectPage() {
           </fieldset>
         ) : null}
         <label className="block">
-          <span className="text-sm text-muted">{copy?.title_label || "项目名"}</span>
+          <span className="text-sm text-muted">{copy?.title_label || "课程名"}</span>
           <input
             name="title"
             required
-            placeholder={copy?.title_hint || "例如：高等数学 · 第 3 章 导数"}
+            placeholder={copy?.title_hint || "例如：高等数学"}
             className="mt-1 w-full border border-line bg-card px-3 py-2 outline-none focus:border-ink"
           />
         </label>
