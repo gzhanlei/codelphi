@@ -3,6 +3,7 @@ package execution
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -505,4 +506,142 @@ func TestMaterialKindUnsupported(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "not supported") {
 		t.Fatalf("want ErrMaterialKindUnsupported, got %v", err)
 	}
+}
+
+// StartLesson 立即返回 running，不阻塞在 LLM；后台跑完后停在 awaiting_confirm。
+func TestStartLessonReturnsImmediately(t *testing.T) {
+	e := newEnv(t)
+	e.llm.block = make(chan struct{})
+
+	start := time.Now()
+	lesson, err := e.exec.StartLesson(context.Background(), SubmitInput{
+		OrgID: e.orgID, MemberID: e.memberID, ProjectID: e.projectID, Title: "导数",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(start) > 150*time.Millisecond {
+		t.Fatalf("StartLesson blocked %s, want immediate return", time.Since(start))
+	}
+	if lesson.Status != "running" {
+		t.Fatalf("status = %s, want running", lesson.Status)
+	}
+
+	close(e.llm.block)
+	waitJobStatus(t, lesson.LessonJobID, "awaiting_confirm")
+}
+
+// 进程重启：残留 running（lesson + step）一律 failed，package partial。
+func TestRecoverInFlightAbortsRunning(t *testing.T) {
+	e := newEnv(t)
+	lessonID, packageID, stepID := ulidStr(), ulidStr(), ulidStr()
+	execSQL(t, `INSERT INTO jobs (id, org_id, project_id, package_id, kind, status) VALUES (?, ?, ?, ?, 'lesson', 'running')`,
+		lessonID, e.orgID, e.projectID, packageID)
+	execSQL(t, `INSERT INTO course_packages (id, project_id, status, lesson_job_id) VALUES (?, ?, 'building', ?)`,
+		packageID, e.projectID, lessonID)
+	execSQL(t, `INSERT INTO jobs (id, org_id, project_id, package_id, parent_id, kind, capability, status) VALUES (?, ?, ?, ?, ?, 'step', 'design', 'running')`,
+		stepID, e.orgID, e.projectID, packageID, lessonID)
+
+	n, err := e.exec.RecoverInFlight(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("aborted = %d, want 2", n)
+	}
+	if s := jobStatus(t, lessonID); s != "failed" {
+		t.Fatalf("lesson status = %s, want failed", s)
+	}
+	if s := jobStatus(t, stepID); s != "failed" {
+		t.Fatalf("step status = %s, want failed", s)
+	}
+	if s := packageStatus(t, packageID); s != "partial" {
+		t.Fatalf("package status = %s, want partial", s)
+	}
+}
+
+// 超时收敛：running 且 updated_at 过旧 → failed；刚更新的 running 留下。
+func TestSweepTimedOut(t *testing.T) {
+	e := newEnv(t)
+	staleID, freshID := ulidStr(), ulidStr()
+	execSQL(t, `INSERT INTO jobs (id, org_id, project_id, kind, status) VALUES (?, ?, ?, 'step', 'running')`,
+		staleID, e.orgID, e.projectID)
+	execSQL(t, `INSERT INTO jobs (id, org_id, project_id, kind, status) VALUES (?, ?, ?, 'step', 'running')`,
+		freshID, e.orgID, e.projectID)
+	execSQL(t, `UPDATE jobs SET updated_at = DATE_SUB(NOW(3), INTERVAL 2 HOUR) WHERE id = ?`, staleID)
+
+	n, err := e.exec.SweepTimedOut(context.Background(), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("timed out = %d, want 1", n)
+	}
+	if s := jobStatus(t, staleID); s != "failed" {
+		t.Fatalf("stale status = %s, want failed", s)
+	}
+	if s := jobStatus(t, freshID); s != "running" {
+		t.Fatalf("fresh status = %s, want running", s)
+	}
+}
+
+// get_package：当前指针 + 版本列表 + 签名 URL；返回值不含文件字节。
+func TestGetPackageSignedURLs(t *testing.T) {
+	e := newEnv(t)
+	lesson := e.submit(t)
+	if _, err := e.exec.ConfirmLesson(context.Background(), lesson.LessonJobID); err != nil {
+		t.Fatal(err)
+	}
+
+	pkg, err := e.exec.GetPackage(context.Background(), lesson.PackageID, 15*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pkg.Status != "ready" || pkg.LessonStatus != "succeeded" {
+		t.Fatalf("package=%s lesson=%s", pkg.Status, pkg.LessonStatus)
+	}
+	kinds := map[string]bool{}
+	for _, a := range pkg.Artifacts {
+		kinds[a.Kind] = true
+		if a.Current == nil || a.Current.URL == "" {
+			t.Fatalf("kind %s missing current URL", a.Kind)
+		}
+		if !strings.HasPrefix(a.Current.URL, "/media/") {
+			t.Fatalf("url = %q, want /media/ prefix (no file bytes)", a.Current.URL)
+		}
+		if strings.Contains(a.Current.URL, fakePptxBytes) || strings.Contains(a.Current.URL, fakeDesignJSON) {
+			t.Fatalf("url leaked file contents: %s", a.Current.URL)
+		}
+		if len(a.Versions) < 1 {
+			t.Fatalf("kind %s versions empty", a.Kind)
+		}
+	}
+	for _, k := range []string{"design", "outline", "ppt", "script"} {
+		if !kinds[k] {
+			t.Fatalf("missing artifact kind %s", k)
+		}
+	}
+}
+
+func TestUnknownPresetSubmitFails(t *testing.T) {
+	e := newEnv(t)
+	execSQL(t, "UPDATE projects SET preset_id = 'no_such_pack' WHERE id = ?", e.projectID)
+	_, err := e.exec.SubmitLesson(context.Background(), SubmitInput{
+		OrgID: e.orgID, MemberID: e.memberID, ProjectID: e.projectID, Title: "导数",
+	})
+	if !errors.Is(err, ErrUnknownPreset) {
+		t.Fatalf("err=%v, want ErrUnknownPreset", err)
+	}
+}
+
+func waitJobStatus(t *testing.T, jobID, want string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if jobStatus(t, jobID) == want {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("job %s status = %s, want %s", jobID, jobStatus(t, jobID), want)
 }

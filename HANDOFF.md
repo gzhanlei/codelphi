@@ -14,32 +14,46 @@
 | M0 地基 | ✅ 完成 | Go 仓骨架、13+2 表 goose 迁移、sqlc 打通、storage 接口 + local 驱动、二进制 + systemd 部署管线 |
 | M1 计费闭环 | ✅ 完成 | `internal/billing`：Authorize/Settle/SweepExpired/Reconcile；14 测试绿 |
 | M1 身份链 | ✅ 完成 | `internal/identity`：JWKS 验签、Resolver（§5 归属规则 + 缓存主动失效）、中间件；19 测试绿 |
-| M3 状态机 | ✅ 完成 | `internal/execution`：lesson 状态机（design→outline→awaiting_confirm→ppt+script，确认门零预扣，按 step 扣费）+ adapters/llm（DeepSeek）+ adapters/pptcreator（按契约，假 server 测试）；10 测试绿 |
+| M3 状态机 | ✅ 完成 | `internal/execution`：lesson 状态机 + adapters/llm + adapters/pptcreator；含 StartLesson 异步 + RecoverInFlight / SweepTimedOut |
+| M5 网关 HTTP/MCP | ✅ 完成 | `internal/httpapi` REST + MCP `get_package`/`submit_lesson`；identity 中间件已接线；6 测试绿 |
+| M5 工作台 Web | ✅ 已部署未接库 | `https://app.codelphi.com/login`；nginx 分流 `/v1` `/media` `/mcp` `/healthz` → gateway :18080，其余 → Next.js :13000。登录后 API 仍 404，因 **缺 MYSQL_DSN** |
 | M4 运营后台 | ⬜ 未开 | License 开通、CSV 导入、用量报表、成本预警看板 |
-| M5 工作台 | ⬜ 下一个 | Next.js 工作台 + 网关 HTTP API 接线；DSH 返工后嵌 |
 | M2 PPTCreator partner | 🔵 对方在改 | Epic gzhanlei/PPTCreator#106；契约更新已发 #119 |
 | 联调 | ⬜ 待 M2 | 用真 partner 端点替换 httptest 假 server 跑 happy path |
 
 验证命令：`go build ./... && go vet ./... && go test ./internal/... -count=1 -race`
 （测试连本地真实 MySQL，每包独立测试库，TestMain 自动建库迁移）
+工作台：`cd web && npm install && npm run dev`（先起网关 `HTTP_ADDR=:18080`）
 
 ## 关键事实
 
+- **产品名词**：工作台叫「我的项目」（路由 `/projects`）。卖的是 **预设包**（License.presets），不是 `org.industry`。P0 只卖 `digital_lesson`；多包时只在新建选一次。内核改进见 `PLAN-p0-development.md` §2.1 M5b、设计 §2.3
 - **生产机**：124.156.160.168（VM-32-3，ssh root 直连，本机有密钥）。旧机 101.32.49.240（VM-16-7）已挂，弃用
 - **域名**：`https://app.codelphi.com` → nginx → `127.0.0.1:18080` → systemd 服务 `codelphi-gateway`（二进制 `/data/www/codelphi/gateway`，不用 Docker；8080–8084 被该机别的服务占用，故用 18080）
-- **部署**：`./scripts/deploy.sh`（交叉编译 → scp → systemctl 重启，幂等）；迁移 `./scripts/migrate.sh "<dsn>"`
-- **服务器 env**：`/data/www/codelphi/gateway.env` 已有 HTTP_ADDR / STORAGE_* / MEDIA_SIGNING_KEY / CHANDLER_JWKS_URL / CHANDLER_ISSUER / CHANDLER_CLIENT_ID / CHANDLER_CLIENT_SECRET。**缺 MYSQL_DSN**（腾讯云 MySQL 集群连接信息待提供；DSN 必须带 `loc=Local`）
+- **部署**：`./scripts/deploy.sh` 网关；`./scripts/deploy-web.sh` 工作台。nginx 已切 `deploy/nginx-codelphi-m5.conf`（证书行保留）。Next 听 `127.0.0.1:13000`（3000 是 chandler）
+- **服务器 env**：`/data/www/codelphi/gateway.env` 已有 HTTP_ADDR / STORAGE_* / MEDIA_SIGNING_KEY / CHANDLER_JWKS_URL / CHANDLER_ISSUER / CHANDLER_CLIENT_ID / CHANDLER_CLIENT_SECRET。**缺 MYSQL_DSN**（腾讯云 MySQL 集群连接信息待提供；DSN 必须带 `loc=Local`）。M5 新增可选：`PUBLIC_BASE_URL`（默认 `https://app.codelphi.com`）、`CORS_ORIGINS`、`JOB_TIMEOUT`（默认 30m）、`DESIGN_LLM_API_KEY`
 - **本地 MySQL**：127.0.0.1:3306，root / yuntouyan333（库 codelphi / codelphi_test*）
-- **chandler**：JWKS=`https://api.chandler.work/.well-known/jwks.json`，iss=`workmembership`，client_id=`cm_aca9bb839faa4a4a96839b389f312636`（单应用单 client，无 token exchange）；回调 `https://app.codelphi.com/auth/callback` 已上线占位端点（网关 stub，M5 由工作台替换）；本地开发回调 `http://localhost:3000/auth/callback`
-- **LLM vendor**：DeepSeek，`DEEPSEEK_API_KEY` 在本机 ~/.zshrc（remoteOpenAI 变量组，与 PPTCreator 2C 共用额度——两边都烧 token）；config 键为 `DESIGN_LLM_BASE_URL/MODEL/API_KEY`，默认 deepseek-chat
+- **chandler**：JWKS=`https://api.chandler.work/.well-known/jwks.json`，iss=`workmembership`，client_id=`cm_aca9bb839faa4a4a96839b389f312636`（单应用单 client，无 token exchange）；authorize=`https://api.chandler.work/v1/oauth/authorize`，token=`https://api.chandler.work/v1/oauth/token`（PKCE S256 + client_secret_post）。生产回调 `https://app.codelphi.com/auth/callback` 仍是网关 stub；工作台本地回调 `http://localhost:3000/auth/callback`（需在 chandler 给该 client 加一条）
+- **LLM vendor**：DeepSeek，`DEEPSEEK_API_KEY` 在本机 ~/.zshrc（remoteOpenAI 变量组，与 PPTCreator 2C 共用额度）。网关读 `DESIGN_LLM_API_KEY`（本地可 `export DESIGN_LLM_API_KEY=$DEEPSEEK_API_KEY`）
 - **证书**：certbot 管 app.codelphi.com，自动续期 timer + reload hook 已配
+
+## 网关 HTTP 面（工作台 / MCP）
+
+鉴权：`Authorization: Bearer <chandler JWT>` + 可选 `X-Org-Id` / `X-Unit-Id`。`GET /v1/me` 只验签、列出 memberships（多机构时不 403，供选择器）。其余 `/v1/*` 与 `POST /mcp` 走 identity 中间件。
+
+- `GET /v1/me`
+- `GET|POST /v1/projects` · `GET /v1/projects/{id}` · `POST /v1/projects/{id}/materials` · `POST /v1/projects/{id}/submit`（202，后台跑）
+- `POST /v1/lessons/{id}/confirm`（202）· `GET /v1/packages/{id}`（签名 URL，无文件字节）
+- `POST /mcp` JSON-RPC：`tools/list`、`tools/call`（`get_package` / `submit_lesson`；submit 无 project_id 且非 rebuild → `project_unspecified`）
+- 启动时 `RecoverInFlight`：残留 queued/running → failed，package partial；预扣靠 billing TTL
+- viewer 角色写接口 403 `forbidden`
 
 ## 下一步（按序）
 
-1. **M5 工作台**（最大的一块）：Next.js（chandler OIDC 登录）+ 网关 HTTP API（需新增：工作台/运营后台的 REST 面 + identity 中间件接线 + MCP 工具面 get_package/submit_lesson）。注意 M3 遗留：**编排是进程内同步调用，接 HTTP 层时要补「重启恢复/超时收敛」**（in-flight job 停在 running 的收敛；预扣已有 TTL 扫尾兜底）
+1. **提供生产 MySQL DSN** 写进 `/data/www/codelphi/gateway.env`（必须 `loc=Local`），`systemctl restart codelphi-gateway`，`/healthz` 应变 `db:ok`，`/v1` 才会挂上。没有这一步，登录后工作台调不了 API
 2. **联调**：PPTCreator partner 端点就绪后（盯 #106/#107/#116/#119），配 `PPTCREATOR_PARTNER_BASE_URL/PARTNER_KEY`，真机跑一条 partner 生成，过契约 C6 验收五条
-3. **M4 运营后台**：License pending→active（双人确认）、CSV 导入成员、成员用量 Top 报表、成本预警（按 capability 拆）
-4. 提供生产 MySQL DSN 后写进 gateway.env 重启，健康检查应变 `db:ok`
+3. **M4 运营后台**：License pending→active（双人确认）、CSV 导入成员、成员用量 Top 报表、成本预警（按 capability 拆）。没有这条，试点教师进不来（完工定义 1–2）
+4. DSH 返工对话后嵌（空聊天不上线）
 
 ## PPTCreator 协同
 
@@ -54,5 +68,5 @@
 
 ## 安全注意
 
-- secret 只进 `/data/www/codelphi/gateway.env`，不进仓库、不进对话（本会话曾意外回显过一次 chandler secret，建议方便时轮换）
+- secret 只进 `/data/www/codelphi/gateway.env` 与本机 `web/.env.local`，不进仓库、不进对话（本会话曾意外回显过一次 chandler secret，建议方便时轮换）
 - 本地 MySQL root 密码出现在本文件纯属用户明确同意（本机环境）

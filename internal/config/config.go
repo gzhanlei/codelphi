@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -32,6 +33,12 @@ type Config struct {
 	// PPTCreator partner adapter（契约 C1）。
 	PPTCreatorBaseURL    string
 	PPTCreatorPartnerKey string
+	// 对外根 URL，用于把 /media 签名链拼成绝对地址（工作台与 MCP 下载）。
+	PublicBaseURL string
+	// CORS 允许的 Origin，逗号分隔；工作台本地 http://localhost:3000。
+	CORSOrigins []string
+	// 运行中 job 超时，超时收敛扫尾用，默认 30m。
+	JobTimeout time.Duration
 }
 
 func env(key, def string) string {
@@ -39,6 +46,15 @@ func env(key, def string) string {
 		return v
 	}
 	return def
+}
+
+func firstEnv(keys ...string) string {
+	for _, key := range keys {
+		if v := os.Getenv(key); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func envFloat(key string, def float64) float64 {
@@ -63,6 +79,16 @@ func Load() Config {
 	if err != nil {
 		memberTTL = 60 * time.Second
 	}
+	jobTimeout, err := time.ParseDuration(env("JOB_TIMEOUT", "30m"))
+	if err != nil {
+		jobTimeout = 30 * time.Minute
+	}
+	var cors []string
+	for _, o := range strings.Split(env("CORS_ORIGINS", "http://localhost:3000,https://app.codelphi.com"), ",") {
+		if o = strings.TrimSpace(o); o != "" {
+			cors = append(cors, o)
+		}
+	}
 	return Config{
 		HTTPAddr:             env("HTTP_ADDR", ":8080"),
 		MySQLDSN:             os.Getenv("MYSQL_DSN"),
@@ -77,10 +103,13 @@ func Load() Config {
 		MemberCacheTTL:       memberTTL,
 		DesignLLMBaseURL:     env("DESIGN_LLM_BASE_URL", "https://api.deepseek.com"),
 		DesignLLMModel:       env("DESIGN_LLM_MODEL", "deepseek-chat"),
-		DesignLLMAPIKey:      os.Getenv("DESIGN_LLM_API_KEY"),
+		DesignLLMAPIKey:      firstEnv("DESIGN_LLM_API_KEY", "DEEPSEEK_API_KEY"),
 		DesignLLMPriceIn:     envFloat("DESIGN_LLM_PRICE_PER_MTOK_INPUT", 2),
 		DesignLLMPriceOut:    envFloat("DESIGN_LLM_PRICE_PER_MTOK_OUTPUT", 8),
 		PPTCreatorBaseURL:    os.Getenv("PPTCREATOR_PARTNER_BASE_URL"),
 		PPTCreatorPartnerKey: os.Getenv("PPTCREATOR_PARTNER_KEY"),
+		PublicBaseURL:        env("PUBLIC_BASE_URL", "https://app.codelphi.com"),
+		CORSOrigins:          cors,
+		JobTimeout:           jobTimeout,
 	}
 }

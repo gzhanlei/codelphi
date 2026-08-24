@@ -24,3 +24,8 @@ sql:
               import: "encoding/json"
               type: "RawMessage"
               pointer: true
+          - column: "licenses.presets"
+            go_type:
+              import: "encoding/json"
+              type: "RawMessage"
+              pointer: true

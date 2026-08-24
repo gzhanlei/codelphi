@@ -9,15 +9,34 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"time"
 )
+
+const abortJob = `-- name: AbortJob :execrows
+UPDATE jobs SET status = 'failed', cost_report = ? WHERE id = ? AND status IN ('queued', 'running')
+`
+
+type AbortJobParams struct {
+	CostReport *json.RawMessage `json:"cost_report"`
+	ID         string           `json:"id"`
+}
+
+// 重启恢复/超时收敛：queued 与 running 都可能是上一进程残留。
+func (q *Queries) AbortJob(ctx context.Context, arg AbortJobParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, abortJob, arg.CostReport, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
 
 const clearCurrentArtifact = `-- name: ClearCurrentArtifact :exec
 UPDATE artifacts SET is_current = 0 WHERE package_id = ? AND kind = ?
 `
 
 type ClearCurrentArtifactParams struct {
-	PackageID string        `json:"package_id"`
-	Kind      ArtifactsKind `json:"kind"`
+	PackageID string `json:"package_id"`
+	Kind      string `json:"kind"`
 }
 
 func (q *Queries) ClearCurrentArtifact(ctx context.Context, arg ClearCurrentArtifactParams) error {
@@ -26,7 +45,7 @@ func (q *Queries) ClearCurrentArtifact(ctx context.Context, arg ClearCurrentArti
 }
 
 const getCoursePackage = `-- name: GetCoursePackage :one
-SELECT id, project_id, status, lesson_job_id, created_at, updated_at FROM course_packages WHERE id = ? LIMIT 1
+SELECT id, project_id, status, lesson_job_id, created_at, updated_at, preset_id FROM course_packages WHERE id = ? LIMIT 1
 `
 
 func (q *Queries) GetCoursePackage(ctx context.Context, id string) (CoursePackage, error) {
@@ -37,6 +56,35 @@ func (q *Queries) GetCoursePackage(ctx context.Context, id string) (CoursePackag
 		&i.ProjectID,
 		&i.Status,
 		&i.LessonJobID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PresetID,
+	)
+	return i, err
+}
+
+const getInFlightLessonByProject = `-- name: GetInFlightLessonByProject :one
+SELECT id, org_id, project_id, package_id, parent_id, kind, capability, platform, platform_job_id, status, spec_ref, cost_report, created_at, updated_at FROM jobs
+WHERE project_id = ? AND kind = 'lesson' AND status IN ('queued', 'running', 'awaiting_confirm')
+ORDER BY created_at DESC LIMIT 1
+`
+
+func (q *Queries) GetInFlightLessonByProject(ctx context.Context, projectID string) (Job, error) {
+	row := q.db.QueryRowContext(ctx, getInFlightLessonByProject, projectID)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.ProjectID,
+		&i.PackageID,
+		&i.ParentID,
+		&i.Kind,
+		&i.Capability,
+		&i.Platform,
+		&i.PlatformJobID,
+		&i.Status,
+		&i.SpecRef,
+		&i.CostReport,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -69,8 +117,27 @@ func (q *Queries) GetJob(ctx context.Context, id string) (Job, error) {
 	return i, err
 }
 
+const getLatestPackageByProject = `-- name: GetLatestPackageByProject :one
+SELECT id, project_id, status, lesson_job_id, created_at, updated_at, preset_id FROM course_packages WHERE project_id = ? ORDER BY created_at DESC LIMIT 1
+`
+
+func (q *Queries) GetLatestPackageByProject(ctx context.Context, projectID string) (CoursePackage, error) {
+	row := q.db.QueryRowContext(ctx, getLatestPackageByProject, projectID)
+	var i CoursePackage
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Status,
+		&i.LessonJobID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PresetID,
+	)
+	return i, err
+}
+
 const getProject = `-- name: GetProject :one
-SELECT id, org_id, unit_id, owner_member_id, type_label, title, created_at FROM projects WHERE id = ? LIMIT 1
+SELECT id, org_id, unit_id, owner_member_id, type_label, title, created_at, preset_id FROM projects WHERE id = ? LIMIT 1
 `
 
 func (q *Queries) GetProject(ctx context.Context, id string) (Project, error) {
@@ -84,6 +151,7 @@ func (q *Queries) GetProject(ctx context.Context, id string) (Project, error) {
 		&i.TypeLabel,
 		&i.Title,
 		&i.CreatedAt,
+		&i.PresetID,
 	)
 	return i, err
 }
@@ -96,7 +164,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 type InsertArtifactParams struct {
 	ID         string          `json:"id"`
 	PackageID  string          `json:"package_id"`
-	Kind       ArtifactsKind   `json:"kind"`
+	Kind       string          `json:"kind"`
 	Version    int32           `json:"version"`
 	Status     ArtifactsStatus `json:"status"`
 	StepJobID  sql.NullString  `json:"step_job_id"`
@@ -119,12 +187,13 @@ func (q *Queries) InsertArtifact(ctx context.Context, arg InsertArtifactParams) 
 }
 
 const insertCoursePackage = `-- name: InsertCoursePackage :exec
-INSERT INTO course_packages (id, project_id, status, lesson_job_id) VALUES (?, ?, ?, ?)
+INSERT INTO course_packages (id, project_id, preset_id, status, lesson_job_id) VALUES (?, ?, ?, ?, ?)
 `
 
 type InsertCoursePackageParams struct {
 	ID          string               `json:"id"`
 	ProjectID   string               `json:"project_id"`
+	PresetID    string               `json:"preset_id"`
 	Status      CoursePackagesStatus `json:"status"`
 	LessonJobID sql.NullString       `json:"lesson_job_id"`
 }
@@ -133,6 +202,7 @@ func (q *Queries) InsertCoursePackage(ctx context.Context, arg InsertCoursePacka
 	_, err := q.db.ExecContext(ctx, insertCoursePackage,
 		arg.ID,
 		arg.ProjectID,
+		arg.PresetID,
 		arg.Status,
 		arg.LessonJobID,
 	)
@@ -174,8 +244,93 @@ func (q *Queries) InsertJob(ctx context.Context, arg InsertJobParams) error {
 	return err
 }
 
+const insertMaterial = `-- name: InsertMaterial :exec
+INSERT INTO materials (id, project_id, kind, storage_ref, uploaded_by) VALUES (?, ?, ?, ?, ?)
+`
+
+type InsertMaterialParams struct {
+	ID         string        `json:"id"`
+	ProjectID  string        `json:"project_id"`
+	Kind       MaterialsKind `json:"kind"`
+	StorageRef string        `json:"storage_ref"`
+	UploadedBy string        `json:"uploaded_by"`
+}
+
+func (q *Queries) InsertMaterial(ctx context.Context, arg InsertMaterialParams) error {
+	_, err := q.db.ExecContext(ctx, insertMaterial,
+		arg.ID,
+		arg.ProjectID,
+		arg.Kind,
+		arg.StorageRef,
+		arg.UploadedBy,
+	)
+	return err
+}
+
+const insertProject = `-- name: InsertProject :exec
+INSERT INTO projects (id, org_id, unit_id, owner_member_id, title, preset_id) VALUES (?, ?, ?, ?, ?, ?)
+`
+
+type InsertProjectParams struct {
+	ID            string         `json:"id"`
+	OrgID         string         `json:"org_id"`
+	UnitID        sql.NullString `json:"unit_id"`
+	OwnerMemberID string         `json:"owner_member_id"`
+	Title         string         `json:"title"`
+	PresetID      string         `json:"preset_id"`
+}
+
+func (q *Queries) InsertProject(ctx context.Context, arg InsertProjectParams) error {
+	_, err := q.db.ExecContext(ctx, insertProject,
+		arg.ID,
+		arg.OrgID,
+		arg.UnitID,
+		arg.OwnerMemberID,
+		arg.Title,
+		arg.PresetID,
+	)
+	return err
+}
+
+const listArtifactsByPackage = `-- name: ListArtifactsByPackage :many
+SELECT id, package_id, version, status, step_job_id, storage_ref, is_current, created_at, kind FROM artifacts WHERE package_id = ? ORDER BY kind ASC, version DESC
+`
+
+func (q *Queries) ListArtifactsByPackage(ctx context.Context, packageID string) ([]Artifact, error) {
+	rows, err := q.db.QueryContext(ctx, listArtifactsByPackage, packageID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Artifact
+	for rows.Next() {
+		var i Artifact
+		if err := rows.Scan(
+			&i.ID,
+			&i.PackageID,
+			&i.Version,
+			&i.Status,
+			&i.StepJobID,
+			&i.StorageRef,
+			&i.IsCurrent,
+			&i.CreatedAt,
+			&i.Kind,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCurrentArtifacts = `-- name: ListCurrentArtifacts :many
-SELECT id, package_id, kind, version, status, step_job_id, storage_ref, is_current, created_at FROM artifacts WHERE package_id = ? AND is_current = 1
+SELECT id, package_id, version, status, step_job_id, storage_ref, is_current, created_at, kind FROM artifacts WHERE package_id = ? AND is_current = 1
 `
 
 func (q *Queries) ListCurrentArtifacts(ctx context.Context, packageID string) ([]Artifact, error) {
@@ -190,13 +345,60 @@ func (q *Queries) ListCurrentArtifacts(ctx context.Context, packageID string) ([
 		if err := rows.Scan(
 			&i.ID,
 			&i.PackageID,
-			&i.Kind,
 			&i.Version,
 			&i.Status,
 			&i.StepJobID,
 			&i.StorageRef,
 			&i.IsCurrent,
 			&i.CreatedAt,
+			&i.Kind,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listJobsByStatuses = `-- name: ListJobsByStatuses :many
+SELECT id, org_id, project_id, package_id, parent_id, kind, capability, platform, platform_job_id, status, spec_ref, cost_report, created_at, updated_at FROM jobs WHERE status IN (?, ?)
+`
+
+type ListJobsByStatusesParams struct {
+	Status   JobsStatus `json:"status"`
+	Status_2 JobsStatus `json:"status_2"`
+}
+
+func (q *Queries) ListJobsByStatuses(ctx context.Context, arg ListJobsByStatusesParams) ([]Job, error) {
+	rows, err := q.db.QueryContext(ctx, listJobsByStatuses, arg.Status, arg.Status_2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Job
+	for rows.Next() {
+		var i Job
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.ProjectID,
+			&i.PackageID,
+			&i.ParentID,
+			&i.Kind,
+			&i.Capability,
+			&i.Platform,
+			&i.PlatformJobID,
+			&i.Status,
+			&i.SpecRef,
+			&i.CostReport,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -231,6 +433,125 @@ func (q *Queries) ListProjectMaterials(ctx context.Context, projectID string) ([
 			&i.StorageRef,
 			&i.UploadedBy,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listProjectsByOrg = `-- name: ListProjectsByOrg :many
+SELECT id, org_id, unit_id, owner_member_id, type_label, title, created_at, preset_id FROM projects WHERE org_id = ? ORDER BY created_at DESC
+`
+
+func (q *Queries) ListProjectsByOrg(ctx context.Context, orgID string) ([]Project, error) {
+	rows, err := q.db.QueryContext(ctx, listProjectsByOrg, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Project
+	for rows.Next() {
+		var i Project
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.UnitID,
+			&i.OwnerMemberID,
+			&i.TypeLabel,
+			&i.Title,
+			&i.CreatedAt,
+			&i.PresetID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listProjectsByOwner = `-- name: ListProjectsByOwner :many
+SELECT id, org_id, unit_id, owner_member_id, type_label, title, created_at, preset_id FROM projects WHERE org_id = ? AND owner_member_id = ? ORDER BY created_at DESC
+`
+
+type ListProjectsByOwnerParams struct {
+	OrgID         string `json:"org_id"`
+	OwnerMemberID string `json:"owner_member_id"`
+}
+
+func (q *Queries) ListProjectsByOwner(ctx context.Context, arg ListProjectsByOwnerParams) ([]Project, error) {
+	rows, err := q.db.QueryContext(ctx, listProjectsByOwner, arg.OrgID, arg.OwnerMemberID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Project
+	for rows.Next() {
+		var i Project
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.UnitID,
+			&i.OwnerMemberID,
+			&i.TypeLabel,
+			&i.Title,
+			&i.CreatedAt,
+			&i.PresetID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listStaleRunningJobs = `-- name: ListStaleRunningJobs :many
+SELECT id, org_id, project_id, package_id, parent_id, kind, capability, platform, platform_job_id, status, spec_ref, cost_report, created_at, updated_at FROM jobs WHERE status = 'running' AND updated_at < ?
+`
+
+func (q *Queries) ListStaleRunningJobs(ctx context.Context, updatedAt time.Time) ([]Job, error) {
+	rows, err := q.db.QueryContext(ctx, listStaleRunningJobs, updatedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Job
+	for rows.Next() {
+		var i Job
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.ProjectID,
+			&i.PackageID,
+			&i.ParentID,
+			&i.Kind,
+			&i.Capability,
+			&i.Platform,
+			&i.PlatformJobID,
+			&i.Status,
+			&i.SpecRef,
+			&i.CostReport,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -292,8 +613,8 @@ SELECT COALESCE(MAX(version), 0) + 1 FROM artifacts WHERE package_id = ? AND kin
 `
 
 type NextArtifactVersionParams struct {
-	PackageID string        `json:"package_id"`
-	Kind      ArtifactsKind `json:"kind"`
+	PackageID string `json:"package_id"`
+	Kind      string `json:"kind"`
 }
 
 // Artifact 留版本（设计 §3）：新版本行 + is_current 指针迁移，同事务。
@@ -302,6 +623,15 @@ func (q *Queries) NextArtifactVersion(ctx context.Context, arg NextArtifactVersi
 	var column_1 int32
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const partialPackageByLesson = `-- name: PartialPackageByLesson :exec
+UPDATE course_packages SET status = 'partial' WHERE lesson_job_id = ?
+`
+
+func (q *Queries) PartialPackageByLesson(ctx context.Context, lessonJobID sql.NullString) error {
+	_, err := q.db.ExecContext(ctx, partialPackageByLesson, lessonJobID)
+	return err
 }
 
 const setJobCostReport = `-- name: SetJobCostReport :exec

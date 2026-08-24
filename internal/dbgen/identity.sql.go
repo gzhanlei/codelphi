@@ -113,3 +113,50 @@ func (q *Queries) ListMembershipsBySub(ctx context.Context, chandlerSub string) 
 	}
 	return items, nil
 }
+
+const listMembershipsWithOrgBySub = `-- name: ListMembershipsWithOrgBySub :many
+SELECT m.id, m.org_id, m.chandler_sub, m.role, m.status, o.name AS org_name
+FROM members m
+JOIN orgs o ON o.id = m.org_id
+WHERE m.chandler_sub = ?
+`
+
+type ListMembershipsWithOrgBySubRow struct {
+	ID          string        `json:"id"`
+	OrgID       string        `json:"org_id"`
+	ChandlerSub string        `json:"chandler_sub"`
+	Role        MembersRole   `json:"role"`
+	Status      MembersStatus `json:"status"`
+	OrgName     string        `json:"org_name"`
+}
+
+// 工作台 org 选择器：/v1/me 不走 Resolve（多归属时 Resolve 会 org_unspecified）。
+func (q *Queries) ListMembershipsWithOrgBySub(ctx context.Context, chandlerSub string) ([]ListMembershipsWithOrgBySubRow, error) {
+	rows, err := q.db.QueryContext(ctx, listMembershipsWithOrgBySub, chandlerSub)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMembershipsWithOrgBySubRow
+	for rows.Next() {
+		var i ListMembershipsWithOrgBySubRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.ChandlerSub,
+			&i.Role,
+			&i.Status,
+			&i.OrgName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

@@ -37,7 +37,7 @@
 ## 2. 里程碑与依赖
 
 ```
-M0 地基 ──► M1 计费闭环 ──► M3 lesson 状态机 ──► M5 工作台贯通 ──► M6 试点验收
+M0 地基 ──► M1 计费闭环 ──► M3 lesson 状态机 ──► M5 工作台贯通 ──► M5b 预设包内核 ──► M6 试点验收
      └──► M2 PPTCreator partner（并行，跨仓）──► 汇入 M3/M5
 M4 运营后台（与 M3 并行）
 S1 合成器 spike / S2 OpenMAIC spike（独立时间盒，不挡 P0）
@@ -52,7 +52,8 @@ DSH 返工（M5 之后嵌入，不挡首轮交付）
 | M3 lesson 状态机 | Project/Material/CoursePackage/Artifact（留版本）；设计→大纲→`awaiting_confirm`→PPT+讲稿；每 step 独立 authorize/settle；design/outline LLM adapter 新做；PPTCreator adapter | M1、M2 | `submit_lesson` 全链路造数据跑通，确认门等待期无预扣 |
 | M4 运营后台 | License pending→active（高额双人确认）、suspend + 审计；CSV 批量导入成员；用量报表（成员 Top）；成本预警（按 capability 拆开） | M1 | 完工定义 1、2 的运营侧可演示 |
 | M5 工作台贯通 | chandler OIDC 登录 + token exchange；org/unit 选择回显；章列表；新建章 + 传材料 + 补充说明表单；做课按钮；进度；确认门按钮；版本/预览/下载；失败横幅话术 | M3、M4 | 完工定义 2–6、8 全过 |
-| M6 试点验收 | 造数 + 真机演练完工定义 1–9；对账连跑七天无漂移 | M5 | 可签合同 |
+| M5b 预设包内核 | License.presets + Project.preset_id + execution 读目录；工作台 copy 来自包；P0 只内置 digital_lesson | M5 | 单包路径与现在一致；测试夹具多包时新建必选；原 execution 门禁仍绿 |
+| M6 试点验收 | 造数 + 真机演练完工定义 1–9；对账连跑七天无漂移 | M5b | 可签合同 |
 
 **两条并行关键路径（§18 H）：** 网关路径（M1→M3）与客户端路径（M4→M5）并行推进；客户端不许直连数据库、不许绑 DSH 私有头，契约以网关 HTTP/MCP 为准。
 
@@ -65,6 +66,54 @@ DSH 返工（M5 之后嵌入，不挡首轮交付）
 **进度记录（2026-08-24）：M3 完成。** `internal/execution`：lesson 权威状态机（design → outline → `awaiting_confirm` → ppt+script，合法迁移集写死 + 条件 UPDATE 兜底并发；确认门等待期零预扣；每 step 独立 authorize/settle；Rebuild 整份重出版本迁移；并发公平 (org,platform) 信号量）+ `adapters/llm`（OpenAI 兼容，默认 DeepSeek `deepseek-chat`，schema 校验不过即 fail，JSON + Markdown 双产物，token 实测回报，单价可配）+ `adapters/pptcreator`（按契约 C1–C4，方向二单文档预合成，notes 缺失/不齐即 `notes_missing` failed，产物回拷本侧 storage）。10 个测试 `-race` 全绿（happy path 三门禁断言、notes 缺失退款、partner 5xx 不拖挂 billing、Rebuild 三版本、并发双确认幂等、信号量公平、非法迁移拒绝、schema 违规 fail、材料 kind 拦截）。
 **契约反馈（已升 v1.1）**：spec 补 `note`/`critique` 字段；`usage.pages` 定义为 pptx 实际页数；C1 四个上下文头适用全部 partner 端点（含查询）——PPTCreator 侧按此实现。
 **遗留进 M5**：编排是进程内同步调用，进程重启时 in-flight job 停在 running——M5 接线 HTTP 层时补「重启恢复/超时收敛」逻辑（残留预扣已由 TTL 扫尾兜底）。
+
+**进度记录（2026-08-24）：M5 网关面完成，工作台已部署。** 生产 `db:ok`，试点 member 已手工插入。列表为「我的项目」、路由 `/projects`。未做：预设包内核（M5b）；M4；真 partner 联调。
+
+## 2.1 M5b 预设包内核
+
+决议：设计 §2.3。卖预设包，不贴行业；壳一套；单包无选择器；多包只在新建时选。P0 仍只卖 `digital_lesson`，但内核按「目录可有第二条」建。
+
+### 现行实现焊死点
+
+| 层 | 现状 | 问题 |
+|---|---|---|
+| License.snapshot | `[{capability,quota,unit}]`，billing 只认能力 | 无法表达「卖了哪个包」 |
+| `package_templates` | 销售 SKU | 与运行时套件同名；无 presets[] |
+| `projects` | 只写 title；`type_label` 未用 | 创建不绑预设 |
+| `course_packages` / `jobs.kind=lesson` | 课语义进表名 | P0 不强制改名；新字段用 preset |
+| `artifacts.kind` | ENUM 七值 | 第二包要 ALTER；生产尚无行，现在改 VARCHAR |
+| `execution.Service` | 拓扑与四件齐写死 | 第二包只能 if 分叉 |
+| HTTP | create 不收 preset；submit/confirm 走 lesson | 工作台无法按包渲染 |
+| MCP | `submit_lesson` | 保留为数字课别名 |
+| Web | 「做课」/构件名写死 | 单包时正确，应改为读包 copy |
+| Collection | 无 | M5b 不上文件夹 UI；禁止用 OrgUnit 冒充 |
+
+账本 Authorize/Settle 不用为预设重做。
+
+### 目标
+
+1. Preset 目录在代码里（`internal/preset`），P0 仅 `digital_lesson`（steps / kinds / copy）。
+2. `licenses.presets` JSON 列，与 snapshot 能力数组分开（避免改 billing 反序列化）。空/NULL = 兼容视为 `["digital_lesson"]`。试点行补上。
+3. `projects.preset_id` 创建时写入。单包可省略 body；多包缺省 → `preset_unspecified`。
+4. execution 按 preset 跑步骤；ready = 该包声明的 kinds 齐。现有测试保持绿。
+5. `GET /v1/presets`（或并入 `/v1/me`）返回 entitlements + copy。工作台文案走 copy。
+6. goose `0004`：`artifacts.kind` → VARCHAR(64)；projects/course_packages 加 `preset_id` 默认 `digital_lesson`。
+
+### 不做
+
+公关第二条流水线；Collection UI；`org.industry`；DAG；顶部产品线切换；改 snapshot 数组为对象；删 MCP `submit_lesson`。
+
+### 工单
+
+- **B1 迁移 + 目录**：`0004_presets.sql` + `internal/preset`。测试：目录自检；未知 id 拒绝。
+- **B2 execution 读目录**：Start/Confirm/Rebuild/refreshPackageStatus。测试：原 happy path / 确认门零预扣 / rebuild 必须绿；缺目录则 submit 失败。
+- **B3 HTTP**：presets 列出；create 收 `preset_id`；submit 校验 License 仍包含该包。测试：单包省略 201；伪造包 id 400/403。
+- **B4 工作台**：读 copy。单包无选择器。多包用测试夹具验证新建必选。
+- **B5 试点 License 补 presets**；M4 开通表单写此列。
+
+### 出口
+
+`go test ./internal/... -count=1 -race` 全绿。试点账号仍直接做课。测试 License 挂两个 preset_id 时新建必须选。
 
 ## 3. 工单分解 · 网关（billing / identity）
 

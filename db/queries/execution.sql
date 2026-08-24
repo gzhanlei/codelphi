@@ -19,7 +19,7 @@ UPDATE jobs SET status = ? WHERE id = ? AND status = ?;
 UPDATE jobs SET cost_report = ? WHERE id = ?;
 
 -- name: InsertCoursePackage :exec
-INSERT INTO course_packages (id, project_id, status, lesson_job_id) VALUES (?, ?, ?, ?);
+INSERT INTO course_packages (id, project_id, preset_id, status, lesson_job_id) VALUES (?, ?, ?, ?, ?);
 
 -- name: GetCoursePackage :one
 SELECT * FROM course_packages WHERE id = ? LIMIT 1;
@@ -46,3 +46,39 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: ListCurrentArtifacts :many
 SELECT * FROM artifacts WHERE package_id = ? AND is_current = 1;
+
+-- name: ListArtifactsByPackage :many
+SELECT * FROM artifacts WHERE package_id = ? ORDER BY kind ASC, version DESC;
+
+-- name: InsertProject :exec
+INSERT INTO projects (id, org_id, unit_id, owner_member_id, title, preset_id) VALUES (?, ?, ?, ?, ?, ?);
+
+-- name: ListProjectsByOrg :many
+SELECT * FROM projects WHERE org_id = ? ORDER BY created_at DESC;
+
+-- name: ListProjectsByOwner :many
+SELECT * FROM projects WHERE org_id = ? AND owner_member_id = ? ORDER BY created_at DESC;
+
+-- name: InsertMaterial :exec
+INSERT INTO materials (id, project_id, kind, storage_ref, uploaded_by) VALUES (?, ?, ?, ?, ?);
+
+-- name: GetLatestPackageByProject :one
+SELECT * FROM course_packages WHERE project_id = ? ORDER BY created_at DESC LIMIT 1;
+
+-- name: GetInFlightLessonByProject :one
+SELECT * FROM jobs
+WHERE project_id = ? AND kind = 'lesson' AND status IN ('queued', 'running', 'awaiting_confirm')
+ORDER BY created_at DESC LIMIT 1;
+
+-- 重启恢复/超时收敛：queued 与 running 都可能是上一进程残留。
+-- name: AbortJob :execrows
+UPDATE jobs SET status = 'failed', cost_report = ? WHERE id = ? AND status IN ('queued', 'running');
+
+-- name: ListJobsByStatuses :many
+SELECT * FROM jobs WHERE status IN (?, ?);
+
+-- name: ListStaleRunningJobs :many
+SELECT * FROM jobs WHERE status = 'running' AND updated_at < ?;
+
+-- name: PartialPackageByLesson :exec
+UPDATE course_packages SET status = 'partial' WHERE lesson_job_id = ?;

@@ -19,7 +19,13 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 
+	"codelphi/internal/billing"
 	"codelphi/internal/config"
+	"codelphi/internal/execution"
+	"codelphi/internal/execution/adapters/llm"
+	"codelphi/internal/execution/adapters/pptcreator"
+	"codelphi/internal/httpapi"
+	"codelphi/internal/identity"
 	"codelphi/internal/storage"
 )
 
@@ -50,6 +56,36 @@ func main() {
 	mux.Handle("GET /media/", mediaHandler(store))
 	mux.HandleFunc("GET /auth/callback", authCallbackStub)
 
+	var execSvc *execution.Service
+	if db != nil {
+		billingSvc := billing.New(db, billing.WithReservationTTL(cfg.ReservationTTL))
+		llmClient := llm.New(cfg.DesignLLMBaseURL, cfg.DesignLLMModel, cfg.DesignLLMAPIKey)
+		pptClient := pptcreator.New(cfg.PPTCreatorBaseURL, cfg.PPTCreatorPartnerKey)
+		execSvc = execution.New(db, billingSvc, store, llmClient, pptClient, execution.WithConfig(execution.Config{
+			LLMMaxTokens:   8000,
+			LLMPriceIn:     cfg.DesignLLMPriceIn,
+			LLMPriceOut:    cfg.DesignLLMPriceOut,
+			InFlightPerKey: 2,
+		}))
+		n, err := execSvc.RecoverInFlight(context.Background())
+		if err != nil {
+			log.Fatalf("recover in-flight: %v", err)
+		}
+		if n > 0 {
+			log.Printf("recovered %d stale in-flight jobs", n)
+		}
+		verifier := identity.NewVerifier(cfg.ChandlerJWKSURL, cfg.ChandlerIssuer, cfg.ChandlerClientID)
+		resolver := identity.NewResolver(db, identity.WithMemberCacheTTL(cfg.MemberCacheTTL))
+		api := httpapi.New(httpapi.Deps{
+			DB: db, Exec: execSvc, Store: store,
+			Verifier: verifier, Resolver: resolver,
+			MediaTTL: cfg.MediaURLTTL, PublicBase: cfg.PublicBaseURL,
+			CORSOrigins: cfg.CORSOrigins,
+		})
+		mux.Handle("/v1/", api)
+		mux.Handle("/mcp", api)
+	}
+
 	srv := &http.Server{Addr: cfg.HTTPAddr, Handler: mux}
 
 	go func() {
@@ -59,12 +95,40 @@ func main() {
 		}
 	}()
 
+	if execSvc != nil {
+		go sweepLoop(execSvc, cfg.JobTimeout)
+	}
+
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(ctx)
+	if execSvc != nil {
+		done := make(chan struct{})
+		go func() { execSvc.Wait(); close(done) }()
+		select {
+		case <-done:
+		case <-ctx.Done():
+			log.Printf("in-flight lessons still running; next start will RecoverInFlight")
+		}
+	}
+}
+
+func sweepLoop(execSvc *execution.Service, timeout time.Duration) {
+	t := time.NewTicker(time.Minute)
+	defer t.Stop()
+	for range t.C {
+		n, err := execSvc.SweepTimedOut(context.Background(), timeout)
+		if err != nil {
+			log.Printf("sweep timed out jobs: %v", err)
+			continue
+		}
+		if n > 0 {
+			log.Printf("timed out %d stale running jobs", n)
+		}
+	}
 }
 
 func healthz(db *sql.DB) http.HandlerFunc {
@@ -127,7 +191,7 @@ func authCallbackStub(w http.ResponseWriter, r *http.Request) {
 	case q.Get("code") != "":
 		writeJSON(w, map[string]any{
 			"status": "ok", "code_received": true, "state_received": q.Get("state") != "",
-			"message": "codelphi auth callback placeholder; workbench 未上线",
+			"message": "codelphi auth callback placeholder; workbench 请走 /auth/callback on Next.js :3000",
 		})
 	default:
 		w.WriteHeader(http.StatusBadRequest)

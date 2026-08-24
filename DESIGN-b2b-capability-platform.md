@@ -21,6 +21,7 @@
 - 客户是机构（B2B）。付费模式：**按年买断使用权（1/2/3 年），不按份计价**——合同要素只有年限、价格、能力范围、SLA、合规条款、禁止转租条款。配额是**内部成本护栏**，不出现在合同、不作为商品单位
 - 收款以公对公转账为主（少数在线支付），在高售价内获取利润；盈亏靠内部成本计量（`vendor_cost` + 成本预警）保障，不靠向客户计份
 - **首期买家定位：高校**（终端用户：高校教师；首要场景：制作数字教材）。未来可能扩展其他目标市场——组织/配额/Project 模型一律行业通用，不出现"学校/学院"字样
+- **产品名词是 Project（项目），不是课、不是章。** 数字课是第一种套件预设（P0 商业切片），不是产品边界。工作台列表叫「我的项目」；「做课」只是当前预设的动作文案，接第二种套件时换预设，不换容器
 - **成交落在院系/教研室，不是全校。** Org = 成交落地单位（一单一个客户），学校可以只出现在发票抬头。额度耗尽不是主路径
 - **教师要的是结果，不是过程。** 「根据某章做课」交付的是一套课。首轮生成是工作台：**传材料 → 做课**，不是在对话框里说「帮我做个课」（那比按钮慢）。**自然语言对话只在教师对半成品有修改意见时才出现**（§2.2）。过程由网关状态机执行，不把平台选择甩给教师
 - **能力来自自有姐妹平台**，各自有独立托管、可自行做 2C；给 codelphi 只提供能力（partner）。不是外采「视频/图片供应商」拼盘。已知：PPTCreator（PPT+讲稿）、数字人（讲稿成片，非实时）、AI3D、OpenMAIC（尚未深研；若只做 PPT 则不用，见 §2.1）
@@ -151,7 +152,7 @@ PPTCreator: 成品 pptx + 逐页讲稿
 
 **编排：** 工作台点「做课」= 网关 `submit_lesson`（权威状态机），下面拆 step。教师看进度和文件。有修改意见才打开绑定该构件的对话；对话只把意见变成 `submit_lesson(rebuild=…)`，不决定拓扑。P0 不对教师暴露 `submit_ppt`。
 
-**编排实现形态（约束）：lesson 拓扑硬编码在网关**（设计 → 大纲 → `awaiting_confirm` 确认门 → PPT+讲稿；缺件后补、单件重试）。确认门是状态机的正式状态，不是 UI 层把戏：教师在工作台点「通过，继续」才提交 PPT step，等待期间不持有任何预扣。每个 step 独立 authorize/settle（§4），不整单预扣。不做可视化 DAG、不做用户自定义工作流。CoursePackage 构件清单就是状态机。等出现第二种套件形态再抽象。
+**编排实现形态（约束）：拓扑来自预设包，不写死行业，不做可视化 DAG，不做用户自定义工作流。** P0 只内置一条 `digital_lesson`（设计 → 大纲 → `awaiting_confirm` → PPT+讲稿）。确认门是状态机的正式状态：操作者点「通过，继续」才提交贵步骤，等待期间不持有任何预扣。每个 step 独立 authorize/settle（§4）。第二种预设是目录里多一条记录 + adapter，不是 `if 大学` 分叉，也不是另一套工作台。详见 §2.3。
 
 ### 2.2 为什么要对话框，以及 DSH 何时出现
 
@@ -199,6 +200,20 @@ PPTCreator: 成品 pptx + 逐页讲稿
 
 **渠道即账本推广：** 教师打开 PPTCreator.com 走个人积分；打开数字人 2C 站点走那边的账；只有经 **套件工作台 / 网关** 的流量记入机构 License。四条缝都存在，销售不承诺「校本只能在本平台生成」。
 
+### 2.3 卖预设包，不给机构贴行业标签
+
+CoDelphi 整合多个外部能力，给某类客户一条龙。商品是 **预设包（Preset）**，不是 `org.industry`。
+
+- **License** 写明这家能用哪些包、各 capability 护栏。运营开通 = 勾选预设包，不是「设成大学」。
+- **工作台壳只有一套**：列表、上传、一个主按钮、进度、确认门、下载、对某一份返工。文案/构件名/步骤来自该包 copy。
+- **只买一个包**：界面不出现包选择器。主按钮就是该包的动作（数字课 = 「做课」）。
+- **买了多个包**：只在 **新建那一次** 选产物种类。Project 绑死 `preset_id`。不要顶部全局产品线切换。
+- **挑包 ≠ 挑引擎。** 挑的是产物；包内部仍是一条龙。
+- **全案不是超级按钮。** 全案是多份 Project 放在 Collection 里。Collection UI 在第二种包出售前可不上；不要用 OrgUnit 冒充「品牌/教材」。
+- **`package_templates` = 销售 SKU**（年限、价、护栏）。**Preset = 运行时拓扑 + 皮肤。** SKU 可引用它启用哪些 Preset。
+
+P0 只卖 `digital_lesson`。内核按「目录可以有第二条」来建，不实现第二条。
+
 ## 3. 商业模式与授权模型
 
 核心实体是挂在机构上的 License（按年买断）。codelphi **没有个人积分**（见 §6）。
@@ -241,10 +256,15 @@ PPTCreator: 成品 pptx + 逐页讲稿
 - 配额周期按授权年分条，高校对齐**学年**（九月起算），不硬编码自然年；年未不结转
 - 新周期/新 License 的 unit 帽**不静默复制**去年设置；可做「按去年比例复制」运营按钮
 
-**Project** — 一课/一章的工作容器，上面挂 **CoursePackage（套件）**
-`id, org_id, unit_id, owner_member_id, type_label, title, created_at`
-- P0 强制绑定 submit；`create_project` 即「先建课再填套件」
-- 教师的心智单位是「这一课」，不是「一次 chat」或「某一个平台」
+**Preset** — 运行时商品（拓扑 + 皮肤）。目录级，不是每机构一份行业枚举
+`id（如 digital_lesson）, steps[], artifact_kinds[], copy{}, collection_noun`
+- License 启用哪些 Preset；Project 创建时绑定 `preset_id`
+- 步骤表声明 capability、platform、是否过确认门、一次 step 产出哪些 kind
+
+**Project** — 工作容器，上面挂套件。一份 Project 绑死一个 Preset
+`id, org_id, unit_id, owner_member_id, preset_id, collection_id(可空), type_label, title, created_at`
+- P0 强制绑定 submit；只买一个包时 `preset_id` 可默认
+- Collection（教材 / 品牌全案）第二种包再上 UI；不要用 OrgUnit 表示「这批活为谁做」
 
 **Material** — 章材料（`submit_lesson` 的输入）
 `id, project_id, kind(pdf/docx/image/text), storage_ref, uploaded_by, created_at`

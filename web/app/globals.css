@@ -1,0 +1,23 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --paper: #f3eee4;
+  --ink: #1c1915;
+}
+
+html,
+body {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+body {
+  background-image: radial-gradient(rgba(28, 25, 21, 0.035) 0.6px, transparent 0.6px);
+  background-size: 7px 7px;
+}
+
+::selection {
+  background: #ead7c8;
+}

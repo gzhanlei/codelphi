@@ -1,0 +1,17 @@
+[Unit]
+Description=codelphi workbench (Next.js)
+After=network.target codelphi-gateway.service
+
+[Service]
+Type=simple
+User=codelphi
+WorkingDirectory=/data/www/codelphi/web
+EnvironmentFile=/data/www/codelphi/web.env
+Environment=NODE_ENV=production
+ExecStart=/data/www/codelphi/web/node_modules/.bin/next start -H 127.0.0.1 -p 13000
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

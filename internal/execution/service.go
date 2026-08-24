@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"strings"
 	"sync"
 
@@ -16,11 +17,12 @@ import (
 	"codelphi/internal/dbgen"
 	"codelphi/internal/execution/adapters/llm"
 	"codelphi/internal/execution/adapters/pptcreator"
+	"codelphi/internal/preset"
 	"codelphi/internal/storage"
 )
 
-// lesson 拓扑硬编码（设计 §2.1 约束：不做 DAG、不做用户自定义工作流）：
-// design → outline → awaiting_confirm → ppt+script。每个 step 独立 authorize/settle（§4）。
+// lesson 拓扑来自 Project.preset_id 对应的目录（设计 §2.3）。
+// digital_lesson：design → outline → awaiting_confirm → ppt+script。每个 step 独立 authorize/settle（§4）。
 var (
 	// ErrIllegalTransition：状态机非法迁移（条件 UPDATE rows=0）。
 	ErrIllegalTransition = errors.New("execution: illegal job status transition")
@@ -28,6 +30,8 @@ var (
 	ErrMaterialKindUnsupported = errors.New("execution: material kind not supported (P0 text only)")
 	// ErrRebuildKind：script 只能随 ppt 整份重出（§8 第 9 条讲稿对齐约束）。
 	ErrRebuildKind = errors.New("execution: script rebuilds with ppt, not alone")
+	// ErrUnknownPreset：Project.preset_id 不在目录里，submit 失败。
+	ErrUnknownPreset = errors.New("execution: unknown preset")
 )
 
 // Config 可调项；默认值即可用于生产。
@@ -55,6 +59,7 @@ type Service struct {
 
 	mu   sync.Mutex
 	sems map[string]chan struct{}
+	wg   sync.WaitGroup
 }
 
 type Option func(*Service)
@@ -92,6 +97,79 @@ type Lesson struct {
 // 返回的 error 只在系统性失败（DB / billing 不可用，fail-closed）时非 nil；
 // 业务性 step 失败（deny、adapter 故障）体现在 Lesson.Status = failed。
 func (s *Service) SubmitLesson(ctx context.Context, in SubmitInput) (*Lesson, error) {
+	prepared, err := s.prepareLesson(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	return s.runDesignOutline(ctx, prepared)
+}
+
+// StartLesson 是 HTTP 用的非阻塞入口：建 job 后立即返回 running，design/outline 在后台跑。
+// 进程退出时残留 running 由 RecoverInFlight 收敛；预扣由 billing TTL 扫尾兜底。
+func (s *Service) StartLesson(ctx context.Context, in SubmitInput) (*Lesson, error) {
+	prepared, err := s.prepareLesson(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	lesson := &Lesson{LessonJobID: prepared.lessonID, PackageID: prepared.packageID, Status: string(dbgen.JobsStatusRunning)}
+	bg := context.WithoutCancel(ctx)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		if _, err := s.runDesignOutline(bg, prepared); err != nil {
+			log.Printf("execution: lesson %s background: %v", prepared.lessonID, err)
+		}
+	}()
+	return lesson, nil
+}
+
+// ConfirmLesson 是教师点「通过，继续」后的状态迁移：awaiting_confirm → 提交 ppt step。
+// 幂等安全：重复调用（条件 UPDATE 抢不到行）直接返回当前状态，不产生第二个 ppt step。
+func (s *Service) ConfirmLesson(ctx context.Context, lessonID string) (*Lesson, error) {
+	prepared, skip, err := s.prepareConfirm(ctx, lessonID)
+	if err != nil {
+		return nil, err
+	}
+	if skip != nil {
+		return skip, nil
+	}
+	return s.runPPTAndFinish(ctx, prepared)
+}
+
+// StartConfirm 是 HTTP 用的非阻塞确认门。
+func (s *Service) StartConfirm(ctx context.Context, lessonID string) (*Lesson, error) {
+	prepared, skip, err := s.prepareConfirm(ctx, lessonID)
+	if err != nil {
+		return nil, err
+	}
+	if skip != nil {
+		return skip, nil
+	}
+	lesson := &Lesson{LessonJobID: prepared.lessonID, PackageID: prepared.packageID, Status: string(dbgen.JobsStatusRunning)}
+	bg := context.WithoutCancel(ctx)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		if _, err := s.runPPTAndFinish(bg, prepared); err != nil {
+			log.Printf("execution: confirm %s background: %v", prepared.lessonID, err)
+		}
+	}()
+	return lesson, nil
+}
+
+// Wait 等后台 StartLesson/StartConfirm 结束（进程退出前由 gateway 调用）。
+func (s *Service) Wait() { s.wg.Wait() }
+
+type preparedLesson struct {
+	in        SubmitInput
+	project   dbgen.Project
+	spec      preset.Preset
+	texts     []string
+	lessonID  string
+	packageID string
+}
+
+func (s *Service) prepareLesson(ctx context.Context, in SubmitInput) (*preparedLesson, error) {
 	q := dbgen.New(s.db)
 	project, err := q.GetProject(ctx, in.ProjectID)
 	if err != nil {
@@ -99,6 +177,10 @@ func (s *Service) SubmitLesson(ctx context.Context, in SubmitInput) (*Lesson, er
 	}
 	if project.OrgID != in.OrgID {
 		return nil, errors.New("execution: project not in org")
+	}
+	spec, err := lookupProjectPreset(project)
+	if err != nil {
+		return nil, err
 	}
 	texts, err := s.loadMaterialTexts(ctx, in.ProjectID)
 	if err != nil {
@@ -120,7 +202,7 @@ func (s *Service) SubmitLesson(ctx context.Context, in SubmitInput) (*Lesson, er
 		return nil, err
 	}
 	if err := qt.InsertCoursePackage(ctx, dbgen.InsertCoursePackageParams{
-		ID: packageID, ProjectID: in.ProjectID,
+		ID: packageID, ProjectID: in.ProjectID, PresetID: spec.ID,
 		Status:      dbgen.CoursePackagesStatusBuilding,
 		LessonJobID: sql.NullString{String: lessonID, Valid: true},
 	}); err != nil {
@@ -130,69 +212,84 @@ func (s *Service) SubmitLesson(ctx context.Context, in SubmitInput) (*Lesson, er
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-
-	lesson := &Lesson{LessonJobID: lessonID, PackageID: packageID}
 	if err := s.transition(ctx, lessonID, dbgen.JobsStatusQueued, dbgen.JobsStatusRunning); err != nil {
-		return lesson, err
+		return nil, err
 	}
+	return &preparedLesson{in: in, project: project, spec: spec, texts: texts, lessonID: lessonID, packageID: packageID}, nil
+}
 
-	// design → outline；任一失败即 lesson failed、package partial。
-	for _, kind := range []llm.Kind{llm.KindDesign, llm.KindOutline} {
-		if err := s.runLLMStep(ctx, in, project, lessonID, packageID, kind, texts, in.Note, ""); err != nil {
+func (s *Service) runDesignOutline(ctx context.Context, p *preparedLesson) (*Lesson, error) {
+	lesson := &Lesson{LessonJobID: p.lessonID, PackageID: p.packageID}
+	pre, post := splitGate(p.spec.Steps)
+	for _, step := range pre {
+		if err := s.runCatalogStep(ctx, p, step, p.in.Note, ""); err != nil {
 			return s.failLesson(ctx, lesson, err)
 		}
 	}
-
-	if err := s.transition(ctx, lessonID, dbgen.JobsStatusRunning, dbgen.JobsStatusAwaitingConfirm); err != nil {
+	if len(post) == 0 {
+		return s.finishLesson(ctx, p, lesson)
+	}
+	if err := s.transition(ctx, p.lessonID, dbgen.JobsStatusRunning, dbgen.JobsStatusAwaitingConfirm); err != nil {
 		return lesson, err
 	}
 	lesson.Status = string(dbgen.JobsStatusAwaitingConfirm)
 	return lesson, nil
 }
 
-// ConfirmLesson 是教师点「通过，继续」后的状态迁移：awaiting_confirm → 提交 ppt step。
-// 幂等安全：重复调用（条件 UPDATE 抢不到行）直接返回当前状态，不产生第二个 ppt step。
-func (s *Service) ConfirmLesson(ctx context.Context, lessonID string) (*Lesson, error) {
+func (s *Service) prepareConfirm(ctx context.Context, lessonID string) (p *preparedLesson, skip *Lesson, err error) {
 	q := dbgen.New(s.db)
 	job, err := q.GetJob(ctx, lessonID)
 	if err != nil {
-		return nil, fmt.Errorf("execution: lesson: %w", err)
+		return nil, nil, fmt.Errorf("execution: lesson: %w", err)
 	}
 	if job.Kind != dbgen.JobsKindLesson {
-		return nil, errors.New("execution: not a lesson job")
+		return nil, nil, errors.New("execution: not a lesson job")
 	}
 	lesson := &Lesson{LessonJobID: lessonID, PackageID: job.PackageID.String, Status: string(job.Status)}
 	if job.Status != dbgen.JobsStatusAwaitingConfirm {
-		return lesson, nil // 幂等：已确认/已终态，不再动作
+		return nil, lesson, nil // 幂等：已确认/已终态，不再动作
 	}
 	if err := s.transition(ctx, lessonID, dbgen.JobsStatusAwaitingConfirm, dbgen.JobsStatusRunning); err != nil {
 		if errors.Is(err, ErrIllegalTransition) {
-			return lesson, nil // 并发重复确认：对方已迁移
+			return nil, lesson, nil // 并发重复确认：对方已迁移
 		}
-		return lesson, err
+		return nil, lesson, err
 	}
-
 	project, err := q.GetProject(ctx, job.ProjectID)
 	if err != nil {
-		return lesson, err
+		return nil, lesson, err
 	}
 	texts, err := s.loadMaterialTexts(ctx, job.ProjectID)
 	if err != nil {
-		return lesson, err
+		return nil, lesson, err
+	}
+	spec, err := lookupProjectPreset(project)
+	if err != nil {
+		return nil, lesson, err
 	}
 	in := SubmitInput{
 		OrgID: job.OrgID, MemberID: project.OwnerMemberID,
 		UnitID: project.UnitID.String, ProjectID: project.ID, Title: project.Title,
 	}
-	if err := s.runPPTStep(ctx, in, lessonID, lesson.PackageID, composeDocument(texts), "", ""); err != nil {
-		return s.failLesson(ctx, lesson, err)
+	return &preparedLesson{in: in, project: project, spec: spec, texts: texts, lessonID: lessonID, packageID: job.PackageID.String}, nil, nil
+}
+
+func (s *Service) runPPTAndFinish(ctx context.Context, p *preparedLesson) (*Lesson, error) {
+	lesson := &Lesson{LessonJobID: p.lessonID, PackageID: p.packageID}
+	_, post := splitGate(p.spec.Steps)
+	for _, step := range post {
+		if err := s.runCatalogStep(ctx, p, step, "", ""); err != nil {
+			return s.failLesson(ctx, lesson, err)
+		}
 	}
-	if err := s.transition(ctx, lessonID, dbgen.JobsStatusRunning, dbgen.JobsStatusSucceeded); err != nil {
+	return s.finishLesson(ctx, p, lesson)
+}
+
+func (s *Service) finishLesson(ctx context.Context, p *preparedLesson, lesson *Lesson) (*Lesson, error) {
+	if err := s.transition(ctx, p.lessonID, dbgen.JobsStatusRunning, dbgen.JobsStatusSucceeded); err != nil {
 		return lesson, err
 	}
-	if err := q.UpdatePackageStatus(ctx, dbgen.UpdatePackageStatusParams{
-		Status: dbgen.CoursePackagesStatusReady, ID: lesson.PackageID,
-	}); err != nil {
+	if err := s.refreshPackageStatus(ctx, p.packageID); err != nil {
 		return lesson, err
 	}
 	lesson.Status = string(dbgen.JobsStatusSucceeded)
@@ -227,6 +324,10 @@ func (s *Service) Rebuild(ctx context.Context, packageID, kind, critique string)
 		OrgID: lesson.OrgID, MemberID: project.OwnerMemberID,
 		UnitID: project.UnitID.String, ProjectID: project.ID, Title: project.Title,
 	}
+	spec, err := lookupProjectPreset(project)
+	if err != nil {
+		return err
+	}
 
 	if err := q.UpdatePackageStatus(ctx, dbgen.UpdatePackageStatusParams{
 		Status: dbgen.CoursePackagesStatusBuilding, ID: packageID,
@@ -234,16 +335,12 @@ func (s *Service) Rebuild(ctx context.Context, packageID, kind, critique string)
 		return err
 	}
 
-	switch kind {
-	case "design", "outline":
-		err = s.runLLMStep(ctx, in, project, lesson.ID, packageID, llm.Kind(kind), texts, "", critique)
-	case "ppt":
-		err = s.runPPTStep(ctx, in, lesson.ID, packageID, composeDocument(texts), "", critique)
-	case "script":
-		return ErrRebuildKind
-	default:
-		return fmt.Errorf("execution: unknown artifact kind %q", kind)
+	step, err := stepEmitting(spec, kind)
+	if err != nil {
+		return err
 	}
+	p := &preparedLesson{in: in, project: project, spec: spec, texts: texts, lessonID: lesson.ID, packageID: packageID}
+	err = s.runCatalogStep(ctx, p, step, "", critique)
 	if err != nil {
 		// 业务性失败：package 停在 partial，错误已落 step job cost_report。
 		_ = q.UpdatePackageStatus(ctx, dbgen.UpdatePackageStatusParams{
@@ -380,7 +477,7 @@ func (s *Service) insertStep(ctx context.Context, stepID string, in SubmitInput,
 
 // storeLLMArtifacts 落 JSON + 渲染 Markdown，artifact 版本迁移同事务。
 func (s *Service) storeLLMArtifacts(ctx context.Context, orgID, packageID, stepID string, kind llm.Kind, res *llm.GenerateResult) error {
-	version, err := s.nextVersion(ctx, packageID, dbgen.ArtifactsKind(kind))
+	version, err := s.nextVersion(ctx, packageID, string(kind))
 	if err != nil {
 		return err
 	}
@@ -392,7 +489,7 @@ func (s *Service) storeLLMArtifacts(ctx context.Context, orgID, packageID, stepI
 	if err := s.store.Put(ctx, base+".md", strings.NewReader(res.Markdown), "text/markdown"); err != nil {
 		return err
 	}
-	return s.insertArtifact(ctx, packageID, dbgen.ArtifactsKind(kind), version, stepID, jsonKey)
+	return s.insertArtifact(ctx, packageID, string(kind), version, stepID, jsonKey)
 }
 
 // storePPTArtifacts 回拷 pptx 与逐页 notes 到本侧 storage（不转手平台临时链，C3），
@@ -402,11 +499,11 @@ func (s *Service) storePPTArtifacts(ctx context.Context, orgID, packageID, stepI
 	if err != nil {
 		return err
 	}
-	pptVersion, err := s.nextVersion(ctx, packageID, dbgen.ArtifactsKindPpt)
+	pptVersion, err := s.nextVersion(ctx, packageID, "ppt")
 	if err != nil {
 		return err
 	}
-	scriptVersion, err := s.nextVersion(ctx, packageID, dbgen.ArtifactsKindScript)
+	scriptVersion, err := s.nextVersion(ctx, packageID, "script")
 	if err != nil {
 		return err
 	}
@@ -425,18 +522,18 @@ func (s *Service) storePPTArtifacts(ctx context.Context, orgID, packageID, stepI
 				strings.NewReader(string(docx)), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 		}
 	}
-	if err := s.insertArtifact(ctx, packageID, dbgen.ArtifactsKindPpt, pptVersion, stepID, pptKey); err != nil {
+	if err := s.insertArtifact(ctx, packageID, "ppt", pptVersion, stepID, pptKey); err != nil {
 		return err
 	}
-	return s.insertArtifact(ctx, packageID, dbgen.ArtifactsKindScript, scriptVersion, stepID, scriptKey)
+	return s.insertArtifact(ctx, packageID, "script", scriptVersion, stepID, scriptKey)
 }
 
-func (s *Service) nextVersion(ctx context.Context, packageID string, kind dbgen.ArtifactsKind) (int32, error) {
+func (s *Service) nextVersion(ctx context.Context, packageID string, kind string) (int32, error) {
 	return dbgen.New(s.db).NextArtifactVersion(ctx, dbgen.NextArtifactVersionParams{PackageID: packageID, Kind: kind})
 }
 
 // insertArtifact 同事务清旧 is_current + 插新版本行（旧版本保留可下载，设计 §3）。
-func (s *Service) insertArtifact(ctx context.Context, packageID string, kind dbgen.ArtifactsKind, version int32, stepID, storageKey string) error {
+func (s *Service) insertArtifact(ctx context.Context, packageID string, kind string, version int32, stepID, storageKey string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -495,24 +592,97 @@ func composeDocument(texts []string) string {
 	return sb.String()
 }
 
-// refreshPackageStatus：四个 P0 必齐构件（design/outline/ppt/script）都有 current ready 版本 → ready，否则 partial。
+func lookupProjectPreset(p dbgen.Project) (preset.Preset, error) {
+	id := p.PresetID
+	if id == "" {
+		id = preset.DigitalLesson
+	}
+	spec, err := preset.Lookup(id)
+	if err != nil {
+		return preset.Preset{}, fmt.Errorf("%w: %s", ErrUnknownPreset, id)
+	}
+	return spec, nil
+}
+
+func splitGate(steps []preset.Step) (pre, post []preset.Step) {
+	for i, s := range steps {
+		if s.GateAfter {
+			return steps[:i+1], steps[i+1:]
+		}
+	}
+	return steps, nil
+}
+
+func stepEmitting(spec preset.Preset, kind string) (preset.Step, error) {
+	for _, step := range spec.Steps {
+		for _, e := range step.Emits {
+			if e != kind {
+				continue
+			}
+			if kind != step.Capability {
+				return preset.Step{}, ErrRebuildKind
+			}
+			return step, nil
+		}
+	}
+	return preset.Step{}, fmt.Errorf("execution: unknown artifact kind %q", kind)
+}
+
+func (s *Service) runCatalogStep(ctx context.Context, p *preparedLesson, step preset.Step, note, critique string) error {
+	switch step.Platform {
+	case "llm":
+		return s.runLLMStep(ctx, p.in, p.project, p.lessonID, p.packageID, llm.Kind(step.Capability), p.texts, note, critique)
+	case "pptcreator":
+		return s.runPPTStep(ctx, p.in, p.lessonID, p.packageID, composeDocument(p.texts), note, critique)
+	default:
+		return fmt.Errorf("execution: unknown platform %q", step.Platform)
+	}
+}
+
+// refreshPackageStatus：该包声明的构件都有 current ready 版本 → ready，否则 partial。
 func (s *Service) refreshPackageStatus(ctx context.Context, packageID string) error {
-	arts, err := dbgen.New(s.db).ListCurrentArtifacts(ctx, packageID)
+	q := dbgen.New(s.db)
+	pkg, err := q.GetCoursePackage(ctx, packageID)
 	if err != nil {
 		return err
 	}
-	ready := map[dbgen.ArtifactsKind]bool{}
+	id := pkg.PresetID
+	if id == "" {
+		project, err := q.GetProject(ctx, pkg.ProjectID)
+		if err != nil {
+			return err
+		}
+		id = project.PresetID
+	}
+	if id == "" {
+		id = preset.DigitalLesson
+	}
+	spec, err := preset.Lookup(id)
+	if err != nil {
+		return fmt.Errorf("%w: %s", ErrUnknownPreset, id)
+	}
+	arts, err := q.ListCurrentArtifacts(ctx, packageID)
+	if err != nil {
+		return err
+	}
+	ready := map[string]bool{}
 	for _, a := range arts {
 		if a.Status == dbgen.ArtifactsStatusReady {
 			ready[a.Kind] = true
 		}
 	}
 	status := dbgen.CoursePackagesStatusPartial
-	if ready[dbgen.ArtifactsKindDesign] && ready[dbgen.ArtifactsKindOutline] &&
-		ready[dbgen.ArtifactsKindPpt] && ready[dbgen.ArtifactsKindScript] {
+	all := len(spec.Artifacts) > 0
+	for _, k := range spec.Artifacts {
+		if !ready[k] {
+			all = false
+			break
+		}
+	}
+	if all {
 		status = dbgen.CoursePackagesStatusReady
 	}
-	return dbgen.New(s.db).UpdatePackageStatus(ctx, dbgen.UpdatePackageStatusParams{Status: status, ID: packageID})
+	return q.UpdatePackageStatus(ctx, dbgen.UpdatePackageStatusParams{Status: status, ID: packageID})
 }
 
 // legalTransitions 是状态机的合法迁移集（设计 §7 job 状态机）。

@@ -12,53 +12,6 @@ import (
 	"time"
 )
 
-type ArtifactsKind string
-
-const (
-	ArtifactsKindDesign       ArtifactsKind = "design"
-	ArtifactsKindOutline      ArtifactsKind = "outline"
-	ArtifactsKindPpt          ArtifactsKind = "ppt"
-	ArtifactsKindScript       ArtifactsKind = "script"
-	ArtifactsKindExercise     ArtifactsKind = "exercise"
-	ArtifactsKindLectureVideo ArtifactsKind = "lecture_video"
-	ArtifactsKindAsset3d      ArtifactsKind = "asset_3d"
-)
-
-func (e *ArtifactsKind) Scan(src interface{}) error {
-	switch s := src.(type) {
-	case []byte:
-		*e = ArtifactsKind(s)
-	case string:
-		*e = ArtifactsKind(s)
-	default:
-		return fmt.Errorf("unsupported scan type for ArtifactsKind: %T", src)
-	}
-	return nil
-}
-
-type NullArtifactsKind struct {
-	ArtifactsKind ArtifactsKind `json:"artifacts_kind"`
-	Valid         bool          `json:"valid"` // Valid is true if ArtifactsKind is not NULL
-}
-
-// Scan implements the Scanner interface.
-func (ns *NullArtifactsKind) Scan(value interface{}) error {
-	if value == nil {
-		ns.ArtifactsKind, ns.Valid = "", false
-		return nil
-	}
-	ns.Valid = true
-	return ns.ArtifactsKind.Scan(value)
-}
-
-// Value implements the driver Valuer interface.
-func (ns NullArtifactsKind) Value() (driver.Value, error) {
-	if !ns.Valid {
-		return nil, nil
-	}
-	return string(ns.ArtifactsKind), nil
-}
-
 type ArtifactsStatus string
 
 const (
@@ -712,13 +665,13 @@ func (ns NullUsageRecordsUnit) Value() (driver.Value, error) {
 type Artifact struct {
 	ID         string          `json:"id"`
 	PackageID  string          `json:"package_id"`
-	Kind       ArtifactsKind   `json:"kind"`
 	Version    int32           `json:"version"`
 	Status     ArtifactsStatus `json:"status"`
 	StepJobID  sql.NullString  `json:"step_job_id"`
 	StorageRef sql.NullString  `json:"storage_ref"`
 	IsCurrent  bool            `json:"is_current"`
 	CreatedAt  time.Time       `json:"created_at"`
+	Kind       string          `json:"kind"`
 }
 
 type AuditLog struct {
@@ -738,6 +691,7 @@ type CoursePackage struct {
 	LessonJobID sql.NullString       `json:"lesson_job_id"`
 	CreatedAt   time.Time            `json:"created_at"`
 	UpdatedAt   time.Time            `json:"updated_at"`
+	PresetID    string               `json:"preset_id"`
 }
 
 type Job struct {
@@ -773,6 +727,8 @@ type License struct {
 	// 套餐快照，不可变；变更 = 新 License/LicenseAmendment
 	Snapshot  json.RawMessage `json:"snapshot"`
 	CreatedAt time.Time       `json:"created_at"`
+	// 授权的预设包 id 数组，与 snapshot 能力分开
+	Presets *json.RawMessage `json:"presets"`
 }
 
 type Material struct {
@@ -854,6 +810,7 @@ type Project struct {
 	// 章名，如「高等数学 · 第 3 章 导数」
 	Title     string    `json:"title"`
 	CreatedAt time.Time `json:"created_at"`
+	PresetID  string    `json:"preset_id"`
 }
 
 type QuotaPool struct {

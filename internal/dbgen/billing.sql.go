@@ -335,7 +335,7 @@ func (q *Queries) ListRootPools(ctx context.Context) ([]QuotaPool, error) {
 }
 
 const listUsableLicenses = `-- name: ListUsableLicenses :many
-SELECT id, org_id, contract_no, valid_from, valid_to, status, payment_channel, paid_amount, snapshot, created_at FROM licenses
+SELECT id, org_id, contract_no, valid_from, valid_to, status, payment_channel, paid_amount, snapshot, created_at, presets FROM licenses
 WHERE org_id = ? AND status = 'active' AND valid_from <= ? AND valid_to >= ?
 ORDER BY valid_to ASC
 `
@@ -367,6 +367,7 @@ func (q *Queries) ListUsableLicenses(ctx context.Context, arg ListUsableLicenses
 			&i.PaidAmount,
 			&i.Snapshot,
 			&i.CreatedAt,
+			&i.Presets,
 		); err != nil {
 			return nil, err
 		}
