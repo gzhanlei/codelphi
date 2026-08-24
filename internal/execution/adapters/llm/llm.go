@@ -76,9 +76,6 @@ var designKeys = []string{"教学目标", "学情", "重难点", "方法", "流�
 var ErrSchema = errors.New("llm: output schema violation")
 
 func (c *Client) Generate(ctx context.Context, in GenerateRequest) (*GenerateResult, error) {
-	if len(in.Materials) == 0 {
-		return nil, errors.New("llm: no materials")
-	}
 	body := map[string]any{
 		"model":           c.model,
 		"messages":        buildMessages(in),

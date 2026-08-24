@@ -634,10 +634,6 @@ func (s *server) writeExecErr(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusBadRequest, "material_kind_unsupported", "不支持该文件类型，请上传 pdf、docx、md 或 txt")
 	case errors.Is(err, execution.ErrNoMaterials):
 		writeErr(w, http.StatusBadRequest, "invalid_request", "请先上传本课材料")
-	case errors.Is(err, execution.ErrNoExtractableText):
-		writeErr(w, http.StatusBadRequest, "no_extractable_text", "无法从材料抽出文本（扫描件 PDF 需要有文字层）")
-	case errors.Is(err, execution.ErrMaterialExtractFailed):
-		writeErr(w, http.StatusBadRequest, "material_extract_failed", "材料无法解析，请检查 pdf/docx 是否损坏")
 	case errors.Is(err, execution.ErrMaterialTooLarge):
 		writeErr(w, http.StatusBadRequest, "invalid_request", "单份材料超过 20MB")
 	case errors.Is(err, execution.ErrTooManyMaterials):
@@ -756,10 +752,6 @@ func adminHint(code string) string {
 		return "本套餐不含此套件，联系销售"
 	case "too_many_materials":
 		return "每课最多 5 份材料"
-	case "no_extractable_text":
-		return "请换有文字层的 PDF，或改传 Word / Markdown / 文本"
-	case "material_extract_failed":
-		return "请检查文件是否损坏，或另存为 pdf/docx 后再传"
 	default:
 		return "联系本机构管理员"
 	}

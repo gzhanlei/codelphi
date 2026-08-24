@@ -10,6 +10,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/oklog/ulid/v2"
 
@@ -37,10 +38,6 @@ var (
 	ErrUnknownPreset = errors.New("execution: unknown preset")
 	// ErrNoMaterials：这一课还没有材料。
 	ErrNoMaterials = errors.New("execution: lesson has no materials")
-	// ErrNoExtractableText：有文件但抽不出文字（扫描件 PDF、空 docx）。
-	ErrNoExtractableText = errors.New("execution: no extractable text")
-	// ErrMaterialExtractFailed：pdf/docx 损坏或无法解析。
-	ErrMaterialExtractFailed = errors.New("execution: material extract failed")
 	// ErrMaterialTooLarge：单份材料超过 extract.MaxBytes。
 	ErrMaterialTooLarge = errors.New("execution: material too large")
 	// ErrTooManyMaterials：超过每课上限。
@@ -85,6 +82,9 @@ type Service struct {
 	ppt     *pptcreator.Client
 	cfg     Config
 
+	publicBase string
+	mediaTTL   time.Duration
+
 	mu   sync.Mutex
 	sems map[string]chan struct{}
 	wg   sync.WaitGroup
@@ -93,6 +93,13 @@ type Service struct {
 type Option func(*Service)
 
 func WithConfig(cfg Config) Option { return func(s *Service) { s.cfg = cfg } }
+
+func WithMedia(publicBase string, ttl time.Duration) Option {
+	return func(s *Service) {
+		s.publicBase = publicBase
+		s.mediaTTL = ttl
+	}
+}
 
 func New(db *sql.DB, billingSvc *billing.Service, store storage.Store, llmClient *llm.Client, pptClient *pptcreator.Client, opts ...Option) *Service {
 	s := &Service{db: db, billing: billingSvc, store: store, llm: llmClient, ppt: pptClient, cfg: defaultConfig(), sems: make(map[string]chan struct{})}
@@ -189,11 +196,22 @@ func (s *Service) StartConfirm(ctx context.Context, lessonID string) (*Lesson, e
 // Wait 等后台 StartLesson/StartConfirm 结束（进程退出前由 gateway 调用）。
 func (s *Service) Wait() { s.wg.Wait() }
 
+type storedMaterial struct {
+	Name string
+	Key  string
+}
+
+type pptFile struct {
+	Name string
+	URL  string
+}
+
 type preparedLesson struct {
 	in        SubmitInput
 	project   dbgen.Project
 	spec      preset.Preset
 	texts     []string
+	files     []storedMaterial
 	lessonID  string
 	packageID string
 }
@@ -224,7 +242,7 @@ func (s *Service) prepareLesson(ctx context.Context, in SubmitInput) (*preparedL
 	if err != nil {
 		return nil, err
 	}
-	texts, err := s.loadMaterialTexts(ctx, in.CourseLessonID)
+	files, texts, err := s.loadLessonMaterials(ctx, in.CourseLessonID)
 	if err != nil {
 		return nil, err
 	}
@@ -270,7 +288,7 @@ func (s *Service) prepareLesson(ctx context.Context, in SubmitInput) (*preparedL
 	if err := s.transition(ctx, lessonID, dbgen.JobsStatusQueued, dbgen.JobsStatusRunning); err != nil {
 		return nil, err
 	}
-	return &preparedLesson{in: in, project: project, spec: spec, texts: texts, lessonID: lessonID, packageID: packageID}, nil
+	return &preparedLesson{in: in, project: project, spec: spec, texts: texts, files: files, lessonID: lessonID, packageID: packageID}, nil
 }
 
 func (s *Service) runDesignOutline(ctx context.Context, p *preparedLesson) (*Lesson, error) {
@@ -322,7 +340,7 @@ func (s *Service) prepareConfirm(ctx context.Context, lessonID string) (p *prepa
 	if err != nil {
 		return nil, lesson, err
 	}
-	texts, err := s.loadMaterialTexts(ctx, pkg.LessonID)
+	files, texts, err := s.loadLessonMaterials(ctx, pkg.LessonID)
 	if err != nil {
 		return nil, lesson, err
 	}
@@ -335,7 +353,7 @@ func (s *Service) prepareConfirm(ctx context.Context, lessonID string) (p *prepa
 		UnitID: project.UnitID.String, ProjectID: project.ID,
 		CourseLessonID: pkg.LessonID, Title: cl.Title,
 	}
-	return &preparedLesson{in: in, project: project, spec: spec, texts: texts, lessonID: lessonID, packageID: job.PackageID.String}, nil, nil
+	return &preparedLesson{in: in, project: project, spec: spec, texts: texts, files: files, lessonID: lessonID, packageID: job.PackageID.String}, nil, nil
 }
 
 func (s *Service) runPPTAndFinish(ctx context.Context, p *preparedLesson) (*Lesson, error) {
@@ -380,7 +398,7 @@ func (s *Service) Rebuild(ctx context.Context, packageID, kind, critique string)
 	if err != nil {
 		return err
 	}
-	texts, err := s.loadMaterialTexts(ctx, pkg.LessonID)
+	files, texts, err := s.loadLessonMaterials(ctx, pkg.LessonID)
 	if err != nil {
 		return err
 	}
@@ -410,7 +428,7 @@ func (s *Service) Rebuild(ctx context.Context, packageID, kind, critique string)
 	if err != nil {
 		return err
 	}
-	p := &preparedLesson{in: in, project: project, spec: spec, texts: texts, lessonID: lesson.ID, packageID: packageID}
+	p := &preparedLesson{in: in, project: project, spec: spec, texts: texts, files: files, lessonID: lesson.ID, packageID: packageID}
 	err = s.runCatalogStep(ctx, p, step, "", critique)
 	if err != nil {
 		// 业务性失败：package 停在 partial，错误已落 step job cost_report。
@@ -626,82 +644,114 @@ func (s *Service) insertArtifact(ctx context.Context, packageID string, kind str
 	return tx.Commit()
 }
 
-// loadMaterialTexts 读该课全部材料并抽文本。pdf/docx/md/txt 可抽。
-func (s *Service) loadMaterialTexts(ctx context.Context, courseLessonID string) ([]string, error) {
+// loadLessonMaterials 列出该课原文件（转交 PPTCreator 用），并尽量抽文本给 LLM。
+// 抽不出字（扫描件 PDF、空白 txt）不挡提交：PPT 侧按原文件解析。
+func (s *Service) loadLessonMaterials(ctx context.Context, courseLessonID string) ([]storedMaterial, []string, error) {
 	materials, err := dbgen.New(s.db).ListLessonMaterials(ctx, courseLessonID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(materials) == 0 {
-		return nil, ErrNoMaterials
+		return nil, nil, ErrNoMaterials
 	}
 	if len(materials) > MaxMaterialsPerLesson {
-		return nil, ErrTooManyMaterials
+		return nil, nil, ErrTooManyMaterials
 	}
+	files := make([]storedMaterial, 0, len(materials))
 	texts := make([]string, 0, len(materials))
 	for _, m := range materials {
 		kind := string(m.Kind)
 		if kind == "image" {
-			return nil, fmt.Errorf("%w: material %s is %s", ErrMaterialKindUnsupported, m.ID, m.Kind)
+			return nil, nil, fmt.Errorf("%w: material %s is %s", ErrMaterialKindUnsupported, m.ID, m.Kind)
 		}
+		name := "材料"
+		if m.Filename.Valid && m.Filename.String != "" {
+			name = m.Filename.String
+		}
+		files = append(files, storedMaterial{Name: name, Key: m.StorageRef})
 		rc, err := s.store.Open(ctx, m.StorageRef)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		data, err := io.ReadAll(io.LimitReader(rc, extract.MaxBytes+1))
 		rc.Close()
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if int64(len(data)) > extract.MaxBytes {
-			return nil, fmt.Errorf("%w: material %s", ErrMaterialTooLarge, m.ID)
+			return nil, nil, fmt.Errorf("%w: material %s", ErrMaterialTooLarge, m.ID)
 		}
 		text, err := extract.Text(kind, data)
 		if err != nil {
-			return nil, fmt.Errorf("%w: material %s: %v", ErrMaterialExtractFailed, m.ID, err)
+			log.Printf("execution: skip extract for material %s: %v", m.ID, err)
+			continue
 		}
 		if strings.TrimSpace(text) == "" {
 			continue
 		}
 		texts = append(texts, text)
 	}
-	if len(texts) == 0 {
-		return nil, ErrNoExtractableText
-	}
-	return texts, nil
+	return files, texts, nil
 }
 
-// packPPTDocuments 组 create_ppt_from_documents 材料包（契约 C2 方向一）。
-// 槽位优先：textbook → teaching_design → outline → 其余材料作 reference。
-// PPTCreator 上限 5 份、content 至少 10 字符；短材料丢弃。
-func packPPTDocuments(texts []string, design, outline string) []pptcreator.Doc {
+func (s *Service) signMaterialURL(ctx context.Context, key string) (string, error) {
+	if strings.TrimSpace(s.publicBase) == "" {
+		return "", errors.New("execution: public base URL required to sign material")
+	}
+	ttl := s.mediaTTL
+	if ttl <= 0 {
+		ttl = 15 * time.Minute
+	}
+	rel, err := s.store.SignGet(ctx, key, ttl)
+	if err != nil {
+		return "", err
+	}
+	return absolutizeURL(s.publicBase, rel), nil
+}
+
+func absolutizeURL(base, u string) string {
+	if u == "" || base == "" {
+		return u
+	}
+	if strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://") {
+		return u
+	}
+	return strings.TrimRight(base, "/") + u
+}
+
+// packPPTDocuments 组 create_ppt_from_documents 材料包（契约 C2）。
+// 教师原文件走 url；design/outline 构件走 content。
+// 槽位优先：textbook 文件 → teaching_design → outline → 其余文件作 reference。
+func packPPTDocuments(files []pptFile, design, outline string) []pptcreator.Doc {
 	const maxDocs, minLen = 5, 10
 	docs := make([]pptcreator.Doc, 0, maxDocs)
-	appendDoc := func(role, name, content string) {
+	appendContent := func(role, name, content string) {
 		content = strings.TrimSpace(content)
 		if len(content) < minLen || len(docs) >= maxDocs {
 			return
 		}
 		docs = append(docs, pptcreator.Doc{Role: role, Name: name, Content: content})
 	}
-	textbook := ""
-	var extras []string
-	for _, t := range texts {
-		t = strings.TrimSpace(t)
-		if len(t) < minLen {
-			continue
+	appendFile := func(role, name, fileURL string) {
+		if strings.TrimSpace(fileURL) == "" || len(docs) >= maxDocs {
+			return
 		}
-		if textbook == "" {
-			textbook = t
-			continue
+		if name == "" {
+			name = "材料"
 		}
-		extras = append(extras, t)
+		docs = append(docs, pptcreator.Doc{Role: role, Name: name, URL: fileURL})
 	}
-	appendDoc("textbook", "课文", textbook)
-	appendDoc("teaching_design", "课程设计", design)
-	appendDoc("reference", "大纲", outline)
-	for i, t := range extras {
-		appendDoc("reference", fmt.Sprintf("材料 %d", i+2), t)
+	if len(files) > 0 {
+		appendFile("textbook", files[0].Name, files[0].URL)
+	}
+	appendContent("teaching_design", "课程设计", design)
+	appendContent("reference", "大纲", outline)
+	for i, f := range files[1:] {
+		name := f.Name
+		if name == "" {
+			name = fmt.Sprintf("材料 %d", i+2)
+		}
+		appendFile("reference", name, f.URL)
 	}
 	return docs
 }
@@ -731,7 +781,15 @@ func (s *Service) loadPPTDocuments(ctx context.Context, p *preparedLesson) ([]pp
 			outline = string(data)
 		}
 	}
-	docs := packPPTDocuments(p.texts, design, outline)
+	signed := make([]pptFile, 0, len(p.files))
+	for _, f := range p.files {
+		u, err := s.signMaterialURL(ctx, f.Key)
+		if err != nil {
+			return nil, err
+		}
+		signed = append(signed, pptFile{Name: f.Name, URL: u})
+	}
+	docs := packPPTDocuments(signed, design, outline)
 	for _, d := range docs {
 		if d.Role == "textbook" {
 			return docs, nil

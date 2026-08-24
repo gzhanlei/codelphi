@@ -1,5 +1,6 @@
-// Package extract 从教师上传的材料中抽出纯文本，供 LLM / PPTCreator content 使用。
+// Package extract 从教师上传的材料中抽出纯文本，供 design/outline LLM 使用。
 // 支持 text/markdown、docx、pdf；扫描件或无文字层的 PDF 会得到空串。
+// PPTCreator 材料包不走这里，直接转交原文件。
 package extract
 
 import (

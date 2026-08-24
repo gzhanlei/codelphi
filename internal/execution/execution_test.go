@@ -176,6 +176,7 @@ func newEnv(t *testing.T) *env {
 	svc := New(testDB, billing.New(testDB), f.store,
 		llm.New(fl.srv.URL, "test-model", ""),
 		pptcreator.New(fp.srv.URL, "partner-key-test", pptcreator.WithPoll(time.Millisecond, 5*time.Second)),
+		WithMedia("https://app.example.test", time.Hour),
 	)
 	return &env{fixture: f, exec: svc, llm: fl, ppt: fp}
 }
@@ -293,48 +294,55 @@ func TestHappyPath(t *testing.T) {
 		t.Fatalf("documents = %#v", body["documents"])
 	}
 	roles := map[string]int{}
-	var textbook string
+	var textbook map[string]any
 	for _, raw := range docs {
 		d, _ := raw.(map[string]any)
 		role, _ := d["role"].(string)
 		roles[role]++
 		if role == "textbook" {
-			textbook, _ = d["content"].(string)
+			textbook = d
 		}
 	}
 	if roles["textbook"] != 1 || roles["teaching_design"] != 1 {
 		t.Fatalf("roles = %v", roles)
 	}
-	if !strings.Contains(textbook, "导数的定义") {
-		t.Fatalf("textbook = %q", textbook)
+	url, _ := textbook["url"].(string)
+	if textbook["content"] != nil {
+		t.Fatalf("textbook must forward the file URL, not extracted text: %#v", textbook)
+	}
+	if !strings.Contains(url, "https://app.example.test/media/") || !strings.Contains(url, "0.txt") {
+		t.Fatalf("textbook url = %q", url)
 	}
 }
 
 func TestPackPPTDocuments(t *testing.T) {
 	docs := packPPTDocuments(
-		[]string{"导数的定义：差商的极限……", "几何意义：切线斜率……", "短"},
+		[]pptFile{
+			{Name: "课文.pdf", URL: "https://files.example.test/a.pdf"},
+			{Name: "参考.docx", URL: "https://files.example.test/b.docx"},
+		},
 		`{"教学目标":["理解导数"]}`,
 		`{"条目":[{"节":"1"}]}`,
 	)
 	if len(docs) != 4 {
 		t.Fatalf("len=%d %#v", len(docs), docs)
 	}
-	if docs[0].Role != "textbook" || !strings.Contains(docs[0].Content, "导数的定义") {
+	if docs[0].Role != "textbook" || docs[0].URL != "https://files.example.test/a.pdf" || docs[0].Content != "" {
 		t.Fatalf("textbook = %#v", docs[0])
 	}
-	if docs[1].Role != "teaching_design" {
+	if docs[1].Role != "teaching_design" || !strings.Contains(docs[1].Content, "教学目标") {
 		t.Fatalf("design = %#v", docs[1])
 	}
 	if docs[2].Role != "reference" || !strings.Contains(docs[2].Content, "条目") {
 		t.Fatalf("outline = %#v", docs[2])
 	}
-	if docs[3].Role != "reference" || !strings.Contains(docs[3].Content, "几何意义") {
+	if docs[3].Role != "reference" || docs[3].URL != "https://files.example.test/b.docx" || docs[3].Content != "" {
 		t.Fatalf("extra material = %#v", docs[3])
 	}
 
-	many := make([]string, 8)
+	many := make([]pptFile, 8)
 	for i := range many {
-		many[i] = fmt.Sprintf("这是第 %d 份足够长的课文或参考材料正文", i+1)
+		many[i] = pptFile{Name: fmt.Sprintf("%d.pdf", i+1), URL: fmt.Sprintf("https://files.example.test/%d.pdf", i+1)}
 	}
 	capped := packPPTDocuments(many, `{"教学目标":["x"]}`, `{"条目":[]}`)
 	if len(capped) != 5 {
@@ -600,7 +608,7 @@ func TestLLMSchemaViolation(t *testing.T) {
 	}
 }
 
-func TestNoExtractableText(t *testing.T) {
+func TestEmptyMaterialStillForwardsFile(t *testing.T) {
 	e := newEnv(t)
 	execSQL(t, "DELETE FROM materials WHERE lesson_id = ?", e.courseLessonID)
 	key := fmt.Sprintf("org/%s/material/empty.txt", e.orgID)
@@ -610,11 +618,80 @@ func TestNoExtractableText(t *testing.T) {
 	execSQL(t, "INSERT INTO materials (id, project_id, lesson_id, kind, filename, storage_ref, uploaded_by) VALUES (?, ?, ?, 'text', 'empty.txt', ?, ?)",
 		ulidStr(), e.projectID, e.courseLessonID, key, e.memberID)
 
-	_, err := e.exec.SubmitLesson(context.Background(), SubmitInput{
+	lesson, err := e.exec.SubmitLesson(context.Background(), SubmitInput{
 		OrgID: e.orgID, MemberID: e.memberID, ProjectID: e.projectID, CourseLessonID: e.courseLessonID, Title: "导数",
 	})
-	if !errors.Is(err, ErrNoExtractableText) {
-		t.Fatalf("want ErrNoExtractableText, got %v", err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lesson.Status != "awaiting_confirm" {
+		t.Fatalf("status = %s, want awaiting_confirm (empty extract must not block submit)", lesson.Status)
+	}
+	if _, err := e.exec.ConfirmLesson(context.Background(), lesson.LessonJobID); err != nil {
+		t.Fatal(err)
+	}
+	e.ppt.mu.Lock()
+	body := e.ppt.lastBody
+	e.ppt.mu.Unlock()
+	docs, _ := body["documents"].([]any)
+	var textbook map[string]any
+	for _, raw := range docs {
+		d, _ := raw.(map[string]any)
+		if d["role"] == "textbook" {
+			textbook = d
+		}
+	}
+	url, _ := textbook["url"].(string)
+	if textbook["content"] != nil || !strings.Contains(url, "empty.txt") {
+		t.Fatalf("empty file must still be forwarded by url: %#v", textbook)
+	}
+}
+
+func TestSignMaterialURLRequiresPublicBase(t *testing.T) {
+	e := newEnv(t)
+	e.exec.publicBase = ""
+	_, err := e.exec.signMaterialURL(context.Background(), "org/x/material/a.txt")
+	if err == nil {
+		t.Fatal("want error when publicBase empty")
+	}
+}
+
+func TestCorruptFileStillForwards(t *testing.T) {
+	e := newEnv(t)
+	execSQL(t, "DELETE FROM materials WHERE lesson_id = ?", e.courseLessonID)
+	key := fmt.Sprintf("org/%s/material/bad.docx", e.orgID)
+	if err := e.store.Put(context.Background(), key, stringReader("not-a-docx"), "application/octet-stream"); err != nil {
+		t.Fatal(err)
+	}
+	execSQL(t, "INSERT INTO materials (id, project_id, lesson_id, kind, filename, storage_ref, uploaded_by) VALUES (?, ?, ?, 'docx', 'bad.docx', ?, ?)",
+		ulidStr(), e.projectID, e.courseLessonID, key, e.memberID)
+
+	lesson, err := e.exec.SubmitLesson(context.Background(), SubmitInput{
+		OrgID: e.orgID, MemberID: e.memberID, ProjectID: e.projectID, CourseLessonID: e.courseLessonID, Title: "导数",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lesson.Status != "awaiting_confirm" {
+		t.Fatalf("status = %s, want awaiting_confirm (local extract failure must not block file handoff)", lesson.Status)
+	}
+	if _, err := e.exec.ConfirmLesson(context.Background(), lesson.LessonJobID); err != nil {
+		t.Fatal(err)
+	}
+	e.ppt.mu.Lock()
+	body := e.ppt.lastBody
+	e.ppt.mu.Unlock()
+	docs, _ := body["documents"].([]any)
+	var textbook map[string]any
+	for _, raw := range docs {
+		d, _ := raw.(map[string]any)
+		if d["role"] == "textbook" {
+			textbook = d
+		}
+	}
+	url, _ := textbook["url"].(string)
+	if textbook["content"] != nil || !strings.Contains(url, "bad.docx") {
+		t.Fatalf("corrupt file must still be forwarded by url: %#v", textbook)
 	}
 }
 
@@ -664,7 +741,7 @@ func TestStartLessonConcurrentIdempotent(t *testing.T) {
 	waitJobStatus(t, created.lesson.LessonJobID, "awaiting_confirm")
 }
 
-// image 材料无法抽文本：明确报错。pdf/docx/md 走 extract。
+// image 材料无法作为文件转交：明确报错。pdf/docx/md/txt 原文件转交 PPTCreator。
 func TestMaterialKindUnsupported(t *testing.T) {
 	e := newEnv(t)
 	execSQL(t, "INSERT INTO materials (id, project_id, lesson_id, kind, storage_ref, uploaded_by) VALUES (?, ?, ?, 'image', 'x.png', ?)",

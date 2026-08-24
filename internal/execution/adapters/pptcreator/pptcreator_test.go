@@ -119,6 +119,24 @@ func TestGenerateRejectsMissingTextbook(t *testing.T) {
 	}
 }
 
+func TestValidateDocumentsContentOrURL(t *testing.T) {
+	okURL := []Doc{{Role: "textbook", Name: "课文.pdf", URL: "https://app.codelphi.com/media/a.pdf?sig=1"}}
+	if err := validateDocuments(okURL); err != nil {
+		t.Fatalf("url-only textbook: %v", err)
+	}
+	if err := validateDocuments([]Doc{
+		{Role: "textbook", Content: "导数的定义：差商的极限……足够长", URL: "https://app.codelphi.com/media/a.pdf"},
+	}); err == nil {
+		t.Fatal("content and url together should fail")
+	}
+	if err := validateDocuments([]Doc{{Role: "textbook", Name: "课文.pdf"}}); err == nil {
+		t.Fatal("neither content nor url should fail")
+	}
+	if err := validateDocuments([]Doc{{Role: "textbook", URL: "/media/a.pdf"}}); err == nil {
+		t.Fatal("relative url should fail")
+	}
+}
+
 func TestParseNotesPages(t *testing.T) {
 	arr, err := parseNotesPages([]byte(`[{"page":1}]`))
 	if err != nil || len(arr) != 1 {

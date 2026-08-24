@@ -147,10 +147,6 @@ func mcpExecCode(err error) (code, msg string) {
 	switch {
 	case errors.Is(err, execution.ErrNoMaterials):
 		return "invalid_request", "请先上传本课材料"
-	case errors.Is(err, execution.ErrNoExtractableText):
-		return "no_extractable_text", "无法从材料抽出文本（扫描件 PDF 需要有文字层）"
-	case errors.Is(err, execution.ErrMaterialExtractFailed):
-		return "material_extract_failed", "材料无法解析，请检查 pdf/docx 是否损坏"
 	case errors.Is(err, execution.ErrMaterialKindUnsupported):
 		return "material_kind_unsupported", "不支持该文件类型"
 	case errors.Is(err, execution.ErrTooManyMaterials):

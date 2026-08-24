@@ -127,6 +127,7 @@ func newAPIEnv(t *testing.T) *apiEnv {
 	execSvc := execution.New(testDB, billing.New(testDB), store,
 		llm.New(llmSrv.URL, "test-model", ""),
 		pptcreator.New(pptSrv.URL, "partner-key-test", pptcreator.WithPoll(time.Millisecond, 5*time.Second)),
+		execution.WithMedia("http://gateway.test", 15*time.Minute),
 	)
 	verifier := identity.NewVerifier(jwks.URL, testIssuer, testClientID)
 	resolver := identity.NewResolver(testDB)

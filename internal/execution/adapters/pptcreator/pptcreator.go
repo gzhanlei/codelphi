@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -45,11 +46,13 @@ func New(baseURL, partnerKey string, opts ...Option) *Client {
 }
 
 // Doc 对应 create_ppt_from_documents 的一份材料（契约 C2 方向一）。
-// role 仅 textbook / teaching_design / reference；content 与 document_id 二选一，网关 P0 只走 content。
+// role 仅 textbook / teaching_design / reference；content / url / document_id 三选一。
+// 教师原文件走 url（短 TTL 签名 GET）；design/outline 构件走 content。
 type Doc struct {
 	Role    string `json:"role"`
 	Name    string `json:"name,omitempty"`
 	Content string `json:"content,omitempty"`
+	URL     string `json:"url,omitempty"`
 }
 
 // GenerateRequest 对应 C2。Documents 是材料包（恰好一份 textbook），不再预合成单文本。
@@ -123,8 +126,8 @@ func validateDocuments(docs []Doc) error {
 		default:
 			return &Error{Code: "invalid_materials", Message: "invalid document role: " + d.Role}
 		}
-		if len(strings.TrimSpace(d.Content)) < 10 {
-			return &Error{Code: "invalid_materials", Message: "each document content must be at least 10 characters"}
+		if err := validateDocSource(d); err != nil {
+			return err
 		}
 		if d.Role == "textbook" {
 			n++
@@ -134,6 +137,23 @@ func validateDocuments(docs []Doc) error {
 		return &Error{Code: "invalid_materials", Message: "exactly one textbook document required"}
 	}
 	return nil
+}
+
+func validateDocSource(d Doc) error {
+	contentOK := len(strings.TrimSpace(d.Content)) >= 10
+	urlOK := isHTTPURL(strings.TrimSpace(d.URL))
+	if contentOK == urlOK {
+		return &Error{Code: "invalid_materials", Message: "each document needs content or url, not both"}
+	}
+	return nil
+}
+
+func isHTTPURL(s string) bool {
+	u, err := url.Parse(s)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	return u.Scheme == "http" || u.Scheme == "https"
 }
 
 func (c *Client) setPartnerHeaders(req *http.Request, in GenerateRequest) {

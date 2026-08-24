@@ -4,7 +4,7 @@
 > 变更走设计文档评审轮（`DESIGN-b2b-capability-platform.md`），改完同步本文档版本号。
 > PPTCreator 侧工单（GitHub Issue）直接引用本文档条目号（C1、C2…）。
 >
-> 依据：设计文档 §2.1 Partner 通则、§8 改造清单。v1.2 · 2026-08-24（C2 切到 MCP `create_ppt_from_documents`；方向二 / REST `/generate` 废弃）。
+> 依据：设计文档 §2.1 Partner 通则、§8 改造清单。v1.3 · 2026-08-24（C2 教师材料改走签名文件 URL，网关不再预抽文本）。
 
 ## C0. 角色
 
@@ -39,9 +39,9 @@ Headers: C1 四个头 + Accept: application/json, text/event-stream
     "arguments": {
       "title": "章标题",
       "documents": [
-        { "role": "textbook",         "name": "课文",     "content": "……至少 10 字" },
+        { "role": "textbook",         "name": "课文.pdf", "url": "https://app.codelphi.com/media/.../课文.pdf?exp=&sig=" },
         { "role": "teaching_design",  "name": "课程设计", "content": "……当前 design 构件 JSON" },
-        { "role": "reference",        "name": "材料 2",   "content": "……其余材料" },
+        { "role": "reference",        "name": "材料 2.docx", "url": "https://app.codelphi.com/media/.../材料2.docx?exp=&sig=" },
         { "role": "reference",        "name": "大纲",     "content": "……当前 outline 构件 JSON" }
       ],
       "note":     "可选，教师补充说明（首轮做课）",
@@ -55,8 +55,11 @@ Headers: C1 四个头 + Accept: application/json, text/event-stream
 查询：同一入口 `tools/call` `get_generation_status` `{ "project_id" }`。终态 `COMPLETED` / `FAILED`（不是 REST 的 succeeded/failed）。讲稿 JSON 为 `{ "pages": [{ "page", "notes" }] }`。
 
 - `documents[]`：1–5 项；**恰好一份** `role=textbook`；其余为 `teaching_design` 或 `reference`
-- 每项 `content` 与 `document_id` 二选一；网关 P0 只走 `content`（min 10 字符），不传 `document_id`
-- 网关组装：第一份项目材料 → `textbook`；当前 `design` artifact → `teaching_design`；其余材料与 `outline` → `reference`。超额截断时保 textbook + teaching_design
+- 每项 `content` / `url` / `document_id` **三选一**：
+  - `url`：短 TTL 签名 GET，指向教师上传的原文件（pdf/docx/md/txt）。网关 **不** 预抽文本；PPTCreator 拉文件后用自己的解析器抽文本
+  - `content`：UTF-8 纯文本，min 10 字符。网关只用它传本侧生成的 design/outline 构件 JSON
+  - `document_id`：PPTCreator 已上传并解析完成的文档（网关 P0 不用）
+- 网关组装：第一份课材料 → `textbook`（`url`）；当前 `design` artifact → `teaching_design`（`content`）；`outline` 与其余材料 → `reference`（构件走 `content`，文件走 `url`）。超额截断时保 textbook + teaching_design
 - `note`/`critique` 为工具顶层字段（不是嵌套 `spec`），必须进入生成提示词，不得丢弃
 
 ## C3. 状态查询（Query）

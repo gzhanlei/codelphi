@@ -66,7 +66,7 @@ func main() {
 			LLMPriceIn:     cfg.DesignLLMPriceIn,
 			LLMPriceOut:    cfg.DesignLLMPriceOut,
 			InFlightPerKey: 2,
-		}))
+		}), execution.WithMedia(cfg.PublicBaseURL, cfg.MediaURLTTL))
 		n, err := execSvc.RecoverInFlight(context.Background())
 		if err != nil {
 			log.Fatalf("recover in-flight: %v", err)

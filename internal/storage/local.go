@@ -68,7 +68,11 @@ func (l *Local) SignGet(_ context.Context, key string, ttl time.Duration) (strin
 	v := url.Values{}
 	v.Set("exp", strconv.FormatInt(exp, 10))
 	v.Set("sig", l.signature(key, exp))
-	return "/media/" + key + "?" + v.Encode(), nil
+	segs := strings.Split(key, "/")
+	for i, s := range segs {
+		segs[i] = url.PathEscape(s)
+	}
+	return "/media/" + strings.Join(segs, "/") + "?" + v.Encode(), nil
 }
 
 func (l *Local) signature(key string, exp int64) string {
