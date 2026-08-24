@@ -4,7 +4,7 @@
 > 变更走设计文档评审轮（`DESIGN-b2b-capability-platform.md`），改完同步本文档版本号。
 > PPTCreator 侧工单（GitHub Issue）直接引用本文档条目号（C1、C2…）。
 >
-> 依据：设计文档 §2.1 Partner 通则、§8 改造清单。v1.3 · 2026-08-24（C2 教师材料改走签名文件 URL，网关不再预抽文本）。
+> 依据：设计文档 §2.1 Partner 通则、§8 改造清单。v1.4 · 2026-08-25（C2 网关传 style=editorial；C4 当前讲稿构件指向 script_url docx）。
 
 ## C0. 角色
 
@@ -61,6 +61,7 @@ Headers: C1 四个头 + Accept: application/json, text/event-stream
   - `document_id`：PPTCreator 已上传并解析完成的文档（网关 P0 不用）
 - 网关组装：第一份课材料 → `textbook`（`url`）；当前 `design` artifact → `teaching_design`（`content`）；`outline` 与其余材料 → `reference`（构件走 `content`，文件走 `url`）。超额截断时保 textbook + teaching_design
 - `note`/`critique` 为工具顶层字段（不是嵌套 `spec`），必须进入生成提示词，不得丢弃
+- `style`：网关固定传 `editorial`（课件默认皮肤）
 
 ## C3. 状态查询（Query）
 
@@ -84,6 +85,7 @@ PPTCreator 实例：`POST {base}/mcp` `tools/call` `get_generation_status` `{ "p
 
 - 完成响应必须带**逐页 notes**（JSON `{pages:[{page,notes}]}`，与页数严格对齐），可选附整份 script docx
 - **notes 为空或页数不齐 = job failed**（`error.code = "notes_missing"`），不得标成功——数字人链与套件「讲稿」构件都以此为合法输入
+- 网关回拷：`notes_url` → 本侧 `script-vN.json`（校验用，可作数字人输入）；有 `script_url` 时当前「讲稿」构件指向 `script-vN.docx`（教师下载）
 
 ## C5. 行为不变量（对应 §8 第 1–8 条）
 

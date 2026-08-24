@@ -600,16 +600,22 @@ func (s *Service) storePPTArtifacts(ctx context.Context, orgID, packageID, stepI
 	if err := s.store.Put(ctx, pptKey, strings.NewReader(string(pptx)), "application/vnd.openxmlformats-officedocument.presentationml.presentation"); err != nil {
 		return err
 	}
-	scriptKey := fmt.Sprintf("org/%s/package/%s/script-v%d.json", orgID, packageID, scriptVersion)
-	if err := s.store.Put(ctx, scriptKey, strings.NewReader(string(res.Notes)), "application/json"); err != nil {
+	scriptJSONKey := fmt.Sprintf("org/%s/package/%s/script-v%d.json", orgID, packageID, scriptVersion)
+	if err := s.store.Put(ctx, scriptJSONKey, strings.NewReader(string(res.Notes)), "application/json"); err != nil {
 		return err
 	}
-	// 可选整份 script docx（契约 C4 可选附）。
+	scriptKey := scriptJSONKey
+	// 契约 C4：notes JSON 是硬产物；docx 是教师看到的讲稿。有 script_url 时当前构件指向 docx。
 	if res.ScriptURL != "" {
-		if docx, err := s.ppt.Fetch(ctx, res.ScriptURL); err == nil {
-			_ = s.store.Put(ctx, fmt.Sprintf("org/%s/package/%s/script-v%d.docx", orgID, packageID, scriptVersion),
-				strings.NewReader(string(docx)), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+		docx, err := s.ppt.Fetch(ctx, res.ScriptURL)
+		if err != nil {
+			return fmt.Errorf("fetch script docx: %w", err)
 		}
+		docxKey := fmt.Sprintf("org/%s/package/%s/script-v%d.docx", orgID, packageID, scriptVersion)
+		if err := s.store.Put(ctx, docxKey, strings.NewReader(string(docx)), "application/vnd.openxmlformats-officedocument.wordprocessingml.document"); err != nil {
+			return err
+		}
+		scriptKey = docxKey
 	}
 	if err := s.insertArtifact(ctx, packageID, "ppt", pptVersion, stepID, pptKey); err != nil {
 		return err

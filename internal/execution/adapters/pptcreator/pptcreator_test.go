@@ -102,6 +102,9 @@ func TestGenerateCallsCreatePptFromDocuments(t *testing.T) {
 	if args["note"] != "2 学时" {
 		t.Fatalf("note = %#v", args["note"])
 	}
+	if args["style"] != DefaultStyle {
+		t.Fatalf("style = %#v, want %q", args["style"], DefaultStyle)
+	}
 }
 
 func TestGenerateRejectsMissingTextbook(t *testing.T) {

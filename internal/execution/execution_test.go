@@ -257,8 +257,23 @@ func TestHappyPath(t *testing.T) {
 		if kind == "ppt" && string(data) != fakePptxBytes {
 			t.Fatalf("pptx 内容 = %q", data)
 		}
-		if kind == "script" && string(data) != fakeNotesJSON {
-			t.Fatalf("notes 内容 = %q", data)
+		if kind == "script" {
+			if !strings.HasSuffix(ref, ".docx") {
+				t.Fatalf("script storage_ref = %q, want .docx (script_url)", ref)
+			}
+			if string(data) != fakeScriptDocx {
+				t.Fatalf("script 内容 = %q, want docx", data)
+			}
+			jsonRef := strings.TrimSuffix(ref, ".docx") + ".json"
+			jrc, err := e.store.Open(context.Background(), jsonRef)
+			if err != nil {
+				t.Fatalf("open notes sidecar %s: %v", jsonRef, err)
+			}
+			jdata, _ := io.ReadAll(jrc)
+			jrc.Close()
+			if string(jdata) != fakeNotesJSON {
+				t.Fatalf("notes sidecar = %q", jdata)
+			}
 		}
 	}
 	// 台账 3 条 settled：design / outline / ppt 三个 step 各一条。
@@ -288,6 +303,9 @@ func TestHappyPath(t *testing.T) {
 	}
 	if _, ok := body["document"]; ok {
 		t.Fatalf("must not send singular document (方向二): %#v", body["document"])
+	}
+	if body["style"] != "editorial" {
+		t.Fatalf("style = %#v, want editorial", body["style"])
 	}
 	docs, _ := body["documents"].([]any)
 	if len(docs) < 3 {
@@ -829,6 +847,29 @@ func TestSweepTimedOut(t *testing.T) {
 	}
 	if s := jobStatus(t, freshID); s != "running" {
 		t.Fatalf("fresh status = %s, want running", s)
+	}
+}
+
+// get_package：尚无构件时 artifacts 必须是 JSON 空数组，不能是 null（工作台 .map 会崩）。
+func TestGetPackageEmptyArtifactsJSON(t *testing.T) {
+	e := newEnv(t)
+	packageID := ulidStr()
+	execSQL(t, `INSERT INTO course_packages (id, project_id, lesson_id, status) VALUES (?, ?, ?, 'building')`,
+		packageID, e.projectID, e.courseLessonID)
+	pkg, err := e.exec.GetPackage(context.Background(), packageID, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m["artifacts"].([]any); !ok {
+		t.Fatalf("artifacts = %#v, want []", m["artifacts"])
 	}
 }
 

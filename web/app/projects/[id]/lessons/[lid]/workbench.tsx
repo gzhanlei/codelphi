@@ -214,23 +214,23 @@ export function LessonWorkbench({
           ) : null}
 
           <ul className="space-y-3">
-            {pkg.artifacts.map((a) => (
+            {(pkg.artifacts || []).map((a) => (
               <li key={a.kind} className="border border-line bg-card px-4 py-3">
                 <div className="flex items-baseline justify-between">
                   <span className="font-serif">{copy?.artifact_labels?.[a.kind] || fallbackLabels[a.kind] || a.kind}</span>
                   {a.current?.url ? (
-                    <a href={mediaHref(a.current.url)} className="text-sm text-seal hover:underline" target="_blank" rel="noreferrer">
+                    <a href={mediaHref(a.current.url)} className="text-sm text-seal hover:underline" {...fileLinkProps(a.current.url)}>
                       预览 / 下载 · v{a.current.version}
                     </a>
                   ) : (
                     <span className="text-sm text-muted">尚未就绪</span>
                   )}
                 </div>
-                {a.versions.length > 1 ? (
+                {(a.versions || []).length > 1 ? (
                   <p className="mt-2 text-xs text-muted">
                     历史版本：
-                    {a.versions.map((v) => (
-                      <a key={v.id} href={v.url ? mediaHref(v.url) : "#"} className="ml-2 hover:underline">
+                    {(a.versions || []).map((v) => (
+                      <a key={v.id} href={v.url ? mediaHref(v.url) : "#"} className="ml-2 hover:underline" {...(v.url ? fileLinkProps(v.url) : {})}>
                         v{v.version}
                       </a>
                     ))}
@@ -267,4 +267,22 @@ function statusLabel(s: string) {
 function mediaHref(url: string) {
   if (url.startsWith("http://") || url.startsWith("https://")) return url;
   return url;
+}
+
+function fileLinkProps(url: string): { download: string } | { target: "_blank"; rel: "noreferrer" } {
+  const name = mediaFileName(url);
+  if (name.endsWith(".pptx") || name.endsWith(".docx")) {
+    return { download: name };
+  }
+  return { target: "_blank", rel: "noreferrer" };
+}
+
+function mediaFileName(url: string): string {
+  try {
+    const path = url.startsWith("http") ? new URL(url).pathname : url.split("?")[0];
+    const seg = path.split("/").filter(Boolean).pop() || "download";
+    return decodeURIComponent(seg);
+  } catch {
+    return "download";
+  }
 }

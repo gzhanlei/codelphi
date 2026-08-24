@@ -59,7 +59,12 @@ func (s *Service) GetPackage(ctx context.Context, packageID string, ttl time.Dur
 	if err != nil {
 		return nil, fmt.Errorf("execution: package: %w", err)
 	}
-	snap := &PackageSnapshot{ID: pkg.ID, ProjectID: pkg.ProjectID, Status: string(pkg.Status)}
+	snap := &PackageSnapshot{
+		ID:        pkg.ID,
+		ProjectID: pkg.ProjectID,
+		Status:    string(pkg.Status),
+		Artifacts: []ArtifactKindSnap{},
+	}
 	if pkg.LessonJobID.Valid {
 		snap.LessonJobID = pkg.LessonJobID.String
 		job, err := q.GetJob(ctx, pkg.LessonJobID.String)
@@ -90,7 +95,7 @@ func (s *Service) GetPackage(ctx context.Context, packageID string, ttl time.Dur
 		kind := string(a.Kind)
 		g, ok := grouped[kind]
 		if !ok {
-			g = &ArtifactKindSnap{Kind: kind}
+			g = &ArtifactKindSnap{Kind: kind, Versions: []ArtifactSnap{}}
 			grouped[kind] = g
 			order = append(order, kind)
 		}

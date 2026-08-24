@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"mime"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -88,4 +89,48 @@ func (l *Local) VerifyLocalSignature(key string, exp int64, sig string) bool {
 	}
 	expect := l.signature(key, exp)
 	return hmac.Equal([]byte(expect), []byte(sig))
+}
+
+// ContentType 按对象 key 的扩展名返回 MIME。pptx/docx 是 zip 容器，
+// 若不显式声明，Go/Safari 会按 PK 魔数嗅探成 application/zip 并自动解压。
+func ContentType(key string) string {
+	switch strings.ToLower(filepath.Ext(key)) {
+	case ".pptx":
+		return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+	case ".docx":
+		return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	case ".pdf":
+		return "application/pdf"
+	case ".json":
+		return "application/json"
+	case ".txt":
+		return "text/plain; charset=utf-8"
+	case ".md":
+		return "text/markdown; charset=utf-8"
+	default:
+		return "application/octet-stream"
+	}
+}
+
+func Filename(key string) string {
+	return filepath.Base(key)
+}
+
+func ContentDisposition(key string) string {
+	name := strings.Map(func(r rune) rune {
+		if r < 32 || r == 127 {
+			return -1
+		}
+		return r
+	}, Filename(key))
+	disp := "inline"
+	switch strings.ToLower(filepath.Ext(key)) {
+	case ".pptx", ".docx":
+		disp = "attachment"
+	}
+	out := mime.FormatMediaType(disp, map[string]string{"filename": name})
+	if out == "" {
+		return disp
+	}
+	return out
 }

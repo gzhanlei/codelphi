@@ -167,6 +167,9 @@ func mediaHandler(store *storage.Local) http.HandlerFunc {
 		}
 		defer rc.Close()
 		w.Header().Set("Cache-Control", "private, no-store")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Content-Type", storage.ContentType(key))
+		w.Header().Set("Content-Disposition", storage.ContentDisposition(key))
 		_, _ = io.Copy(w, rc)
 	}
 }

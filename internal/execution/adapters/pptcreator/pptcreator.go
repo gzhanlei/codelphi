@@ -66,6 +66,10 @@ type GenerateRequest struct {
 	Critique  string // 返工意见（Rebuild 时非空）
 }
 
+// DefaultStyle 是 digital_lesson 课件默认皮肤。partner 路径跳过 C 端 clarify，
+// 不传 style 时 PPTCreator MCP 曾默认 swiss-ikb；课件应对齐 editorial。
+const DefaultStyle = "editorial"
+
 // Result 是 C3 succeeded 的回报 + C4 校验后的逐页 notes。
 type Result struct {
 	Pages      int
@@ -95,6 +99,7 @@ func (c *Client) Generate(ctx context.Context, in GenerateRequest) (*Result, err
 	args := map[string]any{
 		"title":     in.Title,
 		"documents": in.Documents,
+		"style":     DefaultStyle,
 	}
 	if s := strings.TrimSpace(in.Note); s != "" {
 		args["note"] = s

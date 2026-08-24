@@ -133,7 +133,7 @@ export type PackageSnap = {
   lesson_status?: string;
   error?: APIError;
   steps?: { id: string; capability: string; status: string; error?: APIError }[];
-  artifacts: {
+  artifacts?: {
     kind: string;
     current?: { id: string; version: number; status: string; url?: string };
     versions: { id: string; version: number; status: string; url?: string }[];
