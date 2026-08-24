@@ -68,20 +68,37 @@ func newAPIEnv(t *testing.T) *apiEnv {
 	pptMux := http.NewServeMux()
 	pptSrv := httptest.NewServer(pptMux)
 	t.Cleanup(pptSrv.Close)
-	pptMux.HandleFunc("POST /generate", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusAccepted)
-		fmt.Fprint(w, `{"platform_job_id":"pj-1"}`)
-	})
-	pptMux.HandleFunc("GET /jobs/{id}", func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"status": "succeeded",
-			"usage":  map[string]any{"pages": 2, "llm_tokens": 500},
-			"cost":   map[string]string{"currency": "CNY", "vendor_cost": "0.800000"},
-			"result": map[string]string{
-				"pptx_url":  pptSrv.URL + "/files/pptx",
-				"notes_url": pptSrv.URL + "/files/notes",
-			},
-		})
+	pptMux.HandleFunc("POST /mcp", func(w http.ResponseWriter, r *http.Request) {
+		var rpc struct {
+			Params struct {
+				Name string `json:"name"`
+			} `json:"params"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&rpc)
+		switch rpc.Params.Name {
+		case "create_ppt_from_documents":
+			text, _ := json.Marshal(map[string]any{"project_id": "pj-1", "status": "queued"})
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0", "id": 1,
+				"result": map[string]any{"content": []map[string]string{{"type": "text", "text": string(text)}}},
+			})
+		case "get_generation_status":
+			text, _ := json.Marshal(map[string]any{
+				"status": "COMPLETED",
+				"usage":  map[string]any{"pages": 2, "llm_tokens": 500},
+				"cost":   map[string]string{"currency": "CNY", "vendor_cost": "0.800000"},
+				"result": map[string]string{
+					"pptx_url":  pptSrv.URL + "/files/pptx",
+					"notes_url": pptSrv.URL + "/files/notes",
+				},
+			})
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0", "id": 1,
+				"result": map[string]any{"content": []map[string]string{{"type": "text", "text": string(text)}}},
+			})
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+		}
 	})
 	pptMux.HandleFunc("GET /files/pptx", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, fakePptxBytes) })
 	pptMux.HandleFunc("GET /files/notes", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, fakeNotesJSON) })

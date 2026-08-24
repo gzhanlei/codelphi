@@ -63,11 +63,13 @@ DSH 返工（M5 之后嵌入，不挡首轮交付）
 
 **进度记录（2026-08-24）：身份链完成（M1 收尾）。** `internal/identity`：JWKS 验签器（RS256，缓存 5 分钟、拉失败留旧缓存、kid 未命中强制刷新一次；iss=`workmembership` 字符串比对、aud=`cm_aca9bb839faa4a4a96839b389f312636`）、Resolver（§5 全部归属规则 + 进程内短缓存 + `Invalidate` 主动失效，默认/显式两条缓存键都清）、HTTP 中间件（401/403 + 结构化 reason）。迁移 0003 补 `member_units` M:N 表（0001 漏建，设计 §3 本就要求）。19 个测试全过（自签 RSA + httptest 假 JWKS + 真实 MySQL）。约定：每个 internal 包独立测试库（并行跑互不清表）。chandler 对接参数（JWKS URL/issuer/client_id/secret）已进生产 `gateway.env`。未接线 gateway 路由（M5）。
 
-**进度记录（2026-08-24）：M3 完成。** `internal/execution`：lesson 权威状态机（design → outline → `awaiting_confirm` → ppt+script，合法迁移集写死 + 条件 UPDATE 兜底并发；确认门等待期零预扣；每 step 独立 authorize/settle；Rebuild 整份重出版本迁移；并发公平 (org,platform) 信号量）+ `adapters/llm`（OpenAI 兼容，默认 DeepSeek `deepseek-chat`，schema 校验不过即 fail，JSON + Markdown 双产物，token 实测回报，单价可配）+ `adapters/pptcreator`（按契约 C1–C4，方向二单文档预合成，notes 缺失/不齐即 `notes_missing` failed，产物回拷本侧 storage）。10 个测试 `-race` 全绿（happy path 三门禁断言、notes 缺失退款、partner 5xx 不拖挂 billing、Rebuild 三版本、并发双确认幂等、信号量公平、非法迁移拒绝、schema 违规 fail、材料 kind 拦截）。
+**进度记录（2026-08-24）：M3 完成。** `internal/execution`：lesson 权威状态机（design → outline → `awaiting_confirm` → ppt+script，合法迁移集写死 + 条件 UPDATE 兜底并发；确认门等待期零预扣；每 step 独立 authorize/settle；Rebuild 整份重出版本迁移；并发公平 (org,platform) 信号量）+ `adapters/llm`（OpenAI 兼容，默认 DeepSeek `deepseek-chat`，schema 校验不过即 fail，JSON + Markdown 双产物，token 实测回报，单价可配）+ `adapters/pptcreator`（按契约 C1–C4，notes 缺失/不齐即 `notes_missing` failed，产物回拷本侧 storage；多文档见后续 C2 方向一切换）。10 个测试 `-race` 全绿（happy path 三门禁断言、notes 缺失退款、partner 5xx 不拖挂 billing、Rebuild 三版本、并发双确认幂等、信号量公平、非法迁移拒绝、schema 违规 fail、材料 kind 拦截）。
 **契约反馈（已升 v1.1）**：spec 补 `note`/`critique` 字段；`usage.pages` 定义为 pptx 实际页数；C1 四个上下文头适用全部 partner 端点（含查询）——PPTCreator 侧按此实现。
 **遗留进 M5**：编排是进程内同步调用，进程重启时 in-flight job 停在 running——M5 接线 HTTP 层时补「重启恢复/超时收敛」逻辑（残留预扣已由 TTL 扫尾兜底）。
 
 **进度记录（2026-08-24）：M5 网关面完成，工作台已部署。** 生产 `db:ok`，试点 member 已手工插入。列表为「我的项目」、路由 `/projects`。未做：预设包内核（M5b）；M4；真 partner 联调。
+
+**进度记录（2026-08-24）：PPTCreator C2 切方向一。** adapter 直调 MCP `create_ppt_from_documents`（`documents[]`），不走 `create_ppt_from_text` / REST `/generate`。契约升 v1.2。
 
 ## 2.1 M5b 预设包内核
 
@@ -164,7 +166,7 @@ Org、OrgUnit、Member、PackageTemplate、License、QuotaPool、Project、Mater
 
 - partner 服务账号认证；上下文带 `X-Org-Id`/`X-Member-Id`/`X-Job-Id`
 - 材料用本侧签名 URL 交换，不经 MCP 传大文件；产物**回拷**本侧对象存储再签发，不转手平台临时链
-- 多文档输入：方向一（PPTCreator Document 1:N）落地前，用方向二（adapter 侧预合成单文档）顶住 P0；spec 不依赖「哪份是课文」的区分
+- 多文档输入：走方向一 `documents[]`（`create_ppt_from_documents`）；第一份材料 = textbook，当前 design = teaching_design，其余材料与 outline = reference。禁止再发单数 `document`
 - 讲稿回报（§8 第 9 条）为硬依赖：notes 为空 = step failed，不当成功
 
 ### G. MCP 工具面（M3 起）
@@ -188,7 +190,7 @@ Org、OrgUnit、Member、PackageTemplate、License、QuotaPool、Project、Mater
 | 7 | 下载鉴权校验仍是该机构成员，TTL 对齐网关轮询 | 离职成员不可下载 |
 | 8 | partner 流量拒绝/忽略单页重生 API | agent 抠不了单页 |
 | 9 | **讲稿必须回报**：逐页 notes（JSON，与页数对齐）+ 可选 script docx；notes 为空 = job failed（现行 MCP status 无讲稿字段、worker 讲稿失败被吞，均需改） | 讲稿非空且页数对齐 |
-| 10 | **多文档输入**：方向一 Document 1:N（随既有多文档路线图）；P0 期间配合网关侧方向二联调 | 多材料章节可生成 |
+| 10 | **多文档输入**：方向一 `create_ppt_from_documents`；网关发 `documents[]`（恰好一份 textbook） | 多材料章节可生成 |
 
 **整体验收测试（partner 模式完工定义）：** 打一条 partner 生成，断言 `UserProfile.freeCreditsRemaining` 不变、`downloadLocked=false`、网关 UsageRecord settled、C 端 dashboard 不可见、讲稿非空且页数对齐。
 
@@ -265,14 +267,15 @@ Org、OrgUnit、Member、PackageTemplate、License、QuotaPool、Project、Mater
 1. 对象存储选型（默认腾讯 COS）
 2. DSH 会话持久化 backend（MySQL vs 对象存储，P0 内定）
 3. design/outline LLM vendor 的具体型号与密钥来源（默认国内、可换）。**注意**：网关侧（design/outline、agent_llm 计量）和 PPTCreator 的 2C 生成管线都烧 LLM token，两边配置时留意共用限额
-4. PPTCreator 方向一（Document 1:N）排期 —— 决定 P0 是否启用方向二过渡
+4. ~~PPTCreator 方向一（Document 1:N）排期~~ **已切**：网关发 `documents[]`，对方 #116 已落地 `create_ppt_from_documents`。联调卡在真 partner HTTP 映射与 C6
 5. 数字人平台、AI3D 正式产品名（不挡 P0，挡讲解视频/3D 排期）
 
 ## 12. 风险登记
 
 | 风险 | 影响 | 对策 |
 |---|---|---|
-| §8 第 9/10 条（讲稿回报、多文档）未落地 | 套件缺讲稿构件、多材料章节进不了生成 | M2 最高优先；方向二过渡 |
+| §8 第 9 条（讲稿回报）未落地 | 套件缺讲稿构件 | M2 最高优先 |
+| §8 第 10 条材料包 | 网关已发 `documents[]`；对方需把 REST body 映到 `create_ppt_from_documents` | 真机联调 |
 | DSH 云端化工作量 ≥ partner 改造（§18） | 返工对话延期 | 后嵌不挡 M5；空聊天不上线 |
 | LibreOffice 渲染保真不达标 | 讲解视频链受阻 | S1 提前；不挡商业 P0 |
 | OpenMAIC spike 证真 | P1 练习/互动课路线变化 | 两周时间盒，结论进设计 §10 |

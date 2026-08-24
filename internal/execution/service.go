@@ -409,7 +409,7 @@ func (s *Service) runLLMStep(ctx context.Context, in SubmitInput, project dbgen.
 
 // runPPTStep 跑 ppt step（estimated = actual = 1 份）。成功 = 同时产出 ppt 和 script
 // 两个 artifact；notes 为空/页数不齐由 adapter 按 C4 报 notes_missing，这里即 step failed。
-func (s *Service) runPPTStep(ctx context.Context, in SubmitInput, lessonID, packageID, document, note, critique string) error {
+func (s *Service) runPPTStep(ctx context.Context, in SubmitInput, lessonID, packageID string, docs []pptcreator.Doc, note, critique string) error {
 	stepID := ulid.Make().String()
 	if err := s.insertStep(ctx, stepID, in, lessonID, packageID, "ppt", "pptcreator"); err != nil {
 		return err
@@ -435,7 +435,7 @@ func (s *Service) runPPTStep(ctx context.Context, in SubmitInput, lessonID, pack
 
 	res, err := s.ppt.Generate(ctx, pptcreator.GenerateRequest{
 		JobID: stepID, OrgID: in.OrgID, MemberID: in.MemberID,
-		Title: in.Title, Document: document, Note: note, Critique: critique,
+		Title: in.Title, Documents: docs, Note: note, Critique: critique,
 	})
 	if err != nil {
 		s.settleFailure(ctx, d.ReservationID, stepID)
@@ -583,13 +583,73 @@ func (s *Service) loadMaterialTexts(ctx context.Context, projectID string) ([]st
 	return texts, nil
 }
 
-// composeDocument 方向二预合成单文档：多份 text 材料拼接 + 明确分隔标题（契约 C2 过渡期）。
-func composeDocument(texts []string) string {
-	var sb strings.Builder
-	for i, t := range texts {
-		fmt.Fprintf(&sb, "## 材料 %d\n\n%s\n\n", i+1, t)
+// packPPTDocuments 组 create_ppt_from_documents 材料包（契约 C2 方向一）。
+// 第一份可用材料 = textbook；当前 design = teaching_design；其余材料与大纲 = reference。
+// PPTCreator 上限 5 份、content 至少 10 字符；短材料丢弃。超额时保 textbook + teaching_design。
+func packPPTDocuments(texts []string, design, outline string) []pptcreator.Doc {
+	const maxDocs, minLen = 5, 10
+	docs := make([]pptcreator.Doc, 0, maxDocs)
+	appendDoc := func(role, name, content string) {
+		content = strings.TrimSpace(content)
+		if len(content) < minLen || len(docs) >= maxDocs {
+			return
+		}
+		docs = append(docs, pptcreator.Doc{Role: role, Name: name, Content: content})
 	}
-	return sb.String()
+	textbook := ""
+	var extras []string
+	for _, t := range texts {
+		t = strings.TrimSpace(t)
+		if len(t) < minLen {
+			continue
+		}
+		if textbook == "" {
+			textbook = t
+			continue
+		}
+		extras = append(extras, t)
+	}
+	appendDoc("textbook", "课文", textbook)
+	appendDoc("teaching_design", "课程设计", design)
+	for i, t := range extras {
+		appendDoc("reference", fmt.Sprintf("材料 %d", i+2), t)
+	}
+	appendDoc("reference", "大纲", outline)
+	return docs
+}
+
+func (s *Service) loadPPTDocuments(ctx context.Context, p *preparedLesson) ([]pptcreator.Doc, error) {
+	var design, outline string
+	arts, err := dbgen.New(s.db).ListCurrentArtifacts(ctx, p.packageID)
+	if err != nil {
+		return nil, err
+	}
+	for _, a := range arts {
+		if !a.StorageRef.Valid || (a.Kind != "design" && a.Kind != "outline") {
+			continue
+		}
+		rc, err := s.store.Open(ctx, a.StorageRef.String)
+		if err != nil {
+			return nil, err
+		}
+		data, err := io.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			return nil, err
+		}
+		if a.Kind == "design" {
+			design = string(data)
+		} else {
+			outline = string(data)
+		}
+	}
+	docs := packPPTDocuments(p.texts, design, outline)
+	for _, d := range docs {
+		if d.Role == "textbook" {
+			return docs, nil
+		}
+	}
+	return nil, errors.New("execution: ppt materials missing textbook")
 }
 
 func lookupProjectPreset(p dbgen.Project) (preset.Preset, error) {
@@ -633,7 +693,11 @@ func (s *Service) runCatalogStep(ctx context.Context, p *preparedLesson, step pr
 	case "llm":
 		return s.runLLMStep(ctx, p.in, p.project, p.lessonID, p.packageID, llm.Kind(step.Capability), p.texts, note, critique)
 	case "pptcreator":
-		return s.runPPTStep(ctx, p.in, p.lessonID, p.packageID, composeDocument(p.texts), note, critique)
+		docs, err := s.loadPPTDocuments(ctx, p)
+		if err != nil {
+			return err
+		}
+		return s.runPPTStep(ctx, p.in, p.lessonID, p.packageID, docs, note, critique)
 	default:
 		return fmt.Errorf("execution: unknown platform %q", step.Platform)
 	}

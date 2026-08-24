@@ -5,7 +5,8 @@
 > 文档地图：
 > - `DESIGN-b2b-capability-platform.md` — 设计（§1–§10 是现行正文；§10 已定默认/仍开放；§11+ 为评审与修订历史；最新决议见 §22）
 > - `PLAN-p0-development.md` — P0 开发计划（§0 完工定义、§2 里程碑、§9 测试门禁、文末进度记录）
-> - `CONTRACT-pptcreator-partner.md` — 与 PPTCreator 的唯一接缝（v1.1，C0–C7）
+> - `CONTRACT-partner.md` — 能力提供方通用接入合同（Auth/Submit/Query/成本/旁路 2C）；新平台填附录检查表
+> - `CONTRACT-pptcreator-partner.md` — PPTCreator 实例（v1.2，C0–C7；C2 = `documents[]` / `create_ppt_from_documents`）
 
 ## 当前状态
 
@@ -51,19 +52,19 @@
 ## 下一步（按序）
 
 1. **提供生产 MySQL DSN** 写进 `/data/www/codelphi/gateway.env`（必须 `loc=Local`），`systemctl restart codelphi-gateway`，`/healthz` 应变 `db:ok`，`/v1` 才会挂上。没有这一步，登录后工作台调不了 API
-2. **联调**：PPTCreator partner 端点就绪后（盯 #106/#107/#116/#119），配 `PPTCREATOR_PARTNER_BASE_URL/PARTNER_KEY`，真机跑一条 partner 生成，过契约 C6 验收五条
+2. **联调**：配 `PPTCREATOR_PARTNER_BASE_URL`（站点根，不要带 `/mcp`）和 `PPTCREATOR_PARTNER_KEY`。网关直调 `create_ppt_from_documents` + `get_generation_status`。真机跑一条过 C6。对方默认 `verify-partner-mode.ts` 主路径仍是 `create_ppt_from_text`，材料包要用 `--multi-doc`。
 3. **M4 运营后台**：License pending→active（双人确认）、CSV 导入成员、成员用量 Top 报表、成本预警（按 capability 拆）。没有这条，试点教师进不来（完工定义 1–2）
 4. DSH 返工对话后嵌（空聊天不上线）
 
 ## PPTCreator 协同
 
-- 那边走 GitHub Issue 流程（其 AGENTS.md 约定）：Epic **#106**（§8 十条）、**#107**（C1 认证）、**#116**（多文档方向一）、**#119**（契约 v1.1 三澄清：spec.note/critique 必进提示词、usage.pages=实际页数、四个上下文头覆盖全部端点含查询）
+- 那边走 GitHub Issue 流程（其 AGENTS.md 约定）：Epic **#106**（§8 十条）、**#107**（C1 认证）、**#116**（多文档方向一，MCP `create_ppt_from_documents` 已落地）、**#119**（契约 v1.1 三澄清：spec.note/critique 必进提示词、usage.pages=实际页数、四个上下文头覆盖全部端点含查询）
 - 联调约定：契约 C6 验收测试（积分不变、不锁下载、UsageRecord settled、C 端 dashboard 不可见、讲稿非空页数对齐）
-- §8 第 9/10 条（讲稿回报、多文档）是挡 P0 的两项；多文档 P0 用方向二（网关侧预合成单文档）过渡
+- **网关已切方向一**：adapter 直调 MCP `POST /mcp` `tools/call` **`create_ppt_from_documents`**（`documents[]`：恰好一份 `textbook` + 当前 design 作 `teaching_design` + 其余材料/大纲作 `reference`）。不调 `create_ppt_from_text`，也不发 REST `/generate`（PPTCreator 无此路由）。
 
 ## 待确认清单（PLAN §11）
 
-对象存储选型（默认腾讯 COS）/ DSH 会话持久化 backend / 数字人、AI3D 正式产品名 / PPTCreator 方向一排期。
+对象存储选型（默认腾讯 COS）/ DSH 会话持久化 backend / 数字人、AI3D 正式产品名。PPTCreator 方向一网关侧已切（C2 v1.2）。
 设计层面仍开放（销售开口前书面）：教材正文合规口径、试点校组织细节、内部报价模型、OpenMAIC spike 两周结论。
 
 ## 安全注意

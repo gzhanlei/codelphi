@@ -1,10 +1,10 @@
 # PPTCreator Partner 接口契约 v1
 
-> 这是 codelphi 网关 ↔ PPTCreator 之间的**唯一接缝文档**。双方实现与验收以本文档为准；
+> 这是 CoDelphi 网关 ↔ PPTCreator 之间的**唯一接缝文档**（通用语义见 `CONTRACT-partner.md`）。双方实现与验收以本文档为准；
 > 变更走设计文档评审轮（`DESIGN-b2b-capability-platform.md`），改完同步本文档版本号。
 > PPTCreator 侧工单（GitHub Issue）直接引用本文档条目号（C1、C2…）。
 >
-> 依据：设计文档 §2.1 Partner 通则、§8 改造清单。v1.1 · 2026-08-24（codelphi 侧 M3 实现后澄清：spec.note/critique、usage.pages 口径、上下文头适用全部端点）。
+> 依据：设计文档 §2.1 Partner 通则、§8 改造清单。v1.2 · 2026-08-24（C2 切到 MCP `create_ppt_from_documents`；方向二 / REST `/generate` 废弃）。
 
 ## C0. 角色
 
@@ -25,38 +25,49 @@ partner key 不出仓库、不进日志正文；泄露即轮换。**四个头适
 
 ## C2. 提交生成（Submit）
 
-P0 入参（方向二过渡期，单文档）：
+P0 入参走 PPTCreator MCP **`create_ppt_from_documents`**（方向一，材料包）。网关 **不** 调 `create_ppt_from_text` / `create_ppt_from_document`，也 **不** 发 REST `POST /generate`（PPTCreator 无此路由，partner 入口只有 `POST {base}/mcp`）。
 
 ```
-POST {partner_base}/generate
+POST {partner_base}/mcp
+Headers: C1 四个头 + Accept: application/json, text/event-stream
 {
-  "job_id":      "网关 step job id（同 C1 头）",
-  "title":       "章标题",
-  "document":    { "kind": "text", "text": "预合成后的单份材料" },
-  "spec": {
-    "style":         "可选，风格 preset",
-    "language":      "可选，默认按材料检测",
-    "target_slides": "可选页数",
-    "notes_required": true,
-    "note":          "可选，教师补充说明（学时/专业/风格等，首轮做课时传入）",
-    "critique":      "可选，返工意见（Rebuild 时传入，与 note 二选一）"
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "create_ppt_from_documents",
+    "arguments": {
+      "title": "章标题",
+      "documents": [
+        { "role": "textbook",         "name": "课文",     "content": "……至少 10 字" },
+        { "role": "teaching_design",  "name": "课程设计", "content": "……当前 design 构件 JSON" },
+        { "role": "reference",        "name": "材料 2",   "content": "……其余材料" },
+        { "role": "reference",        "name": "大纲",     "content": "……当前 outline 构件 JSON" }
+      ],
+      "note":     "可选，教师补充说明（首轮做课）",
+      "critique": "可选，返工意见（Rebuild）"
+    }
   }
 }
-→ 202 { "platform_job_id": "..." }
+→ 200 MCP result.content[0].text = { "project_id": "...", "status": "queued" }
 ```
 
-- **多文档（方向一）**：PPTCreator 侧 Document 1:N 落地后，`document` 改为 `documents[]`，每份带 `role`（`textbook`/`teaching_design`/`reference`）。v1 合同预留该字段，P0 不启用
-- `note`/`critique` 必须进入生成提示词，不得丢弃——返工意见到不了生成端等于返工没做
+查询：同一入口 `tools/call` `get_generation_status` `{ "project_id" }`。终态 `COMPLETED` / `FAILED`（不是 REST 的 succeeded/failed）。讲稿 JSON 为 `{ "pages": [{ "page", "notes" }] }`。
+
+- `documents[]`：1–5 项；**恰好一份** `role=textbook`；其余为 `teaching_design` 或 `reference`
+- 每项 `content` 与 `document_id` 二选一；网关 P0 只走 `content`（min 10 字符），不传 `document_id`
+- 网关组装：第一份项目材料 → `textbook`；当前 `design` artifact → `teaching_design`；其余材料与 `outline` → `reference`。超额截断时保 textbook + teaching_design
+- `note`/`critique` 为工具顶层字段（不是嵌套 `spec`），必须进入生成提示词，不得丢弃
 
 ## C3. 状态查询（Query）
 
+PPTCreator 实例：`POST {base}/mcp` `tools/call` `get_generation_status` `{ "project_id" }`。字段语义如下（终态枚举在 PPTCreator 为 `COMPLETED`/`FAILED`，网关按此映射）。
+
 ```
-GET {partner_base}/jobs/{platform_job_id}
 → {
-    "status":   "queued|running|succeeded|failed",
-    "progress": 0-100,
-    "error":    { "code": "...", "message": "..." },   // 仅 failed 时
-    "usage":    { "pages": 12, "llm_tokens": 83421 },  // 仅 succeeded 时
+    "status":   "COMPLETED|FAILED|GENERATING|…",
+    "error":    { "code": "...", "message": "..." },   // 仅 FAILED
+    "usage":    { "pages": 12, "llm_tokens": 83421 },  // 仅 COMPLETED
     "cost":     { "currency": "CNY", "vendor_cost": "1.234000" },
     "result":   { "pptx_url": "...", "notes_url": "...", "script_url": "..." }
   }
@@ -68,8 +79,7 @@ GET {partner_base}/jobs/{platform_job_id}
 
 ## C4. 讲稿回报（硬约束，对应 §8 第 9 条）
 
-- 完成响应必须带**逐页 notes**（JSON，与页数严格对齐），可选附整份 script docx
-- 现状需改：现行 MCP `get_generation_status` 无讲稿字段；worker 讲稿 docx 失败是 `console.warn` 后继续成功
+- 完成响应必须带**逐页 notes**（JSON `{pages:[{page,notes}]}`，与页数严格对齐），可选附整份 script docx
 - **notes 为空或页数不齐 = job failed**（`error.code = "notes_missing"`），不得标成功——数字人链与套件「讲稿」构件都以此为合法输入
 
 ## C5. 行为不变量（对应 §8 第 1–8 条）

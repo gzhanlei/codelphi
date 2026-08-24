@@ -196,7 +196,7 @@ PPTCreator: 成品 pptx + 逐页讲稿
 
 **身份：** 工作台是 OIDC RP（单应用单 client）；DSH 仅在打开返工面板时拉起，用同一张网关 token。
 
-**姐妹平台 Partner 通则**（§8 是 PPTCreator 实例，其它平台各填一张表）：服务账号认证；上下文带 org/member/job；旁路自家 2C 积分与 dashboard；回报成本与产物到本侧对象存储；材料用本侧签名 URL 交换，不经 MCP 传大文件。
+**姐妹平台 Partner 通则**（§8 是 PPTCreator 实例，其它平台各填一张表）：服务账号认证；上下文带 org/member/job；旁路自家 2C 积分与 dashboard；回报成本与产物到本侧对象存储；材料用本侧签名 URL 交换，不经 MCP 传大文件。给提供方看的合同正文：`CONTRACT-partner.md`；PPTCreator 填好的实例：`CONTRACT-pptcreator-partner.md`。
 
 **渠道即账本推广：** 教师打开 PPTCreator.com 走个人积分；打开数字人 2C 站点走那边的账；只有经 **套件工作台 / 网关** 的流量记入机构 License。四条缝都存在，销售不承诺「校本只能在本平台生成」。
 
@@ -413,10 +413,10 @@ PPT 几分钟；数字人成片 + PPT 渲染 + 合成是分钟到小时级。**�
 | 9 | **讲稿必须回报**：完成响应带逐页备注/讲稿（管线已有 script），与页数对齐；是否需带每页时长由合成器 spike 定 | worker 完成路径 / MCP status | 数字人没有合法输入，会去猜 PPT 正文 |
 | 10 | partner 生成需支持多文档输入（课文、教学设计等多份材料，来自套件 materials[]） | 生成 API / worker 入参 / 数据模型 | **已确认不支持**：MCP 只收单 `document_id` 或单段文本，worker 对 `project.document` 单一文档硬依赖（`worker/jobs/generate-slides-simplified.ts`） |
 
-第 10 条的两个方向（PPTCreator 路线图本就有多文档计划，方向一为归宿）：
+第 10 条：PPTCreator 已落地 MCP `create_ppt_from_documents`（方向一）。**网关 P0 走材料包 `documents[]`，不再预合成单文本。** 方向二仅作历史过渡，禁止再发单数 `document`（会落到 `create_ppt_from_text`）。
 
-- **方向一（正解）：PPTCreator 侧 Document 改 1:N**（或引入「材料包」），课文与教学设计等保持各自身份进生成。改动落在数据模型 + worker 主链，随其既有路线图做
-- **方向二（P0 过渡）：网关/adapter 侧预合成单文档**再提交，PPTCreator 零改动；代价是课文与教学设计的主次关系在拼接处丢失，只用于方向一落地前解 P0 的急
+- **方向一（现行）：** 课文 / 教学设计 / 参考各自身份进生成。网关组装：第一份材料 = `textbook`，当前 design = `teaching_design`，其余材料与 outline = `reference`（1–5 项，恰好一份 textbook）
+- **方向二（已废弃）：** 网关侧预合成单文档再提交
 
 **验收测试（partner 模式完工定义）**：打一条 partner 生成，断言 `UserProfile.freeCreditsRemaining` 不变、`downloadLocked=false`、网关 UsageRecord settled、C 端 dashboard 不可见、**讲稿非空且页数对齐**。
 

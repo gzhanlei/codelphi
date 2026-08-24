@@ -84,7 +84,8 @@ type fakePPT struct {
 	notesEmpty   atomic.Bool
 
 	mu         sync.Mutex
-	lastHeader http.Header // 最近一次 /generate 的头（断言 C1）
+	lastHeader http.Header    // 最近一次 create_ppt_from_documents 的头（断言 C1）
+	lastBody   map[string]any // 该次 tools/call 的 arguments（断言材料包）
 }
 
 const (
@@ -93,33 +94,56 @@ const (
 	fakeScriptDocx = "fake-script-docx"
 )
 
+func writeMCPTool(w http.ResponseWriter, data any) {
+	text, _ := json.Marshal(data)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"result": map[string]any{
+			"content": []map[string]string{{"type": "text", "text": string(text)}},
+		},
+	})
+}
+
 func newFakePPT(t *testing.T) *fakePPT {
 	t.Helper()
 	f := &fakePPT{}
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /generate", func(w http.ResponseWriter, r *http.Request) {
-		f.mu.Lock()
-		f.lastHeader = r.Header.Clone()
-		f.mu.Unlock()
-		if f.failGenerate.Load() {
-			w.WriteHeader(http.StatusInternalServerError)
-			fmt.Fprint(w, `{"error":{"code":"internal","message":"boom","retryable":true}}`)
-			return
+	mux.HandleFunc("POST /mcp", func(w http.ResponseWriter, r *http.Request) {
+		var rpc struct {
+			Params struct {
+				Name      string         `json:"name"`
+				Arguments map[string]any `json:"arguments"`
+			} `json:"params"`
 		}
-		w.WriteHeader(http.StatusAccepted)
-		fmt.Fprint(w, `{"platform_job_id":"pj-1"}`)
-	})
-	mux.HandleFunc("GET /jobs/{id}", func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"status": "succeeded",
-			"usage":  map[string]any{"pages": 2, "llm_tokens": 500},
-			"cost":   map[string]string{"currency": "CNY", "vendor_cost": "0.800000"},
-			"result": map[string]string{
-				"pptx_url":   f.srv.URL + "/files/pptx",
-				"notes_url":  f.srv.URL + "/files/notes",
-				"script_url": f.srv.URL + "/files/script",
-			},
-		})
+		_ = json.NewDecoder(r.Body).Decode(&rpc)
+		switch rpc.Params.Name {
+		case "create_ppt_from_documents":
+			f.mu.Lock()
+			f.lastHeader = r.Header.Clone()
+			f.lastBody = rpc.Params.Arguments
+			f.mu.Unlock()
+			if f.failGenerate.Load() {
+				w.WriteHeader(http.StatusInternalServerError)
+				fmt.Fprint(w, `{"error":{"code":"internal","message":"boom","retryable":true}}`)
+				return
+			}
+			writeMCPTool(w, map[string]any{"project_id": "pj-1", "status": "queued"})
+		case "get_generation_status":
+			writeMCPTool(w, map[string]any{
+				"status": "COMPLETED",
+				"usage":  map[string]any{"pages": 2, "llm_tokens": 500},
+				"cost":   map[string]string{"currency": "CNY", "vendor_cost": "0.800000"},
+				"result": map[string]string{
+					"pptx_url":   f.srv.URL + "/files/pptx",
+					"notes_url":  f.srv.URL + "/files/notes",
+					"script_url": f.srv.URL + "/files/script",
+				},
+			})
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprintf(w, `{"error":{"code":"unknown_tool","message":%q}}`, rpc.Params.Name)
+		}
 	})
 	mux.HandleFunc("GET /files/pptx", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, fakePptxBytes) })
 	mux.HandleFunc("GET /files/notes", func(w http.ResponseWriter, r *http.Request) {
@@ -240,10 +264,69 @@ func TestHappyPath(t *testing.T) {
 	// C1 头断言。
 	e.ppt.mu.Lock()
 	h := e.ppt.lastHeader
+	body := e.ppt.lastBody
 	e.ppt.mu.Unlock()
 	if h.Get("X-Partner-Key") != "partner-key-test" || h.Get("X-Org-Id") != e.orgID ||
 		h.Get("X-Member-Id") != e.memberID || h.Get("X-Job-Id") == "" {
 		t.Fatalf("partner 头缺失: %v", h)
+	}
+	if _, ok := body["document"]; ok {
+		t.Fatalf("must not send singular document (方向二): %#v", body["document"])
+	}
+	docs, _ := body["documents"].([]any)
+	if len(docs) < 3 {
+		t.Fatalf("documents = %#v", body["documents"])
+	}
+	roles := map[string]int{}
+	var textbook string
+	for _, raw := range docs {
+		d, _ := raw.(map[string]any)
+		role, _ := d["role"].(string)
+		roles[role]++
+		if role == "textbook" {
+			textbook, _ = d["content"].(string)
+		}
+	}
+	if roles["textbook"] != 1 || roles["teaching_design"] != 1 {
+		t.Fatalf("roles = %v", roles)
+	}
+	if !strings.Contains(textbook, "导数的定义") {
+		t.Fatalf("textbook = %q", textbook)
+	}
+}
+
+func TestPackPPTDocuments(t *testing.T) {
+	docs := packPPTDocuments(
+		[]string{"导数的定义：差商的极限……", "几何意义：切线斜率……", "短"},
+		`{"教学目标":["理解导数"]}`,
+		`{"条目":[{"节":"1"}]}`,
+	)
+	if len(docs) != 4 {
+		t.Fatalf("len=%d %#v", len(docs), docs)
+	}
+	if docs[0].Role != "textbook" || !strings.Contains(docs[0].Content, "导数的定义") {
+		t.Fatalf("textbook = %#v", docs[0])
+	}
+	if docs[1].Role != "teaching_design" {
+		t.Fatalf("design = %#v", docs[1])
+	}
+	if docs[2].Role != "reference" || !strings.Contains(docs[2].Content, "几何意义") {
+		t.Fatalf("extra material = %#v", docs[2])
+	}
+	if docs[3].Role != "reference" || !strings.Contains(docs[3].Content, "条目") {
+		t.Fatalf("outline = %#v", docs[3])
+	}
+
+	many := make([]string, 8)
+	for i := range many {
+		many[i] = fmt.Sprintf("这是第 %d 份足够长的课文或参考材料正文", i+1)
+	}
+	capped := packPPTDocuments(many, `{"教学目标":["x"]}`, `{"条目":[]}`)
+	if len(capped) != 5 {
+		t.Fatalf("cap len=%d", len(capped))
+	}
+	if capped[0].Role != "textbook" || capped[1].Role != "teaching_design" {
+		t.Fatalf("priority lost: %#v", capped)
 	}
 }
 

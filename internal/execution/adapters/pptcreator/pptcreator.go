@@ -44,15 +44,23 @@ func New(baseURL, partnerKey string, opts ...Option) *Client {
 	return c
 }
 
-// GenerateRequest 对应 C2。Document 是方向二预合成的单文档（多份 text 材料拼接）。
+// Doc 对应 create_ppt_from_documents 的一份材料（契约 C2 方向一）。
+// role 仅 textbook / teaching_design / reference；content 与 document_id 二选一，网关 P0 只走 content。
+type Doc struct {
+	Role    string `json:"role"`
+	Name    string `json:"name,omitempty"`
+	Content string `json:"content,omitempty"`
+}
+
+// GenerateRequest 对应 C2。Documents 是材料包（恰好一份 textbook），不再预合成单文本。
 type GenerateRequest struct {
-	JobID    string // C1 X-Job-Id，幂等键
-	OrgID    string
-	MemberID string
-	Title    string
-	Document string
-	Note     string // 教师补充说明，并入 spec（契约 v1 未定义字段，见出入说明）
-	Critique string // 返工意见（Rebuild 时非空）
+	JobID     string // C1 X-Job-Id，幂等键
+	OrgID     string
+	MemberID  string
+	Title     string
+	Documents []Doc
+	Note      string // 教师补充说明，并入 spec.note
+	Critique  string // 返工意见（Rebuild 时非空）
 }
 
 // Result 是 C3 succeeded 的回报 + C4 校验后的逐页 notes。
@@ -75,59 +83,139 @@ type Error struct {
 
 func (e *Error) Error() string { return fmt.Sprintf("pptcreator: %s: %s", e.Code, e.Message) }
 
-// Generate 提交生成并轮询到终态。notes 为空/页数不齐 → Error{Code: notes_missing}（C4 硬约束）。
+// Generate 经 MCP tools/call create_ppt_from_documents 提交材料包并轮询到终态。
+// 不调用 create_ppt_from_text（单文本/方向二）。notes 为空/页数不齐 → notes_missing。
 func (c *Client) Generate(ctx context.Context, in GenerateRequest) (*Result, error) {
-	body := map[string]any{
-		"job_id":   in.JobID,
-		"title":    in.Title,
-		"document": map[string]string{"kind": "text", "text": in.Document},
-		"spec": map[string]any{
-			"notes_required": true,
-			"note":           in.Note,
-			"critique":       in.Critique,
-		},
+	if err := validateDocuments(in.Documents); err != nil {
+		return nil, err
 	}
-	payload, _ := json.Marshal(body)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/generate", bytes.NewReader(payload))
+	args := map[string]any{
+		"title":     in.Title,
+		"documents": in.Documents,
+	}
+	if s := strings.TrimSpace(in.Note); s != "" {
+		args["note"] = s
+	}
+	if s := strings.TrimSpace(in.Critique); s != "" {
+		args["critique"] = s
+	}
+	raw, err := c.toolCall(ctx, in, "create_ppt_from_documents", args)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
+	var accepted struct {
+		ProjectID string `json:"project_id"`
+	}
+	if err := json.Unmarshal(raw, &accepted); err != nil || accepted.ProjectID == "" {
+		return nil, &Error{Code: "bad_response", Message: "missing project_id: " + string(raw)}
+	}
+	return c.poll(ctx, in, accepted.ProjectID)
+}
+
+func validateDocuments(docs []Doc) error {
+	if len(docs) == 0 || len(docs) > 5 {
+		return &Error{Code: "invalid_materials", Message: "documents must be 1–5 items"}
+	}
+	n := 0
+	for _, d := range docs {
+		switch d.Role {
+		case "textbook", "teaching_design", "reference":
+		default:
+			return &Error{Code: "invalid_materials", Message: "invalid document role: " + d.Role}
+		}
+		if len(strings.TrimSpace(d.Content)) < 10 {
+			return &Error{Code: "invalid_materials", Message: "each document content must be at least 10 characters"}
+		}
+		if d.Role == "textbook" {
+			n++
+		}
+	}
+	if n != 1 {
+		return &Error{Code: "invalid_materials", Message: "exactly one textbook document required"}
+	}
+	return nil
+}
+
+func (c *Client) setPartnerHeaders(req *http.Request, in GenerateRequest) {
 	req.Header.Set("X-Partner-Key", c.partnerKey)
 	req.Header.Set("X-Org-Id", in.OrgID)
 	req.Header.Set("X-Member-Id", in.MemberID)
 	req.Header.Set("X-Job-Id", in.JobID)
+}
 
+func (c *Client) mcpURL() string {
+	u := strings.TrimRight(c.baseURL, "/")
+	u = strings.TrimSuffix(u, "/mcp")
+	return u + "/mcp"
+}
+
+func (c *Client) toolCall(ctx context.Context, in GenerateRequest, name string, args any) (json.RawMessage, error) {
+	payload, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params":  map[string]any{"name": name, "arguments": args},
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.mcpURL(), bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	c.setPartnerHeaders(req, in)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, &Error{Code: "transport", Message: err.Error(), Retryable: true}
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if resp.StatusCode != http.StatusAccepted {
+	if resp.StatusCode != http.StatusOK {
 		return nil, parsePartnerError(resp.StatusCode, raw)
 	}
-	var accepted struct {
-		PlatformJobID string `json:"platform_job_id"`
+	var rpc struct {
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+		Result *struct {
+			IsError bool `json:"isError"`
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"result"`
 	}
-	if err := json.Unmarshal(raw, &accepted); err != nil || accepted.PlatformJobID == "" {
-		return nil, &Error{Code: "bad_response", Message: "missing platform_job_id: " + string(raw)}
+	if err := json.Unmarshal(raw, &rpc); err != nil {
+		return nil, &Error{Code: "bad_response", Message: err.Error()}
 	}
-	return c.poll(ctx, accepted.PlatformJobID)
+	if rpc.Error != nil {
+		return nil, &Error{Code: "rpc_error", Message: rpc.Error.Message, Retryable: true}
+	}
+	if rpc.Result == nil || len(rpc.Result.Content) == 0 {
+		return nil, &Error{Code: "bad_response", Message: "empty MCP result: " + string(raw)}
+	}
+	text := json.RawMessage(rpc.Result.Content[0].Text)
+	var toolErr struct {
+		Code    string `json:"error"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(text, &toolErr); err == nil && toolErr.Code != "" {
+		return nil, &Error{Code: toolErr.Code, Message: toolErr.Message}
+	}
+	return text, nil
 }
 
 // poll 按 C3 轮询到 succeeded/failed 或超时。
-func (c *Client) poll(ctx context.Context, platformJobID string) (*Result, error) {
+func (c *Client) poll(ctx context.Context, in GenerateRequest, platformJobID string) (*Result, error) {
 	deadline := time.Now().Add(c.pollTimeout)
 	for {
-		st, err := c.query(ctx, platformJobID)
+		st, err := c.query(ctx, in, platformJobID)
 		if err != nil {
 			return nil, err
 		}
-		switch st.Status {
-		case "succeeded":
+		switch strings.ToUpper(st.Status) {
+		case "COMPLETED", "SUCCEEDED":
 			return c.harvest(st)
-		case "failed":
+		case "FAILED":
 			pe := &Error{Code: "platform_failed", Message: "job failed"}
 			if st.Err != nil {
 				pe.Code = st.Err.Code
@@ -166,20 +254,10 @@ type jobStatus struct {
 	} `json:"result"`
 }
 
-func (c *Client) query(ctx context.Context, platformJobID string) (*jobStatus, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/jobs/"+platformJobID, nil)
+func (c *Client) query(ctx context.Context, in GenerateRequest, platformJobID string) (*jobStatus, error) {
+	raw, err := c.toolCall(ctx, in, "get_generation_status", map[string]any{"project_id": platformJobID})
 	if err != nil {
 		return nil, err
-	}
-	req.Header.Set("X-Partner-Key", c.partnerKey)
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, &Error{Code: "transport", Message: err.Error(), Retryable: true}
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if resp.StatusCode != http.StatusOK {
-		return nil, parsePartnerError(resp.StatusCode, raw)
 	}
 	var st jobStatus
 	if err := json.Unmarshal(raw, &st); err != nil {
@@ -198,8 +276,8 @@ func (c *Client) harvest(st *jobStatus) (*Result, error) {
 	if err != nil {
 		return nil, &Error{Code: "notes_missing", Message: "fetch notes: " + err.Error()}
 	}
-	var pages []json.RawMessage
-	if err := json.Unmarshal(notes, &pages); err != nil || len(pages) == 0 {
+	pages, err := parseNotesPages(notes)
+	if err != nil || len(pages) == 0 {
 		return nil, &Error{Code: "notes_missing", Message: "notes empty or not a JSON array"}
 	}
 	if st.Usage.Pages > 0 && len(pages) != st.Usage.Pages {
@@ -257,6 +335,23 @@ func parsePartnerError(status int, raw []byte) error {
 	}
 	return &Error{Code: fmt.Sprintf("http_%d", status), Message: truncate(string(raw), 200),
 		Retryable: status >= 500}
+}
+
+func parseNotesPages(raw []byte) ([]json.RawMessage, error) {
+	var arr []json.RawMessage
+	if err := json.Unmarshal(raw, &arr); err == nil && len(arr) > 0 {
+		return arr, nil
+	}
+	var wrap struct {
+		Pages []json.RawMessage `json:"pages"`
+	}
+	if err := json.Unmarshal(raw, &wrap); err != nil {
+		return nil, err
+	}
+	if len(wrap.Pages) == 0 {
+		return nil, fmt.Errorf("empty pages")
+	}
+	return wrap.Pages, nil
 }
 
 func truncate(s string, n int) string {
