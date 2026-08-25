@@ -447,6 +447,57 @@ func TestGenerateSendsStageAndStopsAtOutlineReady(t *testing.T) {
 	}
 }
 
+func TestGenerateOutlineStageRejectsCompletedWithPptx(t *testing.T) {
+	mux := http.NewServeMux()
+	files := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/n") {
+			fmt.Fprint(w, `[{"page":1,"note":"n"}]`)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/o") {
+			fmt.Fprint(w, `{"source":"generated-deck","slides":[{"order":1,"type":"COVER","title":"导数"}]}`)
+			return
+		}
+		fmt.Fprint(w, "pptx")
+	}))
+	t.Cleanup(files.Close)
+	mux.HandleFunc("POST /mcp", func(w http.ResponseWriter, r *http.Request) {
+		var rpc struct {
+			Params struct {
+				Name string `json:"name"`
+			} `json:"params"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&rpc)
+		switch rpc.Params.Name {
+		case "create_ppt_from_documents":
+			writeMCPTool(w, map[string]any{"project_id": "pj-1", "status": "queued"})
+		case "get_generation_status":
+			writeMCPTool(w, map[string]any{
+				"status": "COMPLETED",
+				"usage":  map[string]any{"pages": 1, "llm_tokens": 10},
+				"cost":   map[string]string{"vendor_cost": "0.1"},
+				"result": map[string]string{
+					"pptx_url":    files.URL + "/p",
+					"notes_url":   files.URL + "/n",
+					"outline_url": files.URL + "/o",
+				},
+			})
+		}
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	c := New(srv.URL, "k", WithPoll(time.Millisecond, time.Second), WithHTTPClient(srv.Client()))
+	_, err := c.Generate(t.Context(), GenerateRequest{
+		JobID: "job-1", OrgID: "org-1", MemberID: "mem-1", Title: "导数",
+		Stage:     StageOutline,
+		Documents: []Doc{{Role: "textbook", Name: "课文", Content: "导数的定义：差商的极限……足够长的正文"}},
+	})
+	pe, ok := err.(*Error)
+	if !ok || pe.Code != "stage_mismatch" {
+		t.Fatalf("err=%v, want stage_mismatch", err)
+	}
+}
+
 func TestGenerateOutlineReadyMissingOutlineFails(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /mcp", func(w http.ResponseWriter, r *http.Request) {

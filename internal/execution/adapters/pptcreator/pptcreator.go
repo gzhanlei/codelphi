@@ -273,6 +273,9 @@ func (c *Client) poll(ctx context.Context, in GenerateRequest, platformJobID str
 			}
 			return res, err
 		case "COMPLETED", "SUCCEEDED":
+			if in.Stage == StageOutline {
+				return nil, &Error{Code: "stage_mismatch", Message: "stage=outline must return OUTLINE_READY, got " + st.Status}
+			}
 			res, err := c.harvest(st)
 			if res != nil {
 				res.ProjectID = platformJobID

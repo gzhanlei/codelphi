@@ -137,7 +137,7 @@ Harness 选型 spike（不挡 M5c 导回；挡「课件≠deck」完整验收）
 - **C8.2** `create_ppt_from_documents` 接受顶层 `confirmed_outline`。有则 worker 走已有 `ctx.confirmedOutline` 路径，不得丢弃。网关 **停止** 把自造 design/outline JSON 塞进 `documents[]`。
 - **C8.3**（硬约束）`stage=outline` 停在 `writeSpeechV2` / `htmlOutline` 之后，终态 `OUTLINE_READY`，无 pptx。网关对照教案后再 `stage=pptx` + `confirmed_outline`。不得等整份 pptx 再判教学。
 
-工单：PPTCreator **#125**（C8.1/C8.2 已落地）；C8.3 **#127**。契约正文 `CONTRACT-pptcreator-partner.md` C8（v1.8）。**网关主路径已切** outline → 对照 → pptx；对方一次出齐则兜底。
+工单：PPTCreator **#125**（C8.1/C8.2 已落地）；C8.3 **#127**。契约正文 `CONTRACT-pptcreator-partner.md` C8（v1.8）。**网关主路径已切** outline → 对照 → pptx；对方一次出齐 = `stage_mismatch` 失败。
 
 ### 本仓：M5c
 

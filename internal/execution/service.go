@@ -850,7 +850,7 @@ func (s *Service) runPPTStep(ctx context.Context, in SubmitInput, lessonID, pack
 		s.failStep(ctx, stepID, "storage_error", err.Error())
 		return err
 	}
-	res, aligned, err := s.produceDeck(ctx, in, packageID, stepID, docs, note, critique, confirmed)
+	res, err := s.produceDeck(ctx, in, packageID, stepID, docs, note, critique, confirmed)
 	if err != nil {
 		s.settleFailure(ctx, d.ReservationID, stepID)
 		code := "partner_error"
@@ -867,13 +867,6 @@ func (s *Service) runPPTStep(ctx context.Context, in SubmitInput, lessonID, pack
 		s.failStep(ctx, stepID, "storage_error", err.Error())
 		return err
 	}
-	if !aligned {
-		if err := s.alignDeckToPlan(ctx, in, packageID, stepID, docs, note, critique, res); err != nil {
-			s.settleFailure(ctx, d.ReservationID, stepID)
-			s.failStep(ctx, stepID, "storage_error", err.Error())
-			return err
-		}
-	}
 	if err := s.billing.Settle(ctx, billing.SettleInput{
 		ReservationID: d.ReservationID, JobID: stepID,
 		ActualAmount: 1, VendorCost: &res.VendorCost, Outcome: billing.OutcomeSuccess,
@@ -884,16 +877,15 @@ func (s *Service) runPPTStep(ctx context.Context, in SubmitInput, lessonID, pack
 }
 
 // produceDeck 走契约 C8.3：先 stage=outline 对照教案，通过后再 stage=pptx。
-// 对方仍一次出齐 COMPLETED（未落地 #127）时 aligned=false，由 alignDeckToPlan 兜底。
-// 已有 confirmed_outline（Rebuild）则直接烧片，不再重排页。
-func (s *Service) produceDeck(ctx context.Context, in SubmitInput, packageID, stepID string, docs []pptcreator.Doc, note, critique string, confirmed json.RawMessage) (*pptcreator.Result, bool, error) {
+// stage=outline 却一次出齐 COMPLETED+pptx 是违约，adapter 报 stage_mismatch，本函数不兜底。
+// 已有 confirmed_outline（Rebuild）则直接 stage=pptx，不再重排页。
+func (s *Service) produceDeck(ctx context.Context, in SubmitInput, packageID, stepID string, docs []pptcreator.Doc, note, critique string, confirmed json.RawMessage) (*pptcreator.Result, error) {
 	if len(bytes.TrimSpace(confirmed)) > 0 {
-		res, err := s.ppt.Generate(ctx, pptcreator.GenerateRequest{
+		return s.ppt.Generate(ctx, pptcreator.GenerateRequest{
 			JobID: stepID, OrgID: in.OrgID, MemberID: in.MemberID,
 			Title: in.Title, Documents: docs, Note: note, Critique: critique,
 			Stage: pptcreator.StagePPTX, ConfirmedOutline: confirmed,
 		})
-		return res, true, err
 	}
 
 	outlineJob := ulid.Make().String()
@@ -903,17 +895,14 @@ func (s *Service) produceDeck(ctx context.Context, in SubmitInput, packageID, st
 		Stage: pptcreator.StageOutline,
 	})
 	if err != nil {
-		return nil, false, err
-	}
-	if strings.TrimSpace(first.PptxURL) != "" {
-		return first, false, nil
+		return nil, err
 	}
 
 	outline, notes := first.Outline, first.Notes
 	projectID := first.ProjectID
 	plan, err := s.loadCurrentPlan(ctx, packageID)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	issues := lessonplan.CheckDeck(plan, outline, notes)
 	if focusUncovered(issues) && strings.TrimSpace(critique) == "" {
@@ -925,10 +914,7 @@ func (s *Service) produceDeck(ctx context.Context, in SubmitInput, packageID, st
 			ProjectID: projectID,
 		})
 		if rerr != nil {
-			return nil, false, rerr
-		}
-		if strings.TrimSpace(retry.PptxURL) != "" {
-			return retry, false, nil
+			return nil, rerr
 		}
 		outline, notes = retry.Outline, retry.Notes
 		if retry.ProjectID != "" {
@@ -939,44 +925,16 @@ func (s *Service) produceDeck(ctx context.Context, in SubmitInput, packageID, st
 		s.annotatePlanDrift(plan, outline, notes)
 		if len(plan.Drift) > 0 {
 			if err := s.rewriteCurrentPlan(ctx, in.OrgID, packageID, plan); err != nil {
-				return nil, false, err
+				return nil, err
 			}
 		}
 	}
 
-	res, err := s.ppt.Generate(ctx, pptcreator.GenerateRequest{
+	return s.ppt.Generate(ctx, pptcreator.GenerateRequest{
 		JobID: stepID, OrgID: in.OrgID, MemberID: in.MemberID,
 		Title: in.Title, Documents: docs, Note: note, Critique: critique,
 		Stage: pptcreator.StagePPTX, ProjectID: projectID, ConfirmedOutline: outline,
 	})
-	return res, true, err
-}
-
-func (s *Service) alignDeckToPlan(ctx context.Context, in SubmitInput, packageID, stepID string, docs []pptcreator.Doc, note, critique string, first *pptcreator.Result) error {
-	plan, err := s.loadCurrentPlan(ctx, packageID)
-	if err != nil || plan == nil {
-		return err
-	}
-	outline, notes := first.Outline, first.Notes
-	issues := lessonplan.CheckDeck(plan, outline, notes)
-	if focusUncovered(issues) && strings.TrimSpace(critique) == "" {
-		res2, err := s.ppt.Generate(ctx, pptcreator.GenerateRequest{
-			JobID: ulid.Make().String(), OrgID: in.OrgID, MemberID: in.MemberID,
-			Title: in.Title, Documents: docs, Note: note,
-			Critique: lessonplan.Critique(issues),
-		})
-		if err == nil {
-			if err := s.storePPTArtifacts(ctx, in.OrgID, packageID, stepID, res2); err != nil {
-				return err
-			}
-			outline, notes = res2.Outline, res2.Notes
-		}
-	}
-	s.annotatePlanDrift(plan, outline, notes)
-	if len(plan.Drift) == 0 {
-		return nil
-	}
-	return s.rewriteCurrentPlan(ctx, in.OrgID, packageID, plan)
 }
 
 func focusUncovered(issues []lessonplan.Issue) bool {

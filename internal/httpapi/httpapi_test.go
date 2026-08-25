@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -71,30 +72,44 @@ func newAPIEnv(t *testing.T) *apiEnv {
 	pptMux := http.NewServeMux()
 	pptSrv := httptest.NewServer(pptMux)
 	t.Cleanup(pptSrv.Close)
+	var lastStage atomic.Value
+	lastStage.Store("")
 	pptMux.HandleFunc("POST /mcp", func(w http.ResponseWriter, r *http.Request) {
 		var rpc struct {
 			Params struct {
-				Name string `json:"name"`
+				Name      string         `json:"name"`
+				Arguments map[string]any `json:"arguments"`
 			} `json:"params"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&rpc)
 		switch rpc.Params.Name {
 		case "create_ppt_from_documents":
+			stage, _ := rpc.Params.Arguments["stage"].(string)
+			lastStage.Store(stage)
 			text, _ := json.Marshal(map[string]any{"project_id": "pj-1", "status": "queued"})
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"jsonrpc": "2.0", "id": 1,
 				"result": map[string]any{"content": []map[string]string{{"type": "text", "text": string(text)}}},
 			})
 		case "get_generation_status":
+			status := "COMPLETED"
+			result := map[string]string{
+				"pptx_url":    pptSrv.URL + "/files/pptx",
+				"notes_url":   pptSrv.URL + "/files/notes",
+				"outline_url": pptSrv.URL + "/files/outline",
+			}
+			if s, _ := lastStage.Load().(string); s == pptcreator.StageOutline {
+				status = "OUTLINE_READY"
+				result = map[string]string{
+					"outline_url": pptSrv.URL + "/files/outline",
+					"notes_url":   pptSrv.URL + "/files/notes",
+				}
+			}
 			text, _ := json.Marshal(map[string]any{
-				"status": "COMPLETED",
+				"status": status,
 				"usage":  map[string]any{"pages": 2, "llm_tokens": 500},
 				"cost":   map[string]string{"currency": "CNY", "vendor_cost": "0.800000"},
-				"result": map[string]string{
-					"pptx_url":    pptSrv.URL + "/files/pptx",
-					"notes_url":   pptSrv.URL + "/files/notes",
-					"outline_url": pptSrv.URL + "/files/outline",
-				},
+				"result": result,
 			})
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"jsonrpc": "2.0", "id": 1,

@@ -125,7 +125,7 @@ PPTCreator 实例：`POST {base}/mcp` `tools/call` `get_generation_status` `{ "p
 
 partner 接口错误返回结构化 JSON：`{ "error": { "code", "message", "retryable" } }`。
 网关侧映射：adapter 超时/5xx → 该 step failed（不升级为 `billing_unavailable`）；`retryable=true` 由网关按新 job 重试。
-`notes_missing` / `outline_missing` → 该 step failed，预扣退回。`OUTLINE_READY` 缺大纲同样 `outline_missing`。
+`notes_missing` / `outline_missing` / `stage_mismatch` → 该 step failed，预扣退回。`OUTLINE_READY` 缺大纲同样 `outline_missing`。`stage=outline` 却返回 `COMPLETED`（或带 `pptx_url`）= 违约，不得当一次出齐兜底。
 
 ## C8. 课件大纲交回 / 写回 / 停住（2026-08-25）
 
@@ -167,7 +167,7 @@ PPTCreator 提供做片，不提供做课件。C 端已有 `/html-outline`（`Co
 | `outline` | `writeBackHtmlOutline` 之后 | `OUTLINE_READY` | 必有 `outline_url`（形同 C8.1；`source` 可为 `planned` 或 `generated-deck`）；尽量带 `notes_url`；**禁止** `pptx_url`；禁止 HTML 排版与渲染 |
 | `pptx` | 现有完整管线终点 | `COMPLETED` | C8.1 + C4（pptx / notes / outline） |
 
-缺 `stage` 时过渡期按 `pptx`，兼容未改的调用方。**网关主路径已切** outline → 对照 → pptx。若对方忽略 `stage` 仍一次出齐 `COMPLETED`（带 `pptx_url`），网关按旧对照兜底，便于 PPTCreator #127 落地后只改对方即可联调。
+缺 `stage` 时过渡期按 `pptx`，兼容未改的调用方。**网关主路径已切** outline → 对照 → pptx。对方忽略 `stage`、一次出齐 `COMPLETED`+pptx = `stage_mismatch`，step failed，预扣退回。不得按旧对照兜底。
 
 握手：
 

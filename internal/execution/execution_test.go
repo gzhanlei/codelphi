@@ -535,15 +535,24 @@ func TestPPTOutlineRetryErrorDoesNotBurnDriftedDeck(t *testing.T) {
 	}
 }
 
-func TestPPTLegacyPartnerCompletesWithoutOutlineStop(t *testing.T) {
+func TestPPTRejectsPartnerThatSkipsOutlineStop(t *testing.T) {
 	e := newEnv(t)
 	e.ppt.legacyShot.Store(true)
 	lesson := e.submit(t)
-	if lesson.Status != "succeeded" {
-		t.Fatalf("status = %s", lesson.Status)
+	if s := jobStatus(t, lesson.LessonJobID); s != "failed" {
+		t.Fatalf("status = %s, want failed (partner ignored stage=outline)", s)
 	}
-	if n := e.ppt.generates.Load(); n != 1 {
-		t.Fatalf("legacy partner generates = %d, want 1 (one-shot pptx)", n)
+	var report string
+	if err := testDB.QueryRow(
+		"SELECT cost_report FROM jobs WHERE parent_id = ? AND capability = 'ppt'",
+		lesson.LessonJobID).Scan(&report); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(report, "stage_mismatch") {
+		t.Fatalf("cost_report = %s, want stage_mismatch", report)
+	}
+	if n := countUsageRecords(t, "capability = 'ppt' AND status = 'refunded'"); n != 1 {
+		t.Fatalf("refunded ppt records = %d, want 1", n)
 	}
 }
 
