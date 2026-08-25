@@ -39,6 +39,8 @@ type Config struct {
 	CORSOrigins []string
 	// 运行中 job 超时，超时收敛扫尾用，默认 30m。
 	JobTimeout time.Duration
+	// 非空时允许 Bearer dev（本地联调跳过 Chandler）。生产勿设。
+	DevAuthSub string
 }
 
 func env(key, def string) string {
@@ -111,5 +113,6 @@ func Load() Config {
 		PublicBaseURL:        env("PUBLIC_BASE_URL", "https://app.codelphi.com"),
 		CORSOrigins:          cors,
 		JobTimeout:           jobTimeout,
+		DevAuthSub:           os.Getenv("CODELPHI_DEV_AUTH_SUB"),
 	}
 }

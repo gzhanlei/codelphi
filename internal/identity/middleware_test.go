@@ -91,4 +91,32 @@ func TestMiddleware(t *testing.T) {
 			t.Fatalf("ctx = %+v", gotCtx)
 		}
 	})
+
+	t.Run("Bearer dev without opt → 401", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Authorization", "Bearer "+DevToken)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("code = %d, want 401", rec.Code)
+		}
+	})
+
+	t.Run("Bearer dev with WithDevAuth → 200", func(t *testing.T) {
+		gotCtx = nil
+		dev := Middleware(verifier, resolver, WithDevAuth("sub-1"))(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotCtx, _ = ContextFrom(r.Context())
+			w.WriteHeader(http.StatusOK)
+		}))
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Authorization", "Bearer "+DevToken)
+		rec := httptest.NewRecorder()
+		dev.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("code = %d body=%s", rec.Code, rec.Body.String())
+		}
+		if gotCtx == nil || gotCtx.MemberID != memberID {
+			t.Fatalf("ctx = %+v", gotCtx)
+		}
+	})
 }

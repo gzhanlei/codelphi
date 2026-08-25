@@ -9,6 +9,7 @@ const fallbackLabels: Record<string, string> = {
   outline: "课件大纲",
   ppt: "PPT",
   script: "讲稿",
+  plan: "教案",
 };
 
 const acceptTypes = ".pdf,.docx,.md,.txt,.markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/markdown,text/plain";
@@ -135,6 +136,20 @@ export function LessonWorkbench({
     await loadPackage(pkg.id);
   }
 
+  async function reshapePlan() {
+    if (!pkg?.id) return;
+    setBusy(true);
+    setErr(null);
+    const res = await fetch(`/api/gw/v1/packages/${pkg.id}/lesson-plan`, { method: "POST" });
+    const data = await res.json();
+    setBusy(false);
+    if (!res.ok) {
+      setErr(data.error || { code: "reshape", message: "整理教案失败" });
+      return;
+    }
+    await loadPackage(pkg.id);
+  }
+
   const lesson = pkg?.lesson_status;
   const canUpload = canWrite && (!pkg || lesson === "failed");
   const slots = maxMaterials - materials.length;
@@ -227,6 +242,16 @@ export function LessonWorkbench({
                           }}
                         />
                       </label>
+                    ) : null}
+                    {a.kind === "script" && canWrite && a.current?.url ? (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        className="text-sm text-seal hover:underline disabled:opacity-50"
+                        onClick={() => void reshapePlan()}
+                      >
+                        整理成教案
+                      </button>
                     ) : null}
                     {a.current?.url ? (
                       <a href={mediaHref(a.current.url)} className="text-sm text-seal hover:underline" {...fileLinkProps(a.current.url)}>

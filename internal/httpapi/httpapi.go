@@ -33,6 +33,7 @@ type Deps struct {
 	MediaTTL    time.Duration
 	PublicBase  string
 	CORSOrigins []string
+	DevAuthSub  string // 非空时允许 Bearer dev，仅本地联调
 }
 
 type server struct {
@@ -44,6 +45,7 @@ type server struct {
 	mediaTTL    time.Duration
 	publicBase  string
 	corsOrigins []string
+	devSub      string
 }
 
 // New 返回已挂 identity 中间件的工作台 REST + MCP。
@@ -55,12 +57,16 @@ func New(d Deps) http.Handler {
 		db: d.DB, exec: d.Exec, store: d.Store,
 		verifier: d.Verifier, resolver: d.Resolver,
 		mediaTTL: d.MediaTTL, publicBase: d.PublicBase,
-		corsOrigins: d.CORSOrigins,
+		corsOrigins: d.CORSOrigins, devSub: strings.TrimSpace(d.DevAuthSub),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/me", s.handleMe)
 
-	auth := identity.Middleware(d.Verifier, d.Resolver)
+	var authOpts []identity.MiddlewareOption
+	if s.devSub != "" {
+		authOpts = append(authOpts, identity.WithDevAuth(s.devSub))
+	}
+	auth := identity.Middleware(d.Verifier, d.Resolver, authOpts...)
 	mux.Handle("GET /v1/presets", auth(http.HandlerFunc(s.listPresets)))
 	mux.Handle("GET /v1/projects", auth(http.HandlerFunc(s.listProjects)))
 	mux.Handle("POST /v1/projects", auth(http.HandlerFunc(s.createProject)))
@@ -74,6 +80,7 @@ func New(d Deps) http.Handler {
 	mux.Handle("GET /v1/packages/{id}", auth(http.HandlerFunc(s.getPackage)))
 	mux.Handle("POST /v1/packages/{id}/rebuild", auth(http.HandlerFunc(s.rebuild)))
 	mux.Handle("POST /v1/packages/{id}/artifacts/ppt", auth(http.HandlerFunc(s.importPPT)))
+	mux.Handle("POST /v1/packages/{id}/lesson-plan", auth(http.HandlerFunc(s.reshapeLessonPlan)))
 	mux.Handle("POST /mcp", auth(http.HandlerFunc(s.handleMCP)))
 	return s.withCORS(mux)
 }
@@ -97,12 +104,12 @@ func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, "missing_token", "missing or malformed Authorization header")
 		return
 	}
-	claims, err := s.verifier.Parse(token)
+	sub, err := identity.Subject(s.verifier, token, s.devSub)
 	if err != nil {
 		writeErr(w, http.StatusUnauthorized, "invalid_token", "token verification failed")
 		return
 	}
-	rows, err := dbgen.New(s.db).ListMembershipsWithOrgBySub(r.Context(), claims.Sub)
+	rows, err := dbgen.New(s.db).ListMembershipsWithOrgBySub(r.Context(), sub)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "identity_unavailable", "list memberships failed")
 		return
@@ -123,7 +130,7 @@ func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
 	out := struct {
 		Sub         string       `json:"sub"`
 		Memberships []membership `json:"memberships"`
-	}{Sub: claims.Sub}
+	}{Sub: sub}
 	q := dbgen.New(s.db)
 	for _, row := range rows {
 		if row.Status != dbgen.MembersStatusActive {
@@ -599,6 +606,25 @@ func (s *server) importPPT(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *server) reshapeLessonPlan(w http.ResponseWriter, r *http.Request) {
+	c := s.ictx(r)
+	if !s.requireWriter(w, c) {
+		return
+	}
+	pkg, ok := s.loadPackage(w, r, r.PathValue("id"), c)
+	if !ok {
+		return
+	}
+	got, err := s.exec.ReshapeLessonPlan(r.Context(), c.OrgID, pkg.ID)
+	if err != nil {
+		s.writeExecErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"kind": got.Kind, "version": got.Version, "package_id": pkg.ID,
+	})
+}
+
 func (s *server) writePackage(w http.ResponseWriter, r *http.Request, packageID string, c *identity.Context) {
 	pkg, ok := s.loadPackage(w, r, packageID, c)
 	if !ok {
@@ -684,6 +710,10 @@ func (s *server) writeExecErr(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusBadRequest, "invalid_request", "未知的预设包")
 	case errors.Is(err, execution.ErrNoCurrentPPT):
 		writeErr(w, http.StatusConflict, "no_current_ppt", "请先生成 PPT，再导回本地修改")
+	case errors.Is(err, execution.ErrNoScript):
+		writeErr(w, http.StatusConflict, "no_script", "请先生成讲稿，再整理成教案")
+	case errors.Is(err, execution.ErrNoNotes):
+		writeErr(w, http.StatusConflict, "no_notes", "讲稿没有可整理的逐页 notes")
 	case errors.Is(err, execution.ErrNotPPTX):
 		writeErr(w, http.StatusBadRequest, "invalid_request", "请上传 .pptx")
 	case errors.Is(err, execution.ErrPPTBusy):

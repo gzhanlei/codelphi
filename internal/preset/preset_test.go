@@ -49,6 +49,14 @@ func TestDigitalLessonP0PrimeTopology(t *testing.T) {
 	if p.Copy.ArtifactLabels["outline"] != "课件大纲" || p.Copy.ArtifactLabels["ppt"] == "" || p.Copy.ArtifactLabels["script"] == "" {
 		t.Fatalf("labels = %v", p.Copy.ArtifactLabels)
 	}
+	if p.Copy.ArtifactLabels["plan"] != "教案" {
+		t.Fatalf("plan label = %q, want 教案", p.Copy.ArtifactLabels["plan"])
+	}
+	for _, k := range p.Artifacts {
+		if k == "plan" {
+			t.Fatal("plan must not be a required artifact")
+		}
+	}
 	if len(p.Steps) != 1 {
 		t.Fatalf("Steps = %d, want 1 (材料 → 做片，无 design/确认门)", len(p.Steps))
 	}

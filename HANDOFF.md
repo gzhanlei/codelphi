@@ -28,7 +28,7 @@
 
 ## 关键事实
 
-- **产品名词**：对外卖 **数字教材建设能力**。PPTCreator = **做片**，课件由 **harness**（编排 / agent loop / 验收）收成，实现不必是 DSH。大纲/教案改稿 = 左对话右预览。本地改过的 **pptx 必须能导回**为新版本（不是当材料重传）。不为成本设确认门。后补见设计 §2.4。现行 `digital_lesson`：材料 → **课件大纲 + ppt + 讲稿**（无确认门；大纲来自 PPTCreator C8，工作台标注「课件大纲」）
+- **产品名词**：对外卖 **数字教材建设能力**。PPTCreator = **做片**，课件由 **harness**（编排 / agent loop / 验收）收成，实现不必是 DSH。大纲/教案改稿 = 左对话右预览。本地改过的 **pptx 必须能导回**为新版本（不是当材料重传）。不为成本设确认门。后补见设计 §2.4。现行 `digital_lesson`：材料 → **课件大纲 + ppt + 讲稿**（无确认门）；讲稿可 **整理成教案**（`plan`，不挡套件 ready）
 - **生产机**：124.156.160.168（VM-32-3，ssh root 直连，本机有密钥）。旧机 101.32.49.240（VM-16-7）已挂，弃用
 - **域名**：`https://app.codelphi.com` → nginx → `127.0.0.1:18080` → systemd 服务 `codelphi-gateway`（二进制 `/data/www/codelphi/gateway`，不用 Docker；8080–8084 被该机别的服务占用，故用 18080）
 - **部署**：`./scripts/deploy.sh` 网关；`./scripts/deploy-web.sh` 工作台。nginx 已切 `deploy/nginx-codelphi-m5.conf`（证书行保留）。Next 听 `127.0.0.1:13000`（3000 是 chandler）
@@ -45,15 +45,15 @@
 - `GET /v1/me`
 - `GET|POST /v1/projects` · `GET /v1/projects/{id}`（含 `lessons[]`）· `POST /v1/projects/{id}/lessons` · `GET /v1/projects/{id}/lessons/{lid}`
 - `POST /v1/projects/{id}/lessons/{lid}/materials`（pdf/docx/md/txt，每课最多 5 份）· `POST /v1/projects/{id}/lessons/{lid}/submit`（202，直接做片）
-- `POST /v1/packages/{id}/artifacts/ppt`（导回本地 pptx，新版本；无 UsageRecord）· `GET /v1/packages/{id}`（签名 URL，无文件字节）
+- `POST /v1/packages/{id}/artifacts/ppt`（导回本地 pptx，新版本；无 UsageRecord）· `POST /v1/packages/{id}/lesson-plan`（讲稿整理成教案栏目）· `GET /v1/packages/{id}`（签名 URL，无文件字节）
 - `POST /v1/lessons/{id}/confirm` 仍在（历史 job）；工作台已撤确认按钮
-- `POST /mcp` JSON-RPC：`tools/list`、`tools/call`（`get_package` / `submit_lesson`；submit 无 `lesson_id` 且非 rebuild → `project_unspecified`）
+- `POST /mcp` JSON-RPC：`tools/list`、`tools/call`（`get_package` / `submit_lesson` / `reshape_lesson_plan`；submit 无 `lesson_id` 且非 rebuild → `project_unspecified`）
 - 启动时 `RecoverInFlight`：残留 queued/running → failed，package partial；预扣靠 billing TTL
 - viewer 角色写接口 403 `forbidden`
 
 ## 下一步（按序）
 
-1. **真机联调 C6**（含大纲对齐）+ **V5 教案整形**
+1. **真机联调 C6**（本地可跳过 Chandler：`scripts/dev-seed.sh` + `CODELPHI_DEV_AUTH_SUB=dev-local` + 工作台 `DEV_AUTH=1`）
 2. **提供生产 MySQL DSN**（若生产 `/healthz` 仍 db 未接）写进 `/data/www/codelphi/gateway.env`（必须 `loc=Local`）
 3. **M4 运营后台**（完工定义 1–2）
 4. Harness 选型 spike（空聊天不上线）

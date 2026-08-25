@@ -79,7 +79,7 @@ Harness 选型 spike（不挡 M5c 导回；挡「课件≠deck」完整验收）
 
 **进度记录（2026-08-25）：M5c V1/V2/V4。** `digital_lesson` 改为材料 → ppt+script（无确认门、不造 design/outline）；`POST /v1/packages/{id}/artifacts/ppt` 导回为新 ppt 版本（ULID 对象键、套件行锁、停用机构拒绝、无 UsageRecord）；工作台主按钮「做课件」、PPT 行可导回。V3 露出大纲待接 C8。
 
-**进度记录（2026-08-25）：M5c V3。** 回拷 C8 `outline_url`（或内联 `outline`）为本侧 `outline` 构件；目录 Artifacts = outline+ppt+script，工作台标签「课件大纲」；COMPLETED 缺大纲/空 slides/页数不齐 → `outline_missing` 退款；Rebuild(ppt) 带当前大纲为 `confirmed_outline`。
+**进度记录（2026-08-25）：M5c V5。** 讲稿 notes + 课件大纲整理成 `plan` 教案栏目（`POST /v1/packages/{id}/lesson-plan`，不进 ready 门禁、无 UsageRecord、不另起课程设计 LLM）。本地联调可设 `CODELPHI_DEV_AUTH_SUB` + `DEV_AUTH=1` 跳过 Chandler。
 
 ## 2.1 M5b 预设包内核
 

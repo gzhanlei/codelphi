@@ -139,6 +139,7 @@ func newAPIEnv(t *testing.T) *apiEnv {
 		DB: testDB, Exec: execSvc, Store: store,
 		Verifier: verifier, Resolver: resolver,
 		MediaTTL: 15 * time.Minute, PublicBase: "http://gateway.test",
+		DevAuthSub: "sub-teacher",
 	})
 	token := signToken(t, key, testKid, validClaims("sub-teacher"))
 	return &apiEnv{h: h, token: token, orgID: orgID, memberID: memberID, key: key, store: store}
@@ -211,6 +212,26 @@ func TestMeListsMemberships(t *testing.T) {
 	}
 	if me.Sub != "sub-teacher" || len(me.Memberships) != 1 || me.Memberships[0].OrgID != e.orgID {
 		t.Fatalf("me = %+v", me)
+	}
+}
+
+func TestDevAuthBearerDev(t *testing.T) {
+	e := newAPIEnv(t)
+	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	req.Header.Set("Authorization", "Bearer "+identity.DevToken)
+	rec := httptest.NewRecorder()
+	e.h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var me struct {
+		Sub string `json:"sub"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &me); err != nil {
+		t.Fatal(err)
+	}
+	if me.Sub != "sub-teacher" {
+		t.Fatalf("sub = %q", me.Sub)
 	}
 }
 
@@ -300,6 +321,16 @@ func TestCreateProjectUploadSubmit(t *testing.T) {
 		t.Fatalf("artifacts = %v", pkg["artifacts"])
 	}
 
+	plan := e.do(t, http.MethodPost, "/v1/packages/"+lesson.PackageID+"/lesson-plan", map[string]any{})
+	if plan.Code != http.StatusCreated {
+		t.Fatalf("lesson-plan code = %d body=%s", plan.Code, plan.Body.String())
+	}
+	pkg = waitPackage(t, e, lesson.PackageID, "succeeded")
+	arts, _ = pkg["artifacts"].([]any)
+	if len(arts) < 4 {
+		t.Fatalf("after reshape artifacts = %v", pkg["artifacts"])
+	}
+
 	got := e.do(t, http.MethodGet, "/v1/projects/"+created.ID, nil)
 	if got.Code != http.StatusOK {
 		t.Fatalf("get project code = %d body=%s", got.Code, got.Body.String())
@@ -384,7 +415,8 @@ func TestMCPGetPackageAndSubmitRequiresProject(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("tools/list code = %d", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), "get_package") || !strings.Contains(rec.Body.String(), "submit_lesson") {
+	if !strings.Contains(rec.Body.String(), "get_package") || !strings.Contains(rec.Body.String(), "submit_lesson") ||
+		!strings.Contains(rec.Body.String(), "reshape_lesson_plan") {
 		t.Fatalf("tools/list = %s", rec.Body.String())
 	}
 	if strings.Contains(rec.Body.String(), "submit_ppt") || strings.Contains(rec.Body.String(), "create_project") {

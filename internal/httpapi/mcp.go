@@ -13,7 +13,7 @@ import (
 	"codelphi/internal/preset"
 )
 
-// handleMCP 是 JSON-RPC 2.0 入口。P0 只挂 get_package / submit_lesson（计划 G）。
+// handleMCP 是 JSON-RPC 2.0 入口。P0 挂 get_package / submit_lesson / reshape_lesson_plan。
 func (s *server) handleMCP(w http.ResponseWriter, r *http.Request) {
 	var req rpcRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
@@ -68,6 +68,26 @@ func (s *server) mcpCall(w http.ResponseWriter, r *http.Request, c *identity.Con
 		}
 		s.absolutize(pkg)
 		writeRPC(w, req.ID, rpcResult(pkg))
+	case "reshape_lesson_plan":
+		if c.Role == string(dbgen.MembersRoleViewer) {
+			writeRPC(w, req.ID, rpcErr(-32000, "forbidden", "forbidden", "viewer 只能查看"))
+			return
+		}
+		packageID, _ := args["package_id"].(string)
+		if packageID == "" {
+			writeRPC(w, req.ID, rpcErr(-32000, "invalid_request", "invalid_request", "package_id required"))
+			return
+		}
+		if _, err := orgPackage(s, r.Context(), packageID, c.OrgID); err != nil {
+			writeRPC(w, req.ID, rpcErr(-32000, "not_found", "not_found", "package not found"))
+			return
+		}
+		got, err := s.exec.ReshapeLessonPlan(r.Context(), c.OrgID, packageID)
+		if err != nil {
+			writeRPC(w, req.ID, rpcErr(-32000, "reshape_failed", "internal", err.Error()))
+			return
+		}
+		writeRPC(w, req.ID, rpcResult(got))
 	case "submit_lesson":
 		if c.Role == string(dbgen.MembersRoleViewer) {
 			writeRPC(w, req.ID, rpcErr(-32000, "forbidden", "forbidden", "viewer 只能查看"))
@@ -190,6 +210,15 @@ func mcpTools() []map[string]any {
 		{
 			"name":        "get_package",
 			"description": "构件列表 + 当前指针 + 最近版本 + 签名 URL。文件永不进返回值。",
+			"inputSchema": map[string]any{
+				"type":       "object",
+				"properties": map[string]any{"package_id": map[string]string{"type": "string"}},
+				"required":   []string{"package_id"},
+			},
+		},
+		{
+			"name":        "reshape_lesson_plan",
+			"description": "把当前讲稿整理成教案栏目（形态加工，不另写课程设计）。",
 			"inputSchema": map[string]any{
 				"type":       "object",
 				"properties": map[string]any{"package_id": map[string]string{"type": "string"}},

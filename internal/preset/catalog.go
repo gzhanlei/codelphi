@@ -24,6 +24,7 @@ var catalog = map[string]Preset{
 				"outline": "课件大纲",
 				"ppt":     "PPT",
 				"script":  "讲稿",
+				"plan":    "教案",
 			},
 		},
 		Artifacts: []string{"outline", "ppt", "script"},

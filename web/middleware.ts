@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { COOKIE_AT } from "@/lib/session";
 
-const publicPaths = ["/login", "/auth/callback", "/auth/start", "/auth/logout"];
+const publicPaths = ["/login", "/auth/callback", "/auth/start", "/auth/logout", "/auth/dev"];
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;

@@ -1164,6 +1164,50 @@ func TestImportPPTRejectsWhileRebuilding(t *testing.T) {
 	}
 }
 
+func TestReshapeLessonPlan(t *testing.T) {
+	e := newEnv(t)
+	lesson := e.submit(t)
+	got, err := e.exec.ReshapeLessonPlan(context.Background(), e.orgID, lesson.PackageID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Kind != "plan" || got.Version != 1 {
+		t.Fatalf("%+v", got)
+	}
+	var ref string
+	if err := testDB.QueryRow(
+		"SELECT storage_ref FROM artifacts WHERE package_id = ? AND kind = 'plan' AND is_current = 1",
+		lesson.PackageID).Scan(&ref); err != nil {
+		t.Fatal(err)
+	}
+	rc, err := e.store.Open(context.Background(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := io.ReadAll(rc)
+	rc.Close()
+	if !strings.Contains(string(data), `"课题"`) || !strings.Contains(string(data), "第一页讲稿") {
+		t.Fatalf("plan = %s", data)
+	}
+	if s := packageStatus(t, lesson.PackageID); s != "ready" {
+		t.Fatalf("package status = %s, want ready", s)
+	}
+	if n := countUsageRecords(t, "1=1"); n != 1 {
+		t.Fatalf("usage records = %d, want 1 (reshape must not bill)", n)
+	}
+}
+
+func TestReshapeLessonPlanRequiresScript(t *testing.T) {
+	e := newEnv(t)
+	pkgID := ulidStr()
+	execSQL(t, "INSERT INTO course_packages (id, project_id, lesson_id, status) VALUES (?, ?, ?, 'draft')",
+		pkgID, e.projectID, e.courseLessonID)
+	_, err := e.exec.ReshapeLessonPlan(context.Background(), e.orgID, pkgID)
+	if !errors.Is(err, ErrNoScript) {
+		t.Fatalf("err=%v, want ErrNoScript", err)
+	}
+}
+
 func waitJobStatus(t *testing.T, jobID, want string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)

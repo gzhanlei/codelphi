@@ -81,7 +81,11 @@ func main() {
 			Verifier: verifier, Resolver: resolver,
 			MediaTTL: cfg.MediaURLTTL, PublicBase: cfg.PublicBaseURL,
 			CORSOrigins: cfg.CORSOrigins,
+			DevAuthSub:  cfg.DevAuthSub,
 		})
+		if cfg.DevAuthSub != "" {
+			log.Printf("WARNING: CODELPHI_DEV_AUTH_SUB set; Authorization: Bearer dev skips Chandler")
+		}
 		mux.Handle("/v1/", api)
 		mux.Handle("/mcp", api)
 	}

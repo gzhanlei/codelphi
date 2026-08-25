@@ -20,6 +20,7 @@ import (
 	"codelphi/internal/execution/adapters/llm"
 	"codelphi/internal/execution/adapters/pptcreator"
 	"codelphi/internal/extract"
+	"codelphi/internal/lessonplan"
 	"codelphi/internal/preset"
 	"codelphi/internal/storage"
 )
@@ -46,6 +47,10 @@ var (
 	ErrLessonInFlight = errors.New("execution: lesson already in flight")
 	// ErrNoCurrentPPT：导回要求套件里已有当前 ppt（不是第一次当材料上传）。
 	ErrNoCurrentPPT = errors.New("execution: no current ppt to import over")
+	// ErrNoScript：教案整形要求套件里已有讲稿。
+	ErrNoScript = errors.New("execution: no current script to reshape")
+	// ErrNoNotes：当前讲稿没有可整理的 notes JSON。
+	ErrNoNotes = errors.New("execution: script notes missing")
 	// ErrNotPPTX：导回只收 .pptx。
 	ErrNotPPTX = errors.New("execution: import requires a .pptx file")
 	// ErrPPTBusy：套件正在做片/重建，不能同时导回。
@@ -298,6 +303,99 @@ func (s *Service) ImportPPT(ctx context.Context, orgID, packageID, filename stri
 		return nil, err
 	}
 	return &ImportResult{Kind: "ppt", Version: version}, nil
+}
+
+// ReshapeLessonPlan 把当前讲稿 notes（及课件大纲）整理成教案栏目，写入 plan 构件。
+// 不调 PPTCreator、不产生 UsageRecord；plan 不进套件 ready 门禁。
+func (s *Service) ReshapeLessonPlan(ctx context.Context, orgID, packageID string) (*ImportResult, error) {
+	if err := s.billing.AssertOrgActive(ctx, orgID); err != nil {
+		if errors.Is(err, billing.ErrOrgSuspended) {
+			return nil, ErrOrgSuspended
+		}
+		return nil, err
+	}
+	q := dbgen.New(s.db)
+	pkg, err := q.GetCoursePackage(ctx, packageID)
+	if err != nil {
+		return nil, fmt.Errorf("execution: package: %w", err)
+	}
+	project, err := q.GetProject(ctx, pkg.ProjectID)
+	if err != nil {
+		return nil, fmt.Errorf("execution: project: %w", err)
+	}
+	if project.OrgID != orgID {
+		return nil, errors.New("execution: project not in org")
+	}
+	notes, err := s.loadScriptNotes(ctx, packageID)
+	if err != nil {
+		return nil, err
+	}
+	outline, err := s.loadCurrentOutline(ctx, packageID)
+	if err != nil {
+		return nil, err
+	}
+	title := project.Title
+	if cl, err := q.GetCourseLesson(ctx, pkg.LessonID); err == nil && cl.Title != "" {
+		title = cl.Title
+	}
+	plan, md, err := lessonplan.Reshape(title, outline, notes)
+	if err != nil {
+		if errors.Is(err, lessonplan.ErrEmpty) {
+			return nil, ErrNoNotes
+		}
+		return nil, err
+	}
+	raw, err := json.Marshal(plan)
+	if err != nil {
+		return nil, err
+	}
+	version, err := s.nextVersion(ctx, packageID, "plan")
+	if err != nil {
+		return nil, err
+	}
+	base := fmt.Sprintf("org/%s/package/%s/plan-v%d", orgID, packageID, version)
+	jsonKey := base + ".json"
+	if err := s.store.Put(ctx, jsonKey, strings.NewReader(string(raw)), "application/json"); err != nil {
+		return nil, err
+	}
+	if err := s.store.Put(ctx, base+".md", strings.NewReader(md), "text/markdown"); err != nil {
+		return nil, err
+	}
+	if err := s.insertArtifact(ctx, packageID, "plan", version, "", jsonKey); err != nil {
+		return nil, err
+	}
+	return &ImportResult{Kind: "plan", Version: version}, nil
+}
+
+func (s *Service) loadScriptNotes(ctx context.Context, packageID string) ([]byte, error) {
+	arts, err := dbgen.New(s.db).ListCurrentArtifacts(ctx, packageID)
+	if err != nil {
+		return nil, err
+	}
+	var ref string
+	for _, a := range arts {
+		if a.Kind == "script" && a.StorageRef.Valid && a.StorageRef.String != "" {
+			ref = a.StorageRef.String
+			break
+		}
+	}
+	if ref == "" {
+		return nil, ErrNoScript
+	}
+	key := ref
+	if strings.HasSuffix(strings.ToLower(key), ".docx") {
+		key = key[:len(key)-5] + ".json"
+	}
+	rc, err := s.store.Open(ctx, key)
+	if err != nil {
+		return nil, ErrNoNotes
+	}
+	data, err := io.ReadAll(io.LimitReader(rc, extract.MaxBytes+1))
+	rc.Close()
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
 }
 
 // Wait 等后台 StartLesson/StartConfirm 结束（进程退出前由 gateway 调用）。
