@@ -26,11 +26,14 @@ func TestGenerateCallsCreatePptFromDocuments(t *testing.T) {
 	var args map[string]any
 	mux := http.NewServeMux()
 	files := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/n") {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/n"):
 			fmt.Fprint(w, `{"pages":[{"page":1,"notes":"n"}]}`)
-			return
+		case strings.HasSuffix(r.URL.Path, "/o"):
+			fmt.Fprint(w, `{"source":"generated-deck","slides":[{"order":1,"type":"COVER","title":"导数"}]}`)
+		default:
+			fmt.Fprint(w, "pptx")
 		}
-		fmt.Fprint(w, "pptx")
 	}))
 	t.Cleanup(files.Close)
 
@@ -62,8 +65,9 @@ func TestGenerateCallsCreatePptFromDocuments(t *testing.T) {
 				"usage":  map[string]any{"pages": 1, "llm_tokens": 10},
 				"cost":   map[string]string{"vendor_cost": "0.1"},
 				"result": map[string]string{
-					"pptx_url":  files.URL + "/p",
-					"notes_url": files.URL + "/n",
+					"pptx_url":    files.URL + "/p",
+					"notes_url":   files.URL + "/n",
+					"outline_url": files.URL + "/o",
 				},
 			})
 		default:
@@ -74,7 +78,7 @@ func TestGenerateCallsCreatePptFromDocuments(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := New(srv.URL, "k", WithPoll(time.Millisecond, time.Second), WithHTTPClient(srv.Client()))
-	_, err := c.Generate(t.Context(), GenerateRequest{
+	res, err := c.Generate(t.Context(), GenerateRequest{
 		JobID: "job-1", OrgID: "org-1", MemberID: "mem-1", Title: "导数",
 		Documents: []Doc{
 			{Role: "textbook", Name: "课文", Content: "导数的定义：差商的极限……足够长的正文"},
@@ -84,6 +88,9 @@ func TestGenerateCallsCreatePptFromDocuments(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(string(res.Outline), `"source":"generated-deck"`) || !strings.Contains(string(res.Outline), "导数") {
+		t.Fatalf("outline = %s", res.Outline)
 	}
 	if tool != "create_ppt_from_documents" {
 		t.Fatalf("tool = %q", tool)
@@ -104,6 +111,232 @@ func TestGenerateCallsCreatePptFromDocuments(t *testing.T) {
 	}
 	if args["style"] != DefaultStyle {
 		t.Fatalf("style = %#v, want %q", args["style"], DefaultStyle)
+	}
+}
+
+func TestGenerateRejectsMissingOutline(t *testing.T) {
+	mux := http.NewServeMux()
+	files := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/n") {
+			fmt.Fprint(w, `[{"page":1,"note":"n"}]`)
+			return
+		}
+		fmt.Fprint(w, "pptx")
+	}))
+	t.Cleanup(files.Close)
+	mux.HandleFunc("POST /mcp", func(w http.ResponseWriter, r *http.Request) {
+		var rpc struct {
+			Params struct {
+				Name string `json:"name"`
+			} `json:"params"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&rpc)
+		switch rpc.Params.Name {
+		case "create_ppt_from_documents":
+			writeMCPTool(w, map[string]any{"project_id": "pj-1", "status": "queued"})
+		case "get_generation_status":
+			writeMCPTool(w, map[string]any{
+				"status": "COMPLETED",
+				"usage":  map[string]any{"pages": 1, "llm_tokens": 10},
+				"cost":   map[string]string{"vendor_cost": "0.1"},
+				"result": map[string]string{
+					"pptx_url":  files.URL + "/p",
+					"notes_url": files.URL + "/n",
+				},
+			})
+		}
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	c := New(srv.URL, "k", WithPoll(time.Millisecond, time.Second), WithHTTPClient(srv.Client()))
+	_, err := c.Generate(t.Context(), GenerateRequest{
+		JobID: "job-1", OrgID: "org-1", MemberID: "mem-1", Title: "导数",
+		Documents: []Doc{{Role: "textbook", Name: "课文", Content: "导数的定义：差商的极限……足够长的正文"}},
+	})
+	pe, ok := err.(*Error)
+	if !ok || pe.Code != "outline_missing" {
+		t.Fatalf("err=%v, want outline_missing", err)
+	}
+}
+
+func TestGenerateRejectsEmptyOutlineSlides(t *testing.T) {
+	err := generateWithStatus(t, map[string]any{
+		"status": "COMPLETED",
+		"usage":  map[string]any{"pages": 1, "llm_tokens": 10},
+		"cost":   map[string]string{"vendor_cost": "0.1"},
+		"result": map[string]any{
+			"pptx_url":  "http://files/p",
+			"notes_url": "http://files/n",
+			"outline":   map[string]any{"source": "generated-deck", "slides": []any{}},
+		},
+	}, `[{"page":1,"note":"n"}]`)
+	pe, ok := err.(*Error)
+	if !ok || pe.Code != "outline_missing" {
+		t.Fatalf("err=%v, want outline_missing", err)
+	}
+}
+
+func TestGenerateRejectsOutlinePageMismatch(t *testing.T) {
+	err := generateWithStatus(t, map[string]any{
+		"status": "COMPLETED",
+		"usage":  map[string]any{"pages": 2, "llm_tokens": 10},
+		"cost":   map[string]string{"vendor_cost": "0.1"},
+		"result": map[string]any{
+			"pptx_url":  "http://files/p",
+			"notes_url": "http://files/n",
+			"outline": map[string]any{
+				"source": "generated-deck",
+				"slides": []any{map[string]any{"order": 1, "type": "COVER", "title": "导数"}},
+			},
+		},
+	}, `[{"page":1,"note":"n"},{"page":2,"note":"n2"}]`)
+	pe, ok := err.(*Error)
+	if !ok || pe.Code != "outline_missing" {
+		t.Fatalf("err=%v, want outline_missing", err)
+	}
+}
+
+func TestGenerateAcceptsInlineOutline(t *testing.T) {
+	res, err := generateOKWithStatus(t, map[string]any{
+		"status": "COMPLETED",
+		"usage":  map[string]any{"pages": 1, "llm_tokens": 10},
+		"cost":   map[string]string{"vendor_cost": "0.1"},
+		"result": map[string]any{
+			"pptx_url":  "http://files/p",
+			"notes_url": "http://files/n",
+			"outline": map[string]any{
+				"source": "generated-deck",
+				"slides": []any{map[string]any{"order": 1, "type": "COVER", "title": "导数"}},
+			},
+		},
+	}, `[{"page":1,"note":"n"}]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(res.Outline), "导数") {
+		t.Fatalf("outline = %s", res.Outline)
+	}
+}
+
+func TestGeneratePassesConfirmedOutline(t *testing.T) {
+	var args map[string]any
+	mux := http.NewServeMux()
+	files := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/n") {
+			fmt.Fprint(w, `[{"page":1,"note":"n"}]`)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/o") {
+			fmt.Fprint(w, `{"source":"generated-deck","slides":[{"order":1,"type":"COVER","title":"导数"}]}`)
+			return
+		}
+		fmt.Fprint(w, "pptx")
+	}))
+	t.Cleanup(files.Close)
+	mux.HandleFunc("POST /mcp", func(w http.ResponseWriter, r *http.Request) {
+		var rpc struct {
+			Params struct {
+				Name      string         `json:"name"`
+				Arguments map[string]any `json:"arguments"`
+			} `json:"params"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&rpc)
+		switch rpc.Params.Name {
+		case "create_ppt_from_documents":
+			args = rpc.Params.Arguments
+			writeMCPTool(w, map[string]any{"project_id": "pj-1", "status": "queued"})
+		case "get_generation_status":
+			writeMCPTool(w, map[string]any{
+				"status": "COMPLETED",
+				"usage":  map[string]any{"pages": 1, "llm_tokens": 10},
+				"cost":   map[string]string{"vendor_cost": "0.1"},
+				"result": map[string]string{
+					"pptx_url":    files.URL + "/p",
+					"notes_url":   files.URL + "/n",
+					"outline_url": files.URL + "/o",
+				},
+			})
+		}
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	c := New(srv.URL, "k", WithPoll(time.Millisecond, time.Second), WithHTTPClient(srv.Client()))
+	outline := json.RawMessage(`{"source":"planned","slides":[{"order":1,"type":"COVER","title":"导数"}]}`)
+	if _, err := c.Generate(t.Context(), GenerateRequest{
+		JobID: "job-1", OrgID: "org-1", MemberID: "mem-1", Title: "导数",
+		Documents:        []Doc{{Role: "textbook", Name: "课文", Content: "导数的定义：差商的极限……足够长的正文"}},
+		ConfirmedOutline: outline,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	raw, ok := args["confirmed_outline"]
+	if !ok {
+		t.Fatal("confirmed_outline missing from create_ppt_from_documents")
+	}
+	b, _ := json.Marshal(raw)
+	if !strings.Contains(string(b), "导数") {
+		t.Fatalf("confirmed_outline = %s", b)
+	}
+}
+
+func generateWithStatus(t *testing.T, status map[string]any, notes string) error {
+	t.Helper()
+	_, err := generateOKWithStatus(t, status, notes)
+	return err
+}
+
+func generateOKWithStatus(t *testing.T, status map[string]any, notes string) (*Result, error) {
+	t.Helper()
+	mux := http.NewServeMux()
+	files := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/n") {
+			fmt.Fprint(w, notes)
+			return
+		}
+		fmt.Fprint(w, "pptx")
+	}))
+	t.Cleanup(files.Close)
+	if pptx, _ := status["result"].(map[string]any); pptx != nil {
+		if _, ok := pptx["pptx_url"]; ok {
+			pptx["pptx_url"] = files.URL + "/p"
+		}
+		if _, ok := pptx["notes_url"]; ok {
+			pptx["notes_url"] = files.URL + "/n"
+		}
+	}
+	mux.HandleFunc("POST /mcp", func(w http.ResponseWriter, r *http.Request) {
+		var rpc struct {
+			Params struct {
+				Name string `json:"name"`
+			} `json:"params"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&rpc)
+		switch rpc.Params.Name {
+		case "create_ppt_from_documents":
+			writeMCPTool(w, map[string]any{"project_id": "pj-1", "status": "queued"})
+		case "get_generation_status":
+			writeMCPTool(w, status)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	c := New(srv.URL, "k", WithPoll(time.Millisecond, time.Second), WithHTTPClient(srv.Client()))
+	return c.Generate(t.Context(), GenerateRequest{
+		JobID: "job-1", OrgID: "org-1", MemberID: "mem-1", Title: "导数",
+		Documents: []Doc{{Role: "textbook", Name: "课文", Content: "导数的定义：差商的极限……足够长的正文"}},
+	})
+}
+
+func TestParseOutlineSlides(t *testing.T) {
+	slides, err := parseOutlineSlides([]byte(`{"source":"generated-deck","slides":[{"order":1,"title":"a"},{"order":2,"title":"b"}]}`))
+	if err != nil || len(slides) != 2 {
+		t.Fatalf("ok: %v %d", err, len(slides))
+	}
+	if _, err := parseOutlineSlides([]byte(`{"source":"generated-deck","slides":[]}`)); err == nil {
+		t.Fatal("empty slides should fail")
+	}
+	if _, err := parseOutlineSlides([]byte(`{"slides":null}`)); err == nil {
+		t.Fatal("null slides should fail")
 	}
 }
 

@@ -83,6 +83,7 @@ type fakePPT struct {
 	// 旋钮：generate 返回 500；notes 为空数组
 	failGenerate atomic.Bool
 	notesEmpty   atomic.Bool
+	outlineEmpty atomic.Bool
 	block        chan struct{}
 	cur          atomic.Int32
 	max          atomic.Int32
@@ -93,9 +94,10 @@ type fakePPT struct {
 }
 
 const (
-	fakePptxBytes  = "fake-pptx-bytes"
-	fakeNotesJSON  = `[{"page":1,"note":"第一页讲稿"},{"page":2,"note":"第二页讲稿"}]`
-	fakeScriptDocx = "fake-script-docx"
+	fakePptxBytes       = "fake-pptx-bytes"
+	fakeNotesJSON       = `[{"page":1,"note":"第一页讲稿"},{"page":2,"note":"第二页讲稿"}]`
+	fakeScriptDocx      = "fake-script-docx"
+	fakeDeckOutlineJSON = `{"source":"generated-deck","slides":[{"order":1,"type":"COVER","title":"导数"},{"order":2,"type":"CONTENT","title":"差商"}]}`
 )
 
 func writeMCPTool(w http.ResponseWriter, data any) {
@@ -148,15 +150,19 @@ func newFakePPT(t *testing.T) *fakePPT {
 			}
 			writeMCPTool(w, map[string]any{"project_id": "pj-1", "status": "queued"})
 		case "get_generation_status":
+			result := map[string]string{
+				"pptx_url":   f.srv.URL + "/files/pptx",
+				"notes_url":  f.srv.URL + "/files/notes",
+				"script_url": f.srv.URL + "/files/script",
+			}
+			if !f.outlineEmpty.Load() {
+				result["outline_url"] = f.srv.URL + "/files/outline"
+			}
 			writeMCPTool(w, map[string]any{
 				"status": "COMPLETED",
 				"usage":  map[string]any{"pages": 2, "llm_tokens": 500},
 				"cost":   map[string]string{"currency": "CNY", "vendor_cost": "0.800000"},
-				"result": map[string]string{
-					"pptx_url":   f.srv.URL + "/files/pptx",
-					"notes_url":  f.srv.URL + "/files/notes",
-					"script_url": f.srv.URL + "/files/script",
-				},
+				"result": result,
 			})
 		default:
 			w.WriteHeader(http.StatusBadRequest)
@@ -172,6 +178,13 @@ func newFakePPT(t *testing.T) *fakePPT {
 		fmt.Fprint(w, fakeNotesJSON)
 	})
 	mux.HandleFunc("GET /files/script", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, fakeScriptDocx) })
+	mux.HandleFunc("GET /files/outline", func(w http.ResponseWriter, r *http.Request) {
+		if f.outlineEmpty.Load() {
+			fmt.Fprint(w, `{"source":"generated-deck","slides":[]}`)
+			return
+		}
+		fmt.Fprint(w, fakeDeckOutlineJSON)
+	})
 	f.srv = httptest.NewServer(mux)
 	t.Cleanup(f.srv.Close)
 	return f
@@ -227,7 +240,7 @@ func (e *env) submit(t *testing.T) *Lesson {
 
 // --- 门禁测试 ---
 
-// 全链路 happy path：submit 直接做片 → ppt+script 齐、package ready、1 条 ppt UsageRecord settled。无确认门。
+// 全链路 happy path：submit 直接做片 → outline+ppt+script 齐、package ready、1 条 ppt UsageRecord settled。无确认门。
 func TestHappyPath(t *testing.T) {
 	e := newEnv(t)
 	lesson := e.submit(t)
@@ -239,7 +252,7 @@ func TestHappyPath(t *testing.T) {
 		t.Fatalf("package status = %s, want ready", s)
 	}
 
-	for _, kind := range []string{"ppt", "script"} {
+	for _, kind := range []string{"outline", "ppt", "script"} {
 		var ref string
 		if err := testDB.QueryRow(
 			"SELECT storage_ref FROM artifacts WHERE package_id = ? AND kind = ? AND is_current = 1",
@@ -254,6 +267,11 @@ func TestHappyPath(t *testing.T) {
 		rc.Close()
 		if kind == "ppt" && string(data) != fakePptxBytes {
 			t.Fatalf("pptx 内容 = %q", data)
+		}
+		if kind == "outline" {
+			if !strings.Contains(string(data), `"source":"generated-deck"`) || !strings.Contains(string(data), "导数") {
+				t.Fatalf("outline = %q", data)
+			}
 		}
 		if kind == "script" {
 			if !strings.HasSuffix(ref, ".docx") {
@@ -326,6 +344,9 @@ func TestHappyPath(t *testing.T) {
 	}
 	if !strings.Contains(url, "https://app.example.test/media/") || !strings.Contains(url, "0.txt") {
 		t.Fatalf("textbook url = %q", url)
+	}
+	if _, ok := body["confirmed_outline"]; ok {
+		t.Fatalf("first generate must not send confirmed_outline: %#v", body["confirmed_outline"])
 	}
 }
 
@@ -409,6 +430,34 @@ func TestPPTNotesMissing(t *testing.T) {
 	}
 }
 
+// 大纲缺失 → ppt step failed、预扣 refunded（契约 C8 硬约束）。
+func TestPPTOutlineMissing(t *testing.T) {
+	e := newEnv(t)
+	e.ppt.outlineEmpty.Store(true)
+	lesson := e.submit(t)
+	if s := jobStatus(t, lesson.LessonJobID); s != "failed" {
+		t.Fatalf("lesson status = %s, want failed", s)
+	}
+	if s := packageStatus(t, lesson.PackageID); s != "partial" {
+		t.Fatalf("package status = %s, want partial", s)
+	}
+	if used := poolUsed(t, e.pptPool); used != 0 {
+		t.Fatalf("ppt pool used = %v, want 0", used)
+	}
+	if n := countUsageRecords(t, "capability = 'ppt' AND status = 'refunded'"); n != 1 {
+		t.Fatalf("refunded ppt records = %d, want 1", n)
+	}
+	var report string
+	if err := testDB.QueryRow(
+		"SELECT cost_report FROM jobs WHERE parent_id = ? AND capability = 'ppt'",
+		lesson.LessonJobID).Scan(&report); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(report, "outline_missing") {
+		t.Fatalf("cost_report = %s, want outline_missing", report)
+	}
+}
+
 // partner 5xx → step failed、退款；billing 不受影响（后续 submit 正常）。
 func TestPartner5xx(t *testing.T) {
 	e := newEnv(t)
@@ -476,6 +525,47 @@ func TestRebuildPptVersions(t *testing.T) {
 	// 1（首轮 ppt）+ 2×1（ppt rebuild）= 3 条 settled；重试是新 job 新预扣。
 	if n := countUsageRecords(t, "status = 'settled'"); n != 3 {
 		t.Fatalf("settled records = %d, want 3", n)
+	}
+	if s := packageStatus(t, lesson.PackageID); s != "ready" {
+		t.Fatalf("package status = %s, want ready", s)
+	}
+}
+
+// Rebuild 须把当前课件大纲作为 confirmed_outline 写回（契约 C8.2）。
+func TestRebuildSendsConfirmedOutline(t *testing.T) {
+	e := newEnv(t)
+	lesson := e.submit(t)
+	if err := e.exec.Rebuild(context.Background(), lesson.PackageID, "ppt", "换案例"); err != nil {
+		t.Fatal(err)
+	}
+	e.ppt.mu.Lock()
+	body := e.ppt.lastBody
+	e.ppt.mu.Unlock()
+	raw, ok := body["confirmed_outline"]
+	if !ok {
+		t.Fatal("rebuild must send confirmed_outline")
+	}
+	b, _ := json.Marshal(raw)
+	if !strings.Contains(string(b), "导数") || !strings.Contains(string(b), "slides") {
+		t.Fatalf("confirmed_outline = %s", b)
+	}
+	var n int
+	if err := testDB.QueryRow(
+		"SELECT COUNT(*) FROM artifacts WHERE package_id = ? AND kind = 'outline'", lesson.PackageID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("outline versions = %d, want 2", n)
+	}
+}
+
+// outline 随 ppt 整份重出，不能单独 Rebuild。
+func TestRebuildOutlineAloneRejected(t *testing.T) {
+	e := newEnv(t)
+	lesson := e.submit(t)
+	err := e.exec.Rebuild(context.Background(), lesson.PackageID, "outline", "")
+	if !errors.Is(err, ErrRebuildKind) {
+		t.Fatalf("err=%v, want ErrRebuildKind", err)
 	}
 	if s := packageStatus(t, lesson.PackageID); s != "ready" {
 		t.Fatalf("package status = %s, want ready", s)
@@ -816,13 +906,13 @@ func TestGetPackageSignedURLs(t *testing.T) {
 			t.Fatalf("kind %s versions empty", a.Kind)
 		}
 	}
-	for _, k := range []string{"ppt", "script"} {
+	for _, k := range []string{"outline", "ppt", "script"} {
 		if !kinds[k] {
 			t.Fatalf("missing artifact kind %s", k)
 		}
 	}
-	if kinds["design"] || kinds["outline"] {
-		t.Fatalf("gateway design/outline must not appear: %v", kinds)
+	if kinds["design"] {
+		t.Fatalf("gateway design must not appear: %v", kinds)
 	}
 }
 

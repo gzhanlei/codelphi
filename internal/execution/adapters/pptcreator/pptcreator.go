@@ -1,5 +1,5 @@
 // Package pptcreator 是 PPTCreator partner adapter（契约 CONTRACT-pptcreator-partner.md v1）。
-// partner 流量 = 纯机构流量；本 client 只实现 C1 认证头、C2 提交、C3 轮询、C4 讲稿校验。
+// partner 流量 = 纯机构流量；本 client 实现 C1 认证头、C2 提交、C3 轮询、C4 讲稿校验、C8 课件大纲。
 package pptcreator
 
 import (
@@ -62,8 +62,9 @@ type GenerateRequest struct {
 	MemberID  string
 	Title     string
 	Documents []Doc
-	Note      string // 教师补充说明，并入 spec.note
-	Critique  string // 返工意见（Rebuild 时非空）
+	Note             string          // 教师补充说明，并入 spec.note
+	Critique         string          // 返工意见（Rebuild 时非空）
+	ConfirmedOutline json.RawMessage // C8.2 当前课件大纲，缺省则 partner 自行编排
 }
 
 // DefaultStyle 是 digital_lesson 课件默认皮肤。partner 路径跳过 C 端 clarify，
@@ -78,7 +79,9 @@ type Result struct {
 	PptxURL    string
 	NotesURL   string
 	ScriptURL  string
+	OutlineURL string
 	Notes      json.RawMessage // 逐页 notes JSON，已校验非空且与页数对齐
+	Outline    json.RawMessage // C8 课件大纲 JSON，已校验非空且与页数对齐
 }
 
 // Error 是 partner 结构化错误（C7）。Retryable 由网关按新 job 重试。
@@ -91,7 +94,7 @@ type Error struct {
 func (e *Error) Error() string { return fmt.Sprintf("pptcreator: %s: %s", e.Code, e.Message) }
 
 // Generate 经 MCP tools/call create_ppt_from_documents 提交材料包并轮询到终态。
-// 不调用 create_ppt_from_text（单文本/方向二）。notes 为空/页数不齐 → notes_missing。
+// 不调用 create_ppt_from_text（单文本/方向二）。notes 为空/页数不齐 → notes_missing；大纲缺失/不齐 → outline_missing。
 func (c *Client) Generate(ctx context.Context, in GenerateRequest) (*Result, error) {
 	if err := validateDocuments(in.Documents); err != nil {
 		return nil, err
@@ -106,6 +109,13 @@ func (c *Client) Generate(ctx context.Context, in GenerateRequest) (*Result, err
 	}
 	if s := strings.TrimSpace(in.Critique); s != "" {
 		args["critique"] = s
+	}
+	if len(in.ConfirmedOutline) > 0 {
+		var v any
+		if err := json.Unmarshal(in.ConfirmedOutline, &v); err != nil {
+			return nil, &Error{Code: "invalid_outline", Message: "confirmed_outline is not JSON"}
+		}
+		args["confirmed_outline"] = v
 	}
 	raw, err := c.toolCall(ctx, in, "create_ppt_from_documents", args)
 	if err != nil {
@@ -273,9 +283,11 @@ type jobStatus struct {
 		VendorCost string `json:"vendor_cost"`
 	} `json:"cost"`
 	Result struct {
-		PptxURL   string `json:"pptx_url"`
-		NotesURL  string `json:"notes_url"`
-		ScriptURL string `json:"script_url"`
+		PptxURL    string          `json:"pptx_url"`
+		NotesURL   string          `json:"notes_url"`
+		ScriptURL  string          `json:"script_url"`
+		OutlineURL string          `json:"outline_url"`
+		Outline    json.RawMessage `json:"outline"`
 	} `json:"result"`
 }
 
@@ -291,7 +303,7 @@ func (c *Client) query(ctx context.Context, in GenerateRequest, platformJobID st
 	return &st, nil
 }
 
-// harvest 校验 C3 回报的完整性 + C4 讲稿硬约束。
+// harvest 校验 C3 回报的完整性 + C4 讲稿硬约束 + C8 课件大纲硬约束。
 func (c *Client) harvest(st *jobStatus) (*Result, error) {
 	if st.Result.PptxURL == "" || st.Result.NotesURL == "" {
 		return nil, &Error{Code: "bad_response", Message: "succeeded but missing result urls"}
@@ -309,6 +321,10 @@ func (c *Client) harvest(st *jobStatus) (*Result, error) {
 		return nil, &Error{Code: "notes_missing",
 			Message: fmt.Sprintf("notes pages %d != pptx pages %d", len(pages), st.Usage.Pages)}
 	}
+	outline, err := c.harvestOutline(st)
+	if err != nil {
+		return nil, err
+	}
 	cost, _ := strconv.ParseFloat(st.Cost.VendorCost, 64)
 	return &Result{
 		Pages:      st.Usage.Pages,
@@ -317,8 +333,35 @@ func (c *Client) harvest(st *jobStatus) (*Result, error) {
 		PptxURL:    st.Result.PptxURL,
 		NotesURL:   st.Result.NotesURL,
 		ScriptURL:  st.Result.ScriptURL,
+		OutlineURL: st.Result.OutlineURL,
 		Notes:      notes,
+		Outline:    outline,
 	}, nil
+}
+
+func (c *Client) harvestOutline(st *jobStatus) (json.RawMessage, error) {
+	var raw json.RawMessage
+	switch {
+	case strings.TrimSpace(st.Result.OutlineURL) != "":
+		b, err := c.fetchBytes(st.Result.OutlineURL)
+		if err != nil {
+			return nil, &Error{Code: "outline_missing", Message: "fetch outline: " + err.Error()}
+		}
+		raw = b
+	case len(bytes.TrimSpace(st.Result.Outline)) > 0 && string(st.Result.Outline) != "null":
+		raw = st.Result.Outline
+	default:
+		return nil, &Error{Code: "outline_missing", Message: "succeeded but missing outline"}
+	}
+	slides, err := parseOutlineSlides(raw)
+	if err != nil || len(slides) == 0 {
+		return nil, &Error{Code: "outline_missing", Message: "outline empty or missing slides"}
+	}
+	if st.Usage.Pages > 0 && len(slides) != st.Usage.Pages {
+		return nil, &Error{Code: "outline_missing",
+			Message: fmt.Sprintf("outline slides %d != pptx pages %d", len(slides), st.Usage.Pages)}
+	}
+	return raw, nil
 }
 
 // Fetch 拉平台预签名 URL 的字节（回拷本侧对象存储用，不转手临时链，C3）。
@@ -377,6 +420,19 @@ func parseNotesPages(raw []byte) ([]json.RawMessage, error) {
 		return nil, fmt.Errorf("empty pages")
 	}
 	return wrap.Pages, nil
+}
+
+func parseOutlineSlides(raw []byte) ([]json.RawMessage, error) {
+	var wrap struct {
+		Slides []json.RawMessage `json:"slides"`
+	}
+	if err := json.Unmarshal(raw, &wrap); err != nil {
+		return nil, err
+	}
+	if len(wrap.Slides) == 0 {
+		return nil, fmt.Errorf("empty slides")
+	}
+	return wrap.Slides, nil
 }
 
 func truncate(s string, n int) string {

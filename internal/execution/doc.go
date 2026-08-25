@@ -1,5 +1,5 @@
 // Package execution 负责 job 状态机与平台适配：
-// lesson 权威状态机（P0'：材料 → ppt+script，无确认门；大纲随 partner C8 后补）、
+// lesson 权威状态机（P0'：材料 → ppt+script+课件大纲，无确认门；大纲来自 PPTCreator C8）、
 // adapters/*（PPTCreator partner、保留的 LLM adapter、后续数字人/AI3D）、
 // 合成器（成品 pptx 逐页出图 + 人像旁挂）。
 //

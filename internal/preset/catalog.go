@@ -21,13 +21,14 @@ var catalog = map[string]Preset{
 			ConfirmHint:      "",
 			EmptyList:        "还没有课程。点右上角建第一套。",
 			ArtifactLabels: map[string]string{
-				"ppt":    "PPT",
-				"script": "讲稿",
+				"outline": "课件大纲",
+				"ppt":     "PPT",
+				"script":  "讲稿",
 			},
 		},
-		Artifacts: []string{"ppt", "script"},
+		Artifacts: []string{"outline", "ppt", "script"},
 		Steps: []Step{
-			{Capability: "ppt", Platform: "pptcreator", Emits: []string{"ppt", "script"}},
+			{Capability: "ppt", Platform: "pptcreator", Emits: []string{"ppt", "script", "outline"}},
 		},
 	},
 }

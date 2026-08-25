@@ -6,7 +6,7 @@ import type { APIError, Lesson, LessonMaterial, PackageSnap, PresetCopy } from "
 
 const fallbackLabels: Record<string, string> = {
   design: "课程设计",
-  outline: "教学大纲",
+  outline: "课件大纲",
   ppt: "PPT",
   script: "讲稿",
 };

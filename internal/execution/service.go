@@ -24,8 +24,7 @@ import (
 	"codelphi/internal/storage"
 )
 
-// lesson 拓扑来自 Project.preset_id 对应的目录（设计 §2.3 / §2.4）。
-// digital_lesson P0'：材料 → ppt+script（无确认门；大纲随 partner C8 后补）。每个 step 独立 authorize/settle。
+// lesson 权威状态机（P0'：材料 → ppt+script+课件大纲，无确认门；大纲来自 partner C8）。每个 step 独立 authorize/settle。
 var (
 	// ErrIllegalTransition：状态机非法迁移（条件 UPDATE rows=0）。
 	ErrIllegalTransition = errors.New("execution: illegal job status transition")
@@ -33,7 +32,7 @@ var (
 	ErrMaterialKindUnsupported = errors.New("execution: material kind not supported")
 	// ErrCourseLessonRequired：做课必须绑到一课，不能绑在课程项目上。
 	ErrCourseLessonRequired = errors.New("execution: course lesson required")
-	// ErrRebuildKind：script 只能随 ppt 整份重出（§8 第 9 条讲稿对齐约束）。
+	// ErrRebuildKind：script / outline 只能随 ppt 整份重出（§8 第 9 条 / C8）。
 	ErrRebuildKind = errors.New("execution: script rebuilds with ppt, not alone")
 	// ErrUnknownPreset：Project.preset_id 不在目录里，submit 失败。
 	ErrUnknownPreset = errors.New("execution: unknown preset")
@@ -488,7 +487,7 @@ func (s *Service) finishLesson(ctx context.Context, p *preparedLesson, lesson *L
 
 // Rebuild 单件重试/缺件后补（设计 §2.2：P0 整份重出，无单页重生）。
 // 新 step job、新预扣；成功后产生新版本 artifact，is_current 迁移，旧版本保留。
-// kind 只接受目录里能独立重出的构件（P0' 为 ppt）；script 随 ppt 整份重出。
+// kind 只接受目录里能独立重出的构件（P0' 为 ppt）；script / outline 随 ppt 整份重出。
 func (s *Service) Rebuild(ctx context.Context, packageID, kind, critique string) error {
 	q := dbgen.New(s.db)
 	pkg, err := q.GetCoursePackage(ctx, packageID)
@@ -525,6 +524,10 @@ func (s *Service) Rebuild(ctx context.Context, packageID, kind, critique string)
 	if err != nil {
 		return err
 	}
+	step, err := stepEmitting(spec, kind)
+	if err != nil {
+		return err
+	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -545,10 +548,6 @@ func (s *Service) Rebuild(ctx context.Context, packageID, kind, critique string)
 		return err
 	}
 
-	step, err := stepEmitting(spec, kind)
-	if err != nil {
-		return err
-	}
 	p := &preparedLesson{in: in, project: project, spec: spec, texts: texts, files: files, lessonID: lesson.ID, packageID: packageID}
 	err = s.runCatalogStep(ctx, p, step, "", critique)
 	if err != nil {
@@ -617,8 +616,8 @@ func (s *Service) runLLMStep(ctx context.Context, in SubmitInput, project dbgen.
 	return s.transition(ctx, stepID, dbgen.JobsStatusRunning, dbgen.JobsStatusSucceeded)
 }
 
-// runPPTStep 跑 ppt step（estimated = actual = 1 份）。成功 = 同时产出 ppt 和 script
-// 两个 artifact；notes 为空/页数不齐由 adapter 按 C4 报 notes_missing，这里即 step failed。
+// runPPTStep 跑 ppt step（estimated = actual = 1 份）。成功 = 同时产出 outline、ppt、script；
+// notes 为空/页数不齐由 adapter 按 C4 报 notes_missing，大纲缺失按 C8 报 outline_missing。
 func (s *Service) runPPTStep(ctx context.Context, in SubmitInput, lessonID, packageID string, docs []pptcreator.Doc, note, critique string) error {
 	stepID := ulid.Make().String()
 	if err := s.insertStep(ctx, stepID, in, lessonID, packageID, "ppt", "pptcreator"); err != nil {
@@ -643,9 +642,16 @@ func (s *Service) runPPTStep(ctx context.Context, in SubmitInput, lessonID, pack
 		return fmt.Errorf("execution: authorize deny: %s", d.Reason)
 	}
 
+	confirmed, err := s.loadCurrentOutline(ctx, packageID)
+	if err != nil {
+		s.settleFailure(ctx, d.ReservationID, stepID)
+		s.failStep(ctx, stepID, "storage_error", err.Error())
+		return err
+	}
 	res, err := s.ppt.Generate(ctx, pptcreator.GenerateRequest{
 		JobID: stepID, OrgID: in.OrgID, MemberID: in.MemberID,
 		Title: in.Title, Documents: docs, Note: note, Critique: critique,
+		ConfirmedOutline: confirmed,
 	})
 	if err != nil {
 		s.settleFailure(ctx, d.ReservationID, stepID)
@@ -702,10 +708,17 @@ func (s *Service) storeLLMArtifacts(ctx context.Context, orgID, packageID, stepI
 	return s.insertArtifact(ctx, packageID, string(kind), version, stepID, jsonKey)
 }
 
-// storePPTArtifacts 回拷 pptx 与逐页 notes 到本侧 storage（不转手平台临时链，C3），
-// ppt / script 两个 artifact 各升一个版本。
+// storePPTArtifacts 回拷 pptx、逐页 notes、C8 课件大纲到本侧 storage（不转手平台临时链，C3），
+// outline / ppt / script 三个 artifact 各升一个版本。
 func (s *Service) storePPTArtifacts(ctx context.Context, orgID, packageID, stepID string, res *pptcreator.Result) error {
+	if len(res.Outline) == 0 {
+		return errors.New("execution: missing outline")
+	}
 	pptx, err := s.ppt.Fetch(ctx, res.PptxURL)
+	if err != nil {
+		return err
+	}
+	outlineVersion, err := s.nextVersion(ctx, packageID, "outline")
 	if err != nil {
 		return err
 	}
@@ -715,6 +728,10 @@ func (s *Service) storePPTArtifacts(ctx context.Context, orgID, packageID, stepI
 	}
 	scriptVersion, err := s.nextVersion(ctx, packageID, "script")
 	if err != nil {
+		return err
+	}
+	outlineKey := fmt.Sprintf("org/%s/package/%s/outline-v%d.json", orgID, packageID, outlineVersion)
+	if err := s.store.Put(ctx, outlineKey, strings.NewReader(string(res.Outline)), "application/json"); err != nil {
 		return err
 	}
 	pptKey := fmt.Sprintf("org/%s/package/%s/ppt-v%d.pptx", orgID, packageID, pptVersion)
@@ -738,10 +755,36 @@ func (s *Service) storePPTArtifacts(ctx context.Context, orgID, packageID, stepI
 		}
 		scriptKey = docxKey
 	}
+	if err := s.insertArtifact(ctx, packageID, "outline", outlineVersion, stepID, outlineKey); err != nil {
+		return err
+	}
 	if err := s.insertArtifact(ctx, packageID, "ppt", pptVersion, stepID, pptKey); err != nil {
 		return err
 	}
 	return s.insertArtifact(ctx, packageID, "script", scriptVersion, stepID, scriptKey)
+}
+
+func (s *Service) loadCurrentOutline(ctx context.Context, packageID string) (json.RawMessage, error) {
+	arts, err := dbgen.New(s.db).ListCurrentArtifacts(ctx, packageID)
+	if err != nil {
+		return nil, err
+	}
+	for _, a := range arts {
+		if a.Kind != "outline" || !a.StorageRef.Valid || a.StorageRef.String == "" {
+			continue
+		}
+		rc, err := s.store.Open(ctx, a.StorageRef.String)
+		if err != nil {
+			return nil, err
+		}
+		data, err := io.ReadAll(io.LimitReader(rc, extract.MaxBytes+1))
+		rc.Close()
+		if err != nil {
+			return nil, err
+		}
+		return json.RawMessage(data), nil
+	}
+	return nil, nil
 }
 
 func (s *Service) nextVersion(ctx context.Context, packageID string, kind string) (int32, error) {

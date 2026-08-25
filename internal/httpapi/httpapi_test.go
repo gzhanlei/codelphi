@@ -88,8 +88,9 @@ func newAPIEnv(t *testing.T) *apiEnv {
 				"usage":  map[string]any{"pages": 2, "llm_tokens": 500},
 				"cost":   map[string]string{"currency": "CNY", "vendor_cost": "0.800000"},
 				"result": map[string]string{
-					"pptx_url":  pptSrv.URL + "/files/pptx",
-					"notes_url": pptSrv.URL + "/files/notes",
+					"pptx_url":    pptSrv.URL + "/files/pptx",
+					"notes_url":   pptSrv.URL + "/files/notes",
+					"outline_url": pptSrv.URL + "/files/outline",
 				},
 			})
 			_ = json.NewEncoder(w).Encode(map[string]any{
@@ -102,6 +103,9 @@ func newAPIEnv(t *testing.T) *apiEnv {
 	})
 	pptMux.HandleFunc("GET /files/pptx", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, fakePptxBytes) })
 	pptMux.HandleFunc("GET /files/notes", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, fakeNotesJSON) })
+	pptMux.HandleFunc("GET /files/outline", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"source":"generated-deck","slides":[{"order":1,"type":"COVER","title":"导数"},{"order":2,"type":"CONTENT","title":"差商"}]}`)
+	})
 
 	orgID, memberID := ulidStr(), ulidStr()
 	execSQL(t, "INSERT INTO orgs (id, name, status) VALUES (?, ?, 'active')", orgID, "测试学院")
@@ -292,7 +296,7 @@ func TestCreateProjectUploadSubmit(t *testing.T) {
 		t.Fatalf("package = %v", pkg)
 	}
 	arts, _ := pkg["artifacts"].([]any)
-	if len(arts) < 2 {
+	if len(arts) < 3 {
 		t.Fatalf("artifacts = %v", pkg["artifacts"])
 	}
 
