@@ -18,6 +18,7 @@ import (
 	"codelphi/internal/billing"
 	"codelphi/internal/execution/adapters/llm"
 	"codelphi/internal/execution/adapters/pptcreator"
+	"codelphi/internal/extract"
 )
 
 // --- 假 LLM server（OpenAI 兼容 chat completions） ---
@@ -36,6 +37,7 @@ type fakeLLM struct {
 const (
 	fakeDesignJSON  = `{"教学目标":["理解导数定义"],"学情":"已学极限","重难点":["差商极限"],"方法":["讲授","例题"],"流程":[{"环节":"导入","时长":"5min","活动":"回顾极限"}]}`
 	fakeOutlineJSON = `{"条目":[{"节":"1","标题":"导数定义","要点":["差商","极限"]}]}`
+	fakePlanJSON    = `{"教学目标":["能陈述差商定义，达到会计算简单差商的水平"],"教学重点":["差商作为平均变化率"],"教学难点":["从割线斜率理解趋近时易与瞬时变化率混淆"],"教学过程":[{"环节":"导入","教师活动":"从课文实例引入差商"},{"环节":"新授","教师活动":"讲清差商作为平均变化率"}],"讲授稿":"从课文里的平均变化率讲起"}`
 )
 
 func newFakeLLM(t *testing.T) *fakeLLM {
@@ -61,7 +63,9 @@ func newFakeLLM(t *testing.T) *fakeLLM {
 		}
 		body, _ := io.ReadAll(r.Body)
 		content := fakeDesignJSON
-		if strings.Contains(string(body), "条目") {
+		if strings.Contains(string(body), "教学重点") {
+			content = fakePlanJSON
+		} else if strings.Contains(string(body), "条目") {
 			content = fakeOutlineJSON
 		}
 		if f.badJSON.Load() {
@@ -89,8 +93,17 @@ type fakePPT struct {
 	max          atomic.Int32
 
 	mu         sync.Mutex
-	lastHeader http.Header    // 最近一次 create_ppt_from_documents 的头（断言 C1）
-	lastBody   map[string]any // 该次 tools/call 的 arguments（断言材料包）
+	lastHeader http.Header      // 最近一次 create_ppt_from_documents 的头（断言 C1）
+	lastBody   map[string]any   // 该次 tools/call 的 arguments
+	calls      []map[string]any // 历次 create arguments（C8.3 握手顺序）
+	jobIDs     []string
+	generates  atomic.Int32
+	driftFirst atomic.Bool
+	legacyShot atomic.Bool  // true：忽略 stage，一次出齐 COMPLETED（对方未落地 C8.3）
+	failAt     atomic.Int32 // >0 时第 N 次 create 返回 500
+	outline    atomic.Value // string，当前交回的课件大纲
+	lastStage  string
+	projectID  string
 }
 
 const (
@@ -128,7 +141,26 @@ func newFakePPT(t *testing.T) *fakePPT {
 			f.mu.Lock()
 			f.lastHeader = r.Header.Clone()
 			f.lastBody = rpc.Params.Arguments
+			f.calls = append(f.calls, rpc.Params.Arguments)
+			f.jobIDs = append(f.jobIDs, r.Header.Get("X-Job-Id"))
+			if s, _ := rpc.Params.Arguments["stage"].(string); s != "" {
+				f.lastStage = s
+			} else {
+				f.lastStage = ""
+			}
+			if pid, _ := rpc.Params.Arguments["project_id"].(string); pid != "" {
+				f.projectID = pid
+			} else if f.projectID == "" {
+				f.projectID = "pj-1"
+			}
+			pid := f.projectID
 			f.mu.Unlock()
+			n := f.generates.Add(1)
+			if f.driftFirst.Load() && n == 1 {
+				f.outline.Store(`{"source":"generated-deck","slides":[{"order":1,"type":"COVER","title":"封面"},{"order":2,"type":"CONTENT","title":"目录"}]}`)
+			} else {
+				f.outline.Store(fakeDeckOutlineJSON)
+			}
 			cur := f.cur.Add(1)
 			defer f.cur.Add(-1)
 			for {
@@ -143,20 +175,41 @@ func newFakePPT(t *testing.T) *fakePPT {
 			if f.block != nil {
 				<-f.block
 			}
-			if f.failGenerate.Load() {
+			if f.failGenerate.Load() || (f.failAt.Load() != 0 && n == f.failAt.Load()) {
 				w.WriteHeader(http.StatusInternalServerError)
 				fmt.Fprint(w, `{"error":{"code":"internal","message":"boom","retryable":true}}`)
 				return
 			}
-			writeMCPTool(w, map[string]any{"project_id": "pj-1", "status": "queued"})
+			writeMCPTool(w, map[string]any{"project_id": pid, "status": "queued"})
 		case "get_generation_status":
+			f.mu.Lock()
+			stage := f.lastStage
+			legacy := f.legacyShot.Load()
+			f.mu.Unlock()
+			outlineURL := ""
+			if !f.outlineEmpty.Load() {
+				outlineURL = f.srv.URL + "/files/outline"
+			}
+			if !legacy && stage == pptcreator.StageOutline {
+				result := map[string]string{
+					"outline_url": outlineURL,
+					"notes_url":   f.srv.URL + "/files/notes",
+				}
+				writeMCPTool(w, map[string]any{
+					"status": "OUTLINE_READY",
+					"usage":  map[string]any{"pages": 2, "llm_tokens": 500},
+					"cost":   map[string]string{"currency": "CNY", "vendor_cost": "0.800000"},
+					"result": result,
+				})
+				return
+			}
 			result := map[string]string{
 				"pptx_url":   f.srv.URL + "/files/pptx",
 				"notes_url":  f.srv.URL + "/files/notes",
 				"script_url": f.srv.URL + "/files/script",
 			}
-			if !f.outlineEmpty.Load() {
-				result["outline_url"] = f.srv.URL + "/files/outline"
+			if outlineURL != "" {
+				result["outline_url"] = outlineURL
 			}
 			writeMCPTool(w, map[string]any{
 				"status": "COMPLETED",
@@ -181,6 +234,10 @@ func newFakePPT(t *testing.T) *fakePPT {
 	mux.HandleFunc("GET /files/outline", func(w http.ResponseWriter, r *http.Request) {
 		if f.outlineEmpty.Load() {
 			fmt.Fprint(w, `{"source":"generated-deck","slides":[]}`)
+			return
+		}
+		if s, ok := f.outline.Load().(string); ok && s != "" {
+			fmt.Fprint(w, s)
 			return
 		}
 		fmt.Fprint(w, fakeDeckOutlineJSON)
@@ -252,7 +309,7 @@ func TestHappyPath(t *testing.T) {
 		t.Fatalf("package status = %s, want ready", s)
 	}
 
-	for _, kind := range []string{"outline", "ppt", "script"} {
+	for _, kind := range []string{"plan", "outline", "ppt", "script"} {
 		var ref string
 		if err := testDB.QueryRow(
 			"SELECT storage_ref FROM artifacts WHERE package_id = ? AND kind = ? AND is_current = 1",
@@ -265,6 +322,21 @@ func TestHappyPath(t *testing.T) {
 		}
 		data, _ := io.ReadAll(rc)
 		rc.Close()
+		if kind == "plan" {
+			if !strings.HasSuffix(ref, ".docx") {
+				t.Fatalf("plan storage_ref = %q, want .docx", ref)
+			}
+			text, err := extract.Text("docx", data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(text, "教案") || !strings.Contains(text, "能陈述差商定义") || !strings.Contains(text, "从课文里的平均变化率讲起") {
+				t.Fatalf("plan docx = %s", text)
+			}
+			if strings.Contains(text, "第一页讲稿") || strings.Contains(text, "课件对照") {
+				t.Fatalf("plan still looks like 讲稿 or drifted: %s", text)
+			}
+		}
 		if kind == "ppt" && string(data) != fakePptxBytes {
 			t.Fatalf("pptx 内容 = %q", data)
 		}
@@ -306,24 +378,34 @@ func TestHappyPath(t *testing.T) {
 
 	e.ppt.mu.Lock()
 	h := e.ppt.lastHeader
-	body := e.ppt.lastBody
+	calls := append([]map[string]any(nil), e.ppt.calls...)
 	e.ppt.mu.Unlock()
+	if len(calls) != 2 {
+		t.Fatalf("generates = %d, want 2 (outline then pptx)", len(calls))
+	}
 	if h.Get("X-Partner-Key") != "partner-key-test" || h.Get("X-Org-Id") != e.orgID ||
 		h.Get("X-Member-Id") != e.memberID || h.Get("X-Job-Id") == "" {
 		t.Fatalf("partner 头缺失: %v", h)
 	}
-	if _, ok := body["document"]; ok {
-		t.Fatalf("must not send singular document (方向二): %#v", body["document"])
+	first, last := calls[0], calls[1]
+	if first["stage"] != pptcreator.StageOutline {
+		t.Fatalf("first stage = %#v, want outline", first["stage"])
 	}
-	if body["style"] != "editorial" {
-		t.Fatalf("style = %#v, want editorial", body["style"])
+	if _, ok := first["confirmed_outline"]; ok {
+		t.Fatalf("first generate must not send confirmed_outline: %#v", first["confirmed_outline"])
 	}
-	docs, _ := body["documents"].([]any)
+	if _, ok := first["document"]; ok {
+		t.Fatalf("must not send singular document (方向二): %#v", first["document"])
+	}
+	if first["style"] != pptcreator.DefaultStyle {
+		t.Fatalf("style = %#v, want %s", first["style"], pptcreator.DefaultStyle)
+	}
+	docs, _ := first["documents"].([]any)
 	if len(docs) < 1 {
-		t.Fatalf("documents = %#v", body["documents"])
+		t.Fatalf("documents = %#v", first["documents"])
 	}
 	roles := map[string]int{}
-	var textbook map[string]any
+	var textbook, design map[string]any
 	for _, raw := range docs {
 		d, _ := raw.(map[string]any)
 		role, _ := d["role"].(string)
@@ -331,12 +413,21 @@ func TestHappyPath(t *testing.T) {
 		if role == "textbook" {
 			textbook = d
 		}
-		if _, ok := d["content"]; ok && d["content"] != nil && d["content"] != "" {
-			t.Fatalf("must not send gateway design/outline content: %#v", d)
+		if role == "teaching_design" {
+			design = d
+		}
+		if role != "teaching_design" {
+			if _, ok := d["content"]; ok && d["content"] != nil && d["content"] != "" {
+				t.Fatalf("must not send gateway design/outline content on %s: %#v", role, d)
+			}
 		}
 	}
-	if roles["textbook"] != 1 || roles["teaching_design"] != 0 {
+	if roles["textbook"] != 1 || roles["teaching_design"] != 1 {
 		t.Fatalf("roles = %v", roles)
+	}
+	content, _ := design["content"].(string)
+	if !strings.Contains(content, "教学目标") && !strings.Contains(content, "教学重点") {
+		t.Fatalf("teaching_design content = %q", content)
 	}
 	url, _ := textbook["url"].(string)
 	if textbook["content"] != nil {
@@ -345,8 +436,114 @@ func TestHappyPath(t *testing.T) {
 	if !strings.Contains(url, "https://app.example.test/media/") || !strings.Contains(url, "0.txt") {
 		t.Fatalf("textbook url = %q", url)
 	}
-	if _, ok := body["confirmed_outline"]; ok {
-		t.Fatalf("first generate must not send confirmed_outline: %#v", body["confirmed_outline"])
+	if last["stage"] != pptcreator.StagePPTX {
+		t.Fatalf("second stage = %#v, want pptx", last["stage"])
+	}
+	if last["project_id"] != "pj-1" {
+		t.Fatalf("pptx must reuse outline project_id: %#v", last["project_id"])
+	}
+	e.ppt.mu.Lock()
+	ids := append([]string(nil), e.ppt.jobIDs...)
+	e.ppt.mu.Unlock()
+	if len(ids) != 2 || ids[0] == "" || ids[0] == ids[1] {
+		t.Fatalf("X-Job-Id outline vs pptx must differ: %v", ids)
+	}
+	raw, ok := last["confirmed_outline"]
+	if !ok {
+		t.Fatal("pptx stage must send confirmed_outline")
+	}
+	b, _ := json.Marshal(raw)
+	if !strings.Contains(string(b), "导数") || !strings.Contains(string(b), "差商") {
+		t.Fatalf("confirmed_outline = %s", b)
+	}
+}
+
+func TestPPTRetriesWhenDeckDriftsFromPlan(t *testing.T) {
+	e := newEnv(t)
+	e.ppt.driftFirst.Store(true)
+	lesson := e.submit(t)
+	if lesson.Status != "succeeded" {
+		t.Fatalf("status = %s", lesson.Status)
+	}
+	if n := e.ppt.generates.Load(); n != 3 {
+		t.Fatalf("generates = %d, want 3 (outline drift, outline critique, pptx)", n)
+	}
+	e.ppt.mu.Lock()
+	calls := append([]map[string]any(nil), e.ppt.calls...)
+	e.ppt.mu.Unlock()
+	if len(calls) != 3 {
+		t.Fatalf("calls = %d", len(calls))
+	}
+	if calls[1]["stage"] != pptcreator.StageOutline {
+		t.Fatalf("retry stage = %#v", calls[1]["stage"])
+	}
+	if _, ok := calls[1]["confirmed_outline"]; ok {
+		t.Fatalf("outline retry must not lock drifted confirmed_outline: %#v", calls[1]["confirmed_outline"])
+	}
+	critique, _ := calls[1]["critique"].(string)
+	if !strings.Contains(critique, "课件与教案对不上") || !strings.Contains(critique, "教学重点") {
+		t.Fatalf("retry critique = %q", critique)
+	}
+	if calls[2]["stage"] != pptcreator.StagePPTX {
+		t.Fatalf("burn stage = %#v", calls[2]["stage"])
+	}
+	e.ppt.mu.Lock()
+	ids := append([]string(nil), e.ppt.jobIDs...)
+	e.ppt.mu.Unlock()
+	if len(ids) != 3 || ids[0] == ids[1] || ids[0] == ids[2] || ids[1] == ids[2] {
+		t.Fatalf("three creates must use distinct X-Job-Id: %v", ids)
+	}
+	b, _ := json.Marshal(calls[2]["confirmed_outline"])
+	if !strings.Contains(string(b), "差商") || strings.Contains(string(b), `"title":"封面"`) {
+		t.Fatalf("pptx confirmed_outline still drifted: %s", b)
+	}
+	var ref string
+	if err := testDB.QueryRow(
+		"SELECT storage_ref FROM artifacts WHERE package_id = ? AND kind = 'outline' AND is_current = 1",
+		lesson.PackageID).Scan(&ref); err != nil {
+		t.Fatal(err)
+	}
+	rc, err := e.store.Open(context.Background(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := io.ReadAll(rc)
+	rc.Close()
+	if !strings.Contains(string(data), "差商") || strings.Contains(string(data), `"title":"封面"`) {
+		t.Fatalf("current outline still drifted: %s", data)
+	}
+}
+
+func TestPPTOutlineRetryErrorDoesNotBurnDriftedDeck(t *testing.T) {
+	e := newEnv(t)
+	e.ppt.driftFirst.Store(true)
+	e.ppt.failAt.Store(2)
+	lesson := e.submit(t)
+	if s := jobStatus(t, lesson.LessonJobID); s != "failed" {
+		t.Fatalf("lesson status = %s, want failed", s)
+	}
+	if n := e.ppt.generates.Load(); n != 2 {
+		t.Fatalf("generates = %d, want 2 (outline then failed critique)", n)
+	}
+	var n int
+	if err := testDB.QueryRow(
+		"SELECT COUNT(*) FROM artifacts WHERE package_id = ? AND kind = 'ppt'", lesson.PackageID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("must not store pptx after outline retry error: %d", n)
+	}
+}
+
+func TestPPTLegacyPartnerCompletesWithoutOutlineStop(t *testing.T) {
+	e := newEnv(t)
+	e.ppt.legacyShot.Store(true)
+	lesson := e.submit(t)
+	if lesson.Status != "succeeded" {
+		t.Fatalf("status = %s", lesson.Status)
+	}
+	if n := e.ppt.generates.Load(); n != 1 {
+		t.Fatalf("legacy partner generates = %d, want 1 (one-shot pptx)", n)
 	}
 }
 
@@ -356,29 +553,33 @@ func TestPackPPTDocuments(t *testing.T) {
 			{Name: "课文.pdf", URL: "https://files.example.test/a.pdf"},
 			{Name: "参考.docx", URL: "https://files.example.test/b.docx"},
 		},
+		"# 教案\n教学目标：能陈述差商",
 	)
-	if len(docs) != 2 {
+	if len(docs) != 3 {
 		t.Fatalf("len=%d %#v", len(docs), docs)
 	}
 	if docs[0].Role != "textbook" || docs[0].URL != "https://files.example.test/a.pdf" || docs[0].Content != "" {
 		t.Fatalf("textbook = %#v", docs[0])
 	}
-	if docs[1].Role != "reference" || docs[1].URL != "https://files.example.test/b.docx" || docs[1].Content != "" {
-		t.Fatalf("extra material = %#v", docs[1])
+	if docs[1].Role != "teaching_design" || !strings.Contains(docs[1].Content, "教学目标") || docs[1].URL != "" {
+		t.Fatalf("teaching_design = %#v", docs[1])
+	}
+	if docs[2].Role != "reference" || docs[2].URL != "https://files.example.test/b.docx" || docs[2].Content != "" {
+		t.Fatalf("extra material = %#v", docs[2])
 	}
 
 	many := make([]pptFile, 8)
 	for i := range many {
 		many[i] = pptFile{Name: fmt.Sprintf("%d.pdf", i+1), URL: fmt.Sprintf("https://files.example.test/%d.pdf", i+1)}
 	}
-	capped := packPPTDocuments(many)
+	capped := packPPTDocuments(many, "# 教案\n教学目标：能陈述差商")
 	if len(capped) != 5 {
 		t.Fatalf("cap len=%d", len(capped))
 	}
-	if capped[0].Role != "textbook" {
+	if capped[0].Role != "textbook" || capped[1].Role != "teaching_design" {
 		t.Fatalf("priority lost: %#v", capped)
 	}
-	for i := 1; i < 5; i++ {
+	for i := 2; i < 5; i++ {
 		if capped[i].Role != "reference" || capped[i].Content != "" {
 			t.Fatalf("slot %d = %#v", i, capped[i])
 		}
@@ -650,26 +851,11 @@ func TestEmptyMaterialStillForwardsFile(t *testing.T) {
 	lesson, err := e.exec.SubmitLesson(context.Background(), SubmitInput{
 		OrgID: e.orgID, MemberID: e.memberID, ProjectID: e.projectID, CourseLessonID: e.courseLessonID, Title: "导数",
 	})
-	if err != nil {
-		t.Fatal(err)
+	if !errors.Is(err, ErrNoLessonText) {
+		t.Fatalf("err=%v lesson=%v, want ErrNoLessonText", err, lesson)
 	}
-	if lesson.Status != "succeeded" {
-		t.Fatalf("status = %s, want succeeded (empty extract must not block submit)", lesson.Status)
-	}
-	e.ppt.mu.Lock()
-	body := e.ppt.lastBody
-	e.ppt.mu.Unlock()
-	docs, _ := body["documents"].([]any)
-	var textbook map[string]any
-	for _, raw := range docs {
-		d, _ := raw.(map[string]any)
-		if d["role"] == "textbook" {
-			textbook = d
-		}
-	}
-	url, _ := textbook["url"].(string)
-	if textbook["content"] != nil || !strings.Contains(url, "empty.txt") {
-		t.Fatalf("empty file must still be forwarded by url: %#v", textbook)
+	if e.ppt.generates.Load() != 0 {
+		t.Fatalf("ppt must not run without 教案: generates=%d", e.ppt.generates.Load())
 	}
 }
 
@@ -695,26 +881,11 @@ func TestCorruptFileStillForwards(t *testing.T) {
 	lesson, err := e.exec.SubmitLesson(context.Background(), SubmitInput{
 		OrgID: e.orgID, MemberID: e.memberID, ProjectID: e.projectID, CourseLessonID: e.courseLessonID, Title: "导数",
 	})
-	if err != nil {
-		t.Fatal(err)
+	if !errors.Is(err, ErrNoLessonText) {
+		t.Fatalf("err=%v lesson=%v, want ErrNoLessonText", err, lesson)
 	}
-	if lesson.Status != "succeeded" {
-		t.Fatalf("status = %s, want succeeded (local extract failure must not block file handoff)", lesson.Status)
-	}
-	e.ppt.mu.Lock()
-	body := e.ppt.lastBody
-	e.ppt.mu.Unlock()
-	docs, _ := body["documents"].([]any)
-	var textbook map[string]any
-	for _, raw := range docs {
-		d, _ := raw.(map[string]any)
-		if d["role"] == "textbook" {
-			textbook = d
-		}
-	}
-	url, _ := textbook["url"].(string)
-	if textbook["content"] != nil || !strings.Contains(url, "bad.docx") {
-		t.Fatalf("corrupt file must still be forwarded by url: %#v", textbook)
+	if e.ppt.generates.Load() != 0 {
+		t.Fatalf("ppt must not run without 教案: generates=%d", e.ppt.generates.Load())
 	}
 }
 
@@ -906,7 +1077,7 @@ func TestGetPackageSignedURLs(t *testing.T) {
 			t.Fatalf("kind %s versions empty", a.Kind)
 		}
 	}
-	for _, k := range []string{"outline", "ppt", "script"} {
+	for _, k := range []string{"plan", "outline", "ppt", "script"} {
 		if !kinds[k] {
 			t.Fatalf("missing artifact kind %s", k)
 		}
@@ -1171,7 +1342,7 @@ func TestReshapeLessonPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Kind != "plan" || got.Version != 1 {
+	if got.Kind != "plan" || got.Version < 2 {
 		t.Fatalf("%+v", got)
 	}
 	var ref string
@@ -1180,14 +1351,30 @@ func TestReshapeLessonPlan(t *testing.T) {
 		lesson.PackageID).Scan(&ref); err != nil {
 		t.Fatal(err)
 	}
+	if !strings.HasSuffix(ref, ".docx") {
+		t.Fatalf("plan storage_ref = %q, want .docx", ref)
+	}
 	rc, err := e.store.Open(context.Background(), ref)
 	if err != nil {
 		t.Fatal(err)
 	}
 	data, _ := io.ReadAll(rc)
 	rc.Close()
-	if !strings.Contains(string(data), `"课题"`) || !strings.Contains(string(data), "第一页讲稿") {
-		t.Fatalf("plan = %s", data)
+	text, err := extract.Text("docx", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text, "教案") || !strings.Contains(text, "教学过程") || !strings.Contains(text, "教师活动") || !strings.Contains(text, "从课文实例引入差商") {
+		t.Fatalf("plan docx = %s", text)
+	}
+	if !strings.Contains(text, "能陈述差商定义") || !strings.Contains(text, "达到会计算简单差商的水平") {
+		t.Fatalf("教学目标 still not LLM outcomes: %s", text)
+	}
+	if !strings.Contains(text, "差商作为平均变化率") || !strings.Contains(text, "瞬时变化率") {
+		t.Fatalf("重难点 still not LLM: %s", text)
+	}
+	if strings.Contains(text, "第一页讲稿") || strings.Contains(text, "讲授要点") {
+		t.Fatalf("plan still looks like 讲稿: %s", text)
 	}
 	if s := packageStatus(t, lesson.PackageID); s != "ready" {
 		t.Fatalf("package status = %s, want ready", s)
@@ -1197,14 +1384,16 @@ func TestReshapeLessonPlan(t *testing.T) {
 	}
 }
 
-func TestReshapeLessonPlanRequiresScript(t *testing.T) {
+func TestReshapeLessonPlanRequiresMaterials(t *testing.T) {
 	e := newEnv(t)
+	lid := ulidStr()
+	execSQL(t, "INSERT INTO course_lessons (id, project_id, title) VALUES (?, ?, ?)", lid, e.projectID, "空课")
 	pkgID := ulidStr()
 	execSQL(t, "INSERT INTO course_packages (id, project_id, lesson_id, status) VALUES (?, ?, ?, 'draft')",
-		pkgID, e.projectID, e.courseLessonID)
+		pkgID, e.projectID, lid)
 	_, err := e.exec.ReshapeLessonPlan(context.Background(), e.orgID, pkgID)
-	if !errors.Is(err, ErrNoScript) {
-		t.Fatalf("err=%v, want ErrNoScript", err)
+	if !errors.Is(err, ErrNoMaterials) {
+		t.Fatalf("err=%v, want ErrNoMaterials", err)
 	}
 }
 

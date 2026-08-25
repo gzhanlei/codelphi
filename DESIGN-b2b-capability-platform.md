@@ -229,14 +229,14 @@ P0 只卖 `digital_lesson`。内核按「目录可以有第二条」来建，不
 
 - PPTCreator 提供 **做 PPT 的能力**（pptx、C 端已有的课件大纲、讲稿 docx）。它不提供 **做课件的能力**。把 partner 一次返回的 pptx 当课件，得到的是 yet another slides deck。
 - **必须有 harness 层**：能力编排、agent loop、验收。看见教师要的是课件，去调已挂插件、迭代、对照「这是课不是路演 deck」停下来。实现 **不必是 DeepSeek Harness**（DSH 是候选之一）。不把 Cordis 迁进 Go，不把教材图的权威交给对话进程。
-- 课件验收（harness，不替代教师最终点头）：有这一章课的展开（教学设计意义上的大纲）、讲稿能收成教案用、不像路演封面。教案栏目整形仍是被编排的一截插件，不是第二条「从材料生成课程设计」向导。
+- 课件验收（harness，不替代教师最终点头）：先有这一章的教案（从课文写，含教学目标/重难点/教学过程/教学讲稿），再把课本+教案交给做片。**对照发生在课件大纲冻住之后、HTML+PPTX 之前**（契约 C8.3）。网关已切这条主路径；对方未落地时若一次出齐 pptx，网关按旧对照兜底。不像路演封面。不要从 PPT 讲稿倒推教案。
 - 教师点「做课件」启动 harness。对话出现在已有设计稿上（左对话右预览）。空聊天不上线。
 
 **做片插件交出什么（不是课件完成）**
 
-- PPTCreator `create_ppt_from_documents` 产出 pptx + 讲稿 docx，C 端另有大纲。Partner 路径目前一枪打到 pptx，**不把大纲交回**，记为做片接口缺口。
-- 讲稿 docx **不一定已经是教案的表现形态**。网关教案能力只负责把它加工成教案该长成的样子，由 harness 调用。
-- **不要**再并行用网关 LLM 从材料生成「课程设计 / 教学大纲」当作教案源。现行 `digital_lesson` 的 design → outline → `awaiting_confirm` 是历史拓扑。
+- PPTCreator `create_ppt_from_documents` 先交回课件大纲（C8.3 `OUTLINE_READY`），对照通过后再交 pptx + 讲稿（C8.1 / C4）。网关把本侧教案以 `teaching_design` 交给做片，不是让对方从课文自己发明教学设计。
+- PPTCreator 的讲稿是幻灯片备注，**不是教案**。本侧教案从课文写；对方可能按自己的理解排页，所以必须在大纲层对照教案，不要等整份 pptx。
+- **不要**用网关 LLM 从材料生成「课程教学大纲」冒充培养方案。现行 `digital_lesson` 的 design → outline → `awaiting_confirm` 是历史拓扑。教案 ≠ 那份伪大纲。
 
 **课件大纲要露出，改法是教学设计对话，不是 PPTCreator 那张表**
 
@@ -468,7 +468,7 @@ PPT 几分钟；数字人成片 + PPT 渲染 + 合成是分钟到小时级。**�
 | 8 | partner 流量拒绝/忽略单页重生 API | `/slides/[n]/regenerate` 路径 | agent 把一页抠 20 次，LLM token 成本失控（成本护栏，非计费口径） |
 | 9 | **讲稿必须回报**：完成响应带逐页备注/讲稿（管线已有 script），与页数对齐；是否需带每页时长由合成器 spike 定 | worker 完成路径 / MCP status | 数字人没有合法输入，会去猜 PPT 正文 |
 | 10 | partner 生成需支持多文档输入（课文、教学设计等多份材料，来自套件 materials[]） | 生成 API / worker 入参 / 数据模型 | **已落地** `create_ppt_from_documents` |
-| 11 | **课件大纲交回/写回**：COMPLETED 带 `outline_url`（与 C 端 htmlOutline 同形）；再生成接受 `confirmed_outline` 写入 `ctx.confirmedOutline` | MCP status / `create_ppt_from_documents` / worker | 网关看不见课件结构；改大纲无法约束做片；只能再出一副 deck |
+| 11 | **课件大纲交回/写回/停住**：C8.1 COMPLETED 带 `outline_url`；C8.2 再生成接受 `confirmed_outline`；**C8.3 在 `writeSpeechV2`/`htmlOutline` 后停住**（`OUTLINE_READY`，不烧 HTML+PPTX），对照通过后再 `stage=pptx` | MCP status / `create_ppt_from_documents` / `html-export.ts` `writeBackHtmlOutline` | 网关只能等整份 pptx 才发现教学重点没落页；对照失败再烧一遍排版 |
 
 第 10 条：PPTCreator 已落地 MCP `create_ppt_from_documents`（方向一）。**网关 P0 走材料包 `documents[]`，不再预合成单文本。** 方向二仅作历史过渡，禁止再发单数 `document`（会落到 `create_ppt_from_text`）。
 

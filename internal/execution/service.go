@@ -25,7 +25,7 @@ import (
 	"codelphi/internal/storage"
 )
 
-// lesson 权威状态机（P0'：材料 → ppt+script+课件大纲，无确认门；大纲来自 partner C8）。每个 step 独立 authorize/settle。
+// lesson 权威状态机（P0'：课文 → 教案 → 做片交出课件大纲+ppt+讲稿，无确认门）。每个 step 独立 authorize/settle；教案插件内 LLM 不预扣。
 var (
 	// ErrIllegalTransition：状态机非法迁移（条件 UPDATE rows=0）。
 	ErrIllegalTransition = errors.New("execution: illegal job status transition")
@@ -47,10 +47,8 @@ var (
 	ErrLessonInFlight = errors.New("execution: lesson already in flight")
 	// ErrNoCurrentPPT：导回要求套件里已有当前 ppt（不是第一次当材料上传）。
 	ErrNoCurrentPPT = errors.New("execution: no current ppt to import over")
-	// ErrNoScript：教案整形要求套件里已有讲稿。
-	ErrNoScript = errors.New("execution: no current script to reshape")
-	// ErrNoNotes：当前讲稿没有可整理的 notes JSON。
-	ErrNoNotes = errors.New("execution: script notes missing")
+	// ErrNoLessonText：材料抽不出课文，无法写教案。
+	ErrNoLessonText = errors.New("execution: lesson materials have no extractable text")
 	// ErrNotPPTX：导回只收 .pptx。
 	ErrNotPPTX = errors.New("execution: import requires a .pptx file")
 	// ErrPPTBusy：套件正在做片/重建，不能同时导回。
@@ -305,8 +303,8 @@ func (s *Service) ImportPPT(ctx context.Context, orgID, packageID, filename stri
 	return &ImportResult{Kind: "ppt", Version: version}, nil
 }
 
-// ReshapeLessonPlan 把当前讲稿 notes（及课件大纲）整理成教案栏目，写入 plan 构件。
-// 不调 PPTCreator、不产生 UsageRecord；plan 不进套件 ready 门禁。
+// ReshapeLessonPlan 依据课文重写教案。课件大纲只用来对照，不是内容来源。
+// 不调 PPTCreator、不产生 UsageRecord；plan 若已在目录里则进 ready 门禁。
 func (s *Service) ReshapeLessonPlan(ctx context.Context, orgID, packageID string) (*ImportResult, error) {
 	if err := s.billing.AssertOrgActive(ctx, orgID); err != nil {
 		if errors.Is(err, billing.ErrOrgSuspended) {
@@ -326,61 +324,168 @@ func (s *Service) ReshapeLessonPlan(ctx context.Context, orgID, packageID string
 	if project.OrgID != orgID {
 		return nil, errors.New("execution: project not in org")
 	}
-	notes, err := s.loadScriptNotes(ctx, packageID)
+	_, texts, err := s.loadLessonMaterials(ctx, pkg.LessonID)
 	if err != nil {
 		return nil, err
 	}
-	outline, err := s.loadCurrentOutline(ctx, packageID)
-	if err != nil {
-		return nil, err
+	if len(texts) == 0 {
+		return nil, ErrNoLessonText
 	}
 	title := project.Title
 	if cl, err := q.GetCourseLesson(ctx, pkg.LessonID); err == nil && cl.Title != "" {
 		title = cl.Title
 	}
-	plan, md, err := lessonplan.Reshape(title, outline, notes)
-	if err != nil {
-		if errors.Is(err, lessonplan.ErrEmpty) {
-			return nil, ErrNoNotes
-		}
-		return nil, err
-	}
-	raw, err := json.Marshal(plan)
+	outline, err := s.loadCurrentOutline(ctx, packageID)
 	if err != nil {
 		return nil, err
 	}
-	version, err := s.nextVersion(ctx, packageID, "plan")
+	plan, err := s.generatePlan(ctx, title, texts, outline, "", "")
 	if err != nil {
 		return nil, err
 	}
-	base := fmt.Sprintf("org/%s/package/%s/plan-v%d", orgID, packageID, version)
-	jsonKey := base + ".json"
-	if err := s.store.Put(ctx, jsonKey, strings.NewReader(string(raw)), "application/json"); err != nil {
+	s.annotatePlanDrift(plan, outline, nil)
+	version, err := s.storePlan(ctx, orgID, packageID, "", plan)
+	if err != nil {
 		return nil, err
 	}
-	if err := s.store.Put(ctx, base+".md", strings.NewReader(md), "text/markdown"); err != nil {
-		return nil, err
-	}
-	if err := s.insertArtifact(ctx, packageID, "plan", version, "", jsonKey); err != nil {
+	if err := s.refreshPackageStatus(ctx, packageID); err != nil {
 		return nil, err
 	}
 	return &ImportResult{Kind: "plan", Version: version}, nil
 }
 
-func (s *Service) loadScriptNotes(ctx context.Context, packageID string) ([]byte, error) {
+func (s *Service) generatePlan(ctx context.Context, title string, texts []string, outline json.RawMessage, note, critique string) (*lessonplan.Plan, error) {
+	got, err := s.llm.Generate(ctx, llm.GenerateRequest{
+		Kind:      llm.KindPlan,
+		Title:     title,
+		Materials: texts,
+		Outline:   string(outline),
+		Note:      note,
+		Critique:  critique,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("execution: lesson plan llm: %w", err)
+	}
+	plan, err := lessonplan.FromTeaching(title, got.JSON)
+	if err != nil {
+		return nil, err
+	}
+	return plan, nil
+}
+
+func (s *Service) storePlan(ctx context.Context, orgID, packageID, stepID string, plan *lessonplan.Plan) (int32, error) {
+	md := lessonplan.Markdown(plan)
+	raw, err := json.Marshal(plan)
+	if err != nil {
+		return 0, err
+	}
+	docx, err := lessonplan.WriteDocx(plan)
+	if err != nil {
+		return 0, err
+	}
+	version, err := s.nextVersion(ctx, packageID, "plan")
+	if err != nil {
+		return 0, err
+	}
+	base := fmt.Sprintf("org/%s/package/%s/plan-v%d", orgID, packageID, version)
+	if err := s.store.Put(ctx, base+".json", strings.NewReader(string(raw)), "application/json"); err != nil {
+		return 0, err
+	}
+	if err := s.store.Put(ctx, base+".md", strings.NewReader(md), "text/markdown"); err != nil {
+		return 0, err
+	}
+	docxKey := base + ".docx"
+	if err := s.store.Put(ctx, docxKey, bytes.NewReader(docx), "application/vnd.openxmlformats-officedocument.wordprocessingml.document"); err != nil {
+		return 0, err
+	}
+	if err := s.insertArtifact(ctx, packageID, "plan", version, stepID, docxKey); err != nil {
+		return 0, err
+	}
+	return version, nil
+}
+
+func (s *Service) annotatePlanDrift(plan *lessonplan.Plan, outline, notes json.RawMessage) {
+	if plan == nil {
+		return
+	}
+	issues := lessonplan.CheckDeck(plan, outline, notes)
+	plan.Drift = nil
+	for _, it := range issues {
+		plan.Drift = append(plan.Drift, it.String())
+	}
+}
+
+func (s *Service) loadCurrentPlan(ctx context.Context, packageID string) (*lessonplan.Plan, error) {
+	data, err := s.readCurrentKind(ctx, packageID, "plan")
+	if err != nil || len(data) == 0 {
+		return nil, err
+	}
+	var p lessonplan.Plan
+	if err := json.Unmarshal(data, &p); err != nil {
+		return nil, fmt.Errorf("execution: plan json: %w", err)
+	}
+	return &p, nil
+}
+
+func (s *Service) loadPlanMarkdown(ctx context.Context, packageID string) (string, error) {
+	p, err := s.loadCurrentPlan(ctx, packageID)
+	if err != nil || p == nil {
+		return "", err
+	}
+	return lessonplan.Markdown(p), nil
+}
+
+func (s *Service) rewriteCurrentPlan(ctx context.Context, orgID, packageID string, plan *lessonplan.Plan) error {
+	arts, err := dbgen.New(s.db).ListCurrentArtifacts(ctx, packageID)
+	if err != nil {
+		return err
+	}
+	var ref string
+	for _, a := range arts {
+		if a.Kind == "plan" && a.StorageRef.Valid {
+			ref = a.StorageRef.String
+			break
+		}
+	}
+	if ref == "" {
+		_, err := s.storePlan(ctx, orgID, packageID, "", plan)
+		return err
+	}
+	base := strings.TrimSuffix(ref, ".docx")
+	base = strings.TrimSuffix(base, ".json")
+	base = strings.TrimSuffix(base, ".md")
+	raw, err := json.Marshal(plan)
+	if err != nil {
+		return err
+	}
+	md := lessonplan.Markdown(plan)
+	docx, err := lessonplan.WriteDocx(plan)
+	if err != nil {
+		return err
+	}
+	if err := s.store.Put(ctx, base+".json", strings.NewReader(string(raw)), "application/json"); err != nil {
+		return err
+	}
+	if err := s.store.Put(ctx, base+".md", strings.NewReader(md), "text/markdown"); err != nil {
+		return err
+	}
+	return s.store.Put(ctx, base+".docx", bytes.NewReader(docx), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+}
+
+func (s *Service) readCurrentKind(ctx context.Context, packageID, kind string) ([]byte, error) {
 	arts, err := dbgen.New(s.db).ListCurrentArtifacts(ctx, packageID)
 	if err != nil {
 		return nil, err
 	}
 	var ref string
 	for _, a := range arts {
-		if a.Kind == "script" && a.StorageRef.Valid && a.StorageRef.String != "" {
+		if a.Kind == kind && a.StorageRef.Valid && a.StorageRef.String != "" {
 			ref = a.StorageRef.String
 			break
 		}
 	}
 	if ref == "" {
-		return nil, ErrNoScript
+		return nil, nil
 	}
 	key := ref
 	if strings.HasSuffix(strings.ToLower(key), ".docx") {
@@ -388,14 +493,10 @@ func (s *Service) loadScriptNotes(ctx context.Context, packageID string) ([]byte
 	}
 	rc, err := s.store.Open(ctx, key)
 	if err != nil {
-		return nil, ErrNoNotes
-	}
-	data, err := io.ReadAll(io.LimitReader(rc, extract.MaxBytes+1))
-	rc.Close()
-	if err != nil {
 		return nil, err
 	}
-	return data, nil
+	defer rc.Close()
+	return io.ReadAll(io.LimitReader(rc, extract.MaxBytes+1))
 }
 
 // Wait 等后台 StartLesson/StartConfirm 结束（进程退出前由 gateway 调用）。
@@ -450,6 +551,9 @@ func (s *Service) prepareLesson(ctx context.Context, in SubmitInput) (*preparedL
 	files, texts, err := s.loadLessonMaterials(ctx, in.CourseLessonID)
 	if err != nil {
 		return nil, err
+	}
+	if len(texts) == 0 {
+		return nil, ErrNoLessonText
 	}
 
 	lessonID, packageID := ulid.Make().String(), ulid.Make().String()
@@ -746,15 +850,12 @@ func (s *Service) runPPTStep(ctx context.Context, in SubmitInput, lessonID, pack
 		s.failStep(ctx, stepID, "storage_error", err.Error())
 		return err
 	}
-	res, err := s.ppt.Generate(ctx, pptcreator.GenerateRequest{
-		JobID: stepID, OrgID: in.OrgID, MemberID: in.MemberID,
-		Title: in.Title, Documents: docs, Note: note, Critique: critique,
-		ConfirmedOutline: confirmed,
-	})
+	res, aligned, err := s.produceDeck(ctx, in, packageID, stepID, docs, note, critique, confirmed)
 	if err != nil {
 		s.settleFailure(ctx, d.ReservationID, stepID)
 		code := "partner_error"
-		if pe, ok := err.(*pptcreator.Error); ok {
+		var pe *pptcreator.Error
+		if errors.As(err, &pe) {
 			code = pe.Code
 		}
 		s.failStep(ctx, stepID, code, err.Error())
@@ -766,10 +867,159 @@ func (s *Service) runPPTStep(ctx context.Context, in SubmitInput, lessonID, pack
 		s.failStep(ctx, stepID, "storage_error", err.Error())
 		return err
 	}
+	if !aligned {
+		if err := s.alignDeckToPlan(ctx, in, packageID, stepID, docs, note, critique, res); err != nil {
+			s.settleFailure(ctx, d.ReservationID, stepID)
+			s.failStep(ctx, stepID, "storage_error", err.Error())
+			return err
+		}
+	}
 	if err := s.billing.Settle(ctx, billing.SettleInput{
 		ReservationID: d.ReservationID, JobID: stepID,
 		ActualAmount: 1, VendorCost: &res.VendorCost, Outcome: billing.OutcomeSuccess,
 	}); err != nil {
+		return err
+	}
+	return s.transition(ctx, stepID, dbgen.JobsStatusRunning, dbgen.JobsStatusSucceeded)
+}
+
+// produceDeck 走契约 C8.3：先 stage=outline 对照教案，通过后再 stage=pptx。
+// 对方仍一次出齐 COMPLETED（未落地 #127）时 aligned=false，由 alignDeckToPlan 兜底。
+// 已有 confirmed_outline（Rebuild）则直接烧片，不再重排页。
+func (s *Service) produceDeck(ctx context.Context, in SubmitInput, packageID, stepID string, docs []pptcreator.Doc, note, critique string, confirmed json.RawMessage) (*pptcreator.Result, bool, error) {
+	if len(bytes.TrimSpace(confirmed)) > 0 {
+		res, err := s.ppt.Generate(ctx, pptcreator.GenerateRequest{
+			JobID: stepID, OrgID: in.OrgID, MemberID: in.MemberID,
+			Title: in.Title, Documents: docs, Note: note, Critique: critique,
+			Stage: pptcreator.StagePPTX, ConfirmedOutline: confirmed,
+		})
+		return res, true, err
+	}
+
+	outlineJob := ulid.Make().String()
+	first, err := s.ppt.Generate(ctx, pptcreator.GenerateRequest{
+		JobID: outlineJob, OrgID: in.OrgID, MemberID: in.MemberID,
+		Title: in.Title, Documents: docs, Note: note, Critique: critique,
+		Stage: pptcreator.StageOutline,
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	if strings.TrimSpace(first.PptxURL) != "" {
+		return first, false, nil
+	}
+
+	outline, notes := first.Outline, first.Notes
+	projectID := first.ProjectID
+	plan, err := s.loadCurrentPlan(ctx, packageID)
+	if err != nil {
+		return nil, false, err
+	}
+	issues := lessonplan.CheckDeck(plan, outline, notes)
+	if focusUncovered(issues) && strings.TrimSpace(critique) == "" {
+		retry, rerr := s.ppt.Generate(ctx, pptcreator.GenerateRequest{
+			JobID: ulid.Make().String(), OrgID: in.OrgID, MemberID: in.MemberID,
+			Title: in.Title, Documents: docs, Note: note,
+			Critique:  lessonplan.Critique(issues),
+			Stage:     pptcreator.StageOutline,
+			ProjectID: projectID,
+		})
+		if rerr != nil {
+			return nil, false, rerr
+		}
+		if strings.TrimSpace(retry.PptxURL) != "" {
+			return retry, false, nil
+		}
+		outline, notes = retry.Outline, retry.Notes
+		if retry.ProjectID != "" {
+			projectID = retry.ProjectID
+		}
+	}
+	if plan != nil {
+		s.annotatePlanDrift(plan, outline, notes)
+		if len(plan.Drift) > 0 {
+			if err := s.rewriteCurrentPlan(ctx, in.OrgID, packageID, plan); err != nil {
+				return nil, false, err
+			}
+		}
+	}
+
+	res, err := s.ppt.Generate(ctx, pptcreator.GenerateRequest{
+		JobID: stepID, OrgID: in.OrgID, MemberID: in.MemberID,
+		Title: in.Title, Documents: docs, Note: note, Critique: critique,
+		Stage: pptcreator.StagePPTX, ProjectID: projectID, ConfirmedOutline: outline,
+	})
+	return res, true, err
+}
+
+func (s *Service) alignDeckToPlan(ctx context.Context, in SubmitInput, packageID, stepID string, docs []pptcreator.Doc, note, critique string, first *pptcreator.Result) error {
+	plan, err := s.loadCurrentPlan(ctx, packageID)
+	if err != nil || plan == nil {
+		return err
+	}
+	outline, notes := first.Outline, first.Notes
+	issues := lessonplan.CheckDeck(plan, outline, notes)
+	if focusUncovered(issues) && strings.TrimSpace(critique) == "" {
+		res2, err := s.ppt.Generate(ctx, pptcreator.GenerateRequest{
+			JobID: ulid.Make().String(), OrgID: in.OrgID, MemberID: in.MemberID,
+			Title: in.Title, Documents: docs, Note: note,
+			Critique: lessonplan.Critique(issues),
+		})
+		if err == nil {
+			if err := s.storePPTArtifacts(ctx, in.OrgID, packageID, stepID, res2); err != nil {
+				return err
+			}
+			outline, notes = res2.Outline, res2.Notes
+		}
+	}
+	s.annotatePlanDrift(plan, outline, notes)
+	if len(plan.Drift) == 0 {
+		return nil
+	}
+	return s.rewriteCurrentPlan(ctx, in.OrgID, packageID, plan)
+}
+
+func focusUncovered(issues []lessonplan.Issue) bool {
+	for _, it := range issues {
+		if it.Code == "uncovered_focus" {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) runPlanStep(ctx context.Context, p *preparedLesson, note, critique string) error {
+	if err := s.billing.AssertOrgActive(ctx, p.in.OrgID); err != nil {
+		if errors.Is(err, billing.ErrOrgSuspended) {
+			return ErrOrgSuspended
+		}
+		return err
+	}
+	if len(p.texts) == 0 {
+		return ErrNoLessonText
+	}
+	stepID := ulid.Make().String()
+	if err := s.insertStep(ctx, stepID, p.in, p.lessonID, p.packageID, "plan", "llm"); err != nil {
+		return err
+	}
+	release := s.acquire(ctx, p.in.OrgID, "llm")
+	defer release()
+	if err := s.transition(ctx, stepID, dbgen.JobsStatusQueued, dbgen.JobsStatusRunning); err != nil {
+		return err
+	}
+	outline, err := s.loadCurrentOutline(ctx, p.packageID)
+	if err != nil {
+		s.failStep(ctx, stepID, "storage_error", err.Error())
+		return err
+	}
+	plan, err := s.generatePlan(ctx, p.in.Title, p.texts, outline, note, critique)
+	if err != nil {
+		s.failStep(ctx, stepID, "llm_error", err.Error())
+		return err
+	}
+	s.annotatePlanDrift(plan, outline, nil)
+	if _, err := s.storePlan(ctx, p.in.OrgID, p.packageID, stepID, plan); err != nil {
+		s.failStep(ctx, stepID, "storage_error", err.Error())
 		return err
 	}
 	return s.transition(ctx, stepID, dbgen.JobsStatusRunning, dbgen.JobsStatusSucceeded)
@@ -912,8 +1162,8 @@ func (s *Service) insertArtifact(ctx context.Context, packageID string, kind str
 	return tx.Commit()
 }
 
-// loadLessonMaterials 列出该课原文件（转交 PPTCreator 用），并尽量抽文本给 LLM。
-// 抽不出字（扫描件 PDF、空白 txt）不挡提交：PPT 侧按原文件解析。
+// loadLessonMaterials 列出该课原文件（转交 PPTCreator 用），并尽量抽文本给教案 LLM。
+// 抽不出字则无法写教案，由调用方按 ErrNoLessonText 拒绝。
 func (s *Service) loadLessonMaterials(ctx context.Context, courseLessonID string) ([]storedMaterial, []string, error) {
 	materials, err := dbgen.New(s.db).ListLessonMaterials(ctx, courseLessonID)
 	if err != nil {
@@ -987,30 +1237,39 @@ func absolutizeURL(base, u string) string {
 	return strings.TrimRight(base, "/") + u
 }
 
-// packPPTDocuments 组 create_ppt_from_documents 材料包（契约 C2 / C8）。
-// 教师原文件走 url。不再把网关自造 design/outline JSON 塞进 documents[]。
-func packPPTDocuments(files []pptFile) []pptcreator.Doc {
+// packPPTDocuments 组 create_ppt_from_documents 材料包（契约 C2）。
+// 教师原文件走 url；本侧教案走 teaching_design content。不做片前的课件大纲不塞进 documents[]。
+func packPPTDocuments(files []pptFile, teachingDesign string) []pptcreator.Doc {
 	const maxDocs = 5
 	docs := make([]pptcreator.Doc, 0, maxDocs)
-	appendFile := func(role, name, fileURL string) {
-		if strings.TrimSpace(fileURL) == "" || len(docs) >= maxDocs {
+	appendDoc := func(d pptcreator.Doc) {
+		if len(docs) >= maxDocs {
 			return
 		}
+		docs = append(docs, d)
+	}
+	if len(files) > 0 {
+		name := files[0].Name
 		if name == "" {
-			name = "材料"
+			name = "课文"
 		}
-		docs = append(docs, pptcreator.Doc{Role: role, Name: name, URL: fileURL})
+		if strings.TrimSpace(files[0].URL) != "" {
+			appendDoc(pptcreator.Doc{Role: "textbook", Name: name, URL: files[0].URL})
+		}
+		files = files[1:]
 	}
-	if len(files) == 0 {
-		return docs
+	if s := strings.TrimSpace(teachingDesign); len([]rune(s)) >= 10 {
+		appendDoc(pptcreator.Doc{Role: "teaching_design", Name: "教案.md", Content: s})
 	}
-	appendFile("textbook", files[0].Name, files[0].URL)
-	for i, f := range files[1:] {
+	for i, f := range files {
+		if strings.TrimSpace(f.URL) == "" {
+			continue
+		}
 		name := f.Name
 		if name == "" {
 			name = fmt.Sprintf("材料 %d", i+2)
 		}
-		appendFile("reference", name, f.URL)
+		appendDoc(pptcreator.Doc{Role: "reference", Name: name, URL: f.URL})
 	}
 	return docs
 }
@@ -1024,7 +1283,11 @@ func (s *Service) loadPPTDocuments(ctx context.Context, p *preparedLesson) ([]pp
 		}
 		signed = append(signed, pptFile{Name: f.Name, URL: u})
 	}
-	docs := packPPTDocuments(signed)
+	design, err := s.loadPlanMarkdown(ctx, p.packageID)
+	if err != nil {
+		return nil, err
+	}
+	docs := packPPTDocuments(signed, design)
 	for _, d := range docs {
 		if d.Role == "textbook" {
 			return docs, nil
@@ -1072,6 +1335,9 @@ func stepEmitting(spec preset.Preset, kind string) (preset.Step, error) {
 func (s *Service) runCatalogStep(ctx context.Context, p *preparedLesson, step preset.Step, note, critique string) error {
 	switch step.Platform {
 	case "llm":
+		if step.Capability == "plan" {
+			return s.runPlanStep(ctx, p, note, critique)
+		}
 		return s.runLLMStep(ctx, p.in, p.project, p.lessonID, p.packageID, llm.Kind(step.Capability), p.texts, note, critique)
 	case "pptcreator":
 		docs, err := s.loadPPTDocuments(ctx, p)

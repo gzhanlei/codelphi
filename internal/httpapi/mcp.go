@@ -84,7 +84,8 @@ func (s *server) mcpCall(w http.ResponseWriter, r *http.Request, c *identity.Con
 		}
 		got, err := s.exec.ReshapeLessonPlan(r.Context(), c.OrgID, packageID)
 		if err != nil {
-			writeRPC(w, req.ID, rpcErr(-32000, "reshape_failed", "internal", err.Error()))
+			code, msg := mcpExecCode(err)
+			writeRPC(w, req.ID, rpcErr(-32000, msg, code, err.Error()))
 			return
 		}
 		writeRPC(w, req.ID, rpcResult(got))
@@ -167,6 +168,8 @@ func mcpExecCode(err error) (code, msg string) {
 	switch {
 	case errors.Is(err, execution.ErrNoMaterials):
 		return "invalid_request", "请先上传本课材料"
+	case errors.Is(err, execution.ErrNoLessonText):
+		return "invalid_request", "课文抽不出文本，无法写教案"
 	case errors.Is(err, execution.ErrMaterialKindUnsupported):
 		return "material_kind_unsupported", "不支持该文件类型"
 	case errors.Is(err, execution.ErrTooManyMaterials):
@@ -218,7 +221,7 @@ func mcpTools() []map[string]any {
 		},
 		{
 			"name":        "reshape_lesson_plan",
-			"description": "把当前讲稿整理成教案栏目（形态加工，不另写课程设计）。",
+			"description": "依据课文重写教案（不是从 PPT 讲稿倒推）。课件大纲只用来对照是否跑偏。",
 			"inputSchema": map[string]any{
 				"type":       "object",
 				"properties": map[string]any{"package_id": map[string]string{"type": "string"}},

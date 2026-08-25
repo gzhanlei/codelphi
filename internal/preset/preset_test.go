@@ -43,8 +43,8 @@ func TestDigitalLessonP0PrimeTopology(t *testing.T) {
 	if p.Copy.SubmitCTA != "做课件" {
 		t.Fatalf("SubmitCTA = %q, want 做课件", p.Copy.SubmitCTA)
 	}
-	if got := p.Artifacts; len(got) != 3 || got[0] != "outline" || got[1] != "ppt" || got[2] != "script" {
-		t.Fatalf("Artifacts = %v, want [outline ppt script]", got)
+	if got := p.Artifacts; len(got) != 4 || got[0] != "plan" || got[1] != "outline" || got[2] != "ppt" || got[3] != "script" {
+		t.Fatalf("Artifacts = %v, want [plan outline ppt script]", got)
 	}
 	if p.Copy.ArtifactLabels["outline"] != "课件大纲" || p.Copy.ArtifactLabels["ppt"] == "" || p.Copy.ArtifactLabels["script"] == "" {
 		t.Fatalf("labels = %v", p.Copy.ArtifactLabels)
@@ -52,17 +52,15 @@ func TestDigitalLessonP0PrimeTopology(t *testing.T) {
 	if p.Copy.ArtifactLabels["plan"] != "教案" {
 		t.Fatalf("plan label = %q, want 教案", p.Copy.ArtifactLabels["plan"])
 	}
-	for _, k := range p.Artifacts {
-		if k == "plan" {
-			t.Fatal("plan must not be a required artifact")
-		}
+	if len(p.Steps) != 2 {
+		t.Fatalf("Steps = %d, want 2 (课文→教案→做片)", len(p.Steps))
 	}
-	if len(p.Steps) != 1 {
-		t.Fatalf("Steps = %d, want 1 (材料 → 做片，无 design/确认门)", len(p.Steps))
+	if s := p.Steps[0]; s.Capability != "plan" || s.Platform != "llm" || s.GateAfter {
+		t.Fatalf("step 0 = %+v, want plan/llm", s)
 	}
-	s := p.Steps[0]
+	s := p.Steps[1]
 	if s.Capability != "ppt" || s.Platform != "pptcreator" || s.GateAfter {
-		t.Fatalf("step = %+v, want ppt/pptcreator GateAfter=false", s)
+		t.Fatalf("step 1 = %+v, want ppt/pptcreator GateAfter=false", s)
 	}
 	if len(s.Emits) != 3 || s.Emits[0] != "ppt" || s.Emits[1] != "script" || s.Emits[2] != "outline" {
 		t.Fatalf("emits = %v", s.Emits)

@@ -700,6 +700,8 @@ func (s *server) writeExecErr(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusBadRequest, "material_kind_unsupported", "不支持该文件类型，请上传 pdf、docx、md 或 txt")
 	case errors.Is(err, execution.ErrNoMaterials):
 		writeErr(w, http.StatusBadRequest, "invalid_request", "请先上传本课材料")
+	case errors.Is(err, execution.ErrNoLessonText):
+		writeErr(w, http.StatusBadRequest, "invalid_request", "课文抽不出文本，无法写教案。请上传可复制文字的课本")
 	case errors.Is(err, execution.ErrMaterialTooLarge):
 		writeErr(w, http.StatusBadRequest, "invalid_request", "单份材料超过 20MB")
 	case errors.Is(err, execution.ErrTooManyMaterials):
@@ -710,10 +712,6 @@ func (s *server) writeExecErr(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusBadRequest, "invalid_request", "未知的预设包")
 	case errors.Is(err, execution.ErrNoCurrentPPT):
 		writeErr(w, http.StatusConflict, "no_current_ppt", "请先生成 PPT，再导回本地修改")
-	case errors.Is(err, execution.ErrNoScript):
-		writeErr(w, http.StatusConflict, "no_script", "请先生成讲稿，再整理成教案")
-	case errors.Is(err, execution.ErrNoNotes):
-		writeErr(w, http.StatusConflict, "no_notes", "讲稿没有可整理的逐页 notes")
 	case errors.Is(err, execution.ErrNotPPTX):
 		writeErr(w, http.StatusBadRequest, "invalid_request", "请上传 .pptx")
 	case errors.Is(err, execution.ErrPPTBusy):

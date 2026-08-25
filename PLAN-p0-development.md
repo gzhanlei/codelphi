@@ -135,9 +135,9 @@ Harness 选型 spike（不挡 M5c 导回；挡「课件≠deck」完整验收）
 
 - **C8.1** `get_generation_status` COMPLETED 必须带大纲（与 C 端 `htmlOutline` / `ConfirmedOutlineSlide[]` 同形）。缺大纲或与 `usage.pages` 不对齐 = failed（`outline_missing`）。
 - **C8.2** `create_ppt_from_documents` 接受顶层 `confirmed_outline`。有则 worker 走已有 `ctx.confirmedOutline` 路径，不得丢弃。网关 **停止** 把自造 design/outline JSON 塞进 `documents[]`。
-- **C8.3**（可选，不挡 M5c）只出大纲、不出 pptx 的 partner 工具，供教学设计先改再烧片。
+- **C8.3**（硬约束）`stage=outline` 停在 `writeSpeechV2` / `htmlOutline` 之后，终态 `OUTLINE_READY`，无 pptx。网关对照教案后再 `stage=pptx` + `confirmed_outline`。不得等整份 pptx 再判教学。
 
-工单：PPTCreator **#125**。契约正文 `CONTRACT-pptcreator-partner.md` C8。
+工单：PPTCreator **#125**（C8.1/C8.2 已落地）；C8.3 **#127**。契约正文 `CONTRACT-pptcreator-partner.md` C8（v1.8）。**网关主路径已切** outline → 对照 → pptx；对方一次出齐则兜底。
 
 ### 本仓：M5c
 
@@ -227,7 +227,7 @@ Org、OrgUnit、Member、PackageTemplate、License、QuotaPool、Project、Mater
 | 8 | partner 流量拒绝/忽略单页重生 API | agent 抠不了单页 |
 | 9 | **讲稿必须回报**：逐页 notes（JSON，与页数对齐）+ 可选 script docx；notes 为空 = job failed（现行 MCP status 无讲稿字段、worker 讲稿失败被吞，均需改） | 讲稿非空且页数对齐 |
 | 10 | **多文档输入**：方向一 `create_ppt_from_documents`；网关发 `documents[]`（恰好一份 textbook） | 多材料章节可生成 |
-| 11 | **课件大纲交回/写回（C8）**：COMPLETED 带大纲；再生成接受 `confirmed_outline` | 大纲非空且与页数对齐；改大纲后再生成不以网关 LLM 当结构源 |
+| 11 | **课件大纲交回/写回/停住（C8）**：C8.1 COMPLETED 带大纲；C8.2 `confirmed_outline`；**C8.3 `stage=outline` 停在 htmlOutline 后** | 大纲非空且与页数对齐；outline 阶段无 pptx；对照后再烧片不以网关 LLM 当结构源 |
 
 **整体验收测试（partner 模式完工定义）：** 打一条 partner 生成，断言 `UserProfile.freeCreditsRemaining` 不变、`downloadLocked=false`、网关 UsageRecord settled、C 端 dashboard 不可见、讲稿非空且页数对齐、**大纲非空且与页数对齐**。
 

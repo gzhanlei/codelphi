@@ -27,8 +27,9 @@ var catalog = map[string]Preset{
 				"plan":    "教案",
 			},
 		},
-		Artifacts: []string{"outline", "ppt", "script"},
+		Artifacts: []string{"plan", "outline", "ppt", "script"},
 		Steps: []Step{
+			{Capability: "plan", Platform: "llm", Emits: []string{"plan"}},
 			{Capability: "ppt", Platform: "pptcreator", Emits: []string{"ppt", "script", "outline"}},
 		},
 	},

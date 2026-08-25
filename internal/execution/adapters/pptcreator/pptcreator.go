@@ -1,5 +1,5 @@
 // Package pptcreator 是 PPTCreator partner adapter（契约 CONTRACT-pptcreator-partner.md v1）。
-// partner 流量 = 纯机构流量；本 client 实现 C1 认证头、C2 提交、C3 轮询、C4 讲稿校验、C8 课件大纲。
+// partner 流量 = 纯机构流量；本 client 实现 C1 认证头、C2 提交、C3 轮询、C4 讲稿校验、C8 课件大纲（含 C8.3 大纲停住）。
 package pptcreator
 
 import (
@@ -47,7 +47,7 @@ func New(baseURL, partnerKey string, opts ...Option) *Client {
 
 // Doc 对应 create_ppt_from_documents 的一份材料（契约 C2 方向一）。
 // role 仅 textbook / teaching_design / reference；content / url / document_id 三选一。
-// 教师原文件走 url（短 TTL 签名 GET）；design/outline 构件走 content。
+// 教师原文件走 url（短 TTL 签名 GET）；本侧教案走 teaching_design content。
 type Doc struct {
 	Role    string `json:"role"`
 	Name    string `json:"name,omitempty"`
@@ -57,19 +57,27 @@ type Doc struct {
 
 // GenerateRequest 对应 C2。Documents 是材料包（恰好一份 textbook），不再预合成单文本。
 type GenerateRequest struct {
-	JobID     string // C1 X-Job-Id，幂等键
-	OrgID     string
-	MemberID  string
-	Title     string
-	Documents []Doc
+	JobID            string // C1 X-Job-Id，幂等键
+	OrgID            string
+	MemberID         string
+	Title            string
+	Documents        []Doc
 	Note             string          // 教师补充说明，并入 spec.note
 	Critique         string          // 返工意见（Rebuild 时非空）
 	ConfirmedOutline json.RawMessage // C8.2 当前课件大纲，缺省则 partner 自行编排
+	Stage            string          // C8.3：outline 停在 htmlOutline；pptx 烧片。空则一次出齐
+	ProjectID        string          // C8.3：续跑同一 partner 项目（outline → pptx）
 }
 
-// DefaultStyle 是 digital_lesson 课件默认皮肤。partner 路径跳过 C 端 clarify，
-// 不传 style 时 PPTCreator MCP 曾默认 swiss-ikb；课件应对齐 editorial。
-const DefaultStyle = "editorial"
+const (
+	StageOutline = "outline"
+	StagePPTX    = "pptx"
+)
+
+// DefaultStyle 是 digital_lesson 课件默认皮肤。必须是 PPTCreator canonical preset id
+// （editorial-amber/bone/midnight/forest/burgundy/charcoal）。family 裸名 editorial
+// 不是 preset：MCP 缺 style 时默认 swiss-ikb，未知 id 又静默回退 editorial，两者叠在一起四不像。
+const DefaultStyle = "editorial-bone"
 
 // Result 是 C3 succeeded 的回报 + C4 校验后的逐页 notes。
 type Result struct {
@@ -80,7 +88,8 @@ type Result struct {
 	NotesURL   string
 	ScriptURL  string
 	OutlineURL string
-	Notes      json.RawMessage // 逐页 notes JSON，已校验非空且与页数对齐
+	ProjectID  string          // partner project_id，C8.3 续跑烧片用
+	Notes      json.RawMessage // 逐页 notes JSON；outline 阶段可空
 	Outline    json.RawMessage // C8 课件大纲 JSON，已校验非空且与页数对齐
 }
 
@@ -109,6 +118,12 @@ func (c *Client) Generate(ctx context.Context, in GenerateRequest) (*Result, err
 	}
 	if s := strings.TrimSpace(in.Critique); s != "" {
 		args["critique"] = s
+	}
+	if s := strings.TrimSpace(in.Stage); s != "" {
+		args["stage"] = s
+	}
+	if s := strings.TrimSpace(in.ProjectID); s != "" {
+		args["project_id"] = s
 	}
 	if len(in.ConfirmedOutline) > 0 {
 		var v any
@@ -248,8 +263,21 @@ func (c *Client) poll(ctx context.Context, in GenerateRequest, platformJobID str
 			return nil, err
 		}
 		switch strings.ToUpper(st.Status) {
+		case "OUTLINE_READY":
+			if in.Stage == StagePPTX {
+				return nil, &Error{Code: "bad_response", Message: "OUTLINE_READY but stage=pptx"}
+			}
+			res, err := c.harvestOutlineReady(st)
+			if res != nil {
+				res.ProjectID = platformJobID
+			}
+			return res, err
 		case "COMPLETED", "SUCCEEDED":
-			return c.harvest(st)
+			res, err := c.harvest(st)
+			if res != nil {
+				res.ProjectID = platformJobID
+			}
+			return res, err
 		case "FAILED":
 			pe := &Error{Code: "platform_failed", Message: "job failed"}
 			if st.Err != nil {
@@ -304,6 +332,38 @@ func (c *Client) query(ctx context.Context, in GenerateRequest, platformJobID st
 }
 
 // harvest 校验 C3 回报的完整性 + C4 讲稿硬约束 + C8 课件大纲硬约束。
+func (c *Client) harvestOutlineReady(st *jobStatus) (*Result, error) {
+	if strings.TrimSpace(st.Result.PptxURL) != "" {
+		return nil, &Error{Code: "bad_response", Message: "OUTLINE_READY must not include pptx_url"}
+	}
+	outline, err := c.harvestOutline(st)
+	if err != nil {
+		return nil, err
+	}
+	cost, _ := strconv.ParseFloat(st.Cost.VendorCost, 64)
+	res := &Result{
+		Pages:      st.Usage.Pages,
+		LLMTokens:  st.Usage.LLMTokens,
+		VendorCost: cost,
+		NotesURL:   st.Result.NotesURL,
+		OutlineURL: st.Result.OutlineURL,
+		Outline:    outline,
+	}
+	if strings.TrimSpace(st.Result.NotesURL) == "" {
+		return res, nil
+	}
+	notes, err := c.fetchBytes(st.Result.NotesURL)
+	if err != nil || len(bytes.TrimSpace(notes)) == 0 {
+		return res, nil
+	}
+	if pages, perr := parseNotesPages(notes); perr == nil && len(pages) > 0 {
+		if st.Usage.Pages <= 0 || len(pages) == st.Usage.Pages {
+			res.Notes = notes
+		}
+	}
+	return res, nil
+}
+
 func (c *Client) harvest(st *jobStatus) (*Result, error) {
 	if st.Result.PptxURL == "" || st.Result.NotesURL == "" {
 		return nil, &Error{Code: "bad_response", Message: "succeeded but missing result urls"}

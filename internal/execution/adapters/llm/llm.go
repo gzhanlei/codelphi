@@ -21,6 +21,7 @@ type Kind string
 const (
 	KindDesign  Kind = "design"
 	KindOutline Kind = "outline"
+	KindPlan    Kind = "plan"
 )
 
 // Client 是 OpenAI 兼容 chat completions 客户端。
@@ -56,7 +57,8 @@ func New(baseURL, model, apiKey string, opts ...Option) *Client {
 type GenerateRequest struct {
 	Kind      Kind
 	Title     string   // 章标题
-	Materials []string // 材料文本
+	Materials []string // 材料文本；KindPlan 时是课文
+	Outline   string   // KindPlan 可选：课件大纲，仅对齐环节，不是教案源
 	Note      string   // 教师补充说明（表单字段，不是聊天）
 	Critique  string   // 返工意见（Rebuild 时非空）
 }
@@ -152,10 +154,41 @@ func validateSchema(kind Kind, doc map[string]any) error {
 		if !ok || len(items) == 0 {
 			return fmt.Errorf("%w: outline 缺非空「条目」数组", ErrSchema)
 		}
+	case KindPlan:
+		if !nonEmptyStrings(doc["教学目标"]) {
+			return fmt.Errorf("%w: plan 缺非空「教学目标」", ErrSchema)
+		}
+		if !nonEmptyStrings(doc["教学重点"]) {
+			return fmt.Errorf("%w: plan 缺非空「教学重点」", ErrSchema)
+		}
+		if _, ok := doc["教学难点"]; !ok {
+			return fmt.Errorf("%w: plan 缺键「教学难点」", ErrSchema)
+		}
+		proc, ok := doc["教学过程"].([]any)
+		if !ok || len(proc) == 0 {
+			return fmt.Errorf("%w: plan 缺非空「教学过程」", ErrSchema)
+		}
+		if s, _ := doc["讲授稿"].(string); strings.TrimSpace(s) == "" {
+			return fmt.Errorf("%w: plan 缺「讲授稿」", ErrSchema)
+		}
 	default:
 		return fmt.Errorf("llm: unknown kind %q", kind)
 	}
 	return nil
+}
+
+func nonEmptyStrings(v any) bool {
+	arr, ok := v.([]any)
+	if !ok || len(arr) == 0 {
+		return false
+	}
+	for _, item := range arr {
+		s, ok := item.(string)
+		if ok && strings.TrimSpace(s) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func buildMessages(in GenerateRequest) []map[string]string {
@@ -165,11 +198,29 @@ func buildMessages(in GenerateRequest) []map[string]string {
 		schemaHint = `输出 JSON 对象，必须含键：教学目标（字符串数组）、学情（字符串）、重难点（字符串数组）、方法（字符串数组）、流程（数组，元素含 环节/时长/活动 三键）。`
 	case KindOutline:
 		schemaHint = `输出 JSON 对象，必须含键：条目（数组，元素含 节/标题/要点 三键），按节列出整章课纲。`
+	case KindPlan:
+		schemaHint = `依据下面的课文写教案。课件大纲若出现，只用来让教学过程环节与课件页大致对齐，绝不是教案内容来源；不要依据 PPT 讲稿。
+输出 JSON 对象，必须含键：
+- 教学目标：字符串数组。每条写学生上完课后能做什么、达到什么水平（能/会 + 识记或理解或应用）。禁止把课件页标题或章节名原样列为教学目标。
+- 教学重点：字符串数组，1–3 条，本课必须抓住的核心，不要罗列全部知识点。
+- 教学难点：字符串数组，可空；写清学生难在何处，不要编造。
+- 教学过程：数组，元素含 环节、教师活动，可选 学生活动、设计意图。教师活动从教学角度写怎么教这篇课文，不要写成幻灯片备注。
+- 讲授稿：字符串。从教学角度写教师怎么讲这篇课文，不是 PPT 逐页备注。
+只输出 JSON。`
 	}
 	var sb strings.Builder
 	sb.WriteString("章标题：" + in.Title + "\n\n")
-	for i, m := range in.Materials {
-		fmt.Fprintf(&sb, "## 材料 %d\n%s\n\n", i+1, m)
+	if in.Kind == KindPlan {
+		for i, m := range in.Materials {
+			fmt.Fprintf(&sb, "## 课文 %d\n%s\n\n", i+1, m)
+		}
+		if s := strings.TrimSpace(in.Outline); s != "" {
+			sb.WriteString("## 课件大纲（仅供对齐教学环节，不是教案内容来源）\n" + s + "\n\n")
+		}
+	} else {
+		for i, m := range in.Materials {
+			fmt.Fprintf(&sb, "## 材料 %d\n%s\n\n", i+1, m)
+		}
 	}
 	if in.Note != "" {
 		sb.WriteString("## 教师补充说明\n" + in.Note + "\n\n")
@@ -179,9 +230,16 @@ func buildMessages(in GenerateRequest) []map[string]string {
 	}
 	sb.WriteString(schemaHint)
 	return []map[string]string{
-		{"role": "system", "content": "你是课程设计专家。只输出 JSON，不要输出任何其它文字。"},
+		{"role": "system", "content": systemPrompt(in.Kind)},
 		{"role": "user", "content": sb.String()},
 	}
+}
+
+func systemPrompt(kind Kind) string {
+	if kind == KindPlan {
+		return "你是教案撰写人。依据课文写教案。课件大纲只用来对齐教学环节，不是内容来源。只输出 JSON，不要输出任何其它文字。"
+	}
+	return "你是课程设计专家。只输出 JSON，不要输出任何其它文字。"
 }
 
 // renderMarkdown 把结构化产出渲染成给人看的 Markdown（与 JSON 一并落存储）。
@@ -195,6 +253,10 @@ func renderMarkdown(kind Kind, title string, doc map[string]any) string {
 		}
 	case KindOutline:
 		sb.WriteString("## 条目\n\n" + mdValue(doc["条目"]) + "\n")
+	case KindPlan:
+		for _, k := range []string{"教学目标", "教学重点", "教学难点", "教学过程", "讲授稿"} {
+			fmt.Fprintf(&sb, "## %s\n\n%s\n\n", k, mdValue(doc[k]))
+		}
 	}
 	return sb.String()
 }

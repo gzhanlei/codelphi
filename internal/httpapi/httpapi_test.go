@@ -25,6 +25,7 @@ import (
 const (
 	fakeDesignJSON  = `{"教学目标":["理解导数定义"],"学情":"已学极限","重难点":["差商极限"],"方法":["讲授","例题"],"流程":[{"环节":"导入","时长":"5min","活动":"回顾极限"}]}`
 	fakeOutlineJSON = `{"条目":[{"节":"1","标题":"导数定义","要点":["差商","极限"]}]}`
+	fakePlanJSON    = `{"教学目标":["能陈述差商定义，达到会计算简单差商的水平"],"教学重点":["差商作为平均变化率"],"教学难点":["从割线斜率理解趋近时易与瞬时变化率混淆"],"教学过程":[{"环节":"导入","教师活动":"从课文实例引入差商"},{"环节":"新授","教师活动":"讲清差商作为平均变化率"}],"讲授稿":"从课文里的平均变化率讲起"}`
 	fakePptxBytes   = "fake-pptx-bytes"
 	fakeNotesJSON   = `[{"page":1,"note":"第一页讲稿"},{"page":2,"note":"第二页讲稿"}]`
 )
@@ -55,7 +56,9 @@ func newAPIEnv(t *testing.T) *apiEnv {
 	llmSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		content := fakeDesignJSON
-		if strings.Contains(string(body), "条目") {
+		if strings.Contains(string(body), "教学重点") {
+			content = fakePlanJSON
+		} else if strings.Contains(string(body), "条目") {
 			content = fakeOutlineJSON
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -317,8 +320,8 @@ func TestCreateProjectUploadSubmit(t *testing.T) {
 		t.Fatalf("package = %v", pkg)
 	}
 	arts, _ := pkg["artifacts"].([]any)
-	if len(arts) < 3 {
-		t.Fatalf("artifacts = %v", pkg["artifacts"])
+	if len(arts) < 4 {
+		t.Fatalf("artifacts after submit = %v", pkg["artifacts"])
 	}
 
 	plan := e.do(t, http.MethodPost, "/v1/packages/"+lesson.PackageID+"/lesson-plan", map[string]any{})

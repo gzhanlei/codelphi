@@ -6,7 +6,7 @@
 > - `DESIGN-b2b-capability-platform.md` — 设计（§1–§10 是现行正文；§2.4 数字教材插件切分；§10 已定默认/仍开放；§11+ 为评审与修订历史；最新决议见 §23）
 > - `PLAN-p0-development.md` — P0' 开发计划（§0 完工定义已重切、§2.2 M5c/M2c、§9 测试门禁）
 > - `CONTRACT-partner.md` — 能力提供方通用接入合同
-> - `CONTRACT-pptcreator-partner.md` — PPTCreator 实例（v1.5，C0–C8；C8 = 课件大纲交回/写回）
+> - `CONTRACT-pptcreator-partner.md` — PPTCreator 实例（v1.8，C0–C8；C8.3 大纲阶段停住）
 
 ## 当前状态
 
@@ -28,7 +28,7 @@
 
 ## 关键事实
 
-- **产品名词**：对外卖 **数字教材建设能力**。PPTCreator = **做片**，课件由 **harness**（编排 / agent loop / 验收）收成，实现不必是 DSH。大纲/教案改稿 = 左对话右预览。本地改过的 **pptx 必须能导回**为新版本（不是当材料重传）。不为成本设确认门。后补见设计 §2.4。现行 `digital_lesson`：材料 → **课件大纲 + ppt + 讲稿**（无确认门）；讲稿可 **整理成教案**（`plan`，不挡套件 ready）
+- **产品名词**：对外卖 **数字教材建设能力**。PPTCreator = **做片**，课件由 **harness**（编排 / agent loop / 验收）收成，实现不必是 DSH。大纲/教案改稿 = 左对话右预览。本地改过的 **pptx 必须能导回**为新版本（不是当材料重传）。不为成本设确认门。后补见设计 §2.4。现行 `digital_lesson`：课文 → **教案** → 课本+教案交给做片。对照停在课件大纲（C8.3 `stage=outline`），通过后再 `stage=pptx`。对方未落地 #127 时一次出齐再对照兜底。不要从 PPT 讲稿倒推教案
 - **生产机**：124.156.160.168（VM-32-3，ssh root 直连，本机有密钥）。旧机 101.32.49.240（VM-16-7）已挂，弃用
 - **域名**：`https://app.codelphi.com` → nginx → `127.0.0.1:18080` → systemd 服务 `codelphi-gateway`（二进制 `/data/www/codelphi/gateway`，不用 Docker；8080–8084 被该机别的服务占用，故用 18080）
 - **部署**：`./scripts/deploy.sh` 网关；`./scripts/deploy-web.sh` 工作台。nginx 已切 `deploy/nginx-codelphi-m5.conf`（证书行保留）。Next 听 `127.0.0.1:13000`（3000 是 chandler）
@@ -45,7 +45,7 @@
 - `GET /v1/me`
 - `GET|POST /v1/projects` · `GET /v1/projects/{id}`（含 `lessons[]`）· `POST /v1/projects/{id}/lessons` · `GET /v1/projects/{id}/lessons/{lid}`
 - `POST /v1/projects/{id}/lessons/{lid}/materials`（pdf/docx/md/txt，每课最多 5 份）· `POST /v1/projects/{id}/lessons/{lid}/submit`（202，直接做片）
-- `POST /v1/packages/{id}/artifacts/ppt`（导回本地 pptx，新版本；无 UsageRecord）· `POST /v1/packages/{id}/lesson-plan`（讲稿整理成教案栏目）· `GET /v1/packages/{id}`（签名 URL，无文件字节）
+- `POST /v1/packages/{id}/artifacts/ppt`（导回本地 pptx，新版本；无 UsageRecord）· `POST /v1/packages/{id}/lesson-plan`（按课文重写教案）· `GET /v1/packages/{id}`（签名 URL，无文件字节）
 - `POST /v1/lessons/{id}/confirm` 仍在（历史 job）；工作台已撤确认按钮
 - `POST /mcp` JSON-RPC：`tools/list`、`tools/call`（`get_package` / `submit_lesson` / `reshape_lesson_plan`；submit 无 `lesson_id` 且非 rebuild → `project_unspecified`）
 - 启动时 `RecoverInFlight`：残留 queued/running → failed，package partial；预扣靠 billing TTL
@@ -62,7 +62,7 @@
 
 - 那边走 GitHub Issue 流程（其 AGENTS.md 约定）：Epic **#106**（§8 十条）、**#107**（C1 认证）、**#116**（多文档方向一，MCP `create_ppt_from_documents` 已落地）、**#119**（契约 v1.1 三澄清：spec.note/critique 必进提示词、usage.pages=实际页数、四个上下文头覆盖全部端点含查询）
 - 联调约定：契约 C6 验收测试（积分不变、不锁下载、UsageRecord settled、C 端 dashboard 不可见、讲稿非空页数对齐）
-- **网关已切方向一**：adapter 直调 MCP `POST /mcp` `tools/call` **`create_ppt_from_documents`**。C8（#125）对方已完成；本仓已回拷 `outline_url` 为 `outline` 构件，Rebuild 带 `confirmed_outline`。不调 `create_ppt_from_text`，也不发 REST `/generate`。
+- **网关已切方向一**：adapter 直调 MCP `POST /mcp` `tools/call` **`create_ppt_from_documents`**。C8.1/C8.2（#125）对方已完成。**C8.3 网关主路径已切**：先 `stage=outline` 对照教案，通过后再 `stage=pptx` + `confirmed_outline`（同一 `project_id`）。对方未落地时若一次出齐 COMPLETED，仍走旧对照兜底。工单 [PPTCreator#127](https://github.com/gzhanlei/PPTCreator/issues/127)。不调 `create_ppt_from_text`，也不发 REST `/generate`。
 
 ## 待确认清单（PLAN §11）
 

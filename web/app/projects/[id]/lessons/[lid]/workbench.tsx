@@ -31,6 +31,7 @@ export function LessonWorkbench({
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [uploadMsg, setUploadMsg] = useState("");
+  const [planMsg, setPlanMsg] = useState("");
   const [err, setErr] = useState<APIError | null>(null);
 
   const loadPackage = useCallback(async (packageId: string) => {
@@ -140,6 +141,7 @@ export function LessonWorkbench({
     if (!pkg?.id) return;
     setBusy(true);
     setErr(null);
+    setPlanMsg("");
     const res = await fetch(`/api/gw/v1/packages/${pkg.id}/lesson-plan`, { method: "POST" });
     const data = await res.json();
     setBusy(false);
@@ -147,6 +149,7 @@ export function LessonWorkbench({
       setErr(data.error || { code: "reshape", message: "整理教案失败" });
       return;
     }
+    setPlanMsg("已按课文写成教案。做片若与教案对不上，教案里会记下「课件对照」。");
     await loadPackage(pkg.id);
   }
 
@@ -221,6 +224,8 @@ export function LessonWorkbench({
             <p className="text-sm text-muted">正在生成，可离开此页，进度会保留。</p>
           ) : null}
 
+          {planMsg ? <p className="text-sm text-muted">{planMsg}</p> : null}
+
           <ul className="space-y-3">
             {(pkg.artifacts || []).map((a) => (
               <li key={a.kind} className="border border-line bg-card px-4 py-3">
@@ -243,14 +248,14 @@ export function LessonWorkbench({
                         />
                       </label>
                     ) : null}
-                    {a.kind === "script" && canWrite && a.current?.url ? (
+                    {a.kind === "plan" && canWrite ? (
                       <button
                         type="button"
                         disabled={busy}
                         className="text-sm text-seal hover:underline disabled:opacity-50"
                         onClick={() => void reshapePlan()}
                       >
-                        整理成教案
+                        {a.current?.url ? "重新整理教案" : "整理成教案"}
                       </button>
                     ) : null}
                     {a.current?.url ? (
