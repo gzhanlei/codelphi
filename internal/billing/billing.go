@@ -48,6 +48,8 @@ var (
 	ErrJobConflict = errors.New("billing: job_id belongs to another reservation")
 	// ErrRootPoolMissing：Org 根池每单必有（设计 §3），缺失是开通流程的事故，fail-closed。
 	ErrRootPoolMissing = errors.New("billing: org root quota pool not found")
+	// ErrOrgSuspended：机构已停用。Authorize 与无预扣写入（导回）共用。
+	ErrOrgSuspended = errors.New("billing: org_suspended")
 )
 
 // AuthorizeInput 是 authorize 闸门的入参（设计 §4）。
@@ -125,6 +127,18 @@ func snapshotEntitles(snapshot json.RawMessage, capability string) bool {
 		}
 	}
 	return false
+}
+
+// AssertOrgActive 给无 vendor / 无预扣的写入用（导回 pptx）。不落 UsageRecord。
+func (s *Service) AssertOrgActive(ctx context.Context, orgID string) error {
+	org, err := dbgen.New(s.db).GetOrgByID(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	if org.Status == dbgen.OrgsStatusSuspended {
+		return ErrOrgSuspended
+	}
+	return nil
 }
 
 // Authorize 实现设计 §4 的 authorize 闸门。全部检查与预扣在一个事务内完成；

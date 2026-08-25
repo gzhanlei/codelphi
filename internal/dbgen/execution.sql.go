@@ -795,6 +795,26 @@ func (q *Queries) LockCourseLesson(ctx context.Context, id string) (CourseLesson
 	return i, err
 }
 
+const lockCoursePackage = `-- name: LockCoursePackage :one
+SELECT id, project_id, status, lesson_job_id, created_at, updated_at, preset_id, lesson_id FROM course_packages WHERE id = ? FOR UPDATE
+`
+
+func (q *Queries) LockCoursePackage(ctx context.Context, id string) (CoursePackage, error) {
+	row := q.db.QueryRowContext(ctx, lockCoursePackage, id)
+	var i CoursePackage
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Status,
+		&i.LessonJobID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PresetID,
+		&i.LessonID,
+	)
+	return i, err
+}
+
 const nextArtifactVersion = `-- name: NextArtifactVersion :one
 SELECT COALESCE(MAX(version), 0) + 1 FROM artifacts WHERE package_id = ? AND kind = ?
 `

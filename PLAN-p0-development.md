@@ -1,29 +1,30 @@
 # P0 开发计划 · B2B 多能力生成平台
 
-> 依据：`DESIGN-b2b-capability-platform.md`（§1–§10、§21 为准）。本文档把设计落成可分配的工单。
+> 依据：`DESIGN-b2b-capability-platform.md`（§1–§10、**§2.4 / §23** 为准）。本文档把设计落成可分配的工单。
 > 设计变更先改设计文档，再同步本计划；两文档冲突时以设计文档为准。
 >
 > 2026-08-24 第一版。
+> 2026-08-25：**P0' 重切**。PPTCreator = 做片，不是做课件。完工口径改为大纲 + pptx + 讲稿、pptx 可导回、无成本确认门、不验收网关自造课程设计/教学大纲。§2 表里 M3/M5 若仍写确认门，以本节为准。历史进度记录不改写。
 
 ## 0. 范围与完工定义
 
-**P0 交付（商业切片）：** 工作台上传章材料 →「做课」→ 课程设计/大纲（网关新 LLM adapter）→ 确认门（教师点「通过，继续」）→ PPT + 讲稿（PPTCreator partner）进套件，可预览/下载，Artifact 留版本。记账全通，日对账跑通。
+**P0' 交付（商业切片）：** 工作台上传章材料 → 点「做课件」→ PPTCreator 做片（pptx + 讲稿 docx + **交回课件大纲**）进本侧套件 → 可预览/下载 → 本地改过的 pptx **导回为新版本**。记账全通，日对账跑通。教案形态加工、左对话右预览、harness loop 见 §2.2，不挡文件交得出，但挡「课件 ≠ deck」的完整验收。
 
-**P0 不做：** 练习、讲解视频、3D 教具、OpenMAIC（spike 未证伪前不进架构）、机构自助 CSV 导入（P1）、unit 设帽 UI。返工对话（DSH）可后嵌，但**空聊天不上线**。
+**P0' 明确不做：** 网关 LLM「课程设计 / 教学大纲」当教案源；成本确认门（`awaiting_confirm`）；把 pptx 下载当成课件完成。后补：练习、讲解视频、3D、知识图谱、出版导出、OpenMAIC（spike 未证伪前不进架构）、机构自助 CSV（P1）、unit 设帽 UI。Harness **实现未选型**（不必是 DSH）；空聊天不上线。
 
 **完工定义（试点校能签合同的口径）：**
 
 1. 运营能把一笔公对公收款变成 active License（合同号、快照、审计齐全）
 2. 运营 CSV 导入教师名单 → 邀请邮件 → chandler 注册/登录 → 跳进工作台，身份绑在学院 Org 上
-3. 教师新建一章、传材料、点「做课」：设计/大纲先出，确认门后才烧 PPT；构件齐后可下载 pptx + 讲稿 + 设计/大纲文档
-4. PPT 生成时：机构护栏计数变化、PPTCreator C 端积分不动、C 端 dashboard 不可见、讲稿随结果回报且页数对齐
+3. 教师新建一章、传材料、点「做课件」：得到 **课件大纲 + pptx + 讲稿**；可下载。大纲来自 PPTCreator 交回（契约 C8），不是网关自造「教学大纲」。无成本确认门
+4. 做片时：机构护栏计数变化、PPTCreator C 端积分不动、C 端 dashboard 不可见、讲稿非空且页数对齐、**大纲非空且页数与 pptx 对齐**
 5. 护栏触达时工作台横幅 + 统一话术（联系本机构管理员），`quota_exhausted`
 6. 人为杀死 PPTCreator worker / 网关 worker 后，TTL 内预扣自动退回
 7. 日对账脚本：根池 `used` == `sum(UsageRecord where settled)` == partner 调用侧对得上
-8. 同一构件多次重建产生多版本，历史版本可回看可下载；UsageRecord 挂 step_job_id 不受影响
-9. 返工对话若已嵌入：token 进 `agent_llm` 账，过宽帽闸门
+8. 同一构件多次重建产生多版本，历史可回看可下载；**本地修改的 pptx 导回 = 新 `ppt` 版本**（不是 Material、不覆盖历史）。UsageRecord 挂 step_job_id；纯导回无新 vendor 成本行
+9. 返工/harness 若已嵌入：token 进 `agent_llm` 账，过宽帽闸门。未嵌入不挡 3、4、7、8
 
-达不到 3、4、7，不接第二个能力，不进试点校。
+达不到 3、4、7、8（导回），不接第二个能力，不进试点校。C8 未落地则完工定义 3 的大纲交不出——M2c 与 M5c 互为依赖。
 
 ## 1. 仓库与模块划分
 
@@ -31,8 +32,8 @@
 |---|---|---|
 | `codelphi`（新仓） | Go + MySQL + sqlc。`cmd/gateway`（HTTP/MCP 入口）；`internal/billing`（Org/Member/License/Quota/UsageRecord/AuditLog，Authorize/Settle 唯一实现）；`internal/execution`（lesson 状态机、adapters/*、合成器预留）；`internal/identity`（JWKS、token exchange、成员解析）；`internal/storage`（对象存储、签名 URL） | billing 不 import adapter；execution 只调 `billing.Authorize/Settle`，不直接 UPDATE 配额表 |
 | `codelphi` 同仓 `web/` | 套件工作台 + 运营后台（一个 Web 应用，部署在 `app.codelphi.com`） | 团队已有 Next.js 生产经验（PPTCreator），按此建；只走网关 HTTP API，不直连数据库 |
-| DSH fork | 云端多租户 host + 受限 preset（返工对话运行时） | 可后嵌，见 §7 |
-| `PPTCreator`（既有仓） | partner 模式改造，§8 十条 | 走该仓 GitHub Issue 流程 |
+| harness host | 编排 / agent loop / 验收。实现未选型（DSH 为候选，不是绑定） | 见 §7；空聊天不上线 |
+| `PPTCreator`（既有仓） | partner 做片：§8 十条 + **C8 大纲交回/写回** | 走该仓 GitHub Issue 流程 |
 
 ## 2. 里程碑与依赖
 
@@ -40,20 +41,23 @@
 M0 地基 ──► M1 计费闭环 ──► M3 lesson 状态机 ──► M5 工作台贯通 ──► M5b 预设包内核 ──► M6 试点验收
      └──► M2 PPTCreator partner（并行，跨仓）──► 汇入 M3/M5
 M4 运营后台（与 M3 并行）
-S1 合成器 spike / S2 OpenMAIC spike（独立时间盒，不挡 P0）
-DSH 返工（M5 之后嵌入，不挡首轮交付）
+S1 合成器 spike / S2 OpenMAIC spike（独立时间盒，不挡 P0'）
+M2c PPTCreator C8 大纲（跨仓）──► 汇入 M5c 课件竖切（去确认门、导回 pptx、露出大纲）──► M6
+Harness 选型 spike（不挡 M5c 导回；挡「课件≠deck」完整验收）
 ```
 
 | 里程碑 | 内容 | 依赖 | 出口标准 |
 |---|---|---|---|
 | M0 地基 | 新仓骨架；MySQL schema 全表；对象存储打通（上传/签名 URL/回拷）；部署管线到 101.32.49.240 | — | 空服务上线，健康检查 + 迁移工具可用 |
 | M1 计费闭环 | Org/Member/License/QuotaPool/UsageRecord/AuditLog；authorize/settle；reservation TTL 扫尾；多 License 先到期者优先；日对账脚本 | M0 | §8.1 测试门禁全绿；对账脚本在造数场景对齐 |
-| M2 PPTCreator partner | §8 十条全部落地 + 验收测试 | —（跨仓并行） | partner 生成一条：C 端积分不变、不锁下载、dashboard 不可见、讲稿非空页数对齐 |
-| M3 lesson 状态机 | Project/Material/CoursePackage/Artifact（留版本）；设计→大纲→`awaiting_confirm`→PPT+讲稿；每 step 独立 authorize/settle；design/outline LLM adapter 新做；PPTCreator adapter | M1、M2 | `submit_lesson` 全链路造数据跑通，确认门等待期无预扣 |
+| M2 PPTCreator partner | §8 十条 + 验收测试 | —（跨仓并行） | partner 生成一条：C 端积分不变、不锁下载、dashboard 不可见、讲稿非空页数对齐 |
+| M3 lesson 状态机 | 历史：design→outline→confirm→ppt。P0' 起拓扑见 M5c | M1、M2 | （已完成旧切片） |
 | M4 运营后台 | License pending→active（高额双人确认）、suspend + 审计；CSV 批量导入成员；用量报表（成员 Top）；成本预警（按 capability 拆开） | M1 | 完工定义 1、2 的运营侧可演示 |
-| M5 工作台贯通 | chandler OIDC 登录 + token exchange；org/unit 选择回显；章列表；新建章 + 传材料 + 补充说明表单；做课按钮；进度；确认门按钮；版本/预览/下载；失败横幅话术 | M3、M4 | 完工定义 2–6、8 全过 |
-| M5b 预设包内核 | License.presets + Project.preset_id + execution 读目录；工作台 copy 来自包；P0 只内置 digital_lesson | M5 | 单包路径与现在一致；测试夹具多包时新建必选；原 execution 门禁仍绿 |
-| M6 试点验收 | 造数 + 真机演练完工定义 1–9；对账连跑七天无漂移 | M5b | 可签合同 |
+| M5 工作台贯通 | 登录、章列表、传材料、做课、进度、下载。确认门为历史 UI，M5c 撤 | M3、M4 | （已部署旧切片） |
+| M5b 预设包内核 | License.presets + Project.preset_id + execution 读目录；工作台 copy 来自包；P0 只内置 digital_lesson | M5 | 单包路径可用；测试夹具多包时新建必选 |
+| M2c 大纲交回 | 契约 C8：COMPLETED 交回大纲；再生成接受 `confirmed_outline` | M2 | C6 增补：大纲非空且与页数对齐；带大纲再生成不以网关 LLM JSON 当结构源 |
+| M5c 课件竖切 | 去掉 design/outline 向导与确认门；露出 C8 大纲 + pptx + 讲稿；pptx 导回新版本 | M5、M2c | 完工定义 3、4、8；旧 confirm 测试改掉或删除 |
+| M6 试点验收 | 造数 + 真机演练完工定义 1–9；对账连跑七天无漂移 | M5c、M4 | 可签合同 |
 
 **两条并行关键路径（§18 H）：** 网关路径（M1→M3）与客户端路径（M4→M5）并行推进；客户端不许直连数据库、不许绑 DSH 私有头，契约以网关 HTTP/MCP 为准。
 
@@ -70,6 +74,10 @@ DSH 返工（M5 之后嵌入，不挡首轮交付）
 **进度记录（2026-08-24）：M5 网关面完成，工作台已部署。** 生产 `db:ok`，试点 member 已手工插入。列表为「我的项目」、路由 `/projects`。未做：预设包内核（M5b）；M4；真 partner 联调。
 
 **进度记录（2026-08-24）：PPTCreator C2 切方向一。** adapter 直调 MCP `create_ppt_from_documents`（`documents[]`），不走 `create_ppt_from_text` / REST `/generate`。契约升 v1.2。
+
+**进度记录（2026-08-25）：P0' 文档重切。** 设计 §2.4 / §23、契约 C8、本计划 §0 / §2.2。
+
+**进度记录（2026-08-25）：M5c V1/V2/V4。** `digital_lesson` 改为材料 → ppt+script（无确认门、不造 design/outline）；`POST /v1/packages/{id}/artifacts/ppt` 导回为新 ppt 版本（ULID 对象键、套件行锁、停用机构拒绝、无 UsageRecord）；工作台主按钮「做课件」、PPT 行可导回。V3 露出大纲待接 C8。
 
 ## 2.1 M5b 预设包内核
 
@@ -116,6 +124,32 @@ DSH 返工（M5 之后嵌入，不挡首轮交付）
 ### 出口
 
 `go test ./internal/... -count=1 -race` 全绿。试点账号仍直接做课。测试 License 挂两个 preset_id 时新建必须选。
+
+## 2.2 M5c 课件竖切 + M2c 大纲（2026-08-25）
+
+决议：设计 §2.4。做片 ≠ 课件。本切片把工作台从「确认门 + 假大纲 + 只下载」收成「大纲 + pptx + 讲稿 + 导回」。Harness 选型另立 spike，不挡导回。
+
+### 跨仓：M2c（PPTCreator，契约 C8）
+
+- **C8.1** `get_generation_status` COMPLETED 必须带大纲（与 C 端 `htmlOutline` / `ConfirmedOutlineSlide[]` 同形）。缺大纲或与 `usage.pages` 不对齐 = failed（`outline_missing`）。
+- **C8.2** `create_ppt_from_documents` 接受顶层 `confirmed_outline`。有则 worker 走已有 `ctx.confirmedOutline` 路径，不得丢弃。网关 **停止** 把自造 design/outline JSON 塞进 `documents[]`。
+- **C8.3**（可选，不挡 M5c）只出大纲、不出 pptx 的 partner 工具，供教学设计先改再烧片。
+
+工单：PPTCreator **#125**。契约正文 `CONTRACT-pptcreator-partner.md` C8。
+
+### 本仓：M5c
+
+| 工单 | 做什么 | 测试（先红后绿） | 刻意不做 |
+|---|---|---|---|
+| V1 去向导 | `digital_lesson` 拓扑改为材料 → ppt+script（大纲随 partner 回）。删除确认门状态 | 原 awaiting_confirm 用例改为不再出现该状态；submit 仍 202 | 不把确认门改成「贵所以问」 |
+| V2 导回 pptx | `POST .../artifacts/ppt`（或等价）收 pptx，新版本、当前指针前移 | 导回后 `is_current` 指向新行；旧版仍可签 URL；不写 Material；无新 UsageRecord | 不覆盖对象；不整份重跑 PPTCreator |
+| V3 露出大纲 | 回拷 C8 `outline_url` 为 `outline` 构件；工作台可看/下载 | COMPLETED 包含 outline；缺 C8 则 ppt step `outline_missing` 失败 | 不复活网关 LLM 大纲 |
+| V4 工作台 | 撤确认按钮；主按钮「做课件」；ppt 行提供导回 | 浏览器：下载 → 再上传同一/改过的 pptx → 版本 +1 | 不抄 PPTCreator 逐条文本框；分栏对话后嵌 |
+| V5 教案整形 | 讲稿 docx → 教案栏目（网关能力，被后续 harness 调） | 有 script docx 即可先交文件；整形可后于 V1–V4 | 不另起课程设计 LLM |
+
+### Harness spike（不挡 V1–V4）
+
+一页契约：工具面（produce/rebuild/导回）、验收（课的展开 + 教案形态，不是路演）、按钮启动 loop。实现候选含 DSH，**不在本切片绑定**。
 
 ## 3. 工单分解 · 网关（billing / identity）
 
@@ -191,8 +225,9 @@ Org、OrgUnit、Member、PackageTemplate、License、QuotaPool、Project、Mater
 | 8 | partner 流量拒绝/忽略单页重生 API | agent 抠不了单页 |
 | 9 | **讲稿必须回报**：逐页 notes（JSON，与页数对齐）+ 可选 script docx；notes 为空 = job failed（现行 MCP status 无讲稿字段、worker 讲稿失败被吞，均需改） | 讲稿非空且页数对齐 |
 | 10 | **多文档输入**：方向一 `create_ppt_from_documents`；网关发 `documents[]`（恰好一份 textbook） | 多材料章节可生成 |
+| 11 | **课件大纲交回/写回（C8）**：COMPLETED 带大纲；再生成接受 `confirmed_outline` | 大纲非空且与页数对齐；改大纲后再生成不以网关 LLM 当结构源 |
 
-**整体验收测试（partner 模式完工定义）：** 打一条 partner 生成，断言 `UserProfile.freeCreditsRemaining` 不变、`downloadLocked=false`、网关 UsageRecord settled、C 端 dashboard 不可见、讲稿非空且页数对齐。
+**整体验收测试（partner 模式完工定义）：** 打一条 partner 生成，断言 `UserProfile.freeCreditsRemaining` 不变、`downloadLocked=false`、网关 UsageRecord settled、C 端 dashboard 不可见、讲稿非空且页数对齐、**大纲非空且与页数对齐**。
 
 不动的：解析/渲染管线、字体体系、Web 应用本身、C 端积分与 OAuth 体系。
 
@@ -203,10 +238,10 @@ Org、OrgUnit、Member、PackageTemplate、License、QuotaPool、Project、Mater
 - 登录：chandler OIDC RP；一人多机构时先选身份（回显实际 org）
 - 首页 = 我的章/课列表（无聊天入口）；`viewer` 角色只见用量
 - 新建一章：标题 + 上传材料（pdf/docx/image/text → 网关对象存储）+ 可选补充说明（表单，进 `submit_lesson` spec）
-- 做课按钮 → 套件进度（构件逐个亮起）；确认门「通过，继续」；离开可回来进度还在
-- 构件齐：在线预览 + 下载；版本列表可回看旧版
+- 做课件按钮 → 套件进度（大纲 / PPT / 讲稿亮起）；离开可回来进度还在。无成本确认门
+- 构件齐：在线预览 + 下载；版本列表可回看旧版；**PPT 行可导回本地改过的 pptx**
 - 失败 = 页面横幅 + 统一话术（联系本机构管理员），不弹助手
-- 「对这一份提意见」入口：有半成品才出现（DSH 未嵌时该按钮置灰或隐藏）
+- 分栏「左对话右预览」与 harness 后嵌；未嵌入时不出现空聊天
 
 ### 运营后台（我方运营面）
 
@@ -216,16 +251,14 @@ Org、OrgUnit、Member、PackageTemplate、License、QuotaPool、Project、Mater
 - 成本预警看板：按 License、按 capability 的成本/实收比
 - 「暂停后仍在跑的 job」列表
 
-## 7. DSH 返工运行时（后嵌，不挡 M5）
+## 7. Harness / 返工运行时（后嵌，不挡 M5c 导回）
 
-- 云端多租户 host：共享进程 + 会话按 `member_id` 分区持久化（MySQL vs 对象存储 backend，P0 内定）；**禁止**一教师一进程/一块 SQLite；每条 host API 做 member 鉴权
-- 受限 preset：只挂网关 MCP；无 shell/fs/终端、关 `web_fetch`、不 `create_project`
-- 会话键 = member × project × artifact 版本；入口只有工作台「对这一份提意见」
-- token：用工作台已换发的网关 Bearer，不持任何平台 key
-- 系统提示注入当前构件（页数、讲稿摘要、教师选中的页）；指代「这一页」必须能落地
-- 产出只有 rebuild spec（`submit_lesson(rebuild, critique)`），不当文件柜；不用 plan/approval 冒充确认
-- `agent_llm` 计量：每次模型调用前按 token 上限 authorize、按实际 usage settle（宽帽）；billing 不可用 fail-closed
-- **空聊天不上线**：无半成品不加载 DSH
+实现未选型。DSH 是候选，不是绑定。职责见设计 §2.4：能力编排、agent loop、验收（课件不是 slides deck）。
+
+- 若用 DSH：云端多租户 host；共享进程 + 会话按 `member_id` 分区；禁止一教师一进程；只挂网关 MCP；无 shell/fs、关 `web_fetch`、不 `create_project`
+- 入口是工作台「做课件」启动的 loop，或构件上的分栏对话；**空聊天不上线**
+- 产出走网关工具（produce / rebuild / 导回），不当文件柜
+- `agent_llm` 计量：每次模型调用前 authorize、按实际 settle；billing 不可用 fail-closed
 
 ## 8. Spike（独立时间盒）
 
@@ -243,7 +276,7 @@ Org、OrgUnit、Member、PackageTemplate、License、QuotaPool、Project、Mater
 - 失败退款：reserved → refunded，链上各层回滚；重试新 job_id 不打到 refunded 行
 - reservation TTL：过期自动退；迟到的 settle 无害拒绝
 - 多 License：旧池未尽时新池 `used` 不变；单 job 不跨池
-- **按 step 扣费：** `awaiting_confirm` 期间根池无该 lesson 任何预扣；确认后 PPT step 才 authorize
+- **按 step 扣费：** 每个 step 提交前 authorize、结束后 settle。P0' **无确认门**；历史 `awaiting_confirm` 零预扣用例随 M5c 删除或改写
 - 同一父池两 unit 并发只够一笔：一 allow 一 deny，均为 `quota_exhausted`
 - 改帽与消费并发：无死锁
 - `X-Org-Id`/`X-Unit-Id` 不属于该 sub/成员：deny + 安全日志，无预扣
@@ -251,7 +284,8 @@ Org、OrgUnit、Member、PackageTemplate、License、QuotaPool、Project、Mater
 - 调岗后历史 UsageRecord.unit_id 不变
 - 根池对账用全表 settled；unit 报表从 UsageRecord 聚合，禁止 `SUM(children.used)`
 - 无 Project 的 submit：deny `project_unspecified`
-- PPTCreator partner：积分不变、不锁下载、C 端不可见、讲稿非空页数对齐、单页重生被拒
+- PPTCreator partner：积分不变、不锁下载、C 端不可见、讲稿非空页数对齐、**大纲非空页数对齐**、单页重生被拒
+- **pptx 导回：** 新版本、旧版仍在、不写 Material、无新 vendor UsageRecord
 - agent_llm：调用前预扣、按实际 settle、帽到即拒
 
 ## 10. 部署与环境
@@ -266,9 +300,9 @@ Org、OrgUnit、Member、PackageTemplate、License、QuotaPool、Project、Mater
 
 1. 对象存储选型（默认腾讯 COS）
 2. DSH 会话持久化 backend（MySQL vs 对象存储，P0 内定）
-3. design/outline LLM vendor 的具体型号与密钥来源（默认国内、可换）。**注意**：网关侧（design/outline、agent_llm 计量）和 PPTCreator 的 2C 生成管线都烧 LLM token，两边配置时留意共用限额
-4. ~~PPTCreator 方向一（Document 1:N）排期~~ **已切**：网关发 `documents[]`，对方 #116 已落地 `create_ppt_from_documents`。联调卡在真 partner HTTP 映射与 C6
-5. 数字人平台、AI3D 正式产品名（不挡 P0，挡讲解视频/3D 排期）
+3. ~~design/outline LLM vendor~~ **撤回作为教案源**（2026-08-25）。做片 LLM 在 PPTCreator；harness/agent_llm 选型后另配。留意与 PPTCreator 2C 共用限额
+4. ~~PPTCreator 方向一（Document 1:N）排期~~ **已切**。下一步是 **C8 大纲交回**（M2c）
+5. 数字人平台、AI3D 正式产品名（不挡 P0'，挡讲解视频/3D 排期）
 
 ## 12. 风险登记
 

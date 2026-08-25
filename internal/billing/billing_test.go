@@ -388,6 +388,19 @@ func TestOrgSuspendedDoesNotKillInflight(t *testing.T) {
 	}
 }
 
+func TestAssertOrgActive(t *testing.T) {
+	resetTables(t)
+	f := newFixture(t, "ppt", 10)
+	s := newService()
+	if err := s.AssertOrgActive(context.Background(), f.orgID); err != nil {
+		t.Fatal(err)
+	}
+	execSQL(t, "UPDATE orgs SET status = 'suspended' WHERE id = ?", f.orgID)
+	if err := s.AssertOrgActive(context.Background(), f.orgID); !errors.Is(err, ErrOrgSuspended) {
+		t.Fatalf("err=%v, want ErrOrgSuspended", err)
+	}
+}
+
 // actual 与 estimated 的差值调平：actual > estimated 补扣，actual < estimated 退回。
 func TestSettleDeltaAdjustment(t *testing.T) {
 	resetTables(t)

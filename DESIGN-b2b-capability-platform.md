@@ -15,6 +15,7 @@
 > 2026-08-24：教师旅程（一本教材如何变成数字教材）写入 §1.1。
 > 2026-08-24 第十轮：扣费粒度 = step（不整单预扣）、确认门入状态机、设计/大纲 provider 新做、Project 补 Material、PPTCreator 多文档输入（已核实不支持，列入 §8 第 10 条）、CSV 导入主体、agent_llm 进闸门、§19 措辞修正。对照见 §21。
 > 2026-08-24 第十一轮：身份链撤「双 client + token exchange」，改单应用单 client（chandler 无 token-exchange grant；client_id 语义 = 应用）。补 chandler 对接事实（JWKS URL、iss、自助注册）。已写入 §5、§2、§2.2、§9；对照见 §22。
+> 2026-08-25：商品名 = 数字教材建设能力。PPTCreator = 做片能力，不是做课件能力。必须有 harness 层（编排、agent loop、验收）把做片收成课件；实现不必是 DeepSeek Harness。课件大纲/讲稿用左对话右预览改。不为成本设确认门。后补清单见 §2.4。对照见 §23。P0 代码拓扑尚未按此改。
 
 ## 1. 背景与约束
 
@@ -166,13 +167,19 @@ PPTCreator: 成品 pptx + 逐页讲稿
 
 补充说明是表单字段，进 `submit_lesson` 的 spec，不是聊天线程。
 
-**对话框只服务对半成品的修改意见。** 教师已经看见某一版设计/大纲/PPT/讲稿，意见是指代性的、开放的、要迭代的：「第 3 页那个案例换成食堂」「讲稿第二段太书面」。这填不成表单，也不该整份重填材料再按一次「做课」。
+**对话框挂在 harness 的设计稿上，不是做课件入口。** 教师已经看见某一版大纲/PPT/讲稿，意见是指代性的、开放的、要迭代的。首轮用按钮启动 harness；loop 中途即可在分栏里看见并介入，不必等整份 pptx 下载完。不要整份重填材料再当一台做片机按一次。
+
+课件落地后若工作台只提供下载，形态就会像传统生成器：改稿只能去 PowerPoint。**手工改文件始终合法，且经常更快。** 自然语言改稿是可选面，不是替代 Office。它只在按钮填不成的时候成立（例如「给这一页配一张示意图」——这是可能性，不是承诺上配图产品）。
+
+**大纲和讲稿的改稿面是分栏对话，不是 PPTCreator 那种逐条表单。** 右边预览当前课件大纲或教案/讲稿设计稿，左边从教学设计角度提意见（「封面不要营销腔」「第三节改成案例课」「这个环节加一个提问」）。点预览里的一页或一个环节，对话指代「这一页」。这就是 §2.4 要露出的 PPTCreator 课件大纲，不是网关另写一份教学大纲。
+
+**只要提供自然语言交互，就需要 harness 做编排。** 一句话可能改大纲、讲稿、PPT、或后补生图/练习。Harness 的职责不限于返工：首轮「做课件」也要走编排、loop、验收，否则直出的是 deck。实现不必是 DSH。未挂的插件不得假装会做。空聊天不上线。
 
 因此对话必须：
 
 - **有半成品才出现**（绑定 `artifact_id` / 当前版本；空状态不是首页）
 - **入口是「对这一份提意见」**，不是全局「问助手」
-- 把意见变成 `submit_lesson(rebuild=ppt, critique=…)`；P0 整份重跑出新版本，不打单页重生
+- 把意见交给编排层选工具。P0 工具面可以暂时只有 `rebuild` PPT+讲稿（整份出新版本，不打单页重生）；挂上生图/练习等插件后，同一句对话应能选对应 `produce_*` / `rebuild_*`，而不是永远整份重跑 PPTCreator
 
 **确认不等于对话。** 大纲出来点「通过，继续生成 PPT」是按钮。只有「大纲里第三节要改成案例课」才开对话。不要用 DSH plan/approval 冒充确认框。
 
@@ -188,7 +195,7 @@ PPTCreator: 成品 pptx + 逐页讲稿
 
 **一句话：** DSH 是半成品上的返工 agent，不是做课入口。无半成品则不加载。CoursePackage 的 SoR 仍是网关。
 
-用足 DSH 的地方：指代消解（「这一页」「那个例子」）、把散意见收成一条 rebuild spec、对比版本差。不用它做 CMS、不用它问「你想做什么课」。
+用足 DSH 的地方：指代消解（「这一页」「那个例子」）、在已挂插件中选工具、把散意见收成一次或多次 rebuild/produce、对比版本差。不用它做 CMS、不用它问「你想做什么课」、不用它在没有半成品时当入口。
 
 **刻意不用的 DSH 能力：** shell/fs/终端、本地 workspace、默认 `web_fetch`、插件市场、trajectory 当主界面、用对话发起首轮生成。
 
@@ -213,6 +220,55 @@ CoDelphi 整合多个外部能力，给某类客户一条龙。商品是 **预�
 - **`package_templates` = 销售 SKU**（年限、价、护栏）。**Preset = 运行时拓扑 + 皮肤。** SKU 可引用它启用哪些 Preset。
 
 P0 只卖 `digital_lesson`。内核按「目录可以有第二条」来建，不实现第二条。
+
+### 2.4 数字教材：插件切分与后补清单（2026-08-25）
+
+对外卖的是 **一本数字教材的建设能力**（教研室课题或课程建设即可），不是独立「备课套件」。课件是教材上的一层，由 harness 收成，不是 PPTCreator 的产品名。
+
+**PPTCreator 做片，Harness 做课件**
+
+- PPTCreator 提供 **做 PPT 的能力**（pptx、C 端已有的课件大纲、讲稿 docx）。它不提供 **做课件的能力**。把 partner 一次返回的 pptx 当课件，得到的是 yet another slides deck。
+- **必须有 harness 层**：能力编排、agent loop、验收。看见教师要的是课件，去调已挂插件、迭代、对照「这是课不是路演 deck」停下来。实现 **不必是 DeepSeek Harness**（DSH 是候选之一）。不把 Cordis 迁进 Go，不把教材图的权威交给对话进程。
+- 课件验收（harness，不替代教师最终点头）：有这一章课的展开（教学设计意义上的大纲）、讲稿能收成教案用、不像路演封面。教案栏目整形仍是被编排的一截插件，不是第二条「从材料生成课程设计」向导。
+- 教师点「做课件」启动 harness。对话出现在已有设计稿上（左对话右预览）。空聊天不上线。
+
+**做片插件交出什么（不是课件完成）**
+
+- PPTCreator `create_ppt_from_documents` 产出 pptx + 讲稿 docx，C 端另有大纲。Partner 路径目前一枪打到 pptx，**不把大纲交回**，记为做片接口缺口。
+- 讲稿 docx **不一定已经是教案的表现形态**。网关教案能力只负责把它加工成教案该长成的样子，由 harness 调用。
+- **不要**再并行用网关 LLM 从材料生成「课程设计 / 教学大纲」当作教案源。现行 `digital_lesson` 的 design → outline → `awaiting_confirm` 是历史拓扑。
+
+**课件大纲要露出，改法是教学设计对话，不是 PPTCreator 那张表**
+
+- PPTCreator C 端有 `/html-outline`：逐页列出，文本框改标题、按钮增删调序。Partner 路径 `create_ppt_from_documents` 一枪打到 pptx，**不把这份大纲交回 CoDelphi**，所以工作台看不见。
+- 这份大纲是「这一章课怎么展开」（页序、每页教什么），不是培养方案里的课程教学大纲，也不是网关自造的 `outline` 构件。
+- CoDelphi 工作台改大纲、改讲稿/教案：采用分栏——**左边和 AI 说教学设计意见，右边预览当前设计稿**。点预览中的一页/一个环节，对话可指「这一页」。不把逐条文本框当主界面。Office 手工改 pptx/docx 始终合法。
+- 落地：对话结果写回 PPTCreator 的确认大纲（`confirmedOutline`），再生成或重生成 PPT+讲稿；讲稿侧由网关整形和/或 partner 按 critique 重写。这要求 partner 后续能交回大纲、接受更新后的大纲——现行 MCP 没有这一步，记为缺口，不是网关再 LLM 一份大纲冒充。
+- 可以先出大纲、分栏里改完再出 PPT。这是教学设计步骤，**不是**成本确认门。
+
+**本地改过的 PPT 必须能导回**
+
+- 教师下载 pptx 到 PowerPoint 里改，经常比对话快，始终合法。改完若不能回到系统，教材图上的当前课件仍是生成稿，后续讲稿、教案、讲解视频都会对错文件。
+- **导回 = 新的 `ppt` artifact 版本**：当前指针前移，历史可回看可下载。不是覆盖原对象，也 **不是** 把文件当章 `Material` 再跑一遍做片。
+- 导回后 harness 验收：页数/标题是否仍与大纲、讲稿对齐；不对齐要标出来。可从 pptx 抽页序刷新大纲预览。**不要**为了「对齐」默默丢掉教师文件去整份重跑 PPTCreator。
+- 讲稿/教案 docx 同一原则（后补实现也可），本条先钉死 pptx。
+
+**不为成本征求同意**
+
+- 售价覆盖教师用量。插件不要声明「这步贵、先等人点头」。账本仍按 step authorize/settle，那是内部护栏，不是教师确认门。
+- 现行代码里的 `awaiting_confirm` 来自「贵步骤征求同意」；**产品上不再作为设计要求**。未改代码前工作台仍可能出现该状态。
+
+**后补（已记录，P0 不做）**
+
+| 能力 | 挂在哪 | 备注 |
+|---|---|---|
+| 知识结构 / 知识点图谱 | 章 | 检索、图谱、与练习对齐 |
+| 形成性练习 / 案例 | 章 | OpenMAIC 未证伪前可用 LLM |
+| 媒体位（图、微课、3D） | 章内槽位 | 存储先行；AI3D 后接 |
+| 讲解视频（讲稿成片 / 数字人） | 课件旁挂 | 不挡 PPT 画面 |
+| 出版导出（平台包、元数据） | 整本 | 结题才要；ISBN 可无，不是产品身份 |
+
+内核只保留：身份与配额、对象存储、教材图、插件注册表。Harness 做编排 / loop / 验收（实现未绑 DSH）。制作能力按插件挂上；License 启用的是插件清单。教师点「做课件」启动 harness，不是直调 PPTCreator 下载。构件落地后可 Office 手工改，**改完的 pptx 必须导回为新版本**；也可在分栏对话介入。不把「做教材」入口改成空聊天。配图等只是可能挂上的插件，不是 P0 承诺。
 
 ## 3. 商业模式与授权模型
 
@@ -273,7 +329,7 @@ P0 只卖 `digital_lesson`。内核按「目录可以有第二条」来建，不
 **CoursePackage** — 一套课的构件清单（挂在 Project 上）
 `id, project_id, status(draft/building/ready/partial), lesson_job_id`
 - Artifact：`kind(design|outline|ppt|script|exercise|lecture_video|asset_3d), status, step_job_id, storage_ref`
-- **Artifact 留版本**：每次重建产生新版本行，当前指针指向最新；教师迭代十几次是常态，历史版本可回看可下载。UsageRecord 挂 step_job_id，成本侧不受影响
+- **Artifact 留版本**：每次重建或教师导回产生新版本行，当前指针指向最新；教师迭代十几次是常态，历史版本可回看可下载。**本地修改的 pptx 导回是正式写路径**（新版本，不是覆盖、不是 Material）。UsageRecord 挂 step_job_id；纯导回无 vendor 调用则无新成本行。
 - 教师看见的是 artifacts 列表。P0 必齐：design / outline / ppt / script
 - 与 PPTCreator Project：一次 partner 生成对应套件里的 PPT+讲稿；C 端 dashboard 永不可见
 
@@ -411,14 +467,15 @@ PPT 几分钟；数字人成片 + PPT 渲染 + 合成是分钟到小时级。**�
 | 7 | 下载鉴权：`getPresignedDownloadUrl` 校验调用方仍是该机构成员，TTL 对齐网关轮询 | 下载路径 | 离职成员仍可下载 / URL 过期 |
 | 8 | partner 流量拒绝/忽略单页重生 API | `/slides/[n]/regenerate` 路径 | agent 把一页抠 20 次，LLM token 成本失控（成本护栏，非计费口径） |
 | 9 | **讲稿必须回报**：完成响应带逐页备注/讲稿（管线已有 script），与页数对齐；是否需带每页时长由合成器 spike 定 | worker 完成路径 / MCP status | 数字人没有合法输入，会去猜 PPT 正文 |
-| 10 | partner 生成需支持多文档输入（课文、教学设计等多份材料，来自套件 materials[]） | 生成 API / worker 入参 / 数据模型 | **已确认不支持**：MCP 只收单 `document_id` 或单段文本，worker 对 `project.document` 单一文档硬依赖（`worker/jobs/generate-slides-simplified.ts`） |
+| 10 | partner 生成需支持多文档输入（课文、教学设计等多份材料，来自套件 materials[]） | 生成 API / worker 入参 / 数据模型 | **已落地** `create_ppt_from_documents` |
+| 11 | **课件大纲交回/写回**：COMPLETED 带 `outline_url`（与 C 端 htmlOutline 同形）；再生成接受 `confirmed_outline` 写入 `ctx.confirmedOutline` | MCP status / `create_ppt_from_documents` / worker | 网关看不见课件结构；改大纲无法约束做片；只能再出一副 deck |
 
 第 10 条：PPTCreator 已落地 MCP `create_ppt_from_documents`（方向一）。**网关 P0 走材料包 `documents[]`，不再预合成单文本。** 方向二仅作历史过渡，禁止再发单数 `document`（会落到 `create_ppt_from_text`）。
 
-- **方向一（现行）：** 课文 / 教学设计 / 参考各自身份进生成。网关组装：第一份材料 = `textbook`，当前 design = `teaching_design`，其余材料与 outline = `reference`（1–5 项，恰好一份 textbook）
+- **方向一（现行）：** 课文 / 参考各自身份进生成。网关组装：课材料 = `textbook` + `reference`。课件结构走契约 C8 `confirmed_outline`，**不再**把网关自造 design/outline JSON 塞进 `documents[]`。
 - **方向二（已废弃）：** 网关侧预合成单文档再提交
 
-**验收测试（partner 模式完工定义）**：打一条 partner 生成，断言 `UserProfile.freeCreditsRemaining` 不变、`downloadLocked=false`、网关 UsageRecord settled、C 端 dashboard 不可见、**讲稿非空且页数对齐**。
+**验收测试（partner 模式完工定义）**：打一条 partner 生成，断言 `UserProfile.freeCreditsRemaining` 不变、`downloadLocked=false`、网关 UsageRecord settled、C 端 dashboard 不可见、**讲稿非空且页数对齐**、**大纲非空且与页数对齐**。
 
 不动的：解析/渲染管线、字体体系、Web 应用本身、C 端积分与 OAuth 体系。不要在网关 execution 核心写死 PPTCreator 的 MCP 工具名；网关以 partner 身份调 create/status/download。
 
@@ -459,8 +516,8 @@ P0：工作台「做课」必须先通。返工对话可紧随其后，但不得
 | 账号共享 | 不验证；合同禁转租 + 护栏 + 用量异常告警 |
 | vendor 配置 | P0 最低：vendor 在配置里显式、可换（默认国内模型）；org 级 vendor 白名单 P1 |
 | 编排形态 | 首轮做课 = 工作台按钮 → 网关固定状态机。对话 = 半成品返工，不是入口 |
-| 扣费粒度 | 按 step authorize/settle，不整单预扣；确认门（`awaiting_confirm`）等待期间无预扣 |
-| 设计/大纲 provider | 无姐妹平台可接，网关新做 LLM adapter，capability 记 `design`/`outline` |
+| 扣费粒度 | 按 step authorize/settle，不整单预扣。**不为成本设教师确认门**（2026-08-25，§2.4）；售价覆盖用量。现行代码仍可能有 `awaiting_confirm`，产品上不再要求 |
+| 设计/大纲 provider | **撤回作为教案源**（2026-08-25）：教案底稿 = PPTCreator 讲稿 docx，网关只做形态加工。历史：无姐妹平台时网关曾规划 `design`/`outline` LLM |
 
 ### 仍开放（影响合同或合规，销售开口前要书面）
 
@@ -1572,3 +1629,19 @@ P0：工作台可薄、DSH 可后嵌；不要为嵌 DSH 挡「交出 PPT+讲稿�
 - 同步改：§2 架构图、§2.2、§9 第 4 条。§18 评审原文（双 client 出处）为历史记录，不改
 
 **同日更正：** §21 补充事实中「app.codelphi.com 已指向 101.32.49.240」作废——该机（VM-16-7）当日资源耗尽挂掉，生产迁移至 124.156.160.168（VM-32-3），以 §10 部署行为准。
+
+---
+
+## 23. 修订记录（2026-08-25 · 数字教材插件）
+
+对照物：对话结论（卖数字教材不卖备课套件；课件是教材插件；PPTCreator 已出 pptx+docx；不为成本征求同意）。§11–§22 为历史记录。**本轮只写入产品方向，未改 catalog / 状态机代码。**
+
+- **商品名 = 数字教材建设能力。** 校内课题或课程建设即可验收教学使用的数字化章；ISBN / 出版导出后置，不是产品身份（§2.4）
+- **课件 ≠ PPTCreator 一对产出。** Partner 交回的是做片结果（pptx、讲稿 docx、C 端还有大纲）。网关教案整形是被 harness 调用的插件。**不**另起「从材料生成课程设计/教学大纲」当教案源
+- **必须有 harness 层，不必是 DSH。** 职责：能力编排、agent loop、验收（课的展开 + 教案形态，不是路演 deck）。实现未选型。不把 Cordis 迁进 Go。教师点「做课件」启动 loop，不是空聊天，也不是直调 PPTCreator 下载（§2.4）
+- **不为成本设确认门。** 售价覆盖教师用量；插件不声明「这步贵、先点头」。authorize/settle 仍是内部护栏
+- **后补已登记、P0 不做：** 知识结构/知识点图谱、形成性练习/案例、媒体位（图、微课、3D）、讲解视频（讲稿成片/数字人）、出版导出（平台包、元数据）
+- **「像传统软件」= 没有 harness。** 写死向导、落地只给下载、直出 pptx 当课件，都是同一症状。手工改 PPT 始终合法。配图是可能性，不是承诺（§2.2、§2.4）
+- **课件大纲 / 讲稿用左对话右预览改。** 要露出的是 PPTCreator 的幻灯结构，不是网关自造「教学大纲」。不抄 C 端逐条文本框。改完写回 partner 确认大纲再生成。现行 partner MCP 一次出齐、不交回大纲，记为缺口（§2.2、§2.4）
+- **本地修改的 pptx 必须能导回。** 新 artifact 版本，不是当材料重传，也不覆盖历史。导回后大纲/讲稿不对齐由 harness 标出，不得丢掉教师文件去整份重跑（§2.4）
+- **PLAN P0' / 契约 C8 已同步（2026-08-25）。** 完工定义不再验收确认门与网关课程设计。代码拓扑尚未改

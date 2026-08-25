@@ -73,6 +73,7 @@ func New(d Deps) http.Handler {
 	mux.Handle("POST /v1/lessons/{id}/confirm", auth(http.HandlerFunc(s.confirm)))
 	mux.Handle("GET /v1/packages/{id}", auth(http.HandlerFunc(s.getPackage)))
 	mux.Handle("POST /v1/packages/{id}/rebuild", auth(http.HandlerFunc(s.rebuild)))
+	mux.Handle("POST /v1/packages/{id}/artifacts/ppt", auth(http.HandlerFunc(s.importPPT)))
 	mux.Handle("POST /mcp", auth(http.HandlerFunc(s.handleMCP)))
 	return s.withCORS(mux)
 }
@@ -559,6 +560,45 @@ func (s *server) rebuild(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]string{"package_id": pkg.ID, "status": "building"})
 }
 
+func (s *server) importPPT(w http.ResponseWriter, r *http.Request) {
+	c := s.ictx(r)
+	if !s.requireWriter(w, c) {
+		return
+	}
+	pkg, ok := s.loadPackage(w, r, r.PathValue("id"), c)
+	if !ok {
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, extract.MaxBytes)
+	if err := r.ParseMultipartForm(extract.MaxBytes); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid_request", "multipart form required 或文件过大")
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid_request", "file required")
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, extract.MaxBytes+1))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid_request", "读取文件失败")
+		return
+	}
+	if int64(len(data)) > extract.MaxBytes {
+		writeErr(w, http.StatusBadRequest, "invalid_request", "单份材料超过 20MB")
+		return
+	}
+	got, err := s.exec.ImportPPT(r.Context(), c.OrgID, pkg.ID, header.Filename, data)
+	if err != nil {
+		s.writeExecErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"kind": got.Kind, "version": got.Version, "package_id": pkg.ID,
+	})
+}
+
 func (s *server) writePackage(w http.ResponseWriter, r *http.Request, packageID string, c *identity.Context) {
 	pkg, ok := s.loadPackage(w, r, packageID, c)
 	if !ok {
@@ -642,6 +682,14 @@ func (s *server) writeExecErr(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusBadRequest, "invalid_request", msg)
 	case errors.Is(err, execution.ErrUnknownPreset):
 		writeErr(w, http.StatusBadRequest, "invalid_request", "未知的预设包")
+	case errors.Is(err, execution.ErrNoCurrentPPT):
+		writeErr(w, http.StatusConflict, "no_current_ppt", "请先生成 PPT，再导回本地修改")
+	case errors.Is(err, execution.ErrNotPPTX):
+		writeErr(w, http.StatusBadRequest, "invalid_request", "请上传 .pptx")
+	case errors.Is(err, execution.ErrPPTBusy):
+		writeErr(w, http.StatusConflict, "ppt_busy", "正在生成 PPT，请稍后再导回")
+	case errors.Is(err, execution.ErrOrgSuspended):
+		writeErr(w, http.StatusForbidden, "org_suspended", "机构已停用")
 	case strings.Contains(msg, "project not in org"):
 		writeErr(w, http.StatusNotFound, "not_found", "project not found")
 	default:

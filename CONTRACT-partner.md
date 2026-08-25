@@ -2,7 +2,7 @@
 
 > 给**其他能力提供方**的接缝文档。网关 ↔ 你的平台之间只认这一份语义；路径名可以和 PPTCreator 不同，语义不能另起一套闸门。
 >
-> PPTCreator 是第一份填好的实例，细节见 `CONTRACT-pptcreator-partner.md`（C0–C7）。新平台复制文末检查表，**缺一格就不能标「已接入」**。
+> PPTCreator 是第一份填好的实例，细节见 `CONTRACT-pptcreator-partner.md`（C0–C8）。新平台复制文末检查表，**缺一格就不能标「已接入」**。
 >
 > 依据：设计文档 §2.1 Partner 通则、§15 C.1–C.4。v1 · 2026-08-24。
 > 变更走设计评审，改完同步本文档版本号。
@@ -19,7 +19,7 @@ CoDelphi 卖给机构的是**预设包**（一套产物），不是你的 2C 产
 
 网关后面是 `internal/execution/adapters/<你>`。教师侧 MCP 只挂网关，工具名按 **capability**（如 `ppt`），不按平台品牌。平台故障或换路由，教师看见的名字不变。
 
-P0 已接：`design`/`outline`（网关直连 LLM，不是 partner）、`ppt`+`script`（PPTCreator）。下一批候选：数字人成片、AI3D、OpenMAIC——接之前先定 §2 的 `job_kind`。
+P0 已接：`ppt`+`script`+课件大纲（PPTCreator，大纲见 C8）。网关自造 `design`/`outline` LLM **已撤回**（设计 §2.4）。下一批候选：数字人成片、AI3D、OpenMAIC——接之前先定 §2 的 `job_kind`。
 
 ## 1. 角色与不变量
 

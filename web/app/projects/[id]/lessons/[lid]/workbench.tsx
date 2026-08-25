@@ -118,14 +118,18 @@ export function LessonWorkbench({
     await loadPackage(data.package_id);
   }
 
-  async function confirm() {
-    if (!pkg?.lesson_job_id) return;
+  async function importPPT(files: FileList | null) {
+    if (!files || files.length === 0 || !pkg?.id) return;
+    const file = files[0];
     setBusy(true);
-    const res = await fetch(`/api/gw/v1/lessons/${pkg.lesson_job_id}/confirm`, { method: "POST" });
-    const data = (await res.json()) as Lesson & { error?: APIError };
+    setErr(null);
+    const fd = new FormData();
+    fd.set("file", file);
+    const res = await fetch(`/api/gw/v1/packages/${pkg.id}/artifacts/ppt`, { method: "POST", body: fd });
+    const data = await res.json();
     setBusy(false);
     if (!res.ok) {
-      setErr(data.error || { code: "confirm", message: "确认失败" });
+      setErr(data.error || { code: "import", message: "导回失败" });
       return;
     }
     await loadPackage(pkg.id);
@@ -178,7 +182,7 @@ export function LessonWorkbench({
             className="h-24 w-full border border-line bg-paper px-3 py-2 text-sm outline-none focus:border-ink"
           />
           <Button onClick={() => void submit()} disabled={busy || materials.length === 0}>
-            {busy ? "提交中…" : copy?.submit_cta || "做课"}
+            {busy ? "提交中…" : copy?.submit_cta || "做课件"}
           </Button>
         </section>
       ) : null}
@@ -198,17 +202,6 @@ export function LessonWorkbench({
             )}
           </ol>
 
-          {lesson === "awaiting_confirm" && canWrite ? (
-            <div className="border border-line bg-card p-5">
-              <p className="text-sm">{copy?.confirm_hint || "看过之后点确认，才会继续生成。等待期间不扣配额。"}</p>
-              <div className="mt-4">
-                <Button onClick={() => void confirm()} disabled={busy}>
-                  {copy?.confirm_cta || "通过，继续"}
-                </Button>
-              </div>
-            </div>
-          ) : null}
-
           {lesson === "running" || lesson === "queued" ? (
             <p className="text-sm text-muted">正在生成，可离开此页，进度会保留。</p>
           ) : null}
@@ -216,15 +209,33 @@ export function LessonWorkbench({
           <ul className="space-y-3">
             {(pkg.artifacts || []).map((a) => (
               <li key={a.kind} className="border border-line bg-card px-4 py-3">
-                <div className="flex items-baseline justify-between">
+                <div className="flex items-baseline justify-between gap-3">
                   <span className="font-serif">{copy?.artifact_labels?.[a.kind] || fallbackLabels[a.kind] || a.kind}</span>
-                  {a.current?.url ? (
-                    <a href={mediaHref(a.current.url)} className="text-sm text-seal hover:underline" {...fileLinkProps(a.current.url)}>
-                      预览 / 下载 · v{a.current.version}
-                    </a>
-                  ) : (
-                    <span className="text-sm text-muted">尚未就绪</span>
-                  )}
+                  <div className="flex items-center gap-3">
+                    {a.kind === "ppt" && canWrite && a.current?.url ? (
+                      <label className={`text-sm text-seal ${busy ? "pointer-events-none opacity-50" : "cursor-pointer hover:underline"}`}>
+                        导回本地修改
+                        <input
+                          type="file"
+                          accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                          className="hidden"
+                          disabled={busy}
+                          onChange={(e) => {
+                            const files = e.target.files;
+                            void importPPT(files);
+                            e.target.value = "";
+                          }}
+                        />
+                      </label>
+                    ) : null}
+                    {a.current?.url ? (
+                      <a href={mediaHref(a.current.url)} className="text-sm text-seal hover:underline" {...fileLinkProps(a.current.url)}>
+                        预览 / 下载 · v{a.current.version}
+                      </a>
+                    ) : (
+                      <span className="text-sm text-muted">尚未就绪</span>
+                    )}
+                  </div>
                 </div>
                 {(a.versions || []).length > 1 ? (
                   <p className="mt-2 text-xs text-muted">

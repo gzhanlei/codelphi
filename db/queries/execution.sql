@@ -24,6 +24,9 @@ INSERT INTO course_packages (id, project_id, lesson_id, preset_id, status, lesso
 -- name: GetCoursePackage :one
 SELECT * FROM course_packages WHERE id = ? LIMIT 1;
 
+-- name: LockCoursePackage :one
+SELECT * FROM course_packages WHERE id = ? FOR UPDATE;
+
 -- name: UpdatePackageStatus :exec
 UPDATE course_packages SET status = ? WHERE id = ?;
 

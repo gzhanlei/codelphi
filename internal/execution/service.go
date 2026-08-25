@@ -1,6 +1,7 @@
 package execution
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -23,8 +24,8 @@ import (
 	"codelphi/internal/storage"
 )
 
-// lesson 拓扑来自 Project.preset_id 对应的目录（设计 §2.3）。
-// digital_lesson：design → outline → awaiting_confirm → ppt+script。每个 step 独立 authorize/settle（§4）。
+// lesson 拓扑来自 Project.preset_id 对应的目录（设计 §2.3 / §2.4）。
+// digital_lesson P0'：材料 → ppt+script（无确认门；大纲随 partner C8 后补）。每个 step 独立 authorize/settle。
 var (
 	// ErrIllegalTransition：状态机非法迁移（条件 UPDATE rows=0）。
 	ErrIllegalTransition = errors.New("execution: illegal job status transition")
@@ -44,6 +45,14 @@ var (
 	ErrTooManyMaterials = errors.New("execution: too many materials")
 	// ErrLessonInFlight：该课已有 queued/running/awaiting_confirm 的 lesson job。
 	ErrLessonInFlight = errors.New("execution: lesson already in flight")
+	// ErrNoCurrentPPT：导回要求套件里已有当前 ppt（不是第一次当材料上传）。
+	ErrNoCurrentPPT = errors.New("execution: no current ppt to import over")
+	// ErrNotPPTX：导回只收 .pptx。
+	ErrNotPPTX = errors.New("execution: import requires a .pptx file")
+	// ErrPPTBusy：套件正在做片/重建，不能同时导回。
+	ErrPPTBusy = errors.New("execution: ppt generate already in flight")
+	// ErrOrgSuspended：机构已停用，导回等无 vendor 写入也要拦（与 Authorize 同闸，但不预扣）。
+	ErrOrgSuspended = errors.New("execution: org_suspended")
 )
 
 // InFlightError 带上已有 job，供 HTTP/MCP 幂等返回 200。
@@ -56,7 +65,7 @@ type InFlightError struct {
 func (e *InFlightError) Error() string { return ErrLessonInFlight.Error() }
 func (e *InFlightError) Unwrap() error { return ErrLessonInFlight }
 
-// MaxMaterialsPerLesson 是教师上传上限。PPT 材料包另有 5 槽（课文+设计+大纲优先）。
+// MaxMaterialsPerLesson 是教师上传上限。PPT 材料包另有 5 槽（课文优先，其余 reference）。
 const MaxMaterialsPerLesson = 5
 
 // Config 可调项；默认值即可用于生产。
@@ -127,8 +136,7 @@ type Lesson struct {
 	Status      string // jobs.status
 }
 
-// SubmitLesson 建 lesson job + CoursePackage，顺序跑 design、outline 两个 step，
-// 然后停在 awaiting_confirm（确认门是正式状态，等待期间不持有任何预扣）。
+// SubmitLesson 建 lesson job + CoursePackage，按预设跑全部 step（P0' 无确认门，直接做片）。
 //
 // 返回的 error 只在系统性失败（DB / billing 不可用，fail-closed）时非 nil；
 // 业务性 step 失败（deny、adapter 故障）体现在 Lesson.Status = failed。
@@ -140,7 +148,7 @@ func (s *Service) SubmitLesson(ctx context.Context, in SubmitInput) (*Lesson, er
 	return s.runDesignOutline(ctx, prepared)
 }
 
-// StartLesson 是 HTTP 用的非阻塞入口：建 job 后立即返回 running，design/outline 在后台跑。
+// StartLesson 是 HTTP 用的非阻塞入口：建 job 后立即返回 running，step 在后台跑。
 // 进程退出时残留 running 由 RecoverInFlight 收敛；预扣由 billing TTL 扫尾兜底。
 func (s *Service) StartLesson(ctx context.Context, in SubmitInput) (*Lesson, error) {
 	prepared, err := s.prepareLesson(ctx, in)
@@ -191,6 +199,106 @@ func (s *Service) StartConfirm(ctx context.Context, lessonID string) (*Lesson, e
 		}
 	}()
 	return lesson, nil
+}
+
+// ImportResult 是教师导回 pptx 后的新版本快照。
+type ImportResult struct {
+	Kind    string `json:"kind"`
+	Version int32  `json:"version"`
+}
+
+// ImportPPT 把本地改过的 pptx 收成新的 ppt artifact 版本。当前指针前移，历史保留。
+// 不写 Material、不调 PPTCreator、不产生 UsageRecord。
+// 对象键用 ULID，避免与并发导回/重建抢同一 ppt-vN 路径；版本号在锁住套件行后分配。
+func (s *Service) ImportPPT(ctx context.Context, orgID, packageID, filename string, data []byte) (*ImportResult, error) {
+	if !strings.HasSuffix(strings.ToLower(filename), ".pptx") {
+		return nil, ErrNotPPTX
+	}
+	if int64(len(data)) > extract.MaxBytes {
+		return nil, ErrMaterialTooLarge
+	}
+	if err := s.billing.AssertOrgActive(ctx, orgID); err != nil {
+		if errors.Is(err, billing.ErrOrgSuspended) {
+			return nil, ErrOrgSuspended
+		}
+		return nil, err
+	}
+	key := fmt.Sprintf("org/%s/package/%s/ppt-%s.pptx", orgID, packageID, ulid.Make().String())
+	if err := s.store.Put(ctx, key, bytes.NewReader(data), "application/vnd.openxmlformats-officedocument.presentationml.presentation"); err != nil {
+		return nil, err
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	qt := dbgen.New(s.db).WithTx(tx)
+
+	pkg, err := qt.LockCoursePackage(ctx, packageID)
+	if err != nil {
+		return nil, fmt.Errorf("execution: package: %w", err)
+	}
+	project, err := qt.GetProject(ctx, pkg.ProjectID)
+	if err != nil {
+		return nil, fmt.Errorf("execution: project: %w", err)
+	}
+	if project.OrgID != orgID {
+		return nil, errors.New("execution: project not in org")
+	}
+	arts, err := qt.ListCurrentArtifacts(ctx, packageID)
+	if err != nil {
+		return nil, err
+	}
+	hasPPT := false
+	for _, a := range arts {
+		if a.Kind == "ppt" && a.Status == dbgen.ArtifactsStatusReady {
+			hasPPT = true
+			break
+		}
+	}
+	if !hasPPT {
+		return nil, ErrNoCurrentPPT
+	}
+	if pkg.Status == dbgen.CoursePackagesStatusBuilding {
+		return nil, ErrPPTBusy
+	}
+	if pkg.LessonJobID.Valid {
+		steps, err := qt.ListStepJobs(ctx, sql.NullString{String: pkg.LessonJobID.String, Valid: true})
+		if err != nil {
+			return nil, err
+		}
+		for _, st := range steps {
+			if st.Capability.String != "ppt" {
+				continue
+			}
+			if st.Status == dbgen.JobsStatusQueued || st.Status == dbgen.JobsStatusRunning {
+				return nil, ErrPPTBusy
+			}
+		}
+	}
+	version, err := qt.NextArtifactVersion(ctx, dbgen.NextArtifactVersionParams{PackageID: packageID, Kind: "ppt"})
+	if err != nil {
+		return nil, err
+	}
+	if err := qt.ClearCurrentArtifact(ctx, dbgen.ClearCurrentArtifactParams{PackageID: packageID, Kind: "ppt"}); err != nil {
+		return nil, err
+	}
+	if err := qt.InsertArtifact(ctx, dbgen.InsertArtifactParams{
+		ID: ulid.Make().String(), PackageID: packageID, Kind: "ppt", Version: version,
+		Status:     dbgen.ArtifactsStatusReady,
+		StorageRef: sql.NullString{String: key, Valid: true},
+		IsCurrent:  true,
+	}); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	if err := s.refreshPackageStatus(ctx, packageID); err != nil {
+		return nil, err
+	}
+	return &ImportResult{Kind: "ppt", Version: version}, nil
 }
 
 // Wait 等后台 StartLesson/StartConfirm 结束（进程退出前由 gateway 调用）。
@@ -380,7 +488,7 @@ func (s *Service) finishLesson(ctx context.Context, p *preparedLesson, lesson *L
 
 // Rebuild 单件重试/缺件后补（设计 §2.2：P0 整份重出，无单页重生）。
 // 新 step job、新预扣；成功后产生新版本 artifact，is_current 迁移，旧版本保留。
-// kind 只接受 design/outline/ppt；script 随 ppt 整份重出。
+// kind 只接受目录里能独立重出的构件（P0' 为 ppt）；script 随 ppt 整份重出。
 func (s *Service) Rebuild(ctx context.Context, packageID, kind, critique string) error {
 	q := dbgen.New(s.db)
 	pkg, err := q.GetCoursePackage(ctx, packageID)
@@ -418,9 +526,22 @@ func (s *Service) Rebuild(ctx context.Context, packageID, kind, critique string)
 		return err
 	}
 
-	if err := q.UpdatePackageStatus(ctx, dbgen.UpdatePackageStatusParams{
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	qt := q.WithTx(tx)
+	if _, err := qt.LockCoursePackage(ctx, packageID); err != nil {
+		tx.Rollback()
+		return err
+	}
+	if err := qt.UpdatePackageStatus(ctx, dbgen.UpdatePackageStatusParams{
 		Status: dbgen.CoursePackagesStatusBuilding, ID: packageID,
 	}); err != nil {
+		tx.Rollback()
+		return err
+	}
+	if err := tx.Commit(); err != nil {
 		return err
 	}
 
@@ -641,7 +762,7 @@ func (s *Service) insertArtifact(ctx context.Context, packageID string, kind str
 	if err := qt.InsertArtifact(ctx, dbgen.InsertArtifactParams{
 		ID: ulid.Make().String(), PackageID: packageID, Kind: kind, Version: version,
 		Status:     dbgen.ArtifactsStatusReady,
-		StepJobID:  sql.NullString{String: stepID, Valid: true},
+		StepJobID:  sql.NullString{String: stepID, Valid: stepID != ""},
 		StorageRef: sql.NullString{String: storageKey, Valid: true},
 		IsCurrent:  true,
 	}); err != nil {
@@ -725,19 +846,11 @@ func absolutizeURL(base, u string) string {
 	return strings.TrimRight(base, "/") + u
 }
 
-// packPPTDocuments 组 create_ppt_from_documents 材料包（契约 C2）。
-// 教师原文件走 url；design/outline 构件走 content。
-// 槽位优先：textbook 文件 → teaching_design → outline → 其余文件作 reference。
-func packPPTDocuments(files []pptFile, design, outline string) []pptcreator.Doc {
-	const maxDocs, minLen = 5, 10
+// packPPTDocuments 组 create_ppt_from_documents 材料包（契约 C2 / C8）。
+// 教师原文件走 url。不再把网关自造 design/outline JSON 塞进 documents[]。
+func packPPTDocuments(files []pptFile) []pptcreator.Doc {
+	const maxDocs = 5
 	docs := make([]pptcreator.Doc, 0, maxDocs)
-	appendContent := func(role, name, content string) {
-		content = strings.TrimSpace(content)
-		if len(content) < minLen || len(docs) >= maxDocs {
-			return
-		}
-		docs = append(docs, pptcreator.Doc{Role: role, Name: name, Content: content})
-	}
 	appendFile := func(role, name, fileURL string) {
 		if strings.TrimSpace(fileURL) == "" || len(docs) >= maxDocs {
 			return
@@ -747,11 +860,10 @@ func packPPTDocuments(files []pptFile, design, outline string) []pptcreator.Doc 
 		}
 		docs = append(docs, pptcreator.Doc{Role: role, Name: name, URL: fileURL})
 	}
-	if len(files) > 0 {
-		appendFile("textbook", files[0].Name, files[0].URL)
+	if len(files) == 0 {
+		return docs
 	}
-	appendContent("teaching_design", "课程设计", design)
-	appendContent("reference", "大纲", outline)
+	appendFile("textbook", files[0].Name, files[0].URL)
 	for i, f := range files[1:] {
 		name := f.Name
 		if name == "" {
@@ -763,30 +875,6 @@ func packPPTDocuments(files []pptFile, design, outline string) []pptcreator.Doc 
 }
 
 func (s *Service) loadPPTDocuments(ctx context.Context, p *preparedLesson) ([]pptcreator.Doc, error) {
-	var design, outline string
-	arts, err := dbgen.New(s.db).ListCurrentArtifacts(ctx, p.packageID)
-	if err != nil {
-		return nil, err
-	}
-	for _, a := range arts {
-		if !a.StorageRef.Valid || (a.Kind != "design" && a.Kind != "outline") {
-			continue
-		}
-		rc, err := s.store.Open(ctx, a.StorageRef.String)
-		if err != nil {
-			return nil, err
-		}
-		data, err := io.ReadAll(rc)
-		rc.Close()
-		if err != nil {
-			return nil, err
-		}
-		if a.Kind == "design" {
-			design = string(data)
-		} else {
-			outline = string(data)
-		}
-	}
 	signed := make([]pptFile, 0, len(p.files))
 	for _, f := range p.files {
 		u, err := s.signMaterialURL(ctx, f.Key)
@@ -795,7 +883,7 @@ func (s *Service) loadPPTDocuments(ctx context.Context, p *preparedLesson) ([]pp
 		}
 		signed = append(signed, pptFile{Name: f.Name, URL: u})
 	}
-	docs := packPPTDocuments(signed, design, outline)
+	docs := packPPTDocuments(signed)
 	for _, d := range docs {
 		if d.Role == "textbook" {
 			return docs, nil

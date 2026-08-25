@@ -250,7 +250,7 @@ func (e *apiEnv) uploadMaterial(t *testing.T, projectID, lessonID, filename, con
 	return rec
 }
 
-func TestCreateProjectUploadSubmitConfirm(t *testing.T) {
+func TestCreateProjectUploadSubmit(t *testing.T) {
 	e := newAPIEnv(t)
 
 	rec := e.do(t, http.MethodPost, "/v1/projects", map[string]string{"title": "高等数学"})
@@ -287,18 +287,12 @@ func TestCreateProjectUploadSubmitConfirm(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pkg := waitPackage(t, e, lesson.PackageID, "awaiting_confirm")
-	if pkg["lesson_status"] != "awaiting_confirm" {
+	pkg := waitPackage(t, e, lesson.PackageID, "succeeded")
+	if pkg["lesson_status"] != "succeeded" {
 		t.Fatalf("package = %v", pkg)
 	}
-
-	rec = e.do(t, http.MethodPost, "/v1/lessons/"+lesson.LessonJobID+"/confirm", nil)
-	if rec.Code != http.StatusAccepted {
-		t.Fatalf("confirm code = %d body=%s", rec.Code, rec.Body.String())
-	}
-	pkg = waitPackage(t, e, lesson.PackageID, "succeeded")
 	arts, _ := pkg["artifacts"].([]any)
-	if len(arts) < 4 {
+	if len(arts) < 2 {
 		t.Fatalf("artifacts = %v", pkg["artifacts"])
 	}
 
@@ -327,7 +321,7 @@ func TestCreateProjectUploadSubmitConfirm(t *testing.T) {
 
 func TestQuotaExhaustedHasAdminHint(t *testing.T) {
 	e := newAPIEnv(t)
-	execSQL(t, "UPDATE quota_pools SET total = 0, used = 0 WHERE capability = 'design'")
+	execSQL(t, "UPDATE quota_pools SET total = 0, used = 0 WHERE capability = 'ppt'")
 
 	rec := e.do(t, http.MethodPost, "/v1/projects", map[string]string{"title": "帽到了"})
 	var created struct {
@@ -476,7 +470,7 @@ func TestListPresets(t *testing.T) {
 	if len(body.Entitled) != 1 || body.Entitled[0] != "digital_lesson" {
 		t.Fatalf("entitled = %v", body.Entitled)
 	}
-	if len(body.Presets) != 1 || body.Presets[0].Copy.SubmitCTA == "" {
+	if len(body.Presets) != 1 || body.Presets[0].Copy.SubmitCTA != "做课件" {
 		t.Fatalf("presets = %+v", body.Presets)
 	}
 }
@@ -577,6 +571,95 @@ func TestUploadInfersKindAndCapsAtFive(t *testing.T) {
 	}
 	if decodeErr(t, sixth) != "too_many_materials" {
 		t.Fatalf("err = %s body=%s", decodeErr(t, sixth), sixth.Body.String())
+	}
+}
+
+func (e *apiEnv) importPPT(t *testing.T, packageID, filename, content string) *httptest.ResponseRecorder {
+	t.Helper()
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	fw, err := w.CreateFormFile("file", filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.WriteString(fw, content)
+	_ = w.Close()
+	req := httptest.NewRequest(http.MethodPost, "/v1/packages/"+packageID+"/artifacts/ppt", &buf)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+e.token)
+	req.Header.Set("X-Org-Id", e.orgID)
+	rec := httptest.NewRecorder()
+	e.h.ServeHTTP(rec, req)
+	return rec
+}
+
+func TestImportPPTCreatesNewVersion(t *testing.T) {
+	e := newAPIEnv(t)
+	rec := e.do(t, http.MethodPost, "/v1/projects", map[string]string{"title": "高等数学"})
+	var created struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+	lessonID := e.createLesson(t, created.ID, "第 3 章 导数")
+	if up := e.uploadMaterial(t, created.ID, lessonID, "note.txt", "导数的定义", "text"); up.Code != http.StatusCreated {
+		t.Fatalf("upload code = %d body=%s", up.Code, up.Body.String())
+	}
+	rec = e.do(t, http.MethodPost, "/v1/projects/"+created.ID+"/lessons/"+lessonID+"/submit", map[string]string{})
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("submit code = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var lesson struct {
+		PackageID string `json:"package_id"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &lesson)
+	pkg := waitPackage(t, e, lesson.PackageID, "succeeded")
+
+	imp := e.importPPT(t, lesson.PackageID, "导数-改过.pptx", "teacher-edited-pptx-bytes")
+	if imp.Code != http.StatusCreated {
+		t.Fatalf("import code = %d body=%s", imp.Code, imp.Body.String())
+	}
+	var body struct {
+		Kind    string `json:"kind"`
+		Version int    `json:"version"`
+	}
+	if err := json.Unmarshal(imp.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Kind != "ppt" || body.Version != 2 {
+		t.Fatalf("import = %+v", body)
+	}
+
+	got := e.do(t, http.MethodGet, "/v1/packages/"+lesson.PackageID, nil)
+	if got.Code != http.StatusOK {
+		t.Fatalf("get package code = %d body=%s", got.Code, got.Body.String())
+	}
+	pkg = map[string]any{}
+	if err := json.Unmarshal(got.Body.Bytes(), &pkg); err != nil {
+		t.Fatal(err)
+	}
+	arts, _ := pkg["artifacts"].([]any)
+	var ppt map[string]any
+	for _, raw := range arts {
+		a, _ := raw.(map[string]any)
+		if a["kind"] == "ppt" {
+			ppt = a
+		}
+	}
+	if ppt == nil {
+		t.Fatalf("no ppt artifact in %v", pkg["artifacts"])
+	}
+	cur, _ := ppt["current"].(map[string]any)
+	if cur["version"] != float64(2) {
+		t.Fatalf("current = %v", cur)
+	}
+	vers, _ := ppt["versions"].([]any)
+	if len(vers) != 2 {
+		t.Fatalf("versions = %v", ppt["versions"])
+	}
+
+	bad := e.importPPT(t, lesson.PackageID, "讲稿.docx", "not-pptx")
+	if bad.Code != http.StatusBadRequest {
+		t.Fatalf("non-pptx code = %d body=%s", bad.Code, bad.Body.String())
 	}
 }
 

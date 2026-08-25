@@ -3,10 +3,10 @@
 > 用途：清空对话上下文后的续接入口。新会话先读本文件，再按需读三份文档。
 > 远端仓库：`git@github.com:gzhanlei/codelphi.git`（私有，master 已推送）。
 > 文档地图：
-> - `DESIGN-b2b-capability-platform.md` — 设计（§1–§10 是现行正文；§10 已定默认/仍开放；§11+ 为评审与修订历史；最新决议见 §22）
-> - `PLAN-p0-development.md` — P0 开发计划（§0 完工定义、§2 里程碑、§9 测试门禁、文末进度记录）
-> - `CONTRACT-partner.md` — 能力提供方通用接入合同（Auth/Submit/Query/成本/旁路 2C）；新平台填附录检查表
-> - `CONTRACT-pptcreator-partner.md` — PPTCreator 实例（v1.2，C0–C7；C2 = `documents[]` / `create_ppt_from_documents`）
+> - `DESIGN-b2b-capability-platform.md` — 设计（§1–§10 是现行正文；§2.4 数字教材插件切分；§10 已定默认/仍开放；§11+ 为评审与修订历史；最新决议见 §23）
+> - `PLAN-p0-development.md` — P0' 开发计划（§0 完工定义已重切、§2.2 M5c/M2c、§9 测试门禁）
+> - `CONTRACT-partner.md` — 能力提供方通用接入合同
+> - `CONTRACT-pptcreator-partner.md` — PPTCreator 实例（v1.5，C0–C8；C8 = 课件大纲交回/写回）
 
 ## 当前状态
 
@@ -28,7 +28,7 @@
 
 ## 关键事实
 
-- **产品名词**：工作台叫「我的课程」（路由仍是 `/projects`）。一个项目是一套课程，一课是项目内单元。卖的是 **预设包**（License.presets），不是 `org.industry`。P0 只卖 `digital_lesson`；多包时只在新建选一次。内核改进见 `PLAN-p0-development.md` §2.1 M5b、设计 §2.3
+- **产品名词**：对外卖 **数字教材建设能力**。PPTCreator = **做片**，课件由 **harness**（编排 / agent loop / 验收）收成，实现不必是 DSH。大纲/教案改稿 = 左对话右预览。本地改过的 **pptx 必须能导回**为新版本（不是当材料重传）。不为成本设确认门。后补见设计 §2.4。现行 `digital_lesson`：材料 → ppt+script（无确认门）；**V3 露出 C8 大纲尚未接**
 - **生产机**：124.156.160.168（VM-32-3，ssh root 直连，本机有密钥）。旧机 101.32.49.240（VM-16-7）已挂，弃用
 - **域名**：`https://app.codelphi.com` → nginx → `127.0.0.1:18080` → systemd 服务 `codelphi-gateway`（二进制 `/data/www/codelphi/gateway`，不用 Docker；8080–8084 被该机别的服务占用，故用 18080）
 - **部署**：`./scripts/deploy.sh` 网关；`./scripts/deploy-web.sh` 工作台。nginx 已切 `deploy/nginx-codelphi-m5.conf`（证书行保留）。Next 听 `127.0.0.1:13000`（3000 是 chandler）
@@ -44,24 +44,26 @@
 
 - `GET /v1/me`
 - `GET|POST /v1/projects` · `GET /v1/projects/{id}`（含 `lessons[]`）· `POST /v1/projects/{id}/lessons` · `GET /v1/projects/{id}/lessons/{lid}`
-- `POST /v1/projects/{id}/lessons/{lid}/materials`（pdf/docx/md/txt，每课最多 5 份）· `POST /v1/projects/{id}/lessons/{lid}/submit`（202）
-- `POST /v1/lessons/{id}/confirm`（202，id 是 job）· `GET /v1/packages/{id}`（签名 URL，无文件字节）
+- `POST /v1/projects/{id}/lessons/{lid}/materials`（pdf/docx/md/txt，每课最多 5 份）· `POST /v1/projects/{id}/lessons/{lid}/submit`（202，直接做片）
+- `POST /v1/packages/{id}/artifacts/ppt`（导回本地 pptx，新版本；无 UsageRecord）· `GET /v1/packages/{id}`（签名 URL，无文件字节）
+- `POST /v1/lessons/{id}/confirm` 仍在（历史 job）；工作台已撤确认按钮
 - `POST /mcp` JSON-RPC：`tools/list`、`tools/call`（`get_package` / `submit_lesson`；submit 无 `lesson_id` 且非 rebuild → `project_unspecified`）
 - 启动时 `RecoverInFlight`：残留 queued/running → failed，package partial；预扣靠 billing TTL
 - viewer 角色写接口 403 `forbidden`
 
 ## 下一步（按序）
 
-1. **提供生产 MySQL DSN** 写进 `/data/www/codelphi/gateway.env`（必须 `loc=Local`），`systemctl restart codelphi-gateway`，`/healthz` 应变 `db:ok`，`/v1` 才会挂上。没有这一步，登录后工作台调不了 API
-2. **联调**：生产已配 `PPTCREATOR_PARTNER_BASE_URL=https://app.easymakeppt.com`（站点根，请求打到 `/mcp`）和 `PPTCREATOR_PARTNER_KEY`。网关直调 `create_ppt_from_documents` + `get_generation_status`，四个 C1 头都带。真机跑一条过 C6。对方默认 `verify-partner-mode.ts` 主路径仍是 `create_ppt_from_text`，材料包要用 `--multi-doc`。
-3. **M4 运营后台**：License pending→active（双人确认）、CSV 导入成员、成员用量 Top 报表、成本预警（按 capability 拆）。没有这条，试点教师进不来（完工定义 1–2）
-4. DSH 返工对话后嵌（空聊天不上线）
+1. **M5c V3 露出大纲**（C8 已在 PPTCreator 落地）：回拷 `outline_url` 为 `outline` 构件；缺大纲则 `outline_missing`。见 PLAN §2.2
+2. **真机联调 C6**（含大纲对齐）+ **V5 教案整形**
+3. **提供生产 MySQL DSN**（若生产 `/healthz` 仍 db 未接）写进 `/data/www/codelphi/gateway.env`（必须 `loc=Local`）
+4. **M4 运营后台**（完工定义 1–2）
+5. Harness 选型 spike（空聊天不上线）
 
 ## PPTCreator 协同
 
 - 那边走 GitHub Issue 流程（其 AGENTS.md 约定）：Epic **#106**（§8 十条）、**#107**（C1 认证）、**#116**（多文档方向一，MCP `create_ppt_from_documents` 已落地）、**#119**（契约 v1.1 三澄清：spec.note/critique 必进提示词、usage.pages=实际页数、四个上下文头覆盖全部端点含查询）
 - 联调约定：契约 C6 验收测试（积分不变、不锁下载、UsageRecord settled、C 端 dashboard 不可见、讲稿非空页数对齐）
-- **网关已切方向一**：adapter 直调 MCP `POST /mcp` `tools/call` **`create_ppt_from_documents`**（`documents[]`：恰好一份 `textbook` + 当前 design 作 `teaching_design` + 其余材料/大纲作 `reference`）。不调 `create_ppt_from_text`，也不发 REST `/generate`（PPTCreator 无此路由）。
+- **网关已切方向一**：adapter 直调 MCP `POST /mcp` `tools/call` **`create_ppt_from_documents`**。C8（#125）对方已完成；本仓下一步接大纲回拷。不调 `create_ppt_from_text`，也不发 REST `/generate`。
 
 ## 待确认清单（PLAN §11）
 

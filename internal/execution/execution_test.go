@@ -2,6 +2,7 @@ package execution
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -82,6 +83,9 @@ type fakePPT struct {
 	// 旋钮：generate 返回 500；notes 为空数组
 	failGenerate atomic.Bool
 	notesEmpty   atomic.Bool
+	block        chan struct{}
+	cur          atomic.Int32
+	max          atomic.Int32
 
 	mu         sync.Mutex
 	lastHeader http.Header    // 最近一次 create_ppt_from_documents 的头（断言 C1）
@@ -123,6 +127,20 @@ func newFakePPT(t *testing.T) *fakePPT {
 			f.lastHeader = r.Header.Clone()
 			f.lastBody = rpc.Params.Arguments
 			f.mu.Unlock()
+			cur := f.cur.Add(1)
+			defer f.cur.Add(-1)
+			for {
+				if m := f.max.Load(); cur > m {
+					if f.max.CompareAndSwap(m, cur) {
+						break
+					}
+				} else {
+					break
+				}
+			}
+			if f.block != nil {
+				<-f.block
+			}
 			if f.failGenerate.Load() {
 				w.WriteHeader(http.StatusInternalServerError)
 				fmt.Fprint(w, `{"error":{"code":"internal","message":"boom","retryable":true}}`)
@@ -209,39 +227,19 @@ func (e *env) submit(t *testing.T) *Lesson {
 
 // --- 门禁测试 ---
 
-// 全链路 happy path：submit → design/outline → awaiting_confirm（此时无 ppt 预扣）
-// → confirm → ppt+script artifact 齐、package ready、4 条 UsageRecord 全部 settled。
+// 全链路 happy path：submit 直接做片 → ppt+script 齐、package ready、1 条 ppt UsageRecord settled。无确认门。
 func TestHappyPath(t *testing.T) {
 	e := newEnv(t)
 	lesson := e.submit(t)
 
-	if lesson.Status != "awaiting_confirm" {
-		t.Fatalf("lesson status = %s, want awaiting_confirm", lesson.Status)
-	}
-	// 确认门等待期：ppt 根池无任何预扣（设计 §4：确认门等待期间不持有预扣）。
-	if used := poolUsed(t, e.pptPool); used != 0 {
-		t.Fatalf("awaiting_confirm 时 ppt pool used = %v, want 0", used)
-	}
-	// design/outline 已按实际 token settled（假 LLM 回报 300 tokens）。
-	if used := poolUsed(t, e.designPool); used != 300 {
-		t.Fatalf("design pool used = %v, want 300", used)
-	}
-	if n := countUsageRecords(t, "status = 'settled'"); n != 2 {
-		t.Fatalf("settled records = %d, want 2", n)
-	}
-
-	if _, err := e.exec.ConfirmLesson(context.Background(), lesson.LessonJobID); err != nil {
-		t.Fatal(err)
-	}
-	if s := jobStatus(t, lesson.LessonJobID); s != "succeeded" {
-		t.Fatalf("lesson status = %s, want succeeded", s)
+	if lesson.Status != "succeeded" {
+		t.Fatalf("lesson status = %s, want succeeded", lesson.Status)
 	}
 	if s := packageStatus(t, lesson.PackageID); s != "ready" {
 		t.Fatalf("package status = %s, want ready", s)
 	}
 
-	// 四个构件齐，pptx 内容经回拷可 Open。
-	for _, kind := range []string{"design", "outline", "ppt", "script"} {
+	for _, kind := range []string{"ppt", "script"} {
 		var ref string
 		if err := testDB.QueryRow(
 			"SELECT storage_ref FROM artifacts WHERE package_id = ? AND kind = ? AND is_current = 1",
@@ -276,13 +274,9 @@ func TestHappyPath(t *testing.T) {
 			}
 		}
 	}
-	// 台账 3 条 settled：design / outline / ppt 三个 step 各一条。
-	// 注：门禁清单写「4 条」，但 script 不是独立 step——讲稿随 ppt 同一次 partner 生成回报（§2.1），
-	// 按 step 扣费（§4）即 3 条。出入已在报告里标注。
-	if n := countUsageRecords(t, "status = 'settled'"); n != 3 {
-		t.Fatalf("settled records = %d, want 3", n)
+	if n := countUsageRecords(t, "status = 'settled'"); n != 1 {
+		t.Fatalf("settled records = %d, want 1 (ppt step only)", n)
 	}
-	// ppt 的 vendor_cost 透传 C3 回报。
 	var cost float64
 	if err := testDB.QueryRow(
 		"SELECT vendor_cost FROM usage_records WHERE capability = 'ppt'").Scan(&cost); err != nil {
@@ -292,7 +286,6 @@ func TestHappyPath(t *testing.T) {
 		t.Fatalf("ppt vendor_cost = %v, want 0.8", cost)
 	}
 
-	// C1 头断言。
 	e.ppt.mu.Lock()
 	h := e.ppt.lastHeader
 	body := e.ppt.lastBody
@@ -308,7 +301,7 @@ func TestHappyPath(t *testing.T) {
 		t.Fatalf("style = %#v, want editorial", body["style"])
 	}
 	docs, _ := body["documents"].([]any)
-	if len(docs) < 3 {
+	if len(docs) < 1 {
 		t.Fatalf("documents = %#v", body["documents"])
 	}
 	roles := map[string]int{}
@@ -320,8 +313,11 @@ func TestHappyPath(t *testing.T) {
 		if role == "textbook" {
 			textbook = d
 		}
+		if _, ok := d["content"]; ok && d["content"] != nil && d["content"] != "" {
+			t.Fatalf("must not send gateway design/outline content: %#v", d)
+		}
 	}
-	if roles["textbook"] != 1 || roles["teaching_design"] != 1 {
+	if roles["textbook"] != 1 || roles["teaching_design"] != 0 {
 		t.Fatalf("roles = %v", roles)
 	}
 	url, _ := textbook["url"].(string)
@@ -339,53 +335,46 @@ func TestPackPPTDocuments(t *testing.T) {
 			{Name: "课文.pdf", URL: "https://files.example.test/a.pdf"},
 			{Name: "参考.docx", URL: "https://files.example.test/b.docx"},
 		},
-		`{"教学目标":["理解导数"]}`,
-		`{"条目":[{"节":"1"}]}`,
 	)
-	if len(docs) != 4 {
+	if len(docs) != 2 {
 		t.Fatalf("len=%d %#v", len(docs), docs)
 	}
 	if docs[0].Role != "textbook" || docs[0].URL != "https://files.example.test/a.pdf" || docs[0].Content != "" {
 		t.Fatalf("textbook = %#v", docs[0])
 	}
-	if docs[1].Role != "teaching_design" || !strings.Contains(docs[1].Content, "教学目标") {
-		t.Fatalf("design = %#v", docs[1])
-	}
-	if docs[2].Role != "reference" || !strings.Contains(docs[2].Content, "条目") {
-		t.Fatalf("outline = %#v", docs[2])
-	}
-	if docs[3].Role != "reference" || docs[3].URL != "https://files.example.test/b.docx" || docs[3].Content != "" {
-		t.Fatalf("extra material = %#v", docs[3])
+	if docs[1].Role != "reference" || docs[1].URL != "https://files.example.test/b.docx" || docs[1].Content != "" {
+		t.Fatalf("extra material = %#v", docs[1])
 	}
 
 	many := make([]pptFile, 8)
 	for i := range many {
 		many[i] = pptFile{Name: fmt.Sprintf("%d.pdf", i+1), URL: fmt.Sprintf("https://files.example.test/%d.pdf", i+1)}
 	}
-	capped := packPPTDocuments(many, `{"教学目标":["x"]}`, `{"条目":[]}`)
+	capped := packPPTDocuments(many)
 	if len(capped) != 5 {
 		t.Fatalf("cap len=%d", len(capped))
 	}
-	if capped[0].Role != "textbook" || capped[1].Role != "teaching_design" {
+	if capped[0].Role != "textbook" {
 		t.Fatalf("priority lost: %#v", capped)
 	}
-	if capped[2].Role != "reference" || !strings.Contains(capped[2].Content, "条目") {
-		t.Fatalf("outline dropped when extras fill the cap: %#v", capped)
+	for i := 1; i < 5; i++ {
+		if capped[i].Role != "reference" || capped[i].Content != "" {
+			t.Fatalf("slot %d = %#v", i, capped[i])
+		}
 	}
 }
 
-// awaiting_confirm 期间不 confirm：根池无 ppt 残留预扣。
-func TestAwaitingConfirmHoldsNoReservation(t *testing.T) {
+func TestSubmitSettlesPptWithoutConfirm(t *testing.T) {
 	e := newEnv(t)
 	lesson := e.submit(t)
-	if lesson.Status != "awaiting_confirm" {
+	if lesson.Status != "succeeded" {
 		t.Fatalf("status = %s", lesson.Status)
 	}
-	if used := poolUsed(t, e.pptPool); used != 0 {
-		t.Fatalf("ppt pool used = %v, want 0", used)
+	if used := poolUsed(t, e.pptPool); used != 1 {
+		t.Fatalf("ppt pool used = %v, want 1", used)
 	}
 	if n := countUsageRecords(t, "status = 'reserved'"); n != 0 {
-		t.Fatalf("reserved records = %d, want 0（无任何在途预扣）", n)
+		t.Fatalf("reserved records = %d, want 0", n)
 	}
 }
 
@@ -395,9 +384,6 @@ func TestPPTNotesMissing(t *testing.T) {
 	e.ppt.notesEmpty.Store(true)
 	lesson := e.submit(t)
 
-	if _, err := e.exec.ConfirmLesson(context.Background(), lesson.LessonJobID); err != nil {
-		t.Fatal(err)
-	}
 	if s := jobStatus(t, lesson.LessonJobID); s != "failed" {
 		t.Fatalf("lesson status = %s, want failed", s)
 	}
@@ -428,9 +414,6 @@ func TestPartner5xx(t *testing.T) {
 	e := newEnv(t)
 	e.ppt.failGenerate.Store(true)
 	lesson := e.submit(t)
-	if _, err := e.exec.ConfirmLesson(context.Background(), lesson.LessonJobID); err != nil {
-		t.Fatal(err)
-	}
 	if s := jobStatus(t, lesson.LessonJobID); s != "failed" {
 		t.Fatalf("lesson status = %s, want failed", s)
 	}
@@ -441,9 +424,6 @@ func TestPartner5xx(t *testing.T) {
 	// billing 未被拖挂：恢复 partner 后重跑全链路成功。
 	e.ppt.failGenerate.Store(false)
 	lesson2 := e.submit(t)
-	if _, err := e.exec.ConfirmLesson(context.Background(), lesson2.LessonJobID); err != nil {
-		t.Fatal(err)
-	}
 	if s := jobStatus(t, lesson2.LessonJobID); s != "succeeded" {
 		t.Fatalf("第二次 lesson status = %s, want succeeded", s)
 	}
@@ -453,9 +433,6 @@ func TestPartner5xx(t *testing.T) {
 func TestRebuildPptVersions(t *testing.T) {
 	e := newEnv(t)
 	lesson := e.submit(t)
-	if _, err := e.exec.ConfirmLesson(context.Background(), lesson.LessonJobID); err != nil {
-		t.Fatal(err)
-	}
 	for i := 0; i < 2; i++ {
 		if err := e.exec.Rebuild(context.Background(), lesson.PackageID, "ppt", "第 2 页案例换掉"); err != nil {
 			t.Fatal(err)
@@ -496,54 +473,20 @@ func TestRebuildPptVersions(t *testing.T) {
 		}
 		rc.Close()
 	}
-	// 3（首轮 design/outline/ppt）+ 2×1（ppt rebuild）= 5 条 settled；重试是新 job 新预扣。
-	if n := countUsageRecords(t, "status = 'settled'"); n != 5 {
-		t.Fatalf("settled records = %d, want 5", n)
+	// 1（首轮 ppt）+ 2×1（ppt rebuild）= 3 条 settled；重试是新 job 新预扣。
+	if n := countUsageRecords(t, "status = 'settled'"); n != 3 {
+		t.Fatalf("settled records = %d, want 3", n)
 	}
 	if s := packageStatus(t, lesson.PackageID); s != "ready" {
 		t.Fatalf("package status = %s, want ready", s)
 	}
 }
 
-// 确认门重复 ConfirmLesson 幂等安全：并发两次，只产生一个 ppt step。
-func TestConfirmIdempotent(t *testing.T) {
-	e := newEnv(t)
-	lesson := e.submit(t)
-
-	var wg sync.WaitGroup
-	errs := make([]error, 2)
-	for i := 0; i < 2; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			_, errs[i] = e.exec.ConfirmLesson(context.Background(), lesson.LessonJobID)
-		}(i)
-	}
-	wg.Wait()
-	for _, err := range errs {
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	var n int
-	if err := testDB.QueryRow(
-		"SELECT COUNT(*) FROM jobs WHERE parent_id = ? AND capability = 'ppt'",
-		lesson.LessonJobID).Scan(&n); err != nil {
-		t.Fatal(err)
-	}
-	if n != 1 {
-		t.Fatalf("ppt steps = %d, want 1（重复确认不得重复提交）", n)
-	}
-	if s := jobStatus(t, lesson.LessonJobID); s != "succeeded" {
-		t.Fatalf("lesson status = %s, want succeeded", s)
-	}
-}
-
 // (org, platform) 信号量：同键并发 in-flight 不超 2（默认），全部最终完成。
 func TestSemaphoreFairness(t *testing.T) {
 	e := newEnv(t)
-	e.llm.block = make(chan struct{})
-	release := e.llm.block
+	e.ppt.block = make(chan struct{})
+	release := e.ppt.block
 
 	const n = 5
 	lessons := make([]string, n)
@@ -565,8 +508,8 @@ func TestSemaphoreFairness(t *testing.T) {
 
 	// 等所有 goroutine 进入竞争后，断言并发峰值。
 	time.Sleep(200 * time.Millisecond)
-	if m := e.llm.max.Load(); m > 2 {
-		t.Fatalf("LLM 并发峰值 = %d, want <= 2", m)
+	if m := e.ppt.max.Load(); m > 2 {
+		t.Fatalf("PPT 并发峰值 = %d, want <= 2", m)
 	}
 	close(release) // 放行全部
 	// block 关闭后后续请求读已关 channel 立即返回
@@ -604,28 +547,6 @@ func TestIllegalTransition(t *testing.T) {
 	}
 }
 
-// LLM 产出不合 schema → design step failed、预扣退回，不做自由 Markdown 兜底。
-func TestLLMSchemaViolation(t *testing.T) {
-	e := newEnv(t)
-	e.llm.badJSON.Store(true)
-
-	lesson, err := e.exec.SubmitLesson(context.Background(), SubmitInput{
-		OrgID: e.orgID, MemberID: e.memberID, ProjectID: e.projectID, CourseLessonID: e.courseLessonID, Title: "导数",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if lesson.Status != "failed" {
-		t.Fatalf("lesson status = %s, want failed", lesson.Status)
-	}
-	if used := poolUsed(t, e.designPool); used != 0 {
-		t.Fatalf("design pool used = %v, want 0（预扣已退）", used)
-	}
-	if n := countUsageRecords(t, "capability = 'design' AND status = 'refunded'"); n != 1 {
-		t.Fatalf("refunded design records = %d, want 1", n)
-	}
-}
-
 func TestEmptyMaterialStillForwardsFile(t *testing.T) {
 	e := newEnv(t)
 	execSQL(t, "DELETE FROM materials WHERE lesson_id = ?", e.courseLessonID)
@@ -642,11 +563,8 @@ func TestEmptyMaterialStillForwardsFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if lesson.Status != "awaiting_confirm" {
-		t.Fatalf("status = %s, want awaiting_confirm (empty extract must not block submit)", lesson.Status)
-	}
-	if _, err := e.exec.ConfirmLesson(context.Background(), lesson.LessonJobID); err != nil {
-		t.Fatal(err)
+	if lesson.Status != "succeeded" {
+		t.Fatalf("status = %s, want succeeded (empty extract must not block submit)", lesson.Status)
 	}
 	e.ppt.mu.Lock()
 	body := e.ppt.lastBody
@@ -690,11 +608,8 @@ func TestCorruptFileStillForwards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if lesson.Status != "awaiting_confirm" {
-		t.Fatalf("status = %s, want awaiting_confirm (local extract failure must not block file handoff)", lesson.Status)
-	}
-	if _, err := e.exec.ConfirmLesson(context.Background(), lesson.LessonJobID); err != nil {
-		t.Fatal(err)
+	if lesson.Status != "succeeded" {
+		t.Fatalf("status = %s, want succeeded (local extract failure must not block file handoff)", lesson.Status)
 	}
 	e.ppt.mu.Lock()
 	body := e.ppt.lastBody
@@ -715,7 +630,7 @@ func TestCorruptFileStillForwards(t *testing.T) {
 
 func TestStartLessonConcurrentIdempotent(t *testing.T) {
 	e := newEnv(t)
-	e.llm.block = make(chan struct{})
+	e.ppt.block = make(chan struct{})
 
 	type result struct {
 		lesson *Lesson
@@ -731,7 +646,7 @@ func TestStartLessonConcurrentIdempotent(t *testing.T) {
 		}()
 	}
 	a, b := <-ch, <-ch
-	close(e.llm.block)
+	close(e.ppt.block)
 
 	var created, skipped result
 	switch {
@@ -756,7 +671,7 @@ func TestStartLessonConcurrentIdempotent(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("lesson jobs = %d, want 1", n)
 	}
-	waitJobStatus(t, created.lesson.LessonJobID, "awaiting_confirm")
+	waitJobStatus(t, created.lesson.LessonJobID, "succeeded")
 }
 
 // image 材料无法作为文件转交：明确报错。pdf/docx/md/txt 原文件转交 PPTCreator。
@@ -773,10 +688,10 @@ func TestMaterialKindUnsupported(t *testing.T) {
 	}
 }
 
-// StartLesson 立即返回 running，不阻塞在 LLM；后台跑完后停在 awaiting_confirm。
+// StartLesson 立即返回 running，不阻塞在 partner；后台跑完后 succeeded。
 func TestStartLessonReturnsImmediately(t *testing.T) {
 	e := newEnv(t)
-	e.llm.block = make(chan struct{})
+	e.ppt.block = make(chan struct{})
 
 	start := time.Now()
 	lesson, err := e.exec.StartLesson(context.Background(), SubmitInput{
@@ -792,8 +707,8 @@ func TestStartLessonReturnsImmediately(t *testing.T) {
 		t.Fatalf("status = %s, want running", lesson.Status)
 	}
 
-	close(e.llm.block)
-	waitJobStatus(t, lesson.LessonJobID, "awaiting_confirm")
+	close(e.ppt.block)
+	waitJobStatus(t, lesson.LessonJobID, "succeeded")
 }
 
 // 进程重启：残留 running（lesson + step）一律 failed，package partial。
@@ -877,9 +792,6 @@ func TestGetPackageEmptyArtifactsJSON(t *testing.T) {
 func TestGetPackageSignedURLs(t *testing.T) {
 	e := newEnv(t)
 	lesson := e.submit(t)
-	if _, err := e.exec.ConfirmLesson(context.Background(), lesson.LessonJobID); err != nil {
-		t.Fatal(err)
-	}
 
 	pkg, err := e.exec.GetPackage(context.Background(), lesson.PackageID, 15*time.Minute)
 	if err != nil {
@@ -897,17 +809,20 @@ func TestGetPackageSignedURLs(t *testing.T) {
 		if !strings.HasPrefix(a.Current.URL, "/media/") {
 			t.Fatalf("url = %q, want /media/ prefix (no file bytes)", a.Current.URL)
 		}
-		if strings.Contains(a.Current.URL, fakePptxBytes) || strings.Contains(a.Current.URL, fakeDesignJSON) {
+		if strings.Contains(a.Current.URL, fakePptxBytes) || strings.Contains(a.Current.URL, fakeNotesJSON) {
 			t.Fatalf("url leaked file contents: %s", a.Current.URL)
 		}
 		if len(a.Versions) < 1 {
 			t.Fatalf("kind %s versions empty", a.Kind)
 		}
 	}
-	for _, k := range []string{"design", "outline", "ppt", "script"} {
+	for _, k := range []string{"ppt", "script"} {
 		if !kinds[k] {
 			t.Fatalf("missing artifact kind %s", k)
 		}
+	}
+	if kinds["design"] || kinds["outline"] {
+		t.Fatalf("gateway design/outline must not appear: %v", kinds)
 	}
 }
 
@@ -919,6 +834,243 @@ func TestUnknownPresetSubmitFails(t *testing.T) {
 	})
 	if !errors.Is(err, ErrUnknownPreset) {
 		t.Fatalf("err=%v, want ErrUnknownPreset", err)
+	}
+}
+
+const importedPptx = "teacher-edited-pptx-bytes"
+
+func TestImportPPTAsNewVersion(t *testing.T) {
+	e := newEnv(t)
+	lesson := e.submit(t)
+	if lesson.Status != "succeeded" {
+		t.Fatalf("status = %s", lesson.Status)
+	}
+	var materialsBefore, usageBefore int
+	if err := testDB.QueryRow("SELECT COUNT(*) FROM materials WHERE lesson_id = ?", e.courseLessonID).Scan(&materialsBefore); err != nil {
+		t.Fatal(err)
+	}
+	usageBefore = countUsageRecords(t, "1=1")
+
+	got, err := e.exec.ImportPPT(context.Background(), e.orgID, lesson.PackageID, "导数-改过.pptx", []byte(importedPptx))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Version != 2 || got.Kind != "ppt" {
+		t.Fatalf("import = %+v, want version 2 ppt", got)
+	}
+
+	rows, err := testDB.Query(
+		"SELECT version, is_current, storage_ref, step_job_id FROM artifacts WHERE package_id = ? AND kind = 'ppt' ORDER BY version",
+		lesson.PackageID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	type ver struct {
+		version int
+		current bool
+		ref     string
+		step    sql.NullString
+	}
+	var vers []ver
+	for rows.Next() {
+		var v ver
+		if err := rows.Scan(&v.version, &v.current, &v.ref, &v.step); err != nil {
+			t.Fatal(err)
+		}
+		vers = append(vers, v)
+	}
+	if len(vers) != 2 {
+		t.Fatalf("ppt versions = %d, want 2", len(vers))
+	}
+	if vers[0].current || !vers[1].current {
+		t.Fatalf("current pointer: v1=%v v2=%v", vers[0].current, vers[1].current)
+	}
+	if vers[1].step.Valid {
+		t.Fatalf("import must not attach step_job_id: %v", vers[1].step)
+	}
+	rc, err := e.store.Open(context.Background(), vers[1].ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := io.ReadAll(rc)
+	rc.Close()
+	if string(data) != importedPptx {
+		t.Fatalf("current pptx = %q", data)
+	}
+	old, err := e.store.Open(context.Background(), vers[0].ref)
+	if err != nil {
+		t.Fatalf("old version must remain: %v", err)
+	}
+	old.Close()
+
+	var materialsAfter int
+	if err := testDB.QueryRow("SELECT COUNT(*) FROM materials WHERE lesson_id = ?", e.courseLessonID).Scan(&materialsAfter); err != nil {
+		t.Fatal(err)
+	}
+	if materialsAfter != materialsBefore {
+		t.Fatalf("materials %d → %d, 导回不得写成 Material", materialsBefore, materialsAfter)
+	}
+	if n := countUsageRecords(t, "1=1"); n != usageBefore {
+		t.Fatalf("usage records %d → %d, 导回不得产生 UsageRecord", usageBefore, n)
+	}
+	if s := packageStatus(t, lesson.PackageID); s != "ready" {
+		t.Fatalf("package status = %s, want ready", s)
+	}
+}
+
+func TestImportPPTRequiresCurrent(t *testing.T) {
+	e := newEnv(t)
+	packageID := ulidStr()
+	execSQL(t, `INSERT INTO course_packages (id, project_id, lesson_id, status) VALUES (?, ?, ?, 'building')`,
+		packageID, e.projectID, e.courseLessonID)
+	_, err := e.exec.ImportPPT(context.Background(), e.orgID, packageID, "a.pptx", []byte(importedPptx))
+	if !errors.Is(err, ErrNoCurrentPPT) {
+		t.Fatalf("err=%v, want ErrNoCurrentPPT", err)
+	}
+}
+
+func TestImportPPTRejectsNonPptx(t *testing.T) {
+	e := newEnv(t)
+	lesson := e.submit(t)
+	_, err := e.exec.ImportPPT(context.Background(), e.orgID, lesson.PackageID, "讲稿.docx", []byte(importedPptx))
+	if !errors.Is(err, ErrNotPPTX) {
+		t.Fatalf("err=%v, want ErrNotPPTX", err)
+	}
+}
+
+func TestImportPPTRejectsSuspendedOrg(t *testing.T) {
+	e := newEnv(t)
+	lesson := e.submit(t)
+	execSQL(t, "UPDATE orgs SET status = 'suspended' WHERE id = ?", e.orgID)
+	_, err := e.exec.ImportPPT(context.Background(), e.orgID, lesson.PackageID, "改过.pptx", []byte(importedPptx))
+	if !errors.Is(err, ErrOrgSuspended) {
+		t.Fatalf("err=%v, want ErrOrgSuspended", err)
+	}
+	var n int
+	if err := testDB.QueryRow(
+		"SELECT COUNT(*) FROM artifacts WHERE package_id = ? AND kind = 'ppt'", lesson.PackageID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("ppt versions = %d, want 1 (suspended import must not write)", n)
+	}
+	if countUsageRecords(t, "1=1") != 1 {
+		t.Fatalf("usage records changed after denied import")
+	}
+}
+
+func TestImportPPTConcurrentKeepsEachVersion(t *testing.T) {
+	e := newEnv(t)
+	lesson := e.submit(t)
+	bodies := []string{"import-A-pptx-bytes", "import-B-pptx-bytes"}
+
+	type outcome struct {
+		body string
+		res  *ImportResult
+		err  error
+	}
+	ch := make(chan outcome, 2)
+	for i, body := range bodies {
+		go func(i int, body string) {
+			res, err := e.exec.ImportPPT(context.Background(), e.orgID, lesson.PackageID, fmt.Sprintf("改-%d.pptx", i), []byte(body))
+			ch <- outcome{body, res, err}
+		}(i, body)
+	}
+	got := []outcome{<-ch, <-ch}
+	for _, o := range got {
+		if o.err != nil {
+			t.Fatalf("concurrent import: %v", o.err)
+		}
+	}
+
+	rows, err := testDB.Query(
+		"SELECT version, is_current, storage_ref FROM artifacts WHERE package_id = ? AND kind = 'ppt' ORDER BY version",
+		lesson.PackageID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	type ver struct {
+		version int
+		current bool
+		ref     string
+	}
+	var vers []ver
+	seenRef := map[string]bool{}
+	for rows.Next() {
+		var v ver
+		if err := rows.Scan(&v.version, &v.current, &v.ref); err != nil {
+			t.Fatal(err)
+		}
+		if seenRef[v.ref] {
+			t.Fatalf("storage_ref reused: %s (concurrent import clobbered an object key)", v.ref)
+		}
+		seenRef[v.ref] = true
+		vers = append(vers, v)
+	}
+	if len(vers) != 3 {
+		t.Fatalf("ppt versions = %d, want 3", len(vers))
+	}
+	if !vers[len(vers)-1].current {
+		t.Fatalf("current not latest: %+v", vers)
+	}
+
+	open := func(ref string) string {
+		t.Helper()
+		rc, err := e.store.Open(context.Background(), ref)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rc.Close()
+		data, _ := io.ReadAll(rc)
+		return string(data)
+	}
+	if open(vers[0].ref) != fakePptxBytes {
+		t.Fatalf("v1 clobbered: %q", open(vers[0].ref))
+	}
+	for _, o := range got {
+		var ref string
+		if err := testDB.QueryRow(
+			"SELECT storage_ref FROM artifacts WHERE package_id = ? AND kind = 'ppt' AND version = ?",
+			lesson.PackageID, o.res.Version).Scan(&ref); err != nil {
+			t.Fatal(err)
+		}
+		if gotBytes := open(ref); gotBytes != o.body {
+			t.Fatalf("version %d = %q, want %q (committed object overwritten)", o.res.Version, gotBytes, o.body)
+		}
+	}
+}
+
+func TestImportPPTRejectsWhileRebuilding(t *testing.T) {
+	e := newEnv(t)
+	lesson := e.submit(t)
+	e.ppt.block = make(chan struct{})
+
+	errc := make(chan error, 1)
+	go func() {
+		errc <- e.exec.Rebuild(context.Background(), lesson.PackageID, "ppt", "换案例")
+	}()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if packageStatus(t, lesson.PackageID) == "building" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if packageStatus(t, lesson.PackageID) != "building" {
+		t.Fatal("rebuild never set package building")
+	}
+
+	_, err := e.exec.ImportPPT(context.Background(), e.orgID, lesson.PackageID, "改过.pptx", []byte(importedPptx))
+	close(e.ppt.block)
+	rebuildErr := <-errc
+	if !errors.Is(err, ErrPPTBusy) {
+		t.Fatalf("err=%v, want ErrPPTBusy", err)
+	}
+	if rebuildErr != nil {
+		t.Fatal(rebuildErr)
 	}
 }
 

@@ -35,6 +35,32 @@ func TestDigitalLessonCatalogConsistent(t *testing.T) {
 	}
 }
 
+func TestDigitalLessonP0PrimeTopology(t *testing.T) {
+	p, err := Lookup(DigitalLesson)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Copy.SubmitCTA != "做课件" {
+		t.Fatalf("SubmitCTA = %q, want 做课件", p.Copy.SubmitCTA)
+	}
+	if got := p.Artifacts; len(got) != 2 || got[0] != "ppt" || got[1] != "script" {
+		t.Fatalf("Artifacts = %v, want [ppt script] (大纲随 C8 后补，不进必齐清单)", got)
+	}
+	if p.Copy.ArtifactLabels["ppt"] == "" || p.Copy.ArtifactLabels["script"] == "" {
+		t.Fatal("missing ppt/script labels")
+	}
+	if len(p.Steps) != 1 {
+		t.Fatalf("Steps = %d, want 1 (材料 → 做片，无 design/outline/确认门)", len(p.Steps))
+	}
+	s := p.Steps[0]
+	if s.Capability != "ppt" || s.Platform != "pptcreator" || s.GateAfter {
+		t.Fatalf("step = %+v, want ppt/pptcreator GateAfter=false", s)
+	}
+	if len(s.Emits) != 2 || s.Emits[0] != "ppt" || s.Emits[1] != "script" {
+		t.Fatalf("emits = %v", s.Emits)
+	}
+}
+
 func TestEntitledNilMeansDigitalLesson(t *testing.T) {
 	got := Entitled(nil)
 	if len(got) != 1 || got[0] != DigitalLesson {

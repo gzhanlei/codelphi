@@ -205,7 +205,7 @@ func mcpTools() []map[string]any {
 					"lesson_id":  map[string]string{"type": "string"},
 					"note":       map[string]string{"type": "string"},
 					"package_id": map[string]string{"type": "string"},
-					"rebuild":    map[string]string{"type": "string", "description": "design|outline|ppt"},
+					"rebuild":    map[string]string{"type": "string", "description": "ppt"},
 					"critique":   map[string]string{"type": "string"},
 				},
 			},
