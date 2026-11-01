@@ -22,11 +22,15 @@ describe("spec behavior diff", () => {
   it("reports added and removed features without duplicating every nested scenario", () => {
     const added = diffSpec([], [authentication]);
     expect(added).toHaveLength(1);
-    expect(added[0]).toMatchObject({ kind: "added", entityType: "feature", featureName: "Authentication", scenarioReference: null });
+    expect(added[0]).toMatchObject({ kind: "added", entityType: "feature", featureName: "Authentication", scenarioReference: null, summary: "新增功能「Authentication」" });
+    expect(added[0].before).toBeNull();
+    expect(added[0].after).toEqual(authentication);
 
     const removed = diffSpec([authentication], []);
     expect(removed).toHaveLength(1);
     expect(removed[0]).toMatchObject({ kind: "removed", entityType: "feature", featureName: "Authentication" });
+    expect(removed[0].after).toBeNull();
+    expect(removed[0].before).toEqual(authentication);
   });
 
   it("detects scenario behavior changes but ignores evidence-only line movements", () => {
@@ -38,9 +42,17 @@ describe("spec behavior diff", () => {
     changed.scenarios[0].outcome = "Opens onboarding";
     const result = diffSpec([authentication], [changed]);
     expect(result).toHaveLength(1);
-    expect(result[0]).toMatchObject({ kind: "changed", entityType: "scenario", featureName: "Authentication", scenarioReference: "HP-1" });
+    expect(result[0]).toMatchObject({ kind: "changed", entityType: "scenario", featureName: "Authentication", scenarioReference: "HP-1", summary: "「Authentication」更新场景 HP-1" });
     expect(result[0].before).toMatchObject({ outcome: "Opens the dashboard" });
     expect(result[0].after).toMatchObject({ outcome: "Opens onboarding" });
+  });
+
+  it("detects each scenario behavior field independently", () => {
+    for (const [field, value] of [["context", "Signed in"], ["action", "Uses OAuth"], ["category", "error"]] as const) {
+      const changed = structuredClone(authentication);
+      Object.assign(changed.scenarios[0], { [field]: value });
+      expect(diffSpec([authentication], [changed])).toHaveLength(1);
+    }
   });
 
   it("reports feature summary changes and scenario additions/removals", () => {

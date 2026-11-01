@@ -24,7 +24,7 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
       </div>
       <RunStatus run={details.latestRun} />
       <ProductTabs slug={slug} view={view} featureCount={details.features.length} releaseCount={details.releases.length} />
-      <ProductView view={view} features={details.features} scenarios={details.scenarios} releases={details.releases} changes={details.changes} />
+      <ProductView view={view} features={details.features} scenarios={details.scenarios} releases={details.releases} changes={details.changes} behaviorChanges={details.behaviorChanges} />
     </AppShell>
   );
 }

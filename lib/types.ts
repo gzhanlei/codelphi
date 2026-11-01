@@ -52,6 +52,19 @@ export interface ReleaseRow {
   sha: string;
   url: string;
   committedAt: Date;
+  specVersionId: number | null;
+}
+
+export interface BehaviorChangeRow {
+  id: number;
+  releaseId: number;
+  kind: "added" | "changed" | "removed";
+  entityType: "feature" | "scenario";
+  featureName: string;
+  scenarioReference: string;
+  summary: string;
+  before: unknown;
+  after: unknown;
 }
 
 export interface ChangeRow {

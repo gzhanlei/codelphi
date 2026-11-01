@@ -66,10 +66,25 @@ function scenarioChanges(before: SpecFeature, after: SpecFeature): SpecChange[] 
       featureName: after.name,
       scenarioReference: reference,
       summary: changeSummary(kind, "scenario", after.name, reference),
-      before: previous ?? null,
-      after: current ?? null,
+      before: previous === undefined ? null : previous,
+      after: current === undefined ? null : current,
     });
   }
+  return changes;
+}
+
+function diffFeature(previous: SpecFeature | undefined, current: SpecFeature | undefined): SpecChange[] {
+  if (!previous || !current) {
+    const feature = current === undefined ? previous! : current;
+    const kind = current ? "added" : "removed";
+    return [{ kind, entityType: "feature", featureName: feature.name, scenarioReference: null, summary: changeSummary(kind, "feature", feature.name, null), before: previous === undefined ? null : previous, after: current === undefined ? null : current }];
+  }
+
+  const changes: SpecChange[] = [];
+  if (featureBehaviorChanged(previous, current)) {
+    changes.push({ kind: "changed", entityType: "feature", featureName: current.name, scenarioReference: null, summary: changeSummary("changed", "feature", current.name, null), before: previous, after: current });
+  }
+  changes.push(...scenarioChanges(previous, current));
   return changes;
 }
 
@@ -80,21 +95,7 @@ export function diffSpec(before: SpecFeature[] | null, after: SpecFeature[]): Sp
   const keys = [...new Set([...beforeFeatures.keys(), ...afterFeatures.keys()])].sort();
   const changes: SpecChange[] = [];
 
-  for (const key of keys) {
-    const previous = beforeFeatures.get(key);
-    const current = afterFeatures.get(key);
-    if (!previous || !current) {
-      const feature = current ?? previous!;
-      const kind = current ? "added" : "removed";
-      changes.push({ kind, entityType: "feature", featureName: feature.name, scenarioReference: null, summary: changeSummary(kind, "feature", feature.name, null), before: previous ?? null, after: current ?? null });
-      continue;
-    }
-
-    if (featureBehaviorChanged(previous, current)) {
-      changes.push({ kind: "changed", entityType: "feature", featureName: current.name, scenarioReference: null, summary: changeSummary("changed", "feature", current.name, null), before: previous, after: current });
-    }
-    changes.push(...scenarioChanges(previous, current));
-  }
+  for (const key of keys) changes.push(...diffFeature(beforeFeatures.get(key), afterFeatures.get(key)));
   return changes;
 }
 

@@ -38,8 +38,35 @@ function featuresFromRows(featureRows: FeatureRow[], scenarioRows: ScenarioRow[]
   }));
 }
 
+async function loadScenarioRows(connection: PoolConnection, features: FeatureRow[], kind: "manual" | "version") {
+  if (features.length === 0) return [];
+  const ids = features.map((feature) => feature.id);
+  const placeholders = ids.map(() => "?").join(",");
+  const config = kind === "manual"
+    ? { table: "scenarios", column: "feature_id", condition: `source = 'manual' AND active = 1 AND feature_id IN (${placeholders})` }
+    : { table: "spec_scenarios", column: "spec_feature_id", condition: `spec_feature_id IN (${placeholders})` };
+  const [rows] = await connection.execute(
+    `SELECT ${config.column} AS featureId, reference, context, action, outcome, category, source, evidence
+     FROM ${config.table} WHERE ${config.condition}`,
+    ids,
+  );
+  return rows as ScenarioRow[];
+}
+
+async function withScenarioRows(connection: PoolConnection, features: FeatureRow[], kind: "manual" | "version") {
+  const scenarioRows = await loadScenarioRows(connection, features, kind);
+  return featuresFromRows(features, scenarioRows);
+}
+
+async function loadFeatureSpec(connection: PoolConnection, kind: "manual" | "version", query: string, parameters: number[]) {
+  const [featureRows] = await connection.execute(query, parameters);
+  return withScenarioRows(connection, featureRows as FeatureRow[], kind);
+}
+
 async function loadManualSpec(connection: PoolConnection, productId: number) {
-  const [featureRows] = await connection.execute(
+  return loadFeatureSpec(
+    connection,
+    "manual",
     `SELECT id, name, summary, source FROM features
      WHERE product_id = ? AND active = 1 AND (
        source = 'manual' OR EXISTS (
@@ -48,16 +75,10 @@ async function loadManualSpec(connection: PoolConnection, productId: number) {
      )`,
     [productId],
   );
-  const features = featureRows as FeatureRow[];
-  if (features.length === 0) return [];
-  const ids = features.map((feature) => feature.id);
-  const placeholders = ids.map(() => "?").join(",");
-  const [scenarioRows] = await connection.execute(
-    `SELECT feature_id AS featureId, reference, context, action, outcome, category, source, evidence
-     FROM scenarios WHERE source = 'manual' AND active = 1 AND feature_id IN (${placeholders})`,
-    ids,
-  );
-  return featuresFromRows(features, scenarioRows as ScenarioRow[]);
+}
+
+async function loadVersionFeatures(connection: PoolConnection, versionId: number) {
+  return loadFeatureSpec(connection, "version", "SELECT id, name, summary, parent_key AS parentKey, source FROM spec_features WHERE spec_version_id = ? ORDER BY position", [versionId]);
 }
 
 async function loadPreviousSpec(connection: PoolConnection, run: RunContext) {
@@ -67,18 +88,8 @@ async function loadPreviousSpec(connection: PoolConnection, run: RunContext) {
   );
   const version = (versions as Array<{ id: number }>)[0];
   if (!version) return null;
-
-  const [featureRows] = await connection.execute("SELECT id, name, summary, parent_key AS parentKey, source FROM spec_features WHERE spec_version_id = ? ORDER BY position", [version.id]);
-  const features = featureRows as FeatureRow[];
-  if (features.length === 0) return { id: version.id, features: [] };
-  const ids = features.map((feature) => feature.id);
-  const placeholders = ids.map(() => "?").join(",");
-  const [scenarioRows] = await connection.execute(
-    `SELECT spec_feature_id AS featureId, reference, context, action, outcome, category, source, evidence
-     FROM spec_scenarios WHERE spec_feature_id IN (${placeholders})`,
-    ids,
-  );
-  return { id: version.id, features: featuresFromRows(features, scenarioRows as ScenarioRow[]) };
+  const features = await loadVersionFeatures(connection, version.id);
+  return { id: version.id, features };
 }
 
 async function insertFeatures(connection: PoolConnection, versionId: number, features: SpecFeature[]) {
@@ -86,7 +97,7 @@ async function insertFeatures(connection: PoolConnection, versionId: number, fea
     const [featureResult] = await connection.execute(
       `INSERT INTO spec_features (spec_version_id, stable_key, name, summary, parent_key, source, position)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [versionId, specFeatureKey(feature.name), feature.name, feature.summary, feature.parentKey ?? null, feature.source ?? "generated", position],
+      [versionId, specFeatureKey(feature.name), feature.name, feature.summary, feature.parentKey === undefined ? null : feature.parentKey, feature.source === undefined ? "generated" : feature.source, position],
     );
     const featureId = Number((featureResult as { insertId: number }).insertId);
     for (const scenario of feature.scenarios) {
@@ -94,7 +105,7 @@ async function insertFeatures(connection: PoolConnection, versionId: number, fea
         `INSERT INTO spec_scenarios
           (spec_feature_id, reference, context, action, outcome, category, source, evidence)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [featureId, scenario.reference, scenario.context, scenario.action, scenario.outcome, scenario.category, scenario.source ?? "generated", JSON.stringify(scenario.evidence)],
+        [featureId, scenario.reference, scenario.context, scenario.action, scenario.outcome, scenario.category, scenario.source === undefined ? "generated" : scenario.source, JSON.stringify(scenario.evidence)],
       );
     }
   }
@@ -114,7 +125,7 @@ async function insertChanges(connection: PoolConnection, versionId: number, base
         change.kind,
         specFeatureKey(change.featureName),
         change.featureName,
-        change.scenarioReference ?? "",
+        change.scenarioReference === null ? "" : change.scenarioReference,
         change.summary,
         change.before ? JSON.stringify(change.before) : null,
         change.after ? JSON.stringify(change.after) : null,
@@ -126,13 +137,13 @@ async function insertChanges(connection: PoolConnection, versionId: number, base
 export async function insertSpecVersion(connection: PoolConnection, run: RunContext, result: AnalysisResult) {
   const [previous, manual] = await Promise.all([loadPreviousSpec(connection, run), loadManualSpec(connection, run.productId)]);
   const features = mergeSpecSources(result.features, manual);
-  const changes = diffSpec(previous?.features ?? null, features);
+  const changes = diffSpec(previous === null ? null : previous.features, features);
   const [versionResult] = await connection.execute(
     "INSERT INTO spec_versions (product_id, repository_id, analysis_run_id, sha) VALUES (?, ?, ?, ?)",
     [run.productId, run.repositoryId, run.id, run.afterSha],
   );
   const versionId = Number((versionResult as { insertId: number }).insertId);
   await insertFeatures(connection, versionId, features);
-  await insertChanges(connection, versionId, previous?.id ?? null, changes);
+  await insertChanges(connection, versionId, previous === null ? null : previous.id, changes);
   return versionId;
 }

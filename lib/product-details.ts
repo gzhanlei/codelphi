@@ -1,20 +1,45 @@
 import { getDb } from "./db";
-import type { ChangeRow, FeatureRow, ReleaseRow, ScenarioRow } from "./types";
+import { parseJsonValue } from "./json";
+import type { BehaviorChangeRow, ChangeRow, FeatureRow, ReleaseRow, ScenarioRow } from "./types";
+
+async function queryByIds<T>(ids: number[], query: string) {
+  if (ids.length === 0) return [] as T[];
+  const placeholders = ids.map(() => "?").join(",");
+  const [rows] = await getDb().execute(query.replace("{{placeholders}}", placeholders), ids);
+  return rows as T[];
+}
 
 async function loadScenarios(features: FeatureRow[]) {
-  if (features.length === 0) return [];
-  const ids = features.map((feature) => feature.id);
-  const placeholders = ids.map(() => "?").join(",");
-  const [rows] = await getDb().execute(`SELECT id, feature_id AS featureId, reference, context, action, outcome, category, evidence FROM scenarios WHERE active = 1 AND feature_id IN (${placeholders}) ORDER BY reference`, ids);
-  return rows as ScenarioRow[];
+  return queryByIds<ScenarioRow>(features.map((feature) => feature.id), "SELECT id, feature_id AS featureId, reference, context, action, outcome, category, evidence FROM scenarios WHERE active = 1 AND feature_id IN ({{placeholders}}) ORDER BY reference");
 }
 
 async function loadChanges(releases: ReleaseRow[]) {
+  return queryByIds<ChangeRow>(releases.map((release) => release.id), "SELECT id, release_id AS releaseId, feature_name AS featureName, kind, description, user_impact AS userImpact, evidence FROM changes WHERE release_id IN ({{placeholders}}) ORDER BY id");
+}
+
+async function loadBehaviorChanges(releases: ReleaseRow[]) {
   if (releases.length === 0) return [];
   const ids = releases.map((release) => release.id);
   const placeholders = ids.map(() => "?").join(",");
-  const [rows] = await getDb().execute(`SELECT id, release_id AS releaseId, feature_name AS featureName, kind, description, user_impact AS userImpact, evidence FROM changes WHERE release_id IN (${placeholders}) ORDER BY id`, ids);
-  return rows as ChangeRow[];
+  const [rows] = await getDb().execute(
+    `SELECT c.id, r.id AS releaseId, c.kind, c.entity_type AS entityType,
+            c.feature_name AS featureName, c.scenario_reference AS scenarioReference,
+            c.summary, c.before_json AS beforeJson, c.after_json AS afterJson
+     FROM spec_changes c JOIN releases r ON r.spec_version_id = c.spec_version_id
+     WHERE r.id IN (${placeholders}) ORDER BY c.id`,
+    ids,
+  );
+  return (rows as Array<Omit<BehaviorChangeRow, "before" | "after"> & { beforeJson: unknown; afterJson: unknown }>).map((row) => ({
+    id: row.id,
+    releaseId: row.releaseId,
+    kind: row.kind,
+    entityType: row.entityType,
+    featureName: row.featureName,
+    scenarioReference: row.scenarioReference,
+    summary: row.summary,
+    before: parseJsonValue(row.beforeJson),
+    after: parseJsonValue(row.afterJson),
+  }));
 }
 
 export async function getProductDetails(slug: string) {
@@ -30,10 +55,10 @@ export async function getProductDetails(slug: string) {
     [product.id],
   );
   const [featureRows] = await db.execute("SELECT id, name, summary FROM features WHERE product_id = ? AND active = 1 ORDER BY name", [product.id]);
-  const [releaseRows] = await db.execute("SELECT id, title, summary, sha, url, committed_at AS committedAt FROM releases WHERE product_id = ? ORDER BY committed_at DESC LIMIT 30", [product.id]);
+  const [releaseRows] = await db.execute("SELECT id, title, summary, sha, url, committed_at AS committedAt, spec_version_id AS specVersionId FROM releases WHERE product_id = ? ORDER BY committed_at DESC LIMIT 30", [product.id]);
   const features = featureRows as FeatureRow[];
   const releases = releaseRows as ReleaseRow[];
-  const [scenarios, changes] = await Promise.all([loadScenarios(features), loadChanges(releases)]);
+  const [scenarios, changes, behaviorChanges] = await Promise.all([loadScenarios(features), loadChanges(releases), loadBehaviorChanges(releases)]);
 
   return {
     product,
@@ -43,5 +68,6 @@ export async function getProductDetails(slug: string) {
     scenarios,
     releases,
     changes,
+    behaviorChanges,
   };
 }

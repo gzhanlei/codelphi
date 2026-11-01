@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ProductChanges } from "./product-changes";
 import { ProductSpec } from "./product-spec";
-import type { ChangeRow, FeatureRow, ReleaseRow, ScenarioRow } from "@/lib/types";
+import type { BehaviorChangeRow, ChangeRow, FeatureRow, ReleaseRow, ScenarioRow } from "@/lib/types";
 
 interface Repository {
   owner: string;
@@ -43,10 +43,11 @@ interface ProductViewProps {
   scenarios: ScenarioRow[];
   releases: ReleaseRow[];
   changes: ChangeRow[];
+  behaviorChanges: BehaviorChangeRow[];
 }
 
-export function ProductView({ view, features, scenarios, releases, changes }: ProductViewProps) {
+export function ProductView({ view, features, scenarios, releases, changes, behaviorChanges }: ProductViewProps) {
   return view === "spec"
     ? <ProductSpec features={features} scenarios={scenarios} />
-    : <ProductChanges releases={releases} changes={changes} />;
+    : <ProductChanges releases={releases} changes={changes} behaviorChanges={behaviorChanges} />;
 }

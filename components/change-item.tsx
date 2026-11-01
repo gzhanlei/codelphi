@@ -1,7 +1,7 @@
 import type { ChangeRow } from "@/lib/types";
 import { EvidenceLinks } from "./evidence-links";
 
-const kindLabels: Record<string, string> = { added: "新增", changed: "变化", removed: "移除", fixed: "修复", reviewed: "已检查" };
+export const kindLabels: Record<string, string> = { added: "新增", changed: "变化", removed: "移除", fixed: "修复", reviewed: "已检查" };
 
 export function ChangeItem({ change }: { change: ChangeRow }) {
   return (

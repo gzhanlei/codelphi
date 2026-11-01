@@ -1,11 +1,14 @@
-export function FormError({ message }: { message: string }) {
+function TextMessage({ message, className, role }: { message: string; className: string; role?: string }) {
   if (!message) return null;
-  return <div className="error-banner" role="alert">{message}</div>;
+  return <span className={className} role={role}>{message}</span>;
+}
+
+export function FormError({ message }: { message: string }) {
+  return <TextMessage message={message} className="error-banner" role="alert" />;
 }
 
 export function InlineMessage({ message }: { message: string }) {
-  if (!message) return null;
-  return <span className="inline-message">{message}</span>;
+  return <TextMessage message={message} className="inline-message" />;
 }
 
 export function analysisButtonLabel(pending: boolean) {
