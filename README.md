@@ -65,6 +65,18 @@ npm run dev
 
 打开 `http://localhost:3000`，点击“使用 Chandler 登录”。
 
+### 添加其他产品
+
+登录后点击产品总览右上角的“添加产品”，填写产品名称、URL Slug、GitHub `owner/repo` 和默认分支。Radar 会先验证仓库读取权限，再写入产品与仓库记录；保持“添加后立即分析”选中即可生成第一版规格。
+
+也可以在本地对已经注册的产品手动执行：
+
+```bash
+npm run analyze -- <产品-slug>
+```
+
+当前阶段每个产品先接入一个主仓库。GitHub Token 必须对新增仓库具有读取权限。
+
 ### 4. 配置 Chandler OAuth
 
 在 `https://app.chandler.work/partner/apps` 创建 Radar 应用，scope 为 `openid profile email`，登记以下回调：

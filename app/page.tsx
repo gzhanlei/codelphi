@@ -49,7 +49,7 @@ export default async function DashboardPage() {
     <AppShell user={user}>
       <div className="page-heading">
         <div><span className="eyebrow">YOUR PRODUCT PULSE</span><h1>产品总览</h1><p>所有产品的当前规格与最新变化，集中在这里。</p></div>
-        <span className="date-chip">{new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "short" }).format(new Date())}</span>
+        <div className="page-actions"><span className="date-chip">{new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "short" }).format(new Date())}</span><Link href="/products/new" className="primary-button">＋ 添加产品</Link></div>
       </div>
       <section className="stats-grid" aria-label="产品统计">
         <div className="stat-card"><span>已接入产品</span><strong>{products.length}</strong><small>个独立产品空间</small></div>
