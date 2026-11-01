@@ -14,7 +14,7 @@ describe("product registration", () => {
     const result = await resolveGitHubRegistration(input, github);
     expect(result.defaultBranch).toBe("main");
     expect(result.afterSha).toBe("sha-1");
-    expect(github.getBranchHead).toHaveBeenCalledWith({ owner: "gzhanlei", name: "salesbuddy", defaultBranch: "main" });
+    expect(github.getBranchHead).toHaveBeenCalledWith({ owner: "gzhanlei", name: "salesbuddy", defaultBranch: "main" }, { connectionId: null });
   });
 
   it("keeps an explicitly selected branch", async () => {
@@ -24,7 +24,17 @@ describe("product registration", () => {
     };
     const result = await resolveGitHubRegistration({ ...input, defaultBranch: "develop" }, github);
     expect(result.defaultBranch).toBe("develop");
-    expect(github.getBranchHead).toHaveBeenCalledWith(expect.objectContaining({ defaultBranch: "develop" }));
+    expect(github.getBranchHead).toHaveBeenCalledWith(expect.objectContaining({ defaultBranch: "develop" }), { connectionId: null });
+  });
+
+  it("passes the selected installation connection to GitHub", async () => {
+    const github = {
+      getRepository: vi.fn(async () => ({ owner: "gzhanlei", name: "salesbuddy", defaultBranch: "main" })),
+      getBranchHead: vi.fn(async () => "sha-3"),
+    };
+    await resolveGitHubRegistration({ ...input, connectionId: 9 }, github);
+    expect(github.getRepository).toHaveBeenCalledWith(expect.anything(), { connectionId: 9 });
+    expect(github.getBranchHead).toHaveBeenCalledWith(expect.anything(), { connectionId: 9 });
   });
 
   it("maps validation, duplicate and unexpected errors consistently", () => {

@@ -4,7 +4,7 @@ import type { AnalysisResult } from "../lib/ai";
 import type { RunContext } from "../lib/analysis";
 import { insertSpecVersion } from "../lib/spec-versions";
 
-const run: RunContext = { id: 8, repositoryId: 3, productId: 4, owner: "gzhanlei", name: "radar", beforeSha: "a", afterSha: "b" };
+const run: RunContext = { id: 8, repositoryId: 3, productId: 4, owner: "gzhanlei", name: "radar", beforeSha: "a", afterSha: "b", connectionId: null };
 const scenario = { reference: "HP-1", context: "Visitor", action: "Signs in", outcome: "Dashboard", category: "happy" as const, evidence: [] };
 const result: AnalysisResult = {
   release: { title: "Title", summary: "Summary" },

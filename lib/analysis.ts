@@ -12,6 +12,7 @@ export interface RunContext {
   name: string;
   beforeSha: string | null;
   afterSha: string;
+  connectionId: number | null;
 }
 
 type ChangeContext = Awaited<ReturnType<typeof getChangeContext>>;
@@ -138,7 +139,7 @@ export async function queueAnalysis(repositoryId: number, beforeSha: string | nu
 async function loadRun(runId: number) {
   const [rows] = await getDb().execute(
     `SELECT r.id, r.repository_id AS repositoryId, p.id AS productId,
-            repo.owner, repo.name, r.before_sha AS beforeSha, r.after_sha AS afterSha
+            repo.owner, repo.name, r.before_sha AS beforeSha, r.after_sha AS afterSha, repo.connection_id AS connectionId
      FROM analysis_runs r
      JOIN repositories repo ON repo.id = r.repository_id
      JOIN products p ON p.id = repo.product_id
@@ -150,10 +151,11 @@ async function loadRun(runId: number) {
 
 async function performAnalysis(run: RunContext) {
   await getDb().execute("UPDATE analysis_runs SET status = 'running', started_at = CURRENT_TIMESTAMP(3), error_message = NULL WHERE id = ?", [run.id]);
-  const repo: GitHubRepository = await getRepository({ owner: run.owner, name: run.name, defaultBranch: "main" });
+  const repo: GitHubRepository = await getRepository({ owner: run.owner, name: run.name, defaultBranch: "main" }, { connectionId: run.connectionId });
+  const access = { connectionId: run.connectionId };
   const [change, sources] = await Promise.all([
-    getChangeContext(repo, run.beforeSha, run.afterSha),
-    getSourceSnapshot(repo, run.afterSha),
+    getChangeContext(repo, run.beforeSha, run.afterSha, access),
+    getSourceSnapshot(repo, run.afterSha, access),
   ]);
   if (sources.length === 0) throw new Error("No supported source files found");
   const result = await analyzeWithAI(sources, change);

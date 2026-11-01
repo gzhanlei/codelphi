@@ -7,6 +7,7 @@ export const productInputSchema = z.object({
   repository: z.string().trim().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, "仓库格式应为 owner/repo"),
   defaultBranch: z.string().trim().max(191).regex(/^[^\s~^:?*\\]*$/, "分支名称包含无效字符").default(""),
   analyze: z.boolean().default(true),
+  connectionId: z.number().int().positive().nullable().default(null),
 });
 
 export function slugifyProductName(value: string) {
@@ -20,4 +21,8 @@ export function slugifyProductName(value: string) {
 
 export function nextProductSlug(name: string, current: string, edited: boolean) {
   return edited ? current : slugifyProductName(name);
+}
+
+export function defaultConnectionId(connections: Array<{ id: number }>, hasServerToken: boolean) {
+  return hasServerToken || connections.length === 0 ? null : connections[0].id;
 }

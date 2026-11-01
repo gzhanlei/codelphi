@@ -2,20 +2,22 @@ import { ZodError, type z } from "zod";
 import { queueAnalysis } from "./analysis";
 import { getDb } from "./db";
 import { getBranchHead, getRepository, parseRepository, type GitHubRepository } from "./github";
+import type { GitHubAccess } from "./github-access";
 import type { productInputSchema } from "./product-input";
 
 type ProductInput = z.infer<typeof productInputSchema>;
 
 interface GitHubGateway {
-  getRepository: (repo: GitHubRepository) => Promise<GitHubRepository>;
-  getBranchHead: (repo: GitHubRepository) => Promise<string>;
+  getRepository: (repo: GitHubRepository, access?: GitHubAccess) => Promise<GitHubRepository>;
+  getBranchHead: (repo: GitHubRepository, access?: GitHubAccess) => Promise<string>;
 }
 
 export async function resolveGitHubRegistration(input: ProductInput, github: GitHubGateway = { getRepository, getBranchHead }) {
   const repository = parseRepository(input.repository);
-  const metadata = await github.getRepository(repository);
+  const access = { connectionId: input.connectionId };
+  const metadata = await github.getRepository(repository, access);
   const defaultBranch = input.defaultBranch || metadata.defaultBranch;
-  const afterSha = await github.getBranchHead({ ...repository, defaultBranch });
+  const afterSha = await github.getBranchHead({ ...repository, defaultBranch }, access);
   return { repository, defaultBranch, afterSha };
 }
 
@@ -29,8 +31,8 @@ async function insertRegistration(input: ProductInput, repository: GitHubReposit
     );
     const productId = Number((productResult as { insertId: number }).insertId);
     const [repositoryResult] = await connection.execute(
-      "INSERT INTO repositories (product_id, owner, name, default_branch) VALUES (?, ?, ?, ?)",
-      [productId, repository.owner, repository.name, defaultBranch],
+      "INSERT INTO repositories (product_id, owner, name, default_branch, connection_id) VALUES (?, ?, ?, ?, ?)",
+      [productId, repository.owner, repository.name, defaultBranch, input.connectionId],
     );
     await connection.commit();
     return Number((repositoryResult as { insertId: number }).insertId);

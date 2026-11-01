@@ -1,15 +1,14 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createProduct } from "@/lib/product-client";
 import { errorMessage } from "@/lib/error-message";
-import { nextProductSlug } from "@/lib/product-input";
-import { FormError, ProductSubmitButton } from "./form-feedback";
+import { defaultConnectionId, nextProductSlug } from "@/lib/product-input";
+import { ProductSubmissionSection } from "./product-submission-section";
 import { ProductInformationSection, RepositorySection } from "./product-form-sections";
 
-export function NewProductForm() {
+export function NewProductForm({ connections, hasServerToken }: { connections: Array<{ id: number; accountLogin: string }>; hasServerToken: boolean }) {
   const router = useRouter();
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
@@ -20,6 +19,7 @@ export function NewProductForm() {
   const [analyze, setAnalyze] = useState(true);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
+  const [connectionId, setConnectionId] = useState<number | null>(defaultConnectionId(connections, hasServerToken));
 
   function updateName(value: string) {
     setName(value);
@@ -36,7 +36,7 @@ export function NewProductForm() {
     setPending(true);
     setError("");
     try {
-      const productSlug = await createProduct({ name, slug, repository, defaultBranch, description, analyze });
+      const productSlug = await createProduct({ name, slug, repository, defaultBranch, description, analyze, connectionId });
       router.push(`/products/${productSlug}?view=spec`);
       router.refresh();
     } catch (cause) {
@@ -48,10 +48,8 @@ export function NewProductForm() {
   return (
     <form className="product-form" onSubmit={submit}>
       <ProductInformationSection name={name} slug={slug} description={description} onNameChange={updateName} onSlugChange={updateSlug} onDescriptionChange={setDescription} />
-      <RepositorySection repository={repository} defaultBranch={defaultBranch} onRepositoryChange={setRepository} onBranchChange={setDefaultBranch} />
-      <label className="analysis-option"><input type="checkbox" checked={analyze} onChange={(event) => setAnalyze(event.target.checked)} /><span><strong>添加后立即分析</strong><small>读取当前代码，生成第一版产品规格和发布记录。</small></span></label>
-      <FormError message={error} />
-      <div className="form-actions"><Link href="/" className="cancel-link">取消</Link><ProductSubmitButton pending={pending} analyze={analyze} /></div>
+      <RepositorySection repository={repository} defaultBranch={defaultBranch} connectionId={connectionId} connections={connections} hasServerToken={hasServerToken} onRepositoryChange={setRepository} onBranchChange={setDefaultBranch} onConnectionChange={setConnectionId} />
+      <ProductSubmissionSection analyze={analyze} error={error} pending={pending} onAnalyze={setAnalyze} />
     </form>
   );
 }

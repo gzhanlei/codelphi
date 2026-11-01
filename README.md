@@ -11,6 +11,8 @@
 ## 已实现
 
 - Chandler OAuth 授权码 + PKCE（S256）登录、HttpOnly 会话、生产邮箱白名单。
+- GitHub App Manifest 创建与安装、只读 Installation Token、AES-GCM 凭据加密、连接检查与本地断开。
+- Integrations 页面与添加产品时的 GitHub App/PAT 凭据选择；无凭据时提供配置引导。
 - 产品总览、功能规格、正常/边界/错误场景、发布与变化列表。
 - GitHub push Webhook HMAC-SHA256 验签及默认分支过滤。
 - 手动分析与 push 自动分析；每次分析记录运行状态和错误。
@@ -89,6 +91,14 @@ https://radar.chandler.work/auth/callback
 ```
 
 生产环境如果 `AUTH_ALLOWED_EMAILS` 为空，Radar 默认拒绝所有登录。
+
+### 使用 GitHub App（推荐）
+
+打开 `/integrations`，点击“创建 Radar GitHub App”，在 GitHub 官方页面完成创建，然后点击“添加安装”。App 仅申请 `contents:read` 和 `metadata:read`。
+
+安装时可选择全部仓库或指定仓库。Radar 将 App 私钥与 Client Secret 使用 AES-256-GCM 加密后存入 MySQL，仅在服务端内存中解密换取 Installation Token。页面支持重新检查连接和本地断开；断开不会卸载 GitHub App，也不会删除已有规格。
+
+添加产品时选择对应的 GitHub App 安装即可；现有 `GITHUB_TOKEN` 仅作为兼容回退。
 
 ### 5. 配置 GitHub Webhook
 

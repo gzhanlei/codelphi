@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { productInputSchema, slugifyProductName, nextProductSlug } from "../lib/product-input";
+import { productInputSchema, slugifyProductName, nextProductSlug, defaultConnectionId } from "../lib/product-input";
 
 describe("product registration input", () => {
   it("creates URL-safe slugs for product names", () => {
@@ -8,6 +8,9 @@ describe("product registration input", () => {
     expect(slugifyProductName("听风")).toBe("");
     expect(nextProductSlug("SalesBuddy", "", false)).toBe("salesbuddy");
     expect(nextProductSlug("SalesBuddy", "custom-slug", true)).toBe("custom-slug");
+    expect(defaultConnectionId([{ id: 9 }], false)).toBe(9);
+    expect(defaultConnectionId([{ id: 9 }], true)).toBeNull();
+    expect(defaultConnectionId([], false)).toBeNull();
   });
 
   it("accepts a complete product and rejects invalid repositories", () => {
