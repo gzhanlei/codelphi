@@ -13,6 +13,12 @@ describe("AI analysis output", () => {
     expect(parseAnalysisContent(`\`\`\`json\n${JSON.stringify(result)}\n\`\`\``).features[0].scenarios[0].reference).toBe("HP-1");
   });
 
+  it("caps oversized evidence lists before schema validation", () => {
+    const oversized = structuredClone(result);
+    oversized.changes[0].evidence = Array.from({ length: 6 }, (_, index) => ({ path: `lib/file-${index}.ts`, startLine: index + 1 }));
+    expect(parseAnalysisContent(JSON.stringify(oversized)).changes[0].evidence).toHaveLength(5);
+  });
+
   it("rejects unsupported scenario categories", () => {
     const invalid = structuredClone(result);
     invalid.features[0].scenarios[0].category = "unknown";

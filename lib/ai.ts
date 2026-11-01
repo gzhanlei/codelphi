@@ -40,12 +40,27 @@ export const analysisSchema = z.object({
 
 export type AnalysisResult = z.infer<typeof analysisSchema>;
 
+function capEvidence(value: unknown) {
+  const input = value as {
+    changes?: Array<{ evidence?: unknown[] }>;
+    features?: Array<{ scenarios?: Array<{ evidence?: unknown[] }> }>;
+  };
+  return {
+    ...input,
+    changes: input.changes?.map((change) => ({ ...change, evidence: change.evidence?.slice(0, 5) })),
+    features: input.features?.map((feature) => ({
+      ...feature,
+      scenarios: feature.scenarios?.map((scenario) => ({ ...scenario, evidence: scenario.evidence?.slice(0, 5) })),
+    })),
+  };
+}
+
 export function parseAnalysisContent(content: string): AnalysisResult {
   const trimmed = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
   const start = trimmed.indexOf("{");
   const end = trimmed.lastIndexOf("}");
   if (start < 0 || end <= start) throw new Error("AI response did not contain a JSON object");
-  return analysisSchema.parse(JSON.parse(trimmed.slice(start, end + 1)));
+  return analysisSchema.parse(capEvidence(JSON.parse(trimmed.slice(start, end + 1))));
 }
 
 interface ChangeContext {
