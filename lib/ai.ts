@@ -53,8 +53,14 @@ interface ChangeContext {
   files: Array<{ path: string; status: string; patch: string }>;
 }
 
+function chatCompletionsUrl() {
+  const configured = (process.env.AI_BASE_URL ?? "http://127.0.0.1:4000").replace(/\/$/, "");
+  if (configured.endsWith("/v1/chat/completions")) return configured;
+  if (configured.endsWith("/v1")) return `${configured}/chat/completions`;
+  return `${configured}/v1/chat/completions`;
+}
+
 export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext): Promise<AnalysisResult> {
-  const baseUrl = (process.env.AI_BASE_URL ?? "http://127.0.0.1:4000").replace(/\/$/, "");
   const prompt = [
     "你在维护一个内部产品知识库。仅根据给定代码和 diff 输出事实，不要补充猜测。",
     "用简体中文生成：1) 当前产品功能规格；2) 本次发布的用户可感知变化。",
@@ -66,7 +72,7 @@ export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext
     `\n【当前代码，带行号】\n${sources.map((file) => `\n--- ${file.path} ---\n${file.content}`).join("\n")}`,
   ].join("\n");
 
-  const response = await fetch(`${baseUrl}/v1/chat/completions`, {
+  const response = await fetch(chatCompletionsUrl(), {
     method: "POST",
     headers: {
       Authorization: `Bearer ${requiredEnv("AI_API_KEY")}`,

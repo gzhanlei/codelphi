@@ -57,6 +57,7 @@ Radar 不使用 WorkMembership 的业务表。生产环境建议按实际应用�
 
 ```bash
 npm install
+npm run db:create
 npm run db:migrate
 npm run db:seed
 npm run dev
