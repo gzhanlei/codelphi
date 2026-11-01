@@ -1,0 +1,105 @@
+CREATE TABLE IF NOT EXISTS users (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  chandler_sub VARCHAR(191) NOT NULL UNIQUE,
+  email VARCHAR(320) NULL,
+  display_name VARCHAR(255) NULL,
+  picture_url TEXT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS products (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  slug VARCHAR(128) NOT NULL UNIQUE,
+  name VARCHAR(191) NOT NULL,
+  description TEXT NOT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS repositories (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  product_id BIGINT UNSIGNED NOT NULL,
+  owner VARCHAR(191) NOT NULL,
+  name VARCHAR(191) NOT NULL,
+  default_branch VARCHAR(191) NOT NULL DEFAULT 'main',
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UNIQUE KEY repositories_owner_name_unique (owner, name),
+  CONSTRAINT repositories_product_fk FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS analysis_runs (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  repository_id BIGINT UNSIGNED NOT NULL,
+  trigger_type VARCHAR(16) NOT NULL,
+  before_sha VARCHAR(64) NULL,
+  after_sha VARCHAR(64) NOT NULL,
+  status VARCHAR(16) NOT NULL,
+  error_message TEXT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  started_at DATETIME(3) NULL,
+  finished_at DATETIME(3) NULL,
+  KEY analysis_runs_repository_created_idx (repository_id, created_at),
+  CONSTRAINT analysis_runs_repository_fk FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS releases (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  product_id BIGINT UNSIGNED NOT NULL,
+  repository_id BIGINT UNSIGNED NOT NULL,
+  analysis_run_id BIGINT UNSIGNED NULL,
+  sha VARCHAR(64) NOT NULL,
+  title VARCHAR(500) NOT NULL,
+  summary TEXT NOT NULL,
+  url TEXT NOT NULL,
+  committed_at DATETIME(3) NOT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UNIQUE KEY releases_repository_sha_unique (repository_id, sha),
+  KEY releases_product_committed_idx (product_id, committed_at),
+  CONSTRAINT releases_product_fk FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+  CONSTRAINT releases_repository_fk FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE,
+  CONSTRAINT releases_analysis_run_fk FOREIGN KEY (analysis_run_id) REFERENCES analysis_runs(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS changes (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  release_id BIGINT UNSIGNED NOT NULL,
+  feature_name VARCHAR(191) NOT NULL,
+  kind VARCHAR(16) NOT NULL,
+  description TEXT NOT NULL,
+  user_impact TEXT NOT NULL,
+  evidence JSON NOT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  CONSTRAINT changes_release_fk FOREIGN KEY (release_id) REFERENCES releases(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS features (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  product_id BIGINT UNSIGNED NOT NULL,
+  name VARCHAR(191) NOT NULL,
+  summary TEXT NOT NULL,
+  source VARCHAR(16) NOT NULL DEFAULT 'generated',
+  active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  UNIQUE KEY features_product_name_unique (product_id, name),
+  CONSTRAINT features_product_fk FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS scenarios (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  feature_id BIGINT UNSIGNED NOT NULL,
+  reference VARCHAR(32) NOT NULL,
+  context TEXT NOT NULL,
+  action TEXT NOT NULL,
+  outcome TEXT NOT NULL,
+  category VARCHAR(16) NOT NULL,
+  source VARCHAR(16) NOT NULL DEFAULT 'generated',
+  active TINYINT(1) NOT NULL DEFAULT 1,
+  evidence JSON NOT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  UNIQUE KEY scenarios_feature_reference_unique (feature_id, reference),
+  KEY scenarios_feature_active_idx (feature_id, active),
+  CONSTRAINT scenarios_feature_fk FOREIGN KEY (feature_id) REFERENCES features(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
