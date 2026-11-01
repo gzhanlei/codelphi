@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { PoolConnection } from "mysql2/promise";
 import type { AnalysisResult } from "../lib/ai";
-import { assertLatestRun, upsertRelease, type RunContext } from "../lib/analysis";
+import { assertLatestRun, upsertGeneratedSpec, upsertRelease, type RunContext } from "../lib/analysis";
 
 const run: RunContext = { id: 2, repositoryId: 3, productId: 4, owner: "gzhanlei", name: "radar", beforeSha: null, afterSha: "sha-2", connectionId: null };
 const result: AnalysisResult = {
@@ -45,5 +45,12 @@ describe("analysis persistence guards", () => {
     await upsertRelease(connection, run, result, change);
     expect(connection.execute).toHaveBeenCalledTimes(4);
     expect(connection.execute).toHaveBeenLastCalledWith(expect.stringContaining("INSERT INTO changes"), [10, "Auth", "changed", "Changed", "", "[]"]);
+  });
+
+  it("retains generated parents that still have active children", async () => {
+    const connection = { execute: vi.fn(async () => [{}]) } as unknown as PoolConnection;
+    await upsertGeneratedSpec(connection, run, { ...result, features: [] });
+    expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("LEFT JOIN features child ON child.parent_id = f.id AND child.active = 1"), [4]);
+    expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("AND child.id IS NULL"), [4]);
   });
 });

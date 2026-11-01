@@ -32,6 +32,8 @@ export interface FeatureRow {
   id: number;
   name: string;
   summary: string;
+  parentId: number | null;
+  source: "generated" | "manual";
 }
 
 export interface ScenarioRow {
@@ -41,7 +43,8 @@ export interface ScenarioRow {
   context: string;
   action: string;
   outcome: string;
-  category: string;
+  category: "happy" | "edge" | "error";
+  source: "generated" | "manual";
   evidence: unknown;
 }
 

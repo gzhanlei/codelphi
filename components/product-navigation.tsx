@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { ProductChanges } from "./product-changes";
-import { ProductSpec } from "./product-spec";
+import { SpecWorkspace } from "./spec-workspace";
+import { buildFeatureTree, selectFeature } from "@/lib/feature-tree";
+import { scenariosForFeature } from "@/lib/spec-editor-ui";
 import type { BehaviorChangeRow, ChangeRow, FeatureRow, ReleaseRow, ScenarioRow } from "@/lib/types";
 
 interface Repository {
@@ -39,15 +41,19 @@ export function ProductTabs({ slug, view, featureCount, releaseCount }: { slug: 
 
 interface ProductViewProps {
   view: string;
+  productSlug: string;
   features: FeatureRow[];
   scenarios: ScenarioRow[];
   releases: ReleaseRow[];
   changes: ChangeRow[];
   behaviorChanges: BehaviorChangeRow[];
+  mode?: string;
+  featureId?: number;
 }
 
-export function ProductView({ view, features, scenarios, releases, changes, behaviorChanges }: ProductViewProps) {
+export function ProductView({ view, productSlug, features, scenarios, releases, changes, behaviorChanges, mode = "spec", featureId }: ProductViewProps) {
+  const selectedFeature = selectFeature(features, featureId);
   return view === "spec"
-    ? <ProductSpec features={features} scenarios={scenarios} />
+    ? <SpecWorkspace slug={productSlug} tree={buildFeatureTree(features)} feature={selectedFeature} scenarios={scenariosForFeature(scenarios, selectedFeature)} mode={mode} />
     : <ProductChanges releases={releases} changes={changes} behaviorChanges={behaviorChanges} />;
 }

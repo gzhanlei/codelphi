@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diffSpec, mergeSpecSources, type SpecFeature } from "../lib/spec-diff";
+import { diffSpec, mergeSpecSources, specFeatureKey, specScenarioKey, type SpecFeature } from "../lib/spec-diff";
 
 const authentication: SpecFeature = {
   name: "Authentication",
@@ -84,5 +84,24 @@ describe("spec source merging", () => {
     expect(auth?.scenarios.map((scenario) => scenario.reference).sort()).toEqual(["HP-1", "HP-2"]);
     expect(auth?.scenarios.find((scenario) => scenario.reference === "HP-1")?.outcome).toBe("Curated outcome");
     expect(merged.some((feature) => feature.name === "Team notes")).toBe(true);
+  });
+
+  it("keeps fresh generated fields when a generated parent is retained for hierarchy", () => {
+    const generated = { ...structuredClone(authentication), summary: "Fresh AI summary" };
+    const retained = { ...structuredClone(authentication), summary: "Stale stored summary", source: "generated" as const };
+    retained.scenarios.push({ ...retained.scenarios[0], reference: "HP-9", source: "manual" });
+    const merged = mergeSpecSources([generated], [retained]);
+    expect(merged[0].summary).toBe("Fresh AI summary");
+    expect(merged[0].scenarios.map((scenario) => scenario.reference).sort()).toEqual(["HP-1", "HP-9"]);
+  });
+
+  it("suppresses generated features and scenarios deleted through the editor", () => {
+    const team: SpecFeature = { name: "Team notes", summary: "Generated again", scenarios: [] };
+    const merged = mergeSpecSources([structuredClone(authentication), team], [], {
+      featureKeys: new Set([specFeatureKey("Team notes")]),
+      scenarioKeys: new Set([specScenarioKey("Authentication", "HP-1")]),
+    });
+    expect(merged.map((feature) => feature.name)).toEqual(["Authentication"]);
+    expect(merged[0].scenarios).toEqual([]);
   });
 });

@@ -64,11 +64,14 @@ async function upsertFeature(connection: PoolConnection, run: RunContext, featur
   }
 }
 
-async function upsertGeneratedSpec(connection: PoolConnection, run: RunContext, result: AnalysisResult) {
+export async function upsertGeneratedSpec(connection: PoolConnection, run: RunContext, result: AnalysisResult) {
   await connection.execute(
-    `UPDATE features SET active = 0
-     WHERE product_id = ? AND source = 'generated'
-       AND NOT EXISTS (SELECT 1 FROM scenarios WHERE feature_id = features.id AND source = 'manual' AND active = 1)`,
+    `UPDATE features f
+     LEFT JOIN features child ON child.parent_id = f.id AND child.active = 1
+     SET f.active = 0
+     WHERE f.product_id = ? AND f.source = 'generated'
+       AND NOT EXISTS (SELECT 1 FROM scenarios WHERE feature_id = f.id AND source = 'manual' AND active = 1)
+       AND child.id IS NULL`,
     [run.productId],
   );
   await connection.execute(

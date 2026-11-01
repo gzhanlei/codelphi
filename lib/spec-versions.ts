@@ -2,12 +2,13 @@ import type { PoolConnection } from "mysql2/promise";
 import type { AnalysisResult } from "./ai";
 import type { RunContext } from "./analysis";
 import { evidenceItems } from "./evidence";
-import { diffSpec, mergeSpecSources, specFeatureKey, type SpecChange, type SpecFeature, type SpecScenario } from "./spec-diff";
+import { diffSpec, mergeSpecSources, specFeatureKey, specScenarioKey, type SpecChange, type SpecFeature, type SpecScenario, type SpecTombstones } from "./spec-diff";
 
 interface FeatureRow {
   id: number;
   name: string;
   summary: string;
+  parentId?: number | null;
   parentKey?: string | null;
   source: "generated" | "manual";
 }
@@ -23,9 +24,19 @@ interface ScenarioRow {
   evidence: unknown;
 }
 
+export function featureParentKey(feature: { parentId?: number | null; parentKey?: string | null }, parentNames: Map<number, string>) {
+  if (feature.parentId) {
+    const parentName = parentNames.get(feature.parentId);
+    if (parentName !== undefined) return parentName;
+  }
+  return feature.parentKey === undefined ? null : feature.parentKey;
+}
+
 function featuresFromRows(featureRows: FeatureRow[], scenarioRows: ScenarioRow[]): SpecFeature[] {
+  const parentNames = new Map(featureRows.map((feature) => [feature.id, feature.name]));
   return featureRows.map((feature) => ({
     ...feature,
+    parentKey: featureParentKey(feature, parentNames),
     scenarios: scenarioRows.filter((scenario) => scenario.featureId === feature.id).map((scenario) => ({
       reference: scenario.reference,
       context: scenario.context,
@@ -67,14 +78,30 @@ async function loadManualSpec(connection: PoolConnection, productId: number) {
   return loadFeatureSpec(
     connection,
     "manual",
-    `SELECT id, name, summary, source FROM features
-     WHERE product_id = ? AND active = 1 AND (
-       source = 'manual' OR EXISTS (
+    `SELECT features.id, features.name, features.summary, features.parent_id AS parentId, parents.name AS parentKey, features.source
+     FROM features LEFT JOIN features parents ON parents.id = features.parent_id AND parents.active = 1
+     WHERE features.product_id = ? AND features.active = 1 AND (
+       features.source = 'manual' OR EXISTS (
          SELECT 1 FROM scenarios s WHERE s.feature_id = features.id AND s.source = 'manual' AND s.active = 1
+       ) OR EXISTS (
+         SELECT 1 FROM features child WHERE child.parent_id = features.id AND child.active = 1
        )
      )`,
     [productId],
   );
+}
+
+async function loadManualTombstones(connection: PoolConnection, productId: number): Promise<SpecTombstones> {
+  const [featureResult, scenarioResult] = await Promise.all([
+    connection.execute("SELECT name FROM features WHERE product_id = ? AND active = 0 AND source = 'manual'", [productId]),
+    connection.execute("SELECT f.name AS featureName, s.reference FROM scenarios s JOIN features f ON f.id = s.feature_id WHERE f.product_id = ? AND s.active = 0 AND s.source = 'manual'", [productId]),
+  ]);
+  const featureRows = featureResult[0] as Array<{ name: string }>;
+  const scenarioRows = scenarioResult[0] as Array<{ featureName: string; reference: string }>;
+  return {
+    featureKeys: new Set(featureRows.map((feature) => specFeatureKey(feature.name))),
+    scenarioKeys: new Set(scenarioRows.map((scenario) => specScenarioKey(scenario.featureName, scenario.reference))),
+  };
 }
 
 async function loadVersionFeatures(connection: PoolConnection, versionId: number) {
@@ -135,8 +162,8 @@ async function insertChanges(connection: PoolConnection, versionId: number, base
 }
 
 export async function insertSpecVersion(connection: PoolConnection, run: RunContext, result: AnalysisResult) {
-  const [previous, manual] = await Promise.all([loadPreviousSpec(connection, run), loadManualSpec(connection, run.productId)]);
-  const features = mergeSpecSources(result.features, manual);
+  const [previous, manual, tombstones] = await Promise.all([loadPreviousSpec(connection, run), loadManualSpec(connection, run.productId), loadManualTombstones(connection, run.productId)]);
+  const features = mergeSpecSources(result.features, manual, tombstones);
   const changes = diffSpec(previous === null ? null : previous.features, features);
   const [versionResult] = await connection.execute(
     "INSERT INTO spec_versions (product_id, repository_id, analysis_run_id, sha) VALUES (?, ?, ?, ?)",

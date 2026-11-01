@@ -99,8 +99,23 @@ export function diffSpec(before: SpecFeature[] | null, after: SpecFeature[]): Sp
   return changes;
 }
 
-export function mergeSpecSources(generated: SpecFeature[], manual: SpecFeature[]) {
-  const merged = new Map(generated.map((feature) => [specFeatureKey(feature.name), feature]));
+export interface SpecTombstones {
+  featureKeys: ReadonlySet<string>;
+  scenarioKeys: ReadonlySet<string>;
+}
+
+export function specScenarioKey(featureName: string, reference: string) {
+  return `${specFeatureKey(featureName)}:${reference}`;
+}
+
+export function mergeSpecSources(generated: SpecFeature[], manual: SpecFeature[], tombstones: SpecTombstones = { featureKeys: new Set<string>(), scenarioKeys: new Set<string>() }) {
+  const merged = new Map<string, SpecFeature>();
+  for (const feature of generated) {
+    const key = specFeatureKey(feature.name);
+    if (tombstones.featureKeys.has(key)) continue;
+    const scenarios = feature.scenarios.filter((scenario) => !tombstones.scenarioKeys.has(specScenarioKey(feature.name, scenario.reference)));
+    merged.set(key, { ...feature, scenarios });
+  }
   for (const feature of manual) {
     const key = specFeatureKey(feature.name);
     const existing = merged.get(key);
@@ -110,7 +125,8 @@ export function mergeSpecSources(generated: SpecFeature[], manual: SpecFeature[]
     }
     const scenarios = scenarioMap(existing);
     for (const scenario of feature.scenarios) scenarios.set(scenario.reference, scenario);
-    merged.set(key, { ...feature, scenarios: [...scenarios.values()] });
+    const mergedFeature = feature.source === "generated" ? { ...feature, summary: existing.summary } : feature;
+    merged.set(key, { ...mergedFeature, scenarios: [...scenarios.values()] });
   }
   return [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));
 }

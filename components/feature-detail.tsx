@@ -1,0 +1,32 @@
+import Link from "next/link";
+import type { FeatureRow, ScenarioRow } from "@/lib/types";
+import { FeatureFlow } from "./feature-flow";
+import { canCreateChild, featureSourceLabel, featureTabClass } from "@/lib/spec-editor-ui";
+import { ScenarioWorkspace } from "./scenario-workspace";
+import { FormError } from "./form-feedback";
+
+function FeatureDetailHeader({ feature, onEdit, onDelete }: { feature: FeatureRow; onEdit: () => void; onDelete: () => void }) {
+  return (
+    <div className="feature-detail-header">
+      <div><h2>{feature.name}</h2><p>{feature.summary}</p><span className="feature-source">{featureSourceLabel(feature.source)}</span></div>
+      <div className="feature-actions"><button className="text-button" type="button" onClick={onEdit}>编辑</button><button className="text-button danger-link" type="button" onClick={onDelete}>删除</button></div>
+    </div>
+  );
+}
+
+function ChildFeatureAction({ feature, onCreateChild }: { feature: FeatureRow; onCreateChild: () => void }) {
+  if (!canCreateChild(feature)) return null;
+  return <div className="feature-actions secondary-actions"><button className="text-button" type="button" onClick={onCreateChild}>＋ 子功能</button></div>;
+}
+
+export function FeatureDetail({ feature, scenarios, mode, onEdit, onDelete, onCreateChild, error }: { feature: FeatureRow; scenarios: ScenarioRow[]; mode: string; onEdit: () => void; onDelete: () => void; onCreateChild: () => void; error: string }) {
+  return (
+    <>
+      <FeatureDetailHeader feature={feature} onEdit={onEdit} onDelete={onDelete} />
+      <ChildFeatureAction feature={feature} onCreateChild={onCreateChild} />
+      <nav className="feature-view-tabs" aria-label="功能视图"><Link className={featureTabClass(mode, "spec")} href={`?view=spec&feature=${feature.id}`}>场景 <span>{scenarios.length}</span></Link><Link className={featureTabClass(mode, "flow")} href={`?view=spec&feature=${feature.id}&mode=flow`}>流程图</Link></nav>
+      <FormError message={error} />
+      {mode === "flow" ? <FeatureFlow featureName={feature.name} scenarios={scenarios} /> : <ScenarioWorkspace key={feature.id} featureId={feature.id} scenarios={scenarios} />}
+    </>
+  );
+}

@@ -13,14 +13,15 @@
 - Chandler OAuth 授权码 + PKCE（S256）登录、HttpOnly 会话、生产邮箱白名单。
 - GitHub App Manifest 创建与安装、只读 Installation Token、AES-GCM 凭据加密、连接检查与本地断开。
 - Integrations 页面与添加产品时的 GitHub App/PAT 凭据选择；无凭据时提供配置引导。
-- 产品总览、功能规格、正常/边界/错误场景、发布与变化列表。
+- 两级功能树、功能与场景 CRUD、人工来源保护、软删除 tombstone 和父子层级事务保护。
+- 场景分类/全文筛选、列表与表格视图，以及基于场景推导的 SVG 用户流程图。
 - GitHub push Webhook HMAC-SHA256 验签及默认分支过滤。
 - 手动分析与 push 自动分析；每次分析记录运行状态和错误。
 - 不可变 Spec Version 快照，合并人工功能与场景，并计算确定性的功能/场景行为 Diff。
 - 发布页优先展示行为变化及前后差异，Commit 与 AI 摘要仅作为证据和补充。
 - LLM 结构化输出校验、代码证据路径校验。
 - MySQL 版本化迁移、Radar 自产品注册脚本。
-- 自动分析仅更新 generated 内容，不覆盖 manual 功能或场景。
+- 自动分析仅更新 generated 内容，不覆盖 manual 功能或场景；生成功能名作为稳定关联键不可直接修改。
 - 响应式中文界面。
 
 ## 本地启动
@@ -125,7 +126,7 @@ Webhook 和页面上的“立即分析”都通过 Next.js `after()` 在响应�
 - 每次会话有效期 7 天，过期后重新通过 Chandler 登录。
 - AI 只能引用本次读取的代码或 diff 文件，未知证据路径会使分析失败。
 - 代码仅发送给配置的 AI 网关；应确保 LLMGateway 及其上游符合内部代码保密要求。
-- 目前 GitHub 使用服务端共享只读 Token，后续多产品接入可升级为 GitHub App。
+- GitHub 优先使用按仓库授权的 GitHub App Installation Token，服务端共享 PAT 仅作兼容回退。
 - 每次 push 当前采用小仓库全量规格重建 + 本次 diff 分析；大仓库的增量索引留待后续版本。
 
 ## 常用检查

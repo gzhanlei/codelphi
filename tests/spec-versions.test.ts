@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { PoolConnection } from "mysql2/promise";
 import type { AnalysisResult } from "../lib/ai";
 import type { RunContext } from "../lib/analysis";
-import { insertSpecVersion } from "../lib/spec-versions";
+import { featureParentKey, insertSpecVersion } from "../lib/spec-versions";
 
 const run: RunContext = { id: 8, repositoryId: 3, productId: 4, owner: "gzhanlei", name: "radar", beforeSha: "a", afterSha: "b", connectionId: null };
 const scenario = { reference: "HP-1", context: "Visitor", action: "Signs in", outcome: "Dashboard", category: "happy" as const, evidence: [] };
@@ -15,7 +15,7 @@ const result: AnalysisResult = {
   ],
 };
 
-function connection(previousVersions: Array<{ id: number }>, manual = false) {
+function connection(previousVersions: Array<{ id: number }>, manual = false, tombstones: { feature?: string; scenario?: string } = {}) {
   const changes: unknown[][] = [];
   let featureId = 100;
   const connection = {
@@ -28,7 +28,9 @@ function connection(previousVersions: Array<{ id: number }>, manual = false) {
         ]];
       }
       if (sql.includes("FROM spec_scenarios WHERE spec_feature_id")) return [[{ featureId: 1, reference: "HP-1", context: "Visitor", action: "Signs in", outcome: "Dashboard", category: "happy", source: "generated", evidence: "[]" }]];
-      if (sql.includes("SELECT id, name, summary, source FROM features")) return [manual ? [{ id: 5, name: "Manual feature", summary: "Curated", source: "manual" }] : []];
+      if (sql.includes("SELECT name FROM features WHERE product_id")) return [tombstones.feature ? [{ name: tombstones.feature }] : []];
+      if (sql.includes("SELECT f.name AS featureName")) return [tombstones.scenario ? [{ featureName: "Authentication", reference: tombstones.scenario }] : []];
+      if (sql.includes("FROM features LEFT JOIN features parents")) return [manual ? [{ id: 5, name: "Manual feature", summary: "Curated", parentId: 42, parentKey: "Generated parent", source: "manual" }] : []];
       if (sql.includes("FROM scenarios WHERE source = 'manual'")) return [[{ featureId: 5, reference: "HP-9", context: "User", action: "Reads", outcome: "Learns", category: "happy", source: "manual", evidence: "[]" }]];
       if (sql.includes("INSERT INTO spec_versions")) return [{ insertId: 99 }];
       if (sql.includes("INSERT INTO spec_features")) return [{ insertId: featureId++ }];
@@ -65,7 +67,27 @@ describe("spec version persistence", () => {
   it("includes manual features and scenarios in the immutable snapshot", async () => {
     const db = connection([], true);
     await insertSpecVersion(db, run, { ...result, features: [result.features[0]] });
-    expect(db.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO spec_features"), expect.arrayContaining(["Manual feature", "Curated"]));
+    expect(db.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO spec_features"), expect.arrayContaining(["Manual feature", "Curated", "Generated parent"]));
+    expect(db.execute).toHaveBeenCalledWith(expect.stringContaining("LEFT JOIN features parents"), [4]);
+    expect(db.execute).toHaveBeenCalledWith(expect.stringContaining("FROM features child WHERE child.parent_id = features.id AND child.active = 1"), [4]);
     expect(db.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO spec_scenarios"), expect.arrayContaining(["HP-9", "Learns"]));
+  });
+
+  it("resolves live parent ids and immutable parent keys", () => {
+    const names = new Map([[1, "Parent"]]);
+    expect(featureParentKey({ parentId: 1 }, names)).toBe("Parent");
+    expect(featureParentKey({ parentId: 2 }, names)).toBeNull();
+    expect(featureParentKey({ parentId: 2, parentKey: "Generated parent" }, names)).toBe("Generated parent");
+    expect(featureParentKey({ parentKey: "Historical parent" }, names)).toBe("Historical parent");
+    expect(featureParentKey({ parentKey: null }, names)).toBeNull();
+    expect(featureParentKey({}, names)).toBeNull();
+  });
+
+  it("does not resurrect manually deleted generated content", async () => {
+    const db = connection([], false, { feature: "New feature", scenario: "HP-1" });
+    await insertSpecVersion(db, run, result);
+    expect(db.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO spec_features"), expect.arrayContaining(["Authentication"]));
+    expect(db.execute).not.toHaveBeenCalledWith(expect.stringContaining("INSERT INTO spec_features"), expect.arrayContaining(["New feature"]));
+    expect(db.execute).not.toHaveBeenCalledWith(expect.stringContaining("INSERT INTO spec_scenarios"), expect.arrayContaining(["HP-1"]));
   });
 });
