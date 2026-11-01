@@ -9,9 +9,14 @@ export function pkceChallenge(verifier: string) {
 }
 
 export function safeNextPath(value: string | null) {
-  if (!value || !value.startsWith("/") || value.startsWith("//") || value.includes("\\") || /[\r\n]/.test(value)) {
-    return "/";
-  }
+  if (!value) return "/";
+  const invalid = [
+    !value.startsWith("/"),
+    value.startsWith("//"),
+    value.includes("\\"),
+    /[\r\n]/.test(value),
+  ];
+  if (invalid.some(Boolean)) return "/";
   const base = "https://radar.local";
   const parsed = new URL(value, base);
   return parsed.origin === base ? value : "/";

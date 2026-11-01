@@ -17,3 +17,7 @@ export function slugifyProductName(value: string) {
     .replace(/-{2,}/g, "-")
     .slice(0, 64);
 }
+
+export function nextProductSlug(name: string, current: string, edited: boolean) {
+  return edited ? current : slugifyProductName(name);
+}

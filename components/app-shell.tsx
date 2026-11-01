@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { SessionUser } from "@/lib/types";
+import { userDisplayName, userInitial } from "@/lib/user-display";
 
 export function AppShell({ user, children }: { user: SessionUser; children: React.ReactNode }) {
   return (
@@ -19,8 +20,8 @@ export function AppShell({ user, children }: { user: SessionUser; children: Reac
         <header className="topbar">
           <span className="environment"><i />内部工作区</span>
           <div className="user-menu">
-            <span className="avatar">{user.name?.slice(0, 1).toUpperCase() ?? user.email?.slice(0, 1).toUpperCase() ?? "R"}</span>
-            <span className="user-name">{user.name ?? user.email ?? "Radar 用户"}</span>
+            <span className="avatar">{userInitial(user)}</span>
+            <span className="user-name">{userDisplayName(user)}</span>
             <form action="/auth/logout" method="post"><button className="text-button" type="submit">退出</button></form>
           </div>
         </header>

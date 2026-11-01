@@ -1,12 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { LoginError } from "@/components/login-error";
 import { getSessionUser } from "@/lib/session";
-
-const errors: Record<string, string> = {
-  invalid_oauth_state: "登录状态已失效，请重新发起登录。",
-  token_exchange_failed: "Chandler 凭证交换失败，请重试。",
-  userinfo_failed: "无法读取 Chandler 用户信息，请重试。",
-};
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
   if (await getSessionUser()) redirect("/");
@@ -27,7 +22,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           <span className="eyebrow">内部工作区</span>
           <h2>欢迎回来</h2>
           <p>使用 Chandler 统一账号继续。Radar 不保存你的账号密码。</p>
-          {error && <div className="error-banner" role="alert">{errors[error] ?? "登录失败，请重试。"}</div>}
+          <LoginError error={error} />
           <Link className="login-button" href="/auth/login">使用 Chandler 登录 <span>→</span></Link>
           <small>仅允许团队名单中的成员访问</small>
         </div>

@@ -11,6 +11,9 @@ describe("OAuth helpers", () => {
     expect(safeNextPath("https://evil.example")).toBe("/");
     expect(safeNextPath("//evil.example")).toBe("/");
     expect(safeNextPath("/\\\\evil.example")).toBe("/");
+    expect(safeNextPath("relative/path")).toBe("/");
+    expect(safeNextPath("/line\nbreak")).toBe("/");
+    expect(safeNextPath("")).toBe("/");
     expect(safeNextPath(null)).toBe("/");
   });
 });

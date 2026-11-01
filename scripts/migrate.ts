@@ -1,8 +1,23 @@
 import "dotenv/config";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import mysql from "mysql2/promise";
+import mysql, { type Pool } from "mysql2/promise";
 import { databaseConfig } from "../lib/database-config";
+
+async function executeStatements(db: Pool, contents: string) {
+  const statements = contents.split(/;\s*(?:\r?\n|$)/).map((part) => part.trim()).filter(Boolean);
+  for (const statement of statements) await db.query(statement);
+}
+
+async function applyMigration(db: Pool, directory: string, file: string) {
+  const [applied] = await db.execute("SELECT 1 FROM schema_migrations WHERE name = ?", [file]);
+  if ((applied as unknown[]).length > 0) return;
+
+  const contents = await readFile(path.join(directory, file), "utf8");
+  await executeStatements(db, contents);
+  await db.execute("INSERT INTO schema_migrations (name) VALUES (?)", [file]);
+  console.log(`Applied ${file}`);
+}
 
 async function migrate() {
   const db = mysql.createPool(databaseConfig(true));
@@ -14,17 +29,7 @@ async function migrate() {
 
     const directory = path.join(process.cwd(), "migrations");
     const files = (await readdir(directory)).filter((file) => file.endsWith(".sql")).sort();
-
-    for (const file of files) {
-      const [applied] = await db.execute("SELECT 1 FROM schema_migrations WHERE name = ?", [file]);
-      if ((applied as unknown[]).length > 0) continue;
-
-      const contents = await readFile(path.join(directory, file), "utf8");
-      const statements = contents.split(/;\s*(?:\r?\n|$)/).map((part) => part.trim()).filter(Boolean);
-      for (const statement of statements) await db.query(statement);
-      await db.execute("INSERT INTO schema_migrations (name) VALUES (?)", [file]);
-      console.log(`Applied ${file}`);
-    }
+    for (const file of files) await applyMigration(db, directory, file);
   } finally {
     await db.end();
   }

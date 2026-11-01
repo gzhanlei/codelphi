@@ -1,28 +1,10 @@
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
+import { ProductGrid, ReleaseTimeline, type DashboardProduct, type DashboardRelease } from "@/components/dashboard-lists";
 import { getDb } from "@/lib/db";
 import { requireSessionUser } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
-
-interface ProductRow {
-  id: number;
-  slug: string;
-  name: string;
-  description: string;
-  featureCount: number;
-  releaseCount: number;
-  lastRelease?: Date;
-}
-
-interface ReleaseRow {
-  id: number;
-  title: string;
-  summary: string;
-  committedAt: Date;
-  productName: string;
-  productSlug: string;
-}
 
 export default async function DashboardPage() {
   const user = await requireSessionUser();
@@ -34,14 +16,14 @@ export default async function DashboardPage() {
             (SELECT MAX(r.committed_at) FROM releases r WHERE r.product_id = p.id) AS lastRelease
      FROM products p ORDER BY p.name`,
   );
-  const products = productRows as ProductRow[];
+  const products = productRows as DashboardProduct[];
   const [releaseRows] = await db.execute(
     `SELECT r.id, r.title, r.summary, r.committed_at AS committedAt,
             p.name AS productName, p.slug AS productSlug
      FROM releases r JOIN products p ON p.id = r.product_id
      ORDER BY r.committed_at DESC LIMIT 8`,
   );
-  const releases = releaseRows as ReleaseRow[];
+  const releases = releaseRows as DashboardRelease[];
   const featureTotal = products.reduce((sum, product) => sum + Number(product.featureCount), 0);
   const releaseTotal = products.reduce((sum, product) => sum + Number(product.releaseCount), 0);
 
@@ -58,36 +40,11 @@ export default async function DashboardPage() {
       </section>
       <section className="section-block">
         <div className="section-heading"><h2>产品空间</h2><span>{products.length} 个产品</span></div>
-        {products.length === 0 ? (
-          <div className="empty-state"><strong>还没有接入产品</strong><p>配置 MySQL 后运行 <code>npm run db:seed</code> 注册 Radar 自身。</p></div>
-        ) : (
-          <div className="product-grid">
-            {products.map((product) => (
-              <Link href={`/products/${product.slug}`} className="product-card" key={product.id}>
-                <div className="product-icon">{product.name.slice(0, 1)}</div>
-                <div className="product-card-title"><h3>{product.name}</h3><span>↗</span></div>
-                <p>{product.description}</p>
-                <div className="product-meta"><span>{Number(product.featureCount)} 个功能</span><span>{Number(product.releaseCount)} 次发布</span></div>
-              </Link>
-            ))}
-          </div>
-        )}
+        <ProductGrid products={products} />
       </section>
       <section className="section-block">
         <div className="section-heading"><h2>最近变化</h2><span>按发布时间排序</span></div>
-        {releases.length === 0 ? (
-          <div className="empty-state compact"><p>完成第一次代码分析后，发布变化会出现在这里。</p></div>
-        ) : (
-          <div className="timeline-list">
-            {releases.map((release) => (
-              <Link href={`/products/${release.productSlug}?view=changes`} className="timeline-item" key={release.id}>
-                <span className="timeline-dot" />
-                <div><div className="timeline-title"><span className="product-tag">{release.productName}</span><h3>{release.title}</h3></div><p>{release.summary}</p></div>
-                <time>{new Intl.DateTimeFormat("zh-CN", { month: "short", day: "numeric" }).format(new Date(release.committedAt))}</time>
-              </Link>
-            ))}
-          </div>
-        )}
+        <ReleaseTimeline releases={releases} />
       </section>
     </AppShell>
   );

@@ -2,6 +2,9 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { requestAnalysis } from "@/lib/product-client";
+import { errorMessage } from "@/lib/error-message";
+import { InlineMessage, analysisButtonLabel } from "./form-feedback";
 
 export function AnalyzeButton({ slug }: { slug: string }) {
   const router = useRouter();
@@ -12,13 +15,11 @@ export function AnalyzeButton({ slug }: { slug: string }) {
     setPending(true);
     setMessage("");
     try {
-      const response = await fetch(`/api/products/${slug}/analyze`, { method: "POST" });
-      const data = await response.json() as { error?: string };
-      if (!response.ok) throw new Error(data.error ?? "分析请求失败");
+      await requestAnalysis(slug);
       setMessage("分析已排队，稍后刷新查看");
       router.refresh();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "分析请求失败");
+      setMessage(errorMessage(error, "分析请求失败"));
     } finally {
       setPending(false);
     }
@@ -27,9 +28,9 @@ export function AnalyzeButton({ slug }: { slug: string }) {
   return (
     <div className="analyze-control">
       <button className="primary-button" type="button" onClick={analyze} disabled={pending}>
-        {pending ? "正在提交…" : "立即分析"}
+        {analysisButtonLabel(pending)}
       </button>
-      {message && <span className="inline-message">{message}</span>}
+      <InlineMessage message={message} />
     </div>
   );
 }

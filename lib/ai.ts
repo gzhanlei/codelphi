@@ -53,11 +53,26 @@ interface ChangeContext {
   files: Array<{ path: string; status: string; patch: string }>;
 }
 
-function chatCompletionsUrl() {
+export function chatCompletionsUrl() {
   const configured = (process.env.AI_BASE_URL ?? "http://127.0.0.1:4000").replace(/\/$/, "");
   if (configured.endsWith("/v1/chat/completions")) return configured;
   if (configured.endsWith("/v1")) return `${configured}/chat/completions`;
   return `${configured}/v1/chat/completions`;
+}
+
+const gatewayResponseSchema = z.object({
+  choices: z.array(z.object({ message: z.object({ content: z.string().optional() }).optional() })),
+});
+
+export function gatewayContent(value: unknown) {
+  const data = gatewayResponseSchema.parse(value);
+  const content = data.choices[0]?.message?.content;
+  if (!content) throw new Error("AI gateway returned empty content");
+  return content;
+}
+
+async function requireSuccessfulAIResponse(response: Response) {
+  if (!response.ok) throw new Error(`AI gateway ${response.status}: ${await response.text()}`);
 }
 
 export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext): Promise<AnalysisResult> {
@@ -91,9 +106,7 @@ export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext
     cache: "no-store",
     signal: AbortSignal.timeout(Number(process.env.AI_TIMEOUT_MS ?? 180_000)),
   });
-  if (!response.ok) throw new Error(`AI gateway ${response.status}: ${await response.text()}`);
-  const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
-  const content = data.choices?.[0]?.message?.content;
-  if (!content) throw new Error("AI gateway returned empty content");
+  await requireSuccessfulAIResponse(response);
+  const content = gatewayContent(await response.json());
   return parseAnalysisContent(content);
 }

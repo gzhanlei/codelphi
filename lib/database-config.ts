@@ -1,14 +1,27 @@
 import type { PoolOptions } from "mysql2/promise";
 import { requiredEnv } from "./env";
 
-export function databaseConfig(multipleStatements = false): PoolOptions {
+function databaseUrl() {
   const url = new URL(requiredEnv("DATABASE_URL"));
   if (url.protocol !== "mysql:") throw new Error("DATABASE_URL must be a mysql:// URL");
+  return url;
+}
 
-  const useTls = process.env.DATABASE_SSL !== "false";
+function databasePort(url: URL) {
+  return Number(url.port || 3306);
+}
+
+function tlsOptions(): PoolOptions["ssl"] {
+  return process.env.DATABASE_SSL === "false"
+    ? undefined
+    : { minVersion: "TLSv1.2", rejectUnauthorized: true };
+}
+
+export function databaseConfig(multipleStatements = false): PoolOptions {
+  const url = databaseUrl();
   return {
     host: url.hostname,
-    port: Number(url.port || 3306),
+    port: databasePort(url),
     user: decodeURIComponent(url.username),
     password: decodeURIComponent(url.password),
     database: url.pathname.replace(/^\//, ""),
@@ -20,6 +33,6 @@ export function databaseConfig(multipleStatements = false): PoolOptions {
     idleTimeout: 60_000,
     enableKeepAlive: true,
     multipleStatements,
-    ssl: useTls ? { minVersion: "TLSv1.2", rejectUnauthorized: true } : undefined,
+    ssl: tlsOptions(),
   };
 }

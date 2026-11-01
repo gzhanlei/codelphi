@@ -1,13 +1,22 @@
 import "dotenv/config";
-import mysql from "mysql2/promise";
+import mysql, { type PoolOptions } from "mysql2/promise";
 import { databaseConfig } from "../lib/database-config";
+
+export function isValidDatabaseName(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_]+$/.test(value);
+}
+
+export function databaseName(config: PoolOptions) {
+  const database = config.database;
+  if (!isValidDatabaseName(database)) {
+    throw new Error("DATABASE_URL must contain a simple database name");
+  }
+  return database;
+}
 
 async function createDatabase() {
   const config = databaseConfig();
-  const database = config.database;
-  if (!database || !/^[A-Za-z0-9_]+$/.test(database)) {
-    throw new Error("DATABASE_URL must contain a simple database name");
-  }
+  const database = databaseName(config);
   delete config.database;
   const connection = await mysql.createConnection(config);
   try {

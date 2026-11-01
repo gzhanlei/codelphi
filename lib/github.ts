@@ -1,5 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { z } from "zod";
 import { requiredEnv } from "./env";
+import { normalizeChangeContext, numberedSourceContent, selectSourceCandidates } from "./github-source";
 
 export interface GitHubRepository {
   owner: string;
@@ -11,6 +13,9 @@ export interface SourceFile {
   path: string;
   content: string;
 }
+
+const repositorySchema = z.object({ default_branch: z.string().min(1) });
+const branchSchema = z.object({ commit: z.object({ sha: z.string().min(1) }) });
 
 function githubHeaders() {
   return {
@@ -28,7 +33,7 @@ async function githubFetch(path: string) {
     signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) throw new Error(`GitHub API ${response.status}: ${await response.text()}`);
-  return response.json();
+  return response.json() as Promise<unknown>;
 }
 
 export function parseRepository(fullName: string): GitHubRepository {
@@ -38,7 +43,7 @@ export function parseRepository(fullName: string): GitHubRepository {
 }
 
 export async function getRepository(repo: GitHubRepository): Promise<GitHubRepository> {
-  const data = await githubFetch(`/repos/${repo.owner}/${repo.name}`) as { default_branch: string };
+  const data = repositorySchema.parse(await githubFetch(`/repos/${repo.owner}/${repo.name}`));
   return { ...repo, defaultBranch: data.default_branch };
 }
 
@@ -47,72 +52,35 @@ export async function getChangeContext(repo: GitHubRepository, before: string | 
   const path = isInitial
     ? `/repos/${repo.owner}/${repo.name}/commits/${after}`
     : `/repos/${repo.owner}/${repo.name}/compare/${before}...${after}`;
-  const data = await githubFetch(path) as {
-    html_url: string;
-    commit?: { message: string; committer?: { date?: string } };
-    commits?: Array<{ sha: string; commit: { message: string; committer?: { date?: string } } }>;
-    files?: Array<{ filename: string; status: string; patch?: string }>;
-  };
-  const lastCommit = data.commits?.at(-1);
-  const message = lastCommit?.commit.message ?? data.commit?.message ?? `Release ${after.slice(0, 7)}`;
-  const committedAt = lastCommit?.commit.committer?.date ?? data.commit?.committer?.date ?? new Date().toISOString();
-  const files = (data.files ?? []).slice(0, 80).map((file) => ({
-    path: file.filename,
-    status: file.status,
-    patch: (file.patch ?? "(binary or patch unavailable)").slice(0, 8_000),
-  }));
-  return {
-    message,
-    committedAt,
-    url: data.html_url ?? `https://github.com/${repo.owner}/${repo.name}/commit/${after}`,
-    files,
-    totalCharacters: JSON.stringify(files).length,
-  };
+  const fallbackUrl = `https://github.com/${repo.owner}/${repo.name}/commit/${after}`;
+  return normalizeChangeContext(await githubFetch(path), after, fallbackUrl);
 }
 
-function pathScore(path: string) {
-  if (/(?:^|\/)(?:README|AGENTS|package\.json|go\.mod|openapi)/i.test(path)) return 0;
-  if (/(?:^|\/)(?:app|src|pages|cmd|internal|docs|migrations)\//.test(path)) return 1;
-  return 2;
-}
-
-function isSourcePath(path: string) {
-  return /\.(?:ts|tsx|js|jsx|go|py|json|md|sql|yaml|yml|css|html)$/.test(path)
-    && !/(?:node_modules|dist|\.next|coverage|vendor|package-lock|pnpm-lock|yarn\.lock|\.test\.|\.spec\.)/.test(path);
+async function fetchSourceFile(repo: GitHubRepository, sha: string, path: string, maxLength: number): Promise<SourceFile | null> {
+  const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+  const data = await githubFetch(`/repos/${repo.owner}/${repo.name}/contents/${encodedPath}?ref=${sha}`);
+  const content = numberedSourceContent(data, maxLength);
+  return content ? { path, content } : null;
 }
 
 export async function getSourceSnapshot(repo: GitHubRepository, sha: string): Promise<SourceFile[]> {
-  const tree = await githubFetch(`/repos/${repo.owner}/${repo.name}/git/trees/${sha}?recursive=1`) as {
-    tree?: Array<{ path: string; type: string; size?: number }>;
-    truncated?: boolean;
-  };
-  const candidates = (tree.tree ?? [])
-    .filter((entry) => entry.type === "blob" && (entry.size ?? 0) <= 80_000 && isSourcePath(entry.path))
-    .sort((a, b) => pathScore(a.path) - pathScore(b.path) || a.path.localeCompare(b.path))
-    .slice(0, 28);
-
+  const tree = await githubFetch(`/repos/${repo.owner}/${repo.name}/git/trees/${sha}?recursive=1`);
+  const candidates = selectSourceCandidates(tree);
   let remaining = 100_000;
   const sources: SourceFile[] = [];
+
   for (const candidate of candidates) {
     if (remaining < 2_000) break;
-    const data = await githubFetch(`/repos/${repo.owner}/${repo.name}/contents/${candidate.path.split("/").map(encodeURIComponent).join("/")}?ref=${sha}`) as {
-      content?: string;
-      encoding?: string;
-    };
-    if (!data.content || data.encoding !== "base64") continue;
-    const content = Buffer.from(data.content.replace(/\n/g, ""), "base64").toString("utf8");
-    const numbered = content.split("\n").map((line, index) => `${index + 1}: ${line}`).join("\n");
-    const clipped = numbered.slice(0, Math.min(8_000, remaining));
-    sources.push({ path: candidate.path, content: clipped });
-    remaining -= clipped.length;
+    const source = await fetchSourceFile(repo, sha, candidate.path, Math.min(8_000, remaining));
+    if (!source) continue;
+    sources.push(source);
+    remaining -= source.content.length;
   }
   return sources;
 }
 
 export async function getBranchHead(repo: GitHubRepository) {
-  const data = await githubFetch(`/repos/${repo.owner}/${repo.name}/branches/${encodeURIComponent(repo.defaultBranch)}`) as {
-    commit: { sha: string };
-  };
+  const data = branchSchema.parse(await githubFetch(`/repos/${repo.owner}/${repo.name}/branches/${encodeURIComponent(repo.defaultBranch)}`));
   return data.commit.sha;
 }
 
