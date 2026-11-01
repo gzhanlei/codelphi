@@ -7,6 +7,7 @@ export interface SpecScenario {
   outcome: string;
   category: "happy" | "edge" | "error";
   evidence: Evidence[];
+  source?: "generated" | "manual";
 }
 
 export interface SpecFeature {
@@ -14,6 +15,7 @@ export interface SpecFeature {
   summary: string;
   parentKey?: string | null;
   scenarios: SpecScenario[];
+  source?: "generated" | "manual";
 }
 
 export interface SpecChange {
@@ -26,7 +28,7 @@ export interface SpecChange {
   after: SpecFeature | SpecScenario | null;
 }
 
-function featureKey(name: string) {
+export function specFeatureKey(name: string) {
   return name.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
@@ -73,8 +75,8 @@ function scenarioChanges(before: SpecFeature, after: SpecFeature): SpecChange[] 
 
 export function diffSpec(before: SpecFeature[] | null, after: SpecFeature[]): SpecChange[] {
   if (!before) return [];
-  const beforeFeatures = new Map(before.map((feature) => [featureKey(feature.name), feature]));
-  const afterFeatures = new Map(after.map((feature) => [featureKey(feature.name), feature]));
+  const beforeFeatures = new Map(before.map((feature) => [specFeatureKey(feature.name), feature]));
+  const afterFeatures = new Map(after.map((feature) => [specFeatureKey(feature.name), feature]));
   const keys = [...new Set([...beforeFeatures.keys(), ...afterFeatures.keys()])].sort();
   const changes: SpecChange[] = [];
 
@@ -97,9 +99,9 @@ export function diffSpec(before: SpecFeature[] | null, after: SpecFeature[]): Sp
 }
 
 export function mergeSpecSources(generated: SpecFeature[], manual: SpecFeature[]) {
-  const merged = new Map(generated.map((feature) => [featureKey(feature.name), feature]));
+  const merged = new Map(generated.map((feature) => [specFeatureKey(feature.name), feature]));
   for (const feature of manual) {
-    const key = featureKey(feature.name);
+    const key = specFeatureKey(feature.name);
     const existing = merged.get(key);
     if (!existing) {
       merged.set(key, feature);

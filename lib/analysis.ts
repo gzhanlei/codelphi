@@ -2,6 +2,7 @@ import type { PoolConnection } from "mysql2/promise";
 import { getDb } from "./db";
 import { analyzeWithAI, type AnalysisResult } from "./ai";
 import { getChangeContext, getRepository, getSourceSnapshot, type GitHubRepository } from "./github";
+import { insertSpecVersion } from "./spec-versions";
 
 export interface RunContext {
   id: number;
@@ -77,13 +78,13 @@ async function upsertGeneratedSpec(connection: PoolConnection, run: RunContext, 
   for (const feature of result.features) await upsertFeature(connection, run, feature);
 }
 
-export async function upsertRelease(connection: PoolConnection, run: RunContext, result: AnalysisResult, change: ChangeContext) {
+export async function upsertRelease(connection: PoolConnection, run: RunContext, result: AnalysisResult, change: ChangeContext, specVersionId: number | null = null) {
   await connection.execute(
     `INSERT INTO releases
-       (product_id, repository_id, analysis_run_id, sha, title, summary, url, committed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       (product_id, repository_id, analysis_run_id, spec_version_id, sha, title, summary, url, committed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE analysis_run_id = VALUES(analysis_run_id)`,
-    [run.productId, run.repositoryId, run.id, run.afterSha, result.release.title, result.release.summary, change.url, new Date(change.committedAt)],
+    [run.productId, run.repositoryId, run.id, specVersionId, run.afterSha, result.release.title, result.release.summary, change.url, new Date(change.committedAt)],
   );
   const [existing] = await connection.execute("SELECT id FROM releases WHERE repository_id = ? AND sha = ?", [run.repositoryId, run.afterSha]);
   const releaseId = Number((existing as Array<{ id: number }>)[0].id);
@@ -105,8 +106,9 @@ async function saveResult(run: RunContext, result: AnalysisResult, change: Chang
   try {
     await connection.beginTransaction();
     await assertLatestRun(connection, run);
+    const specVersionId = await insertSpecVersion(connection, run, result);
     await upsertGeneratedSpec(connection, run, result);
-    await upsertRelease(connection, run, result, change);
+    await upsertRelease(connection, run, result, change, specVersionId);
     await connection.execute("UPDATE analysis_runs SET status = 'succeeded', finished_at = CURRENT_TIMESTAMP(3) WHERE id = ?", [run.id]);
     await connection.commit();
   } catch (error) {
