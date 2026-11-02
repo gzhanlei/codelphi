@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { ProductChanges } from "./product-changes";
+import { ProductOverview } from "./product-overview";
+import { buildProductOverview, type ProductOverviewData } from "@/lib/product-overview";
 import { SpecWorkspace } from "./spec-workspace";
 import { buildFeatureTree, selectFeature } from "@/lib/feature-tree";
 import { scenariosForFeature } from "@/lib/spec-editor-ui";
@@ -33,6 +35,7 @@ function tabClass(selected: boolean) {
 export function ProductTabs({ slug, view, featureCount, releaseCount }: { slug: string; view: string; featureCount: number; releaseCount: number }) {
   return (
     <nav className="view-tabs" aria-label="产品视图">
+      <Link className={tabClass(view === "overview")} href={`/products/${slug}`}>概览</Link>
       <Link className={tabClass(view === "spec")} href={`/products/${slug}?view=spec`}>产品规格 <span>{featureCount}</span></Link>
       <Link className={tabClass(view === "changes")} href={`/products/${slug}?view=changes`}>发布变化 <span>{releaseCount}</span></Link>
     </nav>
@@ -49,11 +52,16 @@ interface ProductViewProps {
   behaviorChanges: BehaviorChangeRow[];
   mode?: string;
   featureId?: number;
+  overview: ProductOverviewData;
 }
 
-export function ProductView({ view, productSlug, features, scenarios, releases, changes, behaviorChanges, mode = "spec", featureId }: ProductViewProps) {
+function ProductWorkspace({ view, productSlug, features, scenarios, releases, changes, behaviorChanges, mode = "spec", featureId }: Omit<ProductViewProps, "overview">) {
   const selectedFeature = selectFeature(features, featureId);
   return view === "spec"
     ? <SpecWorkspace slug={productSlug} tree={buildFeatureTree(features)} feature={selectedFeature} scenarios={scenariosForFeature(scenarios, selectedFeature)} mode={mode} />
     : <ProductChanges releases={releases} changes={changes} behaviorChanges={behaviorChanges} />;
+}
+
+export function ProductView(props: ProductViewProps) {
+  return props.view === "overview" ? <ProductOverview data={props.overview} /> : <ProductWorkspace {...props} />;
 }

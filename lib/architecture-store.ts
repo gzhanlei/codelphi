@@ -69,6 +69,24 @@ export async function getProductIdentity(productId: number) {
   return (rows as Array<{ id: number; slug: string; name: string }>)[0];
 }
 
+function mapArchitectureRow(row: ArchitectureDocumentRecord & { id: number }) {
+  return { ...row, validationReceipt: parseJsonValue(row.validationReceipt), visualReceipt: parseJsonValue(row.visualReceipt) };
+}
+
+export async function getLatestArchitectureDocument(productId: number) {
+  const [rows] = await getDb().execute(
+    `SELECT d.id, d.product_id AS productId, d.spec_version_id AS specVersionId, d.revision, d.status,
+            d.spec_json AS specJson, d.spec_sha256 AS specSha256, d.artifact_path AS artifactPath,
+            d.artifact_sha256 AS artifactSha256, d.validation_receipt AS validationReceipt,
+            d.visual_receipt AS visualReceipt, d.error_message AS errorMessage,
+            p.slug AS productSlug, p.name AS productName
+     FROM architecture_documents d JOIN products p ON p.id = d.product_id WHERE d.product_id = ? ORDER BY d.id DESC LIMIT 1`,
+    [productId],
+  );
+  const row = (rows as Array<ArchitectureDocumentRecord & { id: number }>)[0];
+  return row ? mapArchitectureRow(row) : undefined;
+}
+
 export async function getArchitectureDocument(id: number) {
   const [rows] = await getDb().execute(
     `SELECT d.id, d.product_id AS productId, d.spec_version_id AS specVersionId, d.revision, d.status,
@@ -81,5 +99,5 @@ export async function getArchitectureDocument(id: number) {
   );
   const row = (rows as Array<ArchitectureDocumentRecord & { id: number }>)[0];
   if (!row) return undefined;
-  return { ...row, validationReceipt: parseJsonValue(row.validationReceipt), visualReceipt: parseJsonValue(row.visualReceipt) };
+  return mapArchitectureRow(row);
 }

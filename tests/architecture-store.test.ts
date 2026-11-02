@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { architectureArtifactPath, architectureSpecPath, artifactAbsolutePathForRecord, getArchitectureDocument, safeArtifactAbsolutePath, saveArchitectureDocument } from "../lib/architecture-store";
+import { architectureArtifactPath, architectureSpecPath, artifactAbsolutePathForRecord, getArchitectureDocument, getLatestArchitectureDocument, safeArtifactAbsolutePath, saveArchitectureDocument } from "../lib/architecture-store";
 import { getDb } from "../lib/db";
 
 vi.mock("../lib/db", () => ({ getDb: vi.fn() }));
@@ -44,6 +44,16 @@ describe("architecture store", () => {
     const parameters = execute.mock.calls[0][1] as unknown[];
     expect(parameters[8]).toBeNull();
     expect(parameters[9]).toBeNull();
+  });
+
+  it("loads the latest architecture document for a product", async () => {
+    const execute = vi.fn(async () => [[{ ...record, validation_receipt: "{}", visual_receipt: "{}" }]]);
+    vi.mocked(getDb).mockReturnValue({ execute } as never);
+    expect(await getLatestArchitectureDocument(4)).toMatchObject({ specVersionId: 7 });
+    expect(execute).toHaveBeenCalledWith(expect.stringContaining("WHERE d.product_id = ? ORDER BY d.id DESC LIMIT 1"), [4]);
+    const empty = vi.fn(async () => [[]]);
+    vi.mocked(getDb).mockReturnValue({ execute: empty } as never);
+    expect(await getLatestArchitectureDocument(4)).toBeUndefined();
   });
 
   it("loads a document with its product identity and decoded receipts", async () => {

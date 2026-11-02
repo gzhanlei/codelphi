@@ -53,4 +53,15 @@ RADAR_REPOSITORY_ROOTS='{"owner/repo":"/absolute/local/checkout"}'
 
 当前确定性模板只支持 `gzhanlei/radar`，并要求路径和源码实现标记同时匹配；其他产品不会因存在同名文件而生成架构图，后续需要独立的语义生成器。`prepare` 阶段的无组件、spec 写入失败等也会保存 `failed` 文档与错误信息。
 
+## 阶段 3：原生产品概览
+
+产品默认首页改为 Conclusion-first 概览，保留 `?view=spec` 与 `?view=changes` 深链。`ProductOverviewData` 由现有产品、功能、场景、release、行为 Diff、运行状态和最新架构文档确定，不增加 AI 调用。页面包含：
+
+1. 产品结论与 Spec/分析状态。
+2. 架构面板：仅 `accepted` 文档显示交互式 Viewer 链接，其他状态展示真实错误或待验收状态。
+3. 核心能力：按场景数排序，链接到原规格工作台。
+4. 最近行为 Diff 与规格可信度：版本、人工来源和证据文件统计。
+
+桌面和 390px 手机视口均已验证无横向滚动，规格深链和架构 Viewer 链接可用。
+
 真实自分析验证：Analysis Run `15` 生成 Spec Version `8` 与 Architecture Document `1`，状态 `accepted`，并已在浏览器中通过 `/api/architecture/1` 打开 Viewer。Run `17` 进一步验证同一 SHA 重跑时，release 会更新到 Spec Version `10`，对应 Architecture Document `3`，不再停留在旧版本。Run `18` 验证了带行号的内容证据，Architecture Document `4` 为 `accepted`。
