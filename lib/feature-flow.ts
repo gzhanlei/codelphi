@@ -2,7 +2,7 @@ import type { SpecScenario } from "./spec-diff";
 
 export interface FlowNode {
   id: string;
-  kind: "start" | "scenario" | "branch" | "end";
+  kind: "start" | "scenario" | "branch";
   reference?: string;
   title: string;
   outcome?: string;
@@ -77,43 +77,29 @@ function contextGroups(scenarios: SpecScenario[]) {
 export function buildFeatureFlow(scenarios: SpecScenario[]): FeatureFlow {
   const groups = contextGroups(scenarios);
   if (groups.length === 0) {
-    return {
-      nodes: [{ id: "start-0", kind: "start", title: "Start", x: 20, y: 60 }, { id: "end-0", kind: "end", title: "End", x: 200, y: 60 }],
-      edges: [{ id: "start-0-end-0", from: "start-0", to: "end-0" }],
-      width: 640,
-      height: 230,
-    };
+    return { nodes: [], edges: [], width: 640, height: 230 };
   }
 
   const nodes: FlowNode[] = [];
   const edges: FlowEdge[] = [];
-  let previousEnd: string | null = null;
 
   groups.forEach((group, groupIndex) => {
     const y = 60 + groupIndex * 190;
     const startId = `start-${groupIndex}`;
-    const endId = `end-${groupIndex}`;
-    nodes.push({ id: startId, kind: "start", title: "Start", x: 20, y });
-    if (previousEnd) edges.push({ id: `${previousEnd}-${startId}`, from: previousEnd, to: startId });
+    nodes.push({ id: startId, kind: "start", title: `开始：${group[0].context}`, x: 20, y });
 
     const happy = group.filter((scenario) => scenario.category === "happy");
     const branches = group.filter((scenario) => scenario.category !== "happy");
-    let previous = startId;
     happy.forEach((scenario, index) => {
       const x = 200 + index * 190;
       nodes.push({ id: scenario.reference, kind: "scenario", reference: scenario.reference, title: scenario.action, outcome: scenario.outcome, category: scenario.category, x, y });
-      edges.push({ id: `${previous}-${scenario.reference}`, from: previous, to: scenario.reference });
-      previous = scenario.reference;
+      edges.push({ id: `${startId}-${scenario.reference}`, from: startId, to: scenario.reference });
     });
 
-    nodes.push({ id: endId, kind: "end", title: "End", x: 200 + happy.length * 190, y });
-    edges.push({ id: `${previous}-${endId}`, from: previous, to: endId });
     branches.forEach((scenario, index) => {
-      const source = happy[index] ? happy[index].reference : startId;
       nodes.push({ id: scenario.reference, kind: "branch", reference: scenario.reference, title: scenario.action, outcome: scenario.outcome, category: scenario.category, x: 200 + index * 190, y: y + 90 });
-      edges.push({ id: `${source}-${scenario.reference}`, from: source, to: scenario.reference });
+      edges.push({ id: `${startId}-${scenario.reference}`, from: startId, to: scenario.reference });
     });
-    previousEnd = endId;
   });
 
   const endX = Math.max(...nodes.map((node) => node.x));

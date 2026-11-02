@@ -49,7 +49,8 @@ export function FeatureFlow({ featureName, scenarios }: { featureName: string; s
   const flow = buildFeatureFlow(scenarios.map((scenario) => ({ ...scenario, evidence: evidenceItems(scenario.evidence) })));
   return (
     <section className="feature-flow">
-      <div className="flow-note">基于场景推导的用户路径；分支表示边界与错误结果，不代表额外执行顺序。</div>
+      <div className="flow-note">每个场景从使用情境独立展开，节点内即操作与结果；不按编号推断先后顺序，也不添加额外结束条件。</div>
+      {flow.nodes.length === 0 ? <div className="empty-state">暂无可推导的场景。</div> : (
       <div className="flow-canvas">
         <svg role="img" aria-label={`${featureName} 流程图`} viewBox={`0 0 ${flow.width} ${flow.height}`}>
           <defs><marker id="flow-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" /></marker></defs>
@@ -57,6 +58,7 @@ export function FeatureFlow({ featureName, scenarios }: { featureName: string; s
           {flow.nodes.map((node) => <Node node={node} key={node.id} />)}
         </svg>
       </div>
+      )}
     </section>
   );
 }
