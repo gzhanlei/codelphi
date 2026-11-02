@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "96a476e4-d13a-4149-9d82-ff91a1648dad",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/Users/leihan/Documents/GitHub/radar/artifacts/radar-architecture.json",
+  "output": "/Users/leihan/Documents/GitHub/radar/artifacts/radar-architecture.html",
+  "specification": {
+    "sha256": "765f0988081501a5fd2ea6a31264851164a60fdafd1544be47e12644efa3d782",
+    "bytes": 3646
+  },
+  "artifact": {
+    "sha256": "5de793fd20d41fc13be00f459a1c54aab37b58b64b8c052f59d6527516aa0b4f",
+    "bytes": 825050
+  }
+}

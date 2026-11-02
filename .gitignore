@@ -8,4 +8,8 @@ coverage/
 .metrics/
 target/
 dist/
+vendor/archify/runtime/
+artifacts/*.html
+artifacts/*.png
+artifacts/legacy-v2.16/
 .DS_Store

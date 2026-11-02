@@ -1,0 +1,31 @@
+{
+  "delivery": {
+    "specification": {
+      "sha256": "765f0988081501a5fd2ea6a31264851164a60fdafd1544be47e12644efa3d782",
+      "bytes": 3646
+    },
+    "artifact": {
+      "sha256": "5de793fd20d41fc13be00f459a1c54aab37b58b64b8c052f59d6527516aa0b4f",
+      "bytes": 825050
+    },
+    "validation": {
+      "checksPassed": 9,
+      "checkCount": 9,
+      "compositionProfile": "showcase",
+      "compositionStatus": "pass",
+      "errors": 0,
+      "warnings": 0
+    },
+    "evidence": {
+      "verified": true,
+      "repository": "https://github.com/gzhanlei/radar",
+      "revision": "43d8ce7b96f7e7deff9bb3b8429eb8ca361466ea",
+      "references": 15
+    }
+  },
+  "visual": {
+    "visualReview": "pending",
+    "containment": "pass",
+    "contactSheet": "radar-architecture.visual-check.html"
+  }
+}

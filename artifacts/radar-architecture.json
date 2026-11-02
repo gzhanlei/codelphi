@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Radar 系统架构",
+    "output": "radar-architecture.html",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/gzhanlei/radar",
+      "revision": "43d8ce7b96f7e7deff9bb3b8429eb8ca361466ea"
+    },
+    "viewBox": [960, 720]
+  },
+  "components": [
+    { "id": "users", "type": "external", "label": "内部用户", "sublabel": "产品 / 研发 / 测试", "pos": [40, 280], "size": [130, 64] },
+    { "id": "radar-ui", "type": "frontend", "label": "Radar Web UI", "sublabel": "产品规格与发布变化", "pos": [230, 280], "size": [150, 64], "sources": [{ "path": "app/products/[slug]/page.tsx" }, { "path": "components/product-navigation.tsx" }] },
+    { "id": "chandler", "type": "security", "label": "Chandler", "sublabel": "WorkMembership OAuth", "pos": [230, 70], "size": [150, 64], "sources": [{ "path": "lib/chandler.ts" }, { "path": "app/auth/callback/route.ts" }] },
+    { "id": "next-api", "type": "backend", "label": "Next.js Server", "sublabel": "Server Components / API", "pos": [440, 280], "size": [150, 64], "sources": [{ "path": "app/api/products/route.ts" }, { "path": "app/products/[slug]/page.tsx" }] },
+    { "id": "mysql", "type": "database", "label": "MySQL", "sublabel": "规格、版本与行为 Diff", "pos": [800, 280], "size": [130, 64], "sources": [{ "path": "lib/db.ts" }, { "path": "migrations/002_spec_versions.sql" }] },
+    { "id": "webhook", "type": "backend", "label": "GitHub Webhook", "sublabel": "HMAC-SHA256 / push", "pos": [230, 490], "size": [150, 64], "sources": [{ "path": "app/api/webhooks/github/route.ts" }, { "path": "lib/github-webhook.ts" }] },
+    { "id": "analysis", "type": "backend", "label": "分析任务", "sublabel": "代码证据 / Spec Version", "pos": [590, 490], "size": [150, 64], "sources": [{ "path": "lib/analysis.ts" }, { "path": "lib/spec-versions.ts" }] },
+    { "id": "github", "type": "external", "label": "GitHub", "sublabel": "App Installation Token", "pos": [590, 620], "size": [150, 64], "sources": [{ "path": "lib/github.ts" }, { "path": "lib/github-app.ts" }] },
+    { "id": "llm", "type": "external", "label": "LLMGateway", "sublabel": "结构化产品分析", "pos": [800, 490], "size": [130, 64], "sources": [{ "path": "lib/ai.ts" }] }
+  ],
+  "connections": [
+    { "id": "users-to-radar", "from": "users", "to": "radar-ui", "label": "HTTPS", "variant": "emphasis" },
+    { "id": "oauth-login", "from": "radar-ui", "to": "chandler", "label": "OAuth 2.0 + PKCE", "variant": "security", "fromSide": "top", "toSide": "bottom" },
+    { "id": "ui-to-server", "from": "radar-ui", "to": "next-api", "label": "页面 / API" },
+    { "id": "server-to-mysql", "from": "next-api", "to": "mysql", "label": "SQL" },
+    { "id": "server-to-analysis", "from": "next-api", "to": "analysis", "label": "after() 手动分析", "variant": "dashed", "fromSide": "bottom", "toSide": "top" },
+    { "id": "github-to-webhook", "from": "github", "to": "webhook", "label": "push 事件", "fromSide": "left", "toSide": "bottom" },
+    { "id": "webhook-to-analysis", "from": "webhook", "to": "analysis", "label": "创建分析任务", "variant": "dashed" },
+    { "id": "analysis-to-github", "from": "analysis", "to": "github", "label": "contents:read", "fromSide": "bottom", "toSide": "top", "labelDy": 24 },
+    { "id": "analysis-to-llm", "from": "analysis", "to": "llm", "label": "代码 + diff" },
+    { "id": "analysis-to-mysql", "from": "analysis", "to": "mysql", "label": "不可变规格版本", "fromSide": "top", "toSide": "bottom" }
+  ]
+}

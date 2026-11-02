@@ -12,6 +12,8 @@
     "db:migrate": "tsx scripts/migrate.ts",
     "db:seed": "tsx scripts/seed.ts",
     "analyze": "tsx scripts/analyze.ts",
+    "archify:prepare": "tsx scripts/prepare-archify.ts",
+    "archify:prototype": "tsx scripts/architecture-prototype.ts",
     "coverage": "vitest run --coverage"
   },
   "dependencies": {
