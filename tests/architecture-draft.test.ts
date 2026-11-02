@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildArchitectureDocument } from "../lib/architecture-draft";
+import { buildArchitectureDocument } from "../lib/architecture-generic";
 
 const paths = [
   "app/products/[slug]/page.tsx",
@@ -66,11 +66,41 @@ describe("architecture draft", () => {
     expect(document.components.map((component) => component.id)).toEqual(["users", "radar-ui"]);
   });
 
-  it("rejects unrelated repositories and stale source content", () => {
-    const unrelated = { productName: "Other", productSlug: "other", owner: "example", name: "other", revision: "43d8ce7b96f7e7deff9bb3b8429eb8ca361466ea", sources: sources() };
-    expect(() => buildArchitectureDocument(unrelated)).toThrow("only available for gzhanlei/radar");
-    expect(() => buildArchitectureDocument({ ...unrelated, owner: "gzhanlei" })).toThrow("only available for gzhanlei/radar");
-    expect(() => buildArchitectureDocument({ ...unrelated, name: "radar" })).toThrow("only available for gzhanlei/radar");
+  it("builds a generic architecture for non-Radar repositories with matching source evidence", () => {
+    const document = buildArchitectureDocument({
+      productName: "Chandler",
+      productSlug: "chandler",
+      owner: "gzhanlei",
+      name: "workmembership",
+      revision: "43d8ce7b96f7e7deff9bb3b8429eb8ca361466ea",
+      sources: [
+        { path: "web/app/page.tsx", content: "1: export default function Home() {}" },
+        { path: "internal/oauth/service.go", content: "1: package oauth\n2: // OAuth WorkMembership PKCE\n3: func Authorize() {}" },
+        { path: "internal/db/db.go", content: "1: package db\n2: import _ \"github.com/go-sql-driver/mysql\"" },
+      ],
+    });
+    expect(document.components.map((component) => component.id)).toEqual(["users", "frontend", "backend", "auth", "db"]);
+    expect(document.components.some((component) => component.id === "llm")).toBe(false);
+    expect(document.components.flatMap((component) => component.sources ?? []).every((source) => source.line && source.line > 0)).toBe(true);
+    expect(document.connections).toContainEqual(expect.objectContaining({ from: "backend", to: "db", label: "SQL" }));
+    expect(document.connections.some((connection) => connection.id === "analysis-to-llm")).toBe(false);
+    expect(document.connections.some((connection) => connection.id === "backend-to-analysis")).toBe(false);
+  });
+
+  it("accepts a minimal generic frontend and caps component evidence", () => {
+    const document = buildArchitectureDocument({
+      productName: "Chandler",
+      productSlug: "chandler",
+      owner: "gzhanlei",
+      name: "workmembership",
+      revision: "43d8ce7b96f7e7deff9bb3b8429eb8ca361466ea",
+      sources: ["page", "a", "b", "c"].map((name) => ({ path: `web/app/${name}/page.tsx`, content: "1: export default function Page() {}" })),
+    });
+    expect(document.components.map((component) => component.id)).toEqual(["users", "frontend"]);
+    expect(document.components[1].sources).toHaveLength(3);
+  });
+
+  it("rejects stale source content", () => {
     const stale = { productName: "Radar", productSlug: "radar", owner: "gzhanlei", name: "radar", revision: "43d8ce7b96f7e7deff9bb3b8429eb8ca361466ea", sources: sources().map((source) => ({ ...source, content: "1: unrelated" })) };
     expect(() => buildArchitectureDocument(stale)).toThrow("No architecture components detected");
   });

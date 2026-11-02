@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { exportProductExplainer } from "../lib/explainer-export";
 import { buildProductOverview } from "../lib/product-overview";
-import { buildArchitectureDocument } from "../lib/architecture-draft";
+import { buildArchitectureDocument } from "../lib/architecture-generic";
 
 const release = { id: 8, title: "Specs", summary: "Summary", sha: "abcdef123456", url: "https://example.com/commit/abcdef1", committedAt: new Date("2026-11-01"), specVersionId: 8 };
 const overview = buildProductOverview({

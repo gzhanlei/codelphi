@@ -51,7 +51,7 @@ Archify 的源码证据验证需要匹配本地 Git checkout。当前仓库通�
 RADAR_REPOSITORY_ROOTS='{"owner/repo":"/absolute/local/checkout"}'
 ```
 
-当前确定性模板只支持 `gzhanlei/radar`，并要求路径和源码实现标记同时匹配；其他产品不会因存在同名文件而生成架构图，后续需要独立的语义生成器。`prepare` 阶段的无组件、spec 写入失败等也会保存 `failed` 文档与错误信息。
+Radar 使用专用模板，其他仓库使用基于源码内容和行号的通用架构生成器，均要求实现标记匹配；不会仅凭同名文件虚构组件。WorkMembership（Chandler）已通过真实分析和 accepted 验收。架构查看使用 `/products/<slug>/architecture/<id>` 原生页面并提供“返回产品概览”按钮，`prepare` 阶段的无组件、spec 写入失败等也会保存 `failed` 文档与错误信息。
 
 ## 阶段 3：原生产品概览
 

@@ -1,4 +1,5 @@
 import { evidenceItems } from "./evidence";
+import { productArchitecturePath } from "./architecture-store";
 import type { BehaviorChangeRow, FeatureRow, ReleaseRow, ScenarioRow } from "./types";
 
 interface ProductOverviewInput {
@@ -66,7 +67,7 @@ export function buildProductOverview(input: ProductOverviewInput) {
     },
     architecture: input.architecture ? {
       ...input.architecture,
-      href: input.architecture.status === "accepted" ? `/api/architecture/${input.architecture.id}` : undefined,
+      href: input.architecture.status === "accepted" ? productArchitecturePath(input.product.slug, input.architecture.id) : undefined,
     } : undefined,
   };
 }

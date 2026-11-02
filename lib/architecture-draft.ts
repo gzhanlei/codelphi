@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-const inputSchema = z.object({
+export const architectureDraftInputSchema = z.object({
   productName: z.string().min(1),
   productSlug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
   owner: z.string().min(1),
@@ -9,7 +9,7 @@ const inputSchema = z.object({
   sources: z.array(z.object({ path: z.string(), content: z.string() })),
 });
 
-export type ArchitectureDraftInput = z.infer<typeof inputSchema>;
+export type ArchitectureDraftInput = z.infer<typeof architectureDraftInputSchema>;
 
 const sourceSchema = z.object({ path: z.string(), line: z.number().int().positive().optional(), end_line: z.number().int().positive().optional(), label: z.string().optional() });
 const componentSchema = z.object({
@@ -117,7 +117,7 @@ const connectionDefinitions: Connection[] = [
 
 const componentOrder: ComponentId[] = ["users", "radar-ui", "chandler", "next-api", "mysql", "webhook", "analysis", "github", "llm"];
 
-function markerLine(content: string, markers: string[]) {
+export function markerLine(content: string, markers: string[]) {
   const lines = content.split("\n");
   const index = lines.findIndex((line) => markers.some((marker) => line.toLowerCase().includes(marker.toLowerCase())));
   return index < 0 ? undefined : index + 1;
@@ -139,7 +139,7 @@ function createComponent(id: ComponentId, sources: ArchitectureDraftInput["sourc
 }
 
 export function buildArchitectureDocument(value: ArchitectureDraftInput): ArchitectureDocument {
-  const input = inputSchema.parse(value);
+  const input = architectureDraftInputSchema.parse(value);
   if (input.owner !== "gzhanlei" || input.name !== "radar") throw new Error("Deterministic architecture template is only available for gzhanlei/radar");
   const sources = [...input.sources].sort((a, b) => a.path.localeCompare(b.path));
   const components = componentOrder.filter((id) => id === "users" || componentSources(id, sources)).map((id) => createComponent(id, sources));

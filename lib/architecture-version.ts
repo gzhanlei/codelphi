@@ -3,7 +3,7 @@ import { dirname } from "node:path";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { z } from "zod";
 import { ArchifyCommandError, deliverArchify, visualCheckArchify, type ArchifyReceipt, type DeliverArchifyInput } from "./archify-cli";
-import { buildArchitectureDocument } from "./architecture-draft";
+import { buildArchitectureDocument } from "./architecture-generic";
 import { architectureArtifactPath, architectureSpecPath, getProductIdentity, safeArtifactAbsolutePath, saveArchitectureDocument, type ArchitectureDocumentInput } from "./architecture-store";
 import { errorMessage } from "./error-message";
 import type { SourceFile } from "./github";

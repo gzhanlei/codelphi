@@ -35,7 +35,7 @@ describe("product overview", () => {
     expect(overview.capabilities.map((feature) => feature.id)).toEqual([1, 2, 3]);
     expect(overview.changes.map((change) => change.summary)).toEqual(["场景结果变化"]);
     expect(overview.trust).toMatchObject({ featureCount: 3, scenarioCount: 3, manualFeatureCount: 1, manualScenarioCount: 2, evidencePathCount: 2, specVersionId: 8 });
-    expect(overview.architecture).toMatchObject({ id: 5, status: "accepted", href: "/api/architecture/5" });
+    expect(overview.architecture).toMatchObject({ id: 5, status: "accepted", href: "/products/radar/architecture/5" });
   });
 
   it("falls back to the release version and handles unknown analysis states", () => {

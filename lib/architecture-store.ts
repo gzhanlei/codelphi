@@ -42,6 +42,10 @@ export function explainerArtifactPath(productSlug: string, specVersionId: number
   return `artifacts/products/${slugSchema.parse(productSlug)}/${specVersionId}/explainer.html`;
 }
 
+export function productArchitecturePath(productSlug: string, id: number) {
+  return `/products/${slugSchema.parse(productSlug)}/architecture/${id}`;
+}
+
 export function safeArtifactAbsolutePath(relativePath: string, root: string) {
   const base = resolve(root, "artifacts", "products");
   const target = resolve(root, relativePath);
