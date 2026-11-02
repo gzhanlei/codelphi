@@ -34,6 +34,14 @@ export function architectureArtifactPath(productSlug: string, specVersionId: num
   return `artifacts/products/${slugSchema.parse(productSlug)}/${specVersionId}/architecture.html`;
 }
 
+export function explainerSpecPath(productSlug: string, specVersionId: number) {
+  return `artifacts/products/${slugSchema.parse(productSlug)}/${specVersionId}/explainer.md`;
+}
+
+export function explainerArtifactPath(productSlug: string, specVersionId: number) {
+  return `artifacts/products/${slugSchema.parse(productSlug)}/${specVersionId}/explainer.html`;
+}
+
 export function safeArtifactAbsolutePath(relativePath: string, root: string) {
   const base = resolve(root, "artifacts", "products");
   const target = resolve(root, relativePath);

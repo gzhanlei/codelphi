@@ -6,7 +6,7 @@ export type ArtifactReader = (path: string, encoding: "utf8") => Promise<string>
 
 const defaultReader: ArtifactReader = (path, encoding) => readFile(path, encoding);
 
-function sandboxHeaders() {
+export function artifactSandboxHeaders() {
   return {
     "Content-Type": "text/html; charset=utf-8",
     "Content-Security-Policy": "sandbox allow-scripts allow-downloads; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: https:; font-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'",
@@ -24,7 +24,7 @@ export async function architectureArtifactResponse(record: ArchitectureDocumentR
   try {
     const path = artifactAbsolutePathForRecord(record, root);
     const html = await reader(path, "utf8");
-    return new NextResponse(html, { status: 200, headers: sandboxHeaders() });
+    return new NextResponse(html, { status: 200, headers: artifactSandboxHeaders() });
   } catch (error) {
     if (errorCode(error) === "ENOENT") return NextResponse.json({ error: "架构产物不存在" }, { status: 404 });
     throw error;

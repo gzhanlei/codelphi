@@ -64,4 +64,17 @@ RADAR_REPOSITORY_ROOTS='{"owner/repo":"/absolute/local/checkout"}'
 
 桌面和 390px 手机视口均已验证无横向滚动，规格深链和架构 Viewer 链接可用。
 
+## 阶段 4：Explainer HTML 导出
+
+`ProductOverviewData` 同时驱动原生概览与 `buildExplainerMarkdown`，不生成第二份产品知识。Markdown 包含产品结论、架构、核心能力、最近行为 Diff 和规格可信度；行为变化行使用稳定的 `BehaviorChangeRow.id` 避免 `explainer/duplicate-id`。
+
+- 输出目录：`artifacts/products/<slug>/<specVersionId>/`。
+- 输入：`explainer.md`，可选复用 accepted 的 `architecture.json`。
+- 输出：`explainer.html`，通过固定 MIT Archify `finalize explainer --browser-check` 生成。
+- 路由：`GET /api/products/<slug>/explainer`，需要有效 Radar 会话，返回与架构 Viewer 相同的 sandbox 和 `private, no-store` 头。
+- 只有 accepted 架构才嵌入源码证据并传入 `repoRoot`；其他状态仅显示真实状态。
+- 版本不一致、缺少 Spec Version、重复 ID 和 finalize 错误均会返回明确错误，不伪造成果。
+
+真实导出 `/api/products/radar/explainer` 已验证包含结论、架构图、核心能力、行为变化和规格可信度，未检测到密钥内容。
+
 真实自分析验证：Analysis Run `15` 生成 Spec Version `8` 与 Architecture Document `1`，状态 `accepted`，并已在浏览器中通过 `/api/architecture/1` 打开 Viewer。Run `17` 进一步验证同一 SHA 重跑时，release 会更新到 Spec Version `10`，对应 Architecture Document `3`，不再停留在旧版本。Run `18` 验证了带行号的内容证据，Architecture Document `4` 为 `accepted`。

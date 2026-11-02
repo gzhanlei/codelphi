@@ -75,3 +75,19 @@ export async function visualCheckArchify(input: ArchifyCall & { artifact: string
   const bin = await archifyBin(input.bin);
   return runArchify([bin, "visual-check", input.artifact, "--json"], runner, input.timeoutMs ?? 300_000);
 }
+
+export interface FinalizeExplainerInput extends ArchifyCall {
+  input: string;
+  output: string;
+  repoRoot?: string;
+  browserCheck?: boolean;
+}
+
+export async function finalizeExplainer(input: FinalizeExplainerInput, runner: CommandRunner = execCommand) {
+  const bin = await archifyBin(input.bin);
+  const args = [bin, "finalize", "explainer", input.input, input.output];
+  if (input.repoRoot) args.push("--repo-root", input.repoRoot);
+  if (input.browserCheck) args.push("--browser-check");
+  args.push("--json");
+  return runArchify(args, runner, input.timeoutMs ?? 300_000);
+}

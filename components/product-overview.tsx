@@ -9,7 +9,7 @@ function OverviewHero({ data }: { data: ProductOverviewData }) {
       <span className="eyebrow">PRODUCT OVERVIEW</span>
       <h2>{data.headline}</h2>
       <div className="overview-meta"><span>{data.freshness}</span><span>{data.analysisLabel}</span></div>
-      <div className="overview-actions"><Link className="primary-button" href="?view=spec">查看产品规格</Link><Link className="secondary-button" href="?view=changes">查看最近变化</Link></div>
+      <div className="overview-actions"><Link className="primary-button" href="?view=spec">查看产品规格</Link><Link className="secondary-button" href="?view=changes">查看最近变化</Link><a className="explainer-link" href={`/api/products/${data.slug}/explainer`} target="_blank" rel="noreferrer">导出 Explainer ↗</a></div>
     </section>
   );
 }
