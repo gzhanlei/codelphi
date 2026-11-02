@@ -21,15 +21,15 @@ const rules: Record<GenericId, EvidenceRule> = {
 };
 
 const presentation: Record<GenericId | "users", Omit<Component, "id" | "sources">> = {
-  users: { type: "external", label: "内部用户", sublabel: "产品 / 研发 / 测试", pos: [40, 280], size: [130, 64] },
-  frontend: { type: "frontend", label: "产品 Web UI", sublabel: "Next.js App Router", pos: [230, 280], size: [150, 64] },
-  backend: { type: "backend", label: "应用服务", sublabel: "Go / Next.js API", pos: [440, 280], size: [150, 64] },
-  auth: { type: "security", label: "身份与 OAuth", sublabel: "OAuth 2.0 / PKCE", pos: [230, 70], size: [150, 64] },
-  db: { type: "database", label: "MySQL", sublabel: "持久化数据", pos: [800, 280], size: [130, 64] },
-  webhook: { type: "backend", label: "GitHub Webhook", sublabel: "HMAC-SHA256 / push", pos: [230, 490], size: [150, 64] },
-  analysis: { type: "backend", label: "分析任务", sublabel: "代码证据 / Spec Version", pos: [590, 490], size: [150, 64] },
-  github: { type: "external", label: "GitHub", sublabel: "仓库与安装凭据", pos: [590, 620], size: [150, 64] },
-  llm: { type: "external", label: "LLM 网关", sublabel: "结构化产品分析", pos: [800, 490], size: [130, 64] },
+  users: { type: "external", label: "内部用户", sublabel: "产品 / 研发 / 测试", pos: [20, 60], size: [130, 64] },
+  frontend: { type: "frontend", label: "产品 Web UI", sublabel: "Next.js App Router", pos: [220, 60], size: [150, 64] },
+  backend: { type: "backend", label: "应用服务", sublabel: "Go / Next.js API", pos: [220, 220], size: [150, 64] },
+  auth: { type: "security", label: "身份与 OAuth", sublabel: "OAuth 2.0 / PKCE", pos: [420, 60], size: [150, 64] },
+  db: { type: "database", label: "MySQL", sublabel: "持久化数据", pos: [220, 360], size: [130, 64] },
+  webhook: { type: "backend", label: "GitHub Webhook", sublabel: "HMAC-SHA256 / push", pos: [20, 360], size: [150, 64] },
+  analysis: { type: "backend", label: "分析任务", sublabel: "代码证据 / Spec Version", pos: [420, 220], size: [150, 64] },
+  github: { type: "external", label: "GitHub", sublabel: "仓库与安装凭据", pos: [420, 300], size: [150, 64] },
+  llm: { type: "external", label: "LLM 网关", sublabel: "结构化产品分析", pos: [620, 220], size: [130, 64] },
 };
 
 const connectionDefinitions: Connection[] = [
@@ -69,6 +69,8 @@ export function buildArchitectureDocument(value: ArchitectureDraftInput): Archit
   const components = componentOrder.filter((id) => id === "users" || sourcesFor(id, sources).length > 0).map((id) => createComponent(id, sources));
   if (components.length < 2) throw new Error("No architecture components detected");
   const ids = new Set(components.map((component) => component.id));
+  const viewBoxHeight = Math.max(240, Math.max(...components.map((component) => component.pos[1])) + 96);
+  const viewBoxWidth = Math.max(500, Math.max(...components.map((component) => component.pos[0] + component.size[0])) + 180);
   const connections = connectionDefinitions.filter((connection) => ids.has(connection.from as GenericId) && ids.has(connection.to as GenericId));
   return architectureDocumentSchema.parse({
     schema_version: 1,
@@ -79,7 +81,7 @@ export function buildArchitectureDocument(value: ArchitectureDraftInput): Archit
       locale: "zh-CN",
       quality_profile: "showcase",
       repository: { url: `https://github.com/${input.owner}/${input.name}`, provider: "github", revision: input.revision },
-      viewBox: [960, 720],
+      viewBox: [viewBoxWidth, viewBoxHeight],
     },
     components,
     connections,
