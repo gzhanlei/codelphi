@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseAnalysisContent } from "../lib/ai";
+import { capEvidence, parseAnalysisContent } from "../lib/ai";
 
 const result = {
   release: { title: "改进登录", summary: "接入统一登录。" },
@@ -17,6 +17,23 @@ describe("AI analysis output", () => {
     const oversized = structuredClone(result);
     oversized.changes[0].evidence = Array.from({ length: 6 }, (_, index) => ({ path: `lib/file-${index}.ts`, startLine: index + 1 }));
     expect(parseAnalysisContent(JSON.stringify(oversized)).changes[0].evidence).toHaveLength(5);
+    oversized.features[0].scenarios[0].evidence = Array.from({ length: 7 }, (_, index) => ({ path: `lib/scenario-${index}.ts`, startLine: index + 1 }));
+    expect(parseAnalysisContent(JSON.stringify(oversized)).features[0].scenarios[0].evidence).toHaveLength(5);
+  });
+
+  it("tolerates missing optional collections while capping evidence", () => {
+    const empty = capEvidence({}) as { changes?: unknown; features?: unknown };
+    expect(empty.changes).toBeUndefined();
+    expect(empty.features).toBeUndefined();
+    const partial = capEvidence({ changes: [{}], features: [{ scenarios: [{}] }, {}] }) as { changes: Array<{ evidence?: unknown }>; features: Array<{ scenarios?: Array<{ evidence?: unknown }> }> };
+    expect(partial.changes[0].evidence).toBeUndefined();
+    expect(partial.features[0].scenarios?.[0].evidence).toBeUndefined();
+    expect(partial.features[1].scenarios).toBeUndefined();
+  });
+
+  it("rejects responses without a complete JSON object", () => {
+    expect(() => parseAnalysisContent("not json")).toThrow("AI response did not contain a JSON object");
+    expect(() => parseAnalysisContent("}{")).toThrow("AI response did not contain a JSON object");
   });
 
   it("rejects unsupported scenario categories", () => {

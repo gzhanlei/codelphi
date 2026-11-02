@@ -11,11 +11,14 @@ describe("AI gateway compatibility", () => {
     expect(chatCompletionsUrl()).toBe("https://gateway.example/v1/chat/completions");
     vi.stubEnv("AI_BASE_URL", "https://gateway.example/v1/chat/completions");
     expect(chatCompletionsUrl()).toBe("https://gateway.example/v1/chat/completions");
+    vi.stubEnv("AI_BASE_URL", "");
+    expect(chatCompletionsUrl()).toBe("http://127.0.0.1:4000/v1/chat/completions");
   });
 
   it("extracts content and fails clearly for an empty gateway response", () => {
     expect(gatewayContent({ choices: [{ message: { content: "{\"ok\":true}" } }] })).toBe("{\"ok\":true}");
     expect(() => gatewayContent({ choices: [] })).toThrow("AI gateway returned empty content");
+    expect(() => gatewayContent({ choices: [{}] })).toThrow("AI gateway returned empty content");
     expect(() => gatewayContent(null)).toThrow();
   });
 });

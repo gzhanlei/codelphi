@@ -40,7 +40,7 @@ export const analysisSchema = z.object({
 
 export type AnalysisResult = z.infer<typeof analysisSchema>;
 
-function capEvidence(value: unknown) {
+export function capEvidence(value: unknown) {
   const input = value as {
     changes?: Array<{ evidence?: unknown[] }>;
     features?: Array<{ scenarios?: Array<{ evidence?: unknown[] }> }>;
@@ -59,8 +59,10 @@ export function parseAnalysisContent(content: string): AnalysisResult {
   const trimmed = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
   const start = trimmed.indexOf("{");
   const end = trimmed.lastIndexOf("}");
-  if (start < 0 || end <= start) throw new Error("AI response did not contain a JSON object");
-  return analysisSchema.parse(capEvidence(JSON.parse(trimmed.slice(start, end + 1))));
+  if (start < 0) throw new Error("AI response did not contain a JSON object");
+  const json = trimmed.slice(start, end + 1);
+  if (!json.endsWith("}")) throw new Error("AI response did not contain a JSON object");
+  return analysisSchema.parse(capEvidence(JSON.parse(json)));
 }
 
 interface ChangeContext {
@@ -69,7 +71,7 @@ interface ChangeContext {
 }
 
 export function chatCompletionsUrl() {
-  const configured = (process.env.AI_BASE_URL ?? "http://127.0.0.1:4000").replace(/\/$/, "");
+  const configured = (process.env.AI_BASE_URL || "http://127.0.0.1:4000").replace(/\/$/, "");
   if (configured.endsWith("/v1/chat/completions")) return configured;
   if (configured.endsWith("/v1")) return `${configured}/chat/completions`;
   return `${configured}/v1/chat/completions`;
@@ -95,6 +97,8 @@ export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext
     "你在维护一个内部产品知识库。仅根据给定代码和 diff 输出事实，不要补充猜测。",
     "用简体中文生成：1) 当前产品功能规格；2) 本次发布的用户可感知变化。",
     "规格按功能组织，每个场景包含情境、操作、结果，分类为 happy/edge/error，reference 使用 HP-n/EC-n/ER-n。",
+    "当前产品功能规格必须覆盖输入代码里的全部主要用户功能，不得只总结本次提交。逐个检查输入中的页面、API、组件和业务模块；输入包含多个独立模块时，只返回一个功能属于不完整结果。",
+    "优先保证功能覆盖，每个功能保留最关键的 1-5 个场景；不要因单个功能场景过多而遗漏其他功能。",
     "每个场景和变化必须给 evidence；path 必须来自输入文件，startLine 使用输入的行号。没有用户变化的发布只生成 reviewed 项。",
     "只返回 JSON，不要 Markdown。结构：",
     '{"release":{"title":"","summary":""},"changes":[{"featureName":"","kind":"added|changed|removed|fixed|reviewed","description":"","userImpact":"","evidence":[{"path":"","startLine":1}]}],"features":[{"name":"","summary":"","scenarios":[{"reference":"HP-1","context":"","action":"","outcome":"","category":"happy","evidence":[{"path":"","startLine":1}]}]}]}',

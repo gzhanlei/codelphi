@@ -19,4 +19,5 @@ describe("analysis evidence validation", () => {
     duplicated.features[0].scenarios[0].evidence = [{ path: "missing.ts" }, { path: "missing.ts" }];
     expect(() => assertEvidence(duplicated, new Set())).toThrow("missing.ts");
   });
+
 });

@@ -69,9 +69,34 @@ describe("GitHub source boundaries", () => {
     expect(candidates.map((entry) => entry.path)).toContain("empty.ts");
     expect(candidates.map((entry) => entry.path)).toContain("at-limit.ts");
     expect(candidates.map((entry) => entry.path)).not.toContain("too-big.ts");
-    const capped = selectSourceCandidates({ tree: Array.from({ length: 30 }, (_, index) => ({ path: `app/file-${index}.ts`, type: "blob", size: 100 })) });
-    expect(capped).toHaveLength(28);
-    expect(capped[0].path).toBe("app/file-0.ts");
+    const capped = selectSourceCandidates({ tree: Array.from({ length: 60 }, (_, index) => ({ path: `app/file-${String(index).padStart(2, "0")}.ts`, type: "blob", size: 100 })) });
+    expect(capped).toHaveLength(48);
+    expect(capped[0].path).toBe("app/file-00.ts");
+    expect(capped[1].path).toBe("app/file-59.ts");
+  });
+
+  it("balances source directories before taking more files from app", () => {
+    const candidates = selectSourceCandidates({ tree: [
+      ...Array.from({ length: 8 }, (_, index) => ({ path: `app/file-${index}.ts`, type: "blob", size: 100 })),
+      { path: "components/tree.tsx", type: "blob", size: 100 },
+      { path: "lib/spec.ts", type: "blob", size: 100 },
+      { path: "migrations/001.sql", type: "blob", size: 100 },
+    ] });
+    expect(candidates.slice(0, 4).map((entry) => entry.path)).toEqual(["app/file-0.ts", "components/tree.tsx", "lib/spec.ts", "migrations/001.sql"]);
+  });
+
+  it("sorts within each group and interleaves small groups without dropping entries", () => {
+    const tiny = selectSourceCandidates({ tree: [
+      { path: "app/file-2.ts", type: "blob", size: 100 },
+      { path: "app/file-0.ts", type: "blob", size: 100 },
+      { path: "app/file-1.ts", type: "blob", size: 100 },
+    ] });
+    expect(tiny.map((entry) => entry.path)).toEqual(["app/file-0.ts", "app/file-2.ts", "app/file-1.ts"]);
+    const docs = selectSourceCandidates({ tree: [
+      { path: "docs/guide.ts", type: "blob", size: 100 },
+      { path: "docs/README.md", type: "blob", size: 100 },
+    ] });
+    expect(docs.map((entry) => entry.path)).toEqual(["docs/README.md", "docs/guide.ts"]);
   });
 
   it("decodes source and adds stable line numbers", () => {

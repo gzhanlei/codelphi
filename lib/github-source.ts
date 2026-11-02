@@ -68,11 +68,70 @@ function isSourcePath(path: string) {
     && !/(?:node_modules|dist|\.next|coverage|vendor|package-lock|pnpm-lock|yarn\.lock|\.test\.|\.spec\.)/.test(path);
 }
 
-export function selectSourceCandidates(value: unknown) {
+type TreeEntry = z.infer<typeof treeSchema>["tree"][number];
+
+function sourceGroup(path: string) {
+  return path.includes("/") ? path.split("/")[0] : "";
+}
+
+function sourceGroupRank(path: string) {
+  if (pathScore(path) === 0) return 0;
+  const group = sourceGroup(path);
+  if (["app", "src", "pages"].includes(group)) return 1;
+  if (["components", "lib", "internal", "cmd"].includes(group)) return 2;
+  if (["docs", "migrations", "scripts"].includes(group)) return 3;
+  return 4;
+}
+
+function interleaveEdges(entries: TreeEntry[]) {
+  return entries.map((_, index) => {
+    const sourceIndex = index % 2 === 0 ? index / 2 : entries.length - Math.ceil(index / 2);
+    return entries[sourceIndex];
+  });
+}
+
+function eligibleSourceEntries(value: unknown) {
   return treeSchema.parse(value).tree
     .filter((entry) => entry.type === "blob" && (entry.size === undefined || entry.size <= 80_000) && isSourcePath(entry.path))
-    .sort((a, b) => pathScore(a.path) - pathScore(b.path) || a.path.localeCompare(b.path))
-    .slice(0, 28);
+    .sort((a, b) => pathScore(a.path) - pathScore(b.path) || a.path.localeCompare(b.path));
+}
+
+function groupSourceEntries(entries: TreeEntry[]) {
+  const grouped = new Map<string, TreeEntry[]>();
+  for (const entry of entries) {
+    const group = sourceGroup(entry.path);
+    const items = grouped.get(group);
+    if (items) {
+      items.push(entry);
+    } else {
+      grouped.set(group, [entry]);
+    }
+  }
+  return [...grouped.values()];
+}
+
+function orderedSourceGroups(entries: TreeEntry[]) {
+  return groupSourceEntries(entries).map(interleaveEdges).sort((a, b) => sourceGroupRank(a[0].path) - sourceGroupRank(b[0].path) || a[0].path.localeCompare(b[0].path));
+}
+
+function selectRoundRobin(groups: TreeEntry[][]) {
+  const selected: TreeEntry[] = [];
+  for (let index = 0; selected.length < 48; index += 1) {
+    let added = false;
+    for (const group of groups) {
+      const entry = group[index];
+      if (!entry) continue;
+      selected.push(entry);
+      added = true;
+      if (selected.length === 48) break;
+    }
+    if (!added) break;
+  }
+  return selected;
+}
+
+export function selectSourceCandidates(value: unknown) {
+  return selectRoundRobin(orderedSourceGroups(eligibleSourceEntries(value)));
 }
 
 const contentSchema = z.object({
