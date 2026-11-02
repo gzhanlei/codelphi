@@ -57,10 +57,14 @@ const treeSchema = z.object({
   })).optional().default([]),
 });
 
+function isDocumentationPath(path: string) {
+  return /(?:^|\/)(?:README|AGENTS|package\.json|go\.mod|openapi)/i.test(path);
+}
+
 function pathScore(path: string) {
-  if (/(?:^|\/)(?:README|AGENTS|package\.json|go\.mod|openapi)/i.test(path)) return 0;
-  if (/(?:^|\/)(?:app|src|pages|cmd|internal|docs|migrations)\//.test(path)) return 1;
-  return 2;
+  if (isDocumentationPath(path)) return "0";
+  if (/(?:^|\/)(?:app|src|pages|cmd|internal|docs|migrations)\//.test(path)) return "1";
+  return "2";
 }
 
 function isSourcePath(path: string) {
@@ -75,12 +79,12 @@ function sourceGroup(path: string) {
 }
 
 function sourceGroupRank(path: string) {
-  if (pathScore(path) === 0) return 0;
+  if (isDocumentationPath(path)) return "0";
   const group = sourceGroup(path);
-  if (["app", "src", "pages"].includes(group)) return 1;
-  if (["components", "lib", "internal", "cmd"].includes(group)) return 2;
-  if (["docs", "migrations", "scripts"].includes(group)) return 3;
-  return 4;
+  if (["app", "src", "pages"].includes(group)) return "1";
+  if (["components", "lib", "internal", "cmd"].includes(group)) return "2";
+  if (["docs", "migrations", "scripts"].includes(group)) return "3";
+  return "4";
 }
 
 function interleaveEdges(entries: TreeEntry[]) {
@@ -93,7 +97,7 @@ function interleaveEdges(entries: TreeEntry[]) {
 function eligibleSourceEntries(value: unknown) {
   return treeSchema.parse(value).tree
     .filter((entry) => entry.type === "blob" && (entry.size === undefined || entry.size <= 80_000) && isSourcePath(entry.path))
-    .sort((a, b) => pathScore(a.path) - pathScore(b.path) || a.path.localeCompare(b.path));
+    .sort((a, b) => pathScore(a.path).localeCompare(pathScore(b.path)) || a.path.localeCompare(b.path));
 }
 
 function groupSourceEntries(entries: TreeEntry[]) {
@@ -111,27 +115,42 @@ function groupSourceEntries(entries: TreeEntry[]) {
 }
 
 function orderedSourceGroups(entries: TreeEntry[]) {
-  return groupSourceEntries(entries).map(interleaveEdges).sort((a, b) => sourceGroupRank(a[0].path) - sourceGroupRank(b[0].path) || a[0].path.localeCompare(b[0].path));
+  return groupSourceEntries(entries).map(interleaveEdges).sort((a, b) => {
+    const key = (group: TreeEntry[]) => `${sourceGroupRank(group[0].path)}:${group[0].path}`;
+    return key(a).localeCompare(key(b));
+  });
 }
 
 function selectRoundRobin(groups: TreeEntry[][]) {
   const selected: TreeEntry[] = [];
-  for (let index = 0; selected.length < 48; index += 1) {
-    let added = false;
-    for (const group of groups) {
-      const entry = group[index];
+  const queue = groups.map((group) => [...group]);
+  while (queue.some((group) => group.length > 0)) {
+    for (const group of queue) {
+      const entry = group.shift();
       if (!entry) continue;
       selected.push(entry);
-      added = true;
-      if (selected.length === 48) break;
     }
-    if (!added) break;
   }
   return selected;
 }
 
+function isEntryPointPath(path: string) {
+  return /^internal\/(?:oauth|db|token)\//.test(path) || /^web\/middleware\.ts$/.test(path) || /^(?:web\/)?app\/.*page\.tsx$/.test(path);
+}
+
+function entryPointRank(path: string) {
+  if (path === "web/app/page.tsx") return "0";
+  if (/^internal\/(?:oauth|db|token)\//.test(path)) return "1";
+  if (/^(?:web\/)?app\/.*page\.tsx$/.test(path)) return "2";
+  return "3";
+}
+
 export function selectSourceCandidates(value: unknown) {
-  return selectRoundRobin(orderedSourceGroups(eligibleSourceEntries(value)));
+  const entries = eligibleSourceEntries(value);
+  const prioritized = entries.filter((entry) => isEntryPointPath(entry.path)).sort((a, b) => entryPointRank(a.path).localeCompare(entryPointRank(b.path)) || a.path.localeCompare(b.path));
+  const documentation = entries.filter((entry) => !isEntryPointPath(entry.path) && pathScore(entry.path) === "0");
+  const remaining = entries.filter((entry) => !isEntryPointPath(entry.path) && pathScore(entry.path) !== "0");
+  return [...documentation, ...prioritized, ...selectRoundRobin(orderedSourceGroups(remaining))].slice(0, 48);
 }
 
 const contentSchema = z.object({

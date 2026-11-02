@@ -80,7 +80,7 @@ describe("architecture draft", () => {
       ],
     });
     expect(document.components.map((component) => component.id)).toEqual(["users", "frontend", "backend", "auth", "db"]);
-    expect(document.meta.viewBox).toEqual([960, 456]);
+    expect(document.meta.viewBox).toEqual([1200, 376]);
     expect(document.components.some((component) => component.id === "llm")).toBe(false);
     expect(document.components.flatMap((component) => component.sources ?? []).every((source) => source.line && source.line > 0)).toBe(true);
     expect(document.connections).toContainEqual(expect.objectContaining({ from: "backend", to: "db", label: "SQL" }));
@@ -98,7 +98,7 @@ describe("architecture draft", () => {
       sources: sources(),
     });
     expect(document.components.some((component) => component.id === "llm")).toBe(true);
-    expect(document.meta.viewBox).toEqual([1030, 456]);
+    expect(document.meta.viewBox).toEqual([1200, 696]);
   });
 
   it("accepts a minimal generic frontend and caps component evidence", () => {
@@ -111,7 +111,7 @@ describe("architecture draft", () => {
       sources: ["page", "a", "b", "c"].map((name) => ({ path: `web/app/${name}/page.tsx`, content: "1: export default function Page() {}" })),
     });
     expect(document.components.map((component) => component.id)).toEqual(["users", "frontend"]);
-    expect(document.meta.viewBox).toEqual([960, 240]);
+    expect(document.meta.viewBox).toEqual([960, 376]);
     expect(document.components[1].sources).toHaveLength(3);
   });
 

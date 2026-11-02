@@ -99,6 +99,34 @@ describe("GitHub source boundaries", () => {
     expect(docs.map((entry) => entry.path)).toEqual(["docs/README.md", "docs/guide.ts"]);
   });
 
+  it("prioritizes OAuth and database entry points before other internal modules", () => {
+    const candidates = selectSourceCandidates({ tree: [
+      { path: "internal/wallet/service.go", type: "blob", size: 100 },
+      { path: "internal/oauth/service.go", type: "blob", size: 100 },
+      { path: "internal/db/db.go", type: "blob", size: 100 },
+      { path: "web/middleware.ts", type: "blob", size: 100 },
+      { path: "web/app/page.tsx", type: "blob", size: 100 },
+    ] });
+    expect(candidates[0].path).toBe("web/app/page.tsx");
+    expect(candidates.slice(1, 3).map((entry) => entry.path)).toEqual(["internal/db/db.go", "internal/oauth/service.go"]);
+    expect(candidates.map((entry) => entry.path)).toContain("web/app/page.tsx");
+    expect(candidates.map((entry) => entry.path)).toContain("web/middleware.ts");
+  });
+
+  it("keeps metadata and group priority ahead of lexical ordering", () => {
+    const candidates = selectSourceCandidates({ tree: [
+      { path: "lib/z.ts", type: "blob", size: 20 },
+      { path: "app/z.ts", type: "blob", size: 20 },
+      { path: "README.md", type: "blob", size: 20 },
+      { path: "lib/a.ts", type: "blob", size: 20 },
+      { path: "app/a.ts", type: "blob", size: 20 },
+    ] });
+    const paths = candidates.map((entry) => entry.path);
+    expect(paths.indexOf("README.md")).toBeLessThan(paths.indexOf("app/a.ts"));
+    expect(paths.indexOf("app/a.ts")).toBeLessThan(paths.indexOf("lib/a.ts"));
+    expect(paths.indexOf("app/a.ts")).toBeLessThan(paths.indexOf("app/z.ts"));
+  });
+
   it("decodes source and adds stable line numbers", () => {
     const encoded = Buffer.from("first\nsecond", "utf8").toString("base64");
     expect(numberedSourceContent({ encoding: "base64", content: encoded }, 100)).toBe("1: first\n2: second");

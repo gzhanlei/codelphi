@@ -66,7 +66,7 @@ async function fetchSourceFile(repo: GitHubRepository, sha: string, path: string
 export async function getSourceSnapshot(repo: GitHubRepository, sha: string, access: GitHubAccess = {}): Promise<SourceFile[]> {
   const tree = await githubFetch(`/repos/${repo.owner}/${repo.name}/git/trees/${sha}?recursive=1`, access);
   const candidates = selectSourceCandidates(tree);
-  let remaining = 100_000;
+  let remaining = 160_000;
   const sources: SourceFile[] = [];
 
   for (const candidate of candidates) {
