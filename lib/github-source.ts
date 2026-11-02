@@ -68,8 +68,9 @@ function pathScore(path: string) {
 }
 
 function isSourcePath(path: string) {
-  return /\.(?:ts|tsx|js|jsx|go|py|json|md|sql|yaml|yml|css|html)$/.test(path)
-    && !/(?:node_modules|dist|\.next|coverage|vendor|package-lock|pnpm-lock|yarn\.lock|\.test\.|\.spec\.)/.test(path);
+  return /\.(?:ts|tsx|js|jsx|go|py|json|md|sql|yaml|yml|css|html|java|c|h|cpp|hpp|xml|gradle|kts)$/.test(path)
+    && !/(?:node_modules|dist|\.next|coverage|vendor|package-lock|pnpm-lock|yarn\.lock|\.test\.|\.spec\.)/.test(path)
+    && !/(?:^|\/)(?:deps|third_party|\.github)\//.test(path);
 }
 
 type TreeEntry = z.infer<typeof treeSchema>["tree"][number];
@@ -135,13 +136,17 @@ function selectRoundRobin(groups: TreeEntry[][]) {
 }
 
 function isEntryPointPath(path: string) {
-  return /^internal\/(?:oauth|db|token)\//.test(path) || /^web\/middleware\.ts$/.test(path) || /^(?:web\/)?app\/.*page\.tsx$/.test(path);
+  return /^internal\/(?:oauth|db|token)\//.test(path) || /^web\/middleware\.ts$/.test(path) || /^(?:web\/)?app\/.*page\.tsx$/.test(path)
+    || /^app\/src\/main\/AndroidManifest\.xml$/.test(path) || /^app\/src\/main\/(?:java|cpp)\//.test(path) || /^uxplay\/lib\/(?:raop|httpd)\.c$/.test(path);
 }
 
 function entryPointRank(path: string) {
-  if (path === "web/app/page.tsx") return "0";
+  if (path === "web/app/page.tsx" || path === "app/src/main/AndroidManifest.xml") return "0";
   if (/^internal\/(?:oauth|db|token)\//.test(path)) return "1";
+  if (/^app\/src\/main\/java\/.*(?:Activity|Service)\.java$/.test(path)) return "1";
   if (/^(?:web\/)?app\/.*page\.tsx$/.test(path)) return "2";
+  if (/^app\/src\/main\/(?:java|cpp)\//.test(path)) return "2";
+  if (/^uxplay\/lib\/(?:raop|httpd)\.c$/.test(path)) return "2";
   return "3";
 }
 

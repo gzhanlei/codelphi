@@ -115,6 +115,27 @@ describe("architecture draft", () => {
     expect(document.components[1].sources).toHaveLength(3);
   });
 
+  it("builds an Android native application architecture from application evidence", () => {
+    const document = buildArchitectureDocument({
+      productName: "Android AirPlay Receiver",
+      productSlug: "android-airplay-receiver",
+      owner: "gzhanlei",
+      name: "uxplay-android",
+      revision: "43d8ce7b96f7e7deff9bb3b8429eb8ca361466ea",
+      sources: [
+        { path: "app/src/main/java/com/codelphi/airplay/MirrorActivity.java", content: "1: public class MirrorActivity extends Activity {}" },
+        { path: "app/src/main/java/com/codelphi/airplay/AirPlayService.java", content: "1: public class AirPlayService extends Service {}" },
+        { path: "app/src/main/java/com/codelphi/airplay/NativeBridge.java", content: "1: static { System.loadLibrary(\"airplay-jni\"); }" },
+        { path: "app/src/main/cpp/airplay_jni.c", content: "1: JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *reserved) {}" },
+        { path: "uxplay/lib/raop.c", content: "1: void *raop_init(raop_callbacks_t *callbacks) {}" },
+        { path: "app/src/main/java/com/codelphi/airplay/VideoSink.java", content: "1: MediaCodec codec;" },
+      ],
+    });
+    expect(document.components.map((component) => component.id)).toEqual(["users", "android-ui", "android-service", "native-bridge", "native-core", "media-sink"]);
+    expect(document.connections).toContainEqual(expect.objectContaining({ from: "android-service", to: "native-bridge" }));
+    expect(document.components.flatMap((component) => component.sources ?? []).every((source) => source.line && source.line > 0)).toBe(true);
+  });
+
   it("rejects stale source content", () => {
     const stale = { productName: "Radar", productSlug: "radar", owner: "gzhanlei", name: "radar", revision: "43d8ce7b96f7e7deff9bb3b8429eb8ca361466ea", sources: sources().map((source) => ({ ...source, content: "1: unrelated" })) };
     expect(() => buildArchitectureDocument(stale)).toThrow("No architecture components detected");

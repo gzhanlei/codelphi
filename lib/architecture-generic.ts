@@ -1,6 +1,6 @@
 import { architectureDocumentSchema, architectureDraftInputSchema, markerLine, buildArchitectureDocument as buildRadarArchitectureDocument, type ArchitectureDocument, type ArchitectureDraftInput } from "./architecture-draft";
 
-type GenericId = "frontend" | "backend" | "auth" | "db" | "github" | "llm" | "webhook" | "analysis";
+type GenericId = "frontend" | "backend" | "auth" | "db" | "github" | "llm" | "webhook" | "analysis" | "android-ui" | "android-service" | "native-bridge" | "native-core" | "media-sink";
 type Component = ArchitectureDocument["components"][number];
 type Connection = ArchitectureDocument["connections"][number];
 
@@ -18,6 +18,11 @@ const rules: Record<GenericId, EvidenceRule> = {
   llm: { path: /ai|llm|gateway/i, markers: ["chat/completions", "OpenAI", "LLMGateway", "AI_API_KEY"] },
   webhook: { path: /webhook/i, markers: ["webhook", "push"] },
   analysis: { path: /analysis|spec/i, markers: ["analyzeWithAI", "insertSpecVersion", "SpecVersion"] },
+  "android-ui": { path: /(?:^|\/)app\/src\/main\/java\/.*\.java$/, markers: ["extends Activity", "SurfaceView", "setContentView"] },
+  "android-service": { path: /(?:^|\/)app\/src\/main\/java\/.*\.java$/, markers: ["extends Service", "NsdManager", "onStartCommand"] },
+  "native-bridge": { path: /(?:^|\/)app\/src\/main\/(?:java\/.*NativeBridge\.java|cpp\/.*\.c)$/, markers: ["System.loadLibrary", "JNI_OnLoad", "Java_com_", "C ↔ Java"] },
+  "native-core": { path: /(?:^|\/)lib\/.*\.c$/, markers: ["raop_init", "httpd_start", "conn_request", "conn_init"] },
+  "media-sink": { path: /(?:^|\/)app\/src\/main\/java\/.*(?:Video|Audio)Sink\.java$/, markers: ["MediaCodec", "AudioTrack", "Surface"] },
 };
 
 const presentation: Record<GenericId | "users", Omit<Component, "id" | "sources">> = {
@@ -30,6 +35,11 @@ const presentation: Record<GenericId | "users", Omit<Component, "id" | "sources"
   analysis: { type: "backend", label: "分析任务", sublabel: "代码证据 / Spec Version", pos: [640, 490], size: [150, 64] },
   github: { type: "external", label: "GitHub", sublabel: "仓库与安装凭据", pos: [640, 600], size: [150, 64] },
   llm: { type: "external", label: "LLM 网关", sublabel: "结构化产品分析", pos: [940, 490], size: [130, 64] },
+  "android-ui": { type: "frontend", label: "Android UI", sublabel: "Activity / SurfaceView", pos: [340, 280], size: [150, 64] },
+  "android-service": { type: "backend", label: "Android 服务", sublabel: "Foreground Service / NSD", pos: [640, 280], size: [150, 64] },
+  "native-bridge": { type: "messagebus", label: "JNI 桥", sublabel: "Java ↔ Native 回调", pos: [940, 490], size: [150, 64] },
+  "native-core": { type: "backend", label: "原生协议核心", sublabel: "C / RAOP / HTTPD", pos: [640, 490], size: [150, 64] },
+  "media-sink": { type: "backend", label: "媒体输出", sublabel: "MediaCodec / AudioTrack", pos: [340, 490], size: [150, 64] },
 };
 
 const connectionDefinitions: Connection[] = [
@@ -43,9 +53,16 @@ const connectionDefinitions: Connection[] = [
   { id: "analysis-to-github", from: "analysis", to: "github", label: "contents:read", fromSide: "bottom", toSide: "top", labelDy: 24 },
   { id: "analysis-to-llm", from: "analysis", to: "llm", label: "代码 + diff" },
   { id: "analysis-to-db", from: "analysis", to: "db", label: "规格版本", fromSide: "top", toSide: "bottom" },
+  { id: "users-to-android-ui", from: "users", to: "android-ui", label: "打开界面", variant: "emphasis" },
+  { id: "android-ui-to-service", from: "android-ui", to: "android-service", label: "启动 / Surface" },
+  { id: "android-service-to-bridge", from: "android-service", to: "native-bridge", label: "nativeStart / 回调", fromSide: "bottom", toSide: "top" },
+  { id: "native-bridge-to-core", from: "native-bridge", to: "native-core", label: "raop_init" },
+  { id: "native-core-to-bridge", from: "native-core", to: "native-bridge", label: "视频 / 音频回调", variant: "dashed", fromSide: "top", toSide: "bottom" },
+  { id: "native-core-to-sink", from: "native-core", to: "media-sink", label: "NALU / AAC" },
+  { id: "media-sink-to-android-ui", from: "media-sink", to: "android-ui", label: "Surface / AudioTrack", fromSide: "top", toSide: "bottom" },
 ];
 
-const componentOrder: Array<GenericId | "users"> = ["users", "frontend", "backend", "auth", "db", "webhook", "analysis", "github", "llm"];
+const componentOrder: Array<GenericId | "users"> = ["users", "frontend", "backend", "auth", "db", "webhook", "analysis", "github", "llm", "android-ui", "android-service", "native-bridge", "native-core", "media-sink"];
 
 function sourcesFor(id: GenericId, sources: ArchitectureDraftInput["sources"]) {
   const rule = rules[id];

@@ -99,6 +99,29 @@ describe("GitHub source boundaries", () => {
     expect(docs.map((entry) => entry.path)).toEqual(["docs/README.md", "docs/guide.ts"]);
   });
 
+  it("prioritizes Android application sources over vendored files", () => {
+    const candidates = selectSourceCandidates({ tree: [
+      { path: "deps/libplist/README.md", type: "blob", size: 20_000 },
+      { path: "deps/libplist/src/base64.c", type: "blob", size: 20_000 },
+      { path: ".github/workflows/build.yml", type: "blob", size: 20_000 },
+      { path: "uxplay/lib/raop.c", type: "blob", size: 60_000 },
+      { path: "app/src/main/AndroidManifest.xml", type: "blob", size: 4_000 },
+      { path: "app/src/main/java/com/codelphi/airplay/MirrorActivity.java", type: "blob", size: 10_000 },
+      { path: "app/src/main/java/com/codelphi/airplay/AirPlayService.java", type: "blob", size: 12_000 },
+      { path: "app/src/main/cpp/airplay_jni.c", type: "blob", size: 14_000 },
+      { path: "web/middleware.ts", type: "blob", size: 1_000 },
+    ] });
+    const paths = candidates.map((entry) => entry.path);
+    expect(paths.indexOf("app/src/main/AndroidManifest.xml")).toBeLessThan(paths.indexOf("app/src/main/java/com/codelphi/airplay/AirPlayService.java"));
+    expect(paths.indexOf("app/src/main/java/com/codelphi/airplay/AirPlayService.java")).toBeLessThan(paths.indexOf("app/src/main/java/com/codelphi/airplay/MirrorActivity.java"));
+    expect(paths.indexOf("app/src/main/java/com/codelphi/airplay/MirrorActivity.java")).toBeLessThan(paths.indexOf("app/src/main/cpp/airplay_jni.c"));
+    expect(paths.indexOf("app/src/main/cpp/airplay_jni.c")).toBeLessThan(paths.indexOf("uxplay/lib/raop.c"));
+    expect(paths.indexOf("uxplay/lib/raop.c")).toBeLessThan(paths.indexOf("web/middleware.ts"));
+    expect(paths).not.toContain("deps/libplist/README.md");
+    expect(paths).not.toContain("deps/libplist/src/base64.c");
+    expect(paths).not.toContain(".github/workflows/build.yml");
+  });
+
   it("prioritizes OAuth and database entry points before other internal modules", () => {
     const candidates = selectSourceCandidates({ tree: [
       { path: "internal/wallet/service.go", type: "blob", size: 100 },
