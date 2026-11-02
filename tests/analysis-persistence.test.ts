@@ -47,6 +47,12 @@ describe("analysis persistence guards", () => {
     expect(connection.execute).toHaveBeenLastCalledWith(expect.stringContaining("INSERT INTO changes"), [10, "Auth", "changed", "Changed", "", "[]"]);
   });
 
+  it("moves an existing release to the latest spec version for the same SHA", async () => {
+    const connection = connectionWithCount(0);
+    await upsertRelease(connection, run, result, change);
+    expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("ON DUPLICATE KEY UPDATE analysis_run_id = VALUES(analysis_run_id), spec_version_id = VALUES(spec_version_id)"), expect.any(Array));
+  });
+
   it("retains generated parents that still have active children", async () => {
     const connection = { execute: vi.fn(async () => [{}]) } as unknown as PoolConnection;
     await upsertGeneratedSpec(connection, run, { ...result, features: [] });

@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS architecture_documents (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  product_id BIGINT UNSIGNED NOT NULL,
+  spec_version_id BIGINT UNSIGNED NOT NULL,
+  revision VARCHAR(40) NOT NULL,
+  status VARCHAR(16) NOT NULL,
+  spec_json MEDIUMTEXT NOT NULL,
+  spec_sha256 CHAR(64) NOT NULL,
+  artifact_path TEXT NULL,
+  artifact_sha256 CHAR(64) NULL,
+  validation_receipt JSON NULL,
+  visual_receipt JSON NULL,
+  error_message TEXT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  UNIQUE KEY architecture_documents_spec_version_unique (spec_version_id),
+  KEY architecture_documents_product_created_idx (product_id, created_at),
+  CONSTRAINT architecture_documents_product_fk FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+  CONSTRAINT architecture_documents_spec_version_fk FOREIGN KEY (spec_version_id) REFERENCES spec_versions(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

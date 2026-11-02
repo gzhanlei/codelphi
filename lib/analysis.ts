@@ -1,8 +1,10 @@
 import type { PoolConnection } from "mysql2/promise";
 import { getDb } from "./db";
 import { analyzeWithAI, type AnalysisResult } from "./ai";
-import { getChangeContext, getRepository, getSourceSnapshot, type GitHubRepository } from "./github";
+import { getChangeContext, getRepository, getSourceSnapshot, type GitHubRepository, type SourceFile } from "./github";
 import { insertSpecVersion } from "./spec-versions";
+import { generateArchitectureVersion } from "./architecture-version";
+import { errorMessage } from "./error-message";
 
 export interface RunContext {
   id: number;
@@ -87,7 +89,7 @@ export async function upsertRelease(connection: PoolConnection, run: RunContext,
     `INSERT INTO releases
        (product_id, repository_id, analysis_run_id, spec_version_id, sha, title, summary, url, committed_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE analysis_run_id = VALUES(analysis_run_id)`,
+     ON DUPLICATE KEY UPDATE analysis_run_id = VALUES(analysis_run_id), spec_version_id = VALUES(spec_version_id)`,
     [run.productId, run.repositoryId, run.id, specVersionId, run.afterSha, result.release.title, result.release.summary, change.url, new Date(change.committedAt)],
   );
   const [existing] = await connection.execute("SELECT id FROM releases WHERE repository_id = ? AND sha = ?", [run.repositoryId, run.afterSha]);
@@ -115,11 +117,27 @@ async function saveResult(run: RunContext, result: AnalysisResult, change: Chang
     await upsertRelease(connection, run, result, change, specVersionId);
     await connection.execute("UPDATE analysis_runs SET status = 'succeeded', finished_at = CURRENT_TIMESTAMP(3) WHERE id = ?", [run.id]);
     await connection.commit();
+    return specVersionId;
   } catch (error) {
     await connection.rollback();
     throw error;
   } finally {
     connection.release();
+  }
+}
+
+interface AnalysisArchitectureDependencies {
+  saveResult: (run: RunContext, result: AnalysisResult, change: ChangeContext) => Promise<number>;
+  generateArchitecture: (input: { run: RunContext; sources: SourceFile[]; specVersionId: number }) => Promise<unknown>;
+}
+
+export async function saveAnalysisAndArchitecture(run: RunContext, result: AnalysisResult, change: ChangeContext, sources: SourceFile[], dependencies: AnalysisArchitectureDependencies = { saveResult, generateArchitecture: generateArchitectureVersion }) {
+  const specVersionId = await dependencies.saveResult(run, result, change);
+  try {
+    await dependencies.generateArchitecture({ run, sources, specVersionId });
+    return { specVersionId, architectureError: null };
+  } catch (error) {
+    return { specVersionId, architectureError: errorMessage(error, "Architecture generation failed") };
   }
 }
 
@@ -163,7 +181,7 @@ async function performAnalysis(run: RunContext) {
   if (sources.length === 0) throw new Error("No supported source files found");
   const result = await analyzeWithAI(sources, change);
   assertEvidence(result, new Set([...sources.map((file) => file.path), ...change.files.map((file) => file.path)]));
-  await saveResult(run, result, change);
+  await saveAnalysisAndArchitecture(run, result, change, sources);
 }
 
 async function runAnalysisSafely(runId: number) {
