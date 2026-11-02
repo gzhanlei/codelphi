@@ -81,6 +81,7 @@ export interface FinalizeExplainerInput extends ArchifyCall {
   output: string;
   repoRoot?: string;
   browserCheck?: boolean;
+  outDir?: string;
 }
 
 export async function finalizeExplainer(input: FinalizeExplainerInput, runner: CommandRunner = execCommand) {
@@ -88,6 +89,7 @@ export async function finalizeExplainer(input: FinalizeExplainerInput, runner: C
   const args = [bin, "finalize", "explainer", input.input, input.output];
   if (input.repoRoot) args.push("--repo-root", input.repoRoot);
   if (input.browserCheck) args.push("--browser-check");
+  if (input.outDir) args.push("--out-dir", input.outDir);
   args.push("--json");
   return runArchify(args, runner, input.timeoutMs ?? 300_000);
 }

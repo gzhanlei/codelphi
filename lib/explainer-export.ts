@@ -1,4 +1,5 @@
 import { dirname } from "node:path";
+import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { finalizeExplainer, type ArchifyReceipt } from "./archify-cli";
 import { architectureDocumentSchema } from "./architecture-draft";
@@ -15,7 +16,7 @@ interface ExplainerExportInput {
 
 interface ExplainerServices {
   root?: string;
-  finalize: (input: { input: string; output: string; repoRoot?: string; browserCheck: boolean }) => Promise<ArchifyReceipt>;
+  finalize: (input: { input: string; output: string; repoRoot?: string; browserCheck: boolean; outDir?: string }) => Promise<ArchifyReceipt>;
 }
 
 function shouldIncludeArchitecture(input: ExplainerExportInput) {
@@ -24,6 +25,11 @@ function shouldIncludeArchitecture(input: ExplainerExportInput) {
 
 function architectureRepository(architecture: ArchitectureDocumentRecord) {
   return architectureDocumentSchema.parse(JSON.parse(architecture.specJson)).meta.repository.url;
+}
+
+function explainerReceiptDirectory(productSlug: string, specVersionId: number, markdown: string, root: string) {
+  const digest = createHash("sha256").update(markdown).digest("hex");
+  return safeArtifactAbsolutePath(`artifacts/products/${productSlug}/${specVersionId}/receipts/${digest}`, root);
 }
 
 export async function exportProductExplainer(input: ExplainerExportInput, services: ExplainerServices) {
@@ -42,6 +48,6 @@ export async function exportProductExplainer(input: ExplainerExportInput, servic
   mkdirSync(dirname(specPath), { recursive: true });
   writeFileSync(specPath, markdown, { mode: 0o600 });
   if (includeArchitecture && input.architecture) writeFileSync(safeArtifactAbsolutePath(`artifacts/products/${input.productSlug}/${specVersionId}/architecture.json`, root), input.architecture.specJson, { mode: 0o600 });
-  const receipt = await services.finalize({ input: specPath, output: artifactPath, repoRoot: includeArchitecture ? input.repoRoot : undefined, browserCheck: true });
+  const receipt = await services.finalize({ input: specPath, output: artifactPath, repoRoot: includeArchitecture ? input.repoRoot : undefined, browserCheck: true, outDir: explainerReceiptDirectory(input.productSlug, specVersionId, markdown, root) });
   return { specPath: specRelative, artifactPath: artifactRelative, receipt };
 }

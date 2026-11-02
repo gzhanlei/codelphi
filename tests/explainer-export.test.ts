@@ -1,4 +1,5 @@
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -53,6 +54,9 @@ describe("Explainer export", () => {
     expect(readFileSync(join(root, "artifacts/products/radar/8/architecture.json"), "utf8")).toBe(architecture.specJson);
     expect(readFileSync(join(root, "artifacts/products/radar/8/explainer.md"), "utf8")).toContain("@diagram architecture source=architecture.json");
     expect(finalize).toHaveBeenCalledWith(expect.objectContaining({ input: join(root, "artifacts/products/radar/8/explainer.md"), output: join(root, "artifacts/products/radar/8/explainer.html"), repoRoot: "/tmp/repo", browserCheck: true }));
+    const markdown = readFileSync(join(root, "artifacts/products/radar/8/explainer.md"), "utf8");
+    const digest = createHash("sha256").update(markdown).digest("hex");
+    expect(finalize).toHaveBeenCalledWith(expect.objectContaining({ outDir: join(root, `artifacts/products/radar/8/receipts/${digest}`) }));
   });
 
   it("omits architecture evidence when it is not accepted", async () => {
