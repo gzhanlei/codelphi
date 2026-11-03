@@ -10,16 +10,16 @@ interface EvidenceRule {
 }
 
 const rules: Record<GenericId, EvidenceRule> = {
-  frontend: { path: /(?:^|\/)app\/.*page\.tsx$/, markers: ["export default", "export function"] },
-  backend: { path: /(?:^|\/)(?:internal\/.*\.go|app\/api\/.*route\.ts)$/, markers: ["func ", "POST", "GET"] },
-  auth: { path: /oauth|auth|chandler/i, markers: ["OAuth", "WorkMembership", "PKCE"] },
-  db: { path: /./, markers: ["go-sql-driver/mysql", "mysql2", "sql.Open", "database/sql"] },
+  frontend: { path: /(?:^|\/)app\/.*page\.tsx$|(?:^|\/)src\/(?:App|main)\.tsx$|(?:^|\/)pages\/(?:index|_app)\.tsx$|(?:^|\/)resources\/js\/.*\.tsx$/, markers: ["export default", "export function", "createRoot", "ReactDOM"] },
+  backend: { path: /(?:^|\/)internal\/.*\.go$|(?:^|\/)app\/api\/.*route\.ts$|(?:^|\/)src\/main\/(?:java|kotlin)\/.*\.(?:java|kt)$|(?:^|\/)app\/.*\.py$|(?:^|\/)src\/.*\.rs$|(?:^|\/)app\/.*\.php$|(?:^|\/)src\/.*\.cs$|(?:^|\/)cmd\/.*\.go$/, markers: ["@SpringBootApplication", "@RestController", "class Controller", "APIRouter", "FastAPI", "func ", "Router::new", "Route::", "class Program", "namespace", "POST", "GET"] },
+  auth: { path: /oauth|auth|chandler/i, markers: ["OAuth", "WorkMembership", "PKCE", "Spring Security", "JWT", "passport", "Authorize"] },
+  db: { path: /./, markers: ["go-sql-driver/mysql", "mysql2", "sql.Open", "database/sql", "spring.datasource", "JpaRepository", "SQLAlchemy", "EntityFrameworkCore", "gorm.Open", "DB::", "CREATE TABLE", "RoomDatabase"] },
   github: { path: /github/i, markers: ["api.github.com", "Installation"] },
   llm: { path: /ai|llm|gateway/i, markers: ["chat/completions", "OpenAI", "LLMGateway", "AI_API_KEY"] },
   webhook: { path: /webhook/i, markers: ["webhook", "push"] },
   analysis: { path: /analysis|spec/i, markers: ["analyzeWithAI", "insertSpecVersion", "SpecVersion"] },
-  "android-ui": { path: /(?:^|\/)app\/src\/main\/java\/.*\.java$/, markers: ["extends Activity", "SurfaceView", "setContentView"] },
-  "android-service": { path: /(?:^|\/)app\/src\/main\/java\/.*\.java$/, markers: ["extends Service", "NsdManager", "onStartCommand"] },
+  "android-ui": { path: /(?:^|\/)app\/src\/main\/(?:java|kotlin)\/.*(?:Activity\.java|Activity\.kt)$/, markers: ["extends Activity", "ComponentActivity", "AppCompatActivity", "setContent", "SurfaceView", "setContentView"] },
+  "android-service": { path: /(?:^|\/)app\/src\/main\/(?:java|kotlin)\/.*(?:Service\.java|Service\.kt)$/, markers: ["extends Service", "NsdManager", "onStartCommand"] },
   "native-bridge": { path: /(?:^|\/)app\/src\/main\/(?:java\/.*NativeBridge\.java|cpp\/.*\.c)$/, markers: ["System.loadLibrary", "JNI_OnLoad", "Java_com_", "C ↔ Java"] },
   "native-core": { path: /(?:^|\/)lib\/.*\.c$/, markers: ["raop_init", "httpd_start", "conn_request", "conn_init"] },
   "media-sink": { path: /(?:^|\/)app\/src\/main\/java\/.*(?:Video|Audio)Sink\.java$/, markers: ["MediaCodec", "AudioTrack", "Surface"] },

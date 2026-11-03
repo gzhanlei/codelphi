@@ -19,7 +19,17 @@ export type StackProfileId =
   | "react-web"
   | "node-api"
   | "go-api"
+  | "fastapi-api"
+  | "fastapi-python"
+  | "django-app"
+  | "spring-java"
+  | "spring-service"
+  | "android-kotlin"
   | "android-native"
+  | "ios-native"
+  | "rust-service"
+  | "laravel-app"
+  | "dotnet-services"
   | "unknown";
 
 export interface ProductSliceInput {

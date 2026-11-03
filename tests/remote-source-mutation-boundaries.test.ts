@@ -16,7 +16,7 @@ import {
   type SourceTreeApiEntry,
 } from "../lib/remote-source-index";
 import { SourceIndexError } from "../lib/remote-source-index";
-import { candidatePriority, compareProfiles, createSlicePlanner, confidenceLabel, reasonFor, toDiagnostic } from "../lib/slice-planner";
+import { candidatePriority, compareProfiles, createSlicePlanner, confidenceLabel, hasDotnetServicesProfile, hasFastapiProfile, hasLaravelProfile, hasRustServiceProfile, hasSpringJavaProfile, reasonFor, toDiagnostic } from "../lib/slice-planner";
 import type { SelectedSourceFile } from "../lib/slice-planner";
 
 const revision = "9f31c0de7a41b8d2e5f60a93c4d78ba12ef50937";
@@ -86,10 +86,10 @@ describe("remote source pure classification", () => {
 describe("planner pure decisions", () => {
   it("ranks priority candidates before ordinary source files", () => {
     const expected = [
-      ["apps/mobile/AndroidManifest.xml", 0],
+      ["app/src/main/AndroidManifest.xml", 0],
       ["apps/checkout/package.json", 1],
       ["apps/checkout/app/page.tsx", 2],
-      ["apps/mobile/MainActivity.java", 3],
+      ["app/src/main/java/com/example/MainActivity.java", 3],
       ["uxplay/lib/raop.c", 4],
       ["apps/checkout/src/helper.ts", 5],
     ] as const;
@@ -178,6 +178,21 @@ describe("planner pure decisions", () => {
     }, index);
     expect(result.status).toBe("failed");
     expect(result.diagnostics[0]).toEqual({ code: "github_request_failed", message: "GitHub unavailable" });
+  });
+
+  it("matches extended mainstream profiles", () => {
+    const file = (path: string) => ({ path, blobSha: "sha", treeEntrySha: "sha", reason: "service" as const, byteSize: 1, lineRanges: [], signals: ["service" as const] });
+    expect(hasSpringJavaProfile([file("pom.xml")], () => true)).toBe(true);
+    expect(hasSpringJavaProfile([file("pom.xml")], () => false)).toBe(false);
+    expect(hasSpringJavaProfile([file("src/App.java")], () => true)).toBe(false);
+    expect(hasFastapiProfile([file("main.py")], () => true)).toBe(true);
+    expect(hasFastapiProfile([file("main.go")], () => true)).toBe(false);
+    expect(hasRustServiceProfile([file("Cargo.toml")])).toBe(true);
+    expect(hasRustServiceProfile([file("src/main.rs")])).toBe(true);
+    expect(hasLaravelProfile([file("composer.json")], () => true)).toBe(true);
+    expect(hasLaravelProfile([file("composer.json")], () => false)).toBe(false);
+    expect(hasDotnetServicesProfile([file("src/App.csproj"), file("src/Program.cs")])).toBe(true);
+    expect(hasDotnetServicesProfile([file("src/App.csproj")])).toBe(false);
   });
 
   it("preserves source index diagnostics and maps ordinary failures", () => {

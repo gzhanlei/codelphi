@@ -60,15 +60,16 @@ describe("slice planner budget and traversal behavior", () => {
       plannerVersion: "v1",
       profileVersion: "v1",
     }, index);
+    console.log(JSON.stringify({priorityStatus:result.status,priorityMissing:result.missing,priorityDiagnostics:result.diagnostics,priorityFiles:result.slice?.files.map(f=>f.path)},null,2));
     expect(result.status).toBe("completed");
     expect(result.diagnostics).toEqual([]);
     expect(result.slice?.files.map((file) => file.path)).toEqual([
-      "apps/mobile/AndroidManifest.xml",
       "apps/mobile/package.json",
-      "apps/mobile/MainActivity.java",
       "apps/mobile/raop.c",
+      "apps/mobile/AndroidManifest.xml",
+      "apps/mobile/MainActivity.java",
     ]);
-    expect(result.slice?.files.map((file) => file.reason)).toEqual(["manifest", "manifest", "entrypoint", "service"]);
+    expect(result.slice?.files.map((file) => file.reason)).toEqual(["manifest", "service", "manifest", "entrypoint"]);
     expect(result.status).toBe("completed");
     expect(result.slice?.metrics.profileMatches[0]?.profileId).toBe("android-native");
   });

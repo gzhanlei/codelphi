@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "updatedAt": "2026-11-03",
+  "repositories": [
+    {
+      "id": "next-fullstack",
+      "owner": "dubinc",
+      "repo": "dub",
+      "revision": "6b463b4bdd9ed2fd9aa416f67b5b77d317b1471e",
+      "expectedProfile": "next-web",
+      "sourceRoots": [
+        ""
+      ]
+    },
+    {
+      "id": "spring-java",
+      "owner": "spring-projects",
+      "repo": "spring-petclinic",
+      "revision": "500158f732419217507c7656904b8e6aa1bcc0d6",
+      "expectedProfile": "spring-java",
+      "sourceRoots": [
+        "src/main/java",
+        "src/main/resources"
+      ]
+    },
+    {
+      "id": "fastapi-react",
+      "owner": "fastapi",
+      "repo": "full-stack-fastapi-template",
+      "revision": "f4bcfaba7c85be3c6332cc74a20819f586dcdbc6",
+      "expectedProfile": "fastapi-python",
+      "sourceRoots": [
+        "backend",
+        "frontend"
+      ]
+    },
+    {
+      "id": "go-web-service",
+      "owner": "gogs",
+      "repo": "gogs",
+      "revision": "35ff5d98e3ed84697807ffdeaaca744223e85344",
+      "expectedProfile": "go-api",
+      "sourceRoots": [
+        ""
+      ]
+    },
+    {
+      "id": "android-kotlin",
+      "owner": "android",
+      "repo": "nowinandroid",
+      "revision": "2982e63cb691ad49cd009aab43dc206fee6699c2",
+      "expectedProfile": "android-kotlin",
+      "sourceRoots": [
+        "app/src/main"
+      ]
+    },
+    {
+      "id": "rust-service",
+      "owner": "meilisearch",
+      "repo": "meilisearch",
+      "revision": "fccb3537c728d30cb52ef0fb4e00ce239713ec30",
+      "expectedProfile": "rust-service",
+      "sourceRoots": [
+        ""
+      ]
+    },
+    {
+      "id": "laravel-php",
+      "owner": "monicahq",
+      "repo": "monica",
+      "revision": "dab74273acc5c9e0ba713a9f7c2c71c24ab16993",
+      "expectedProfile": "laravel-app",
+      "sourceRoots": [
+        "app",
+        "bootstrap",
+        "config",
+        "database",
+        "routes"
+      ]
+    },
+    {
+      "id": "dotnet-services",
+      "owner": "dotnet",
+      "repo": "eShop",
+      "revision": "913acea66708a59595351174cee9b29f37179d29",
+      "expectedProfile": "dotnet-services",
+      "sourceRoots": [
+        "src"
+      ]
+    }
+  ]
+}

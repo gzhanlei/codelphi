@@ -1,0 +1,892 @@
+{
+  "version": 1,
+  "manifestUpdatedAt": "2026-11-03",
+  "generatedAt": "2026-11-03T10:43:05.435Z",
+  "summary": {
+    "total": 8,
+    "completed": 4,
+    "profileMatches": 4
+  },
+  "results": [
+    {
+      "id": "next-fullstack",
+      "repository": "dubinc/dub",
+      "revision": "6b463b4bdd9ed2fd9aa416f67b5b77d317b1471e",
+      "expectedProfile": "next-web",
+      "status": "completed",
+      "detectedProfile": "next-web",
+      "profileMatches": [
+        {
+          "profileId": "next-web",
+          "confidence": 0.9,
+          "matchedSignals": [
+            {
+              "path": "package.json",
+              "signal": "manifest"
+            },
+            {
+              "path": "apps/web/package.json",
+              "signal": "manifest"
+            }
+          ]
+        }
+      ],
+      "missing": [],
+      "diagnostics": [],
+      "selectedFiles": [
+        "package.json",
+        "README.md",
+        "apps/web/package.json",
+        "apps/web/docker-compose.yml",
+        "apps/web/app/layout.tsx",
+        "apps/web/app/not-found-hint.tsx",
+        "apps/web/app/not-found.tsx",
+        "apps/web/app/providers.tsx",
+        "apps/web/app/(ee)/README.md",
+        "apps/web/app/[domain]/page.tsx",
+        "apps/web/app/[domain]/browser-graphic.tsx",
+        "apps/web/app/[domain]/layout.tsx",
+        "apps/web/app/api/route.ts",
+        "apps/web/app/app.dub.co/layout.tsx",
+        "apps/web/guides/auth0.md",
+        "apps/web/guides/better-auth.md",
+        "apps/web/guides/next-auth.md",
+        "apps/web/lib/next-auth.d.ts",
+        "apps/web/lib/actions/create-oauth-url.ts",
+        "apps/web/lib/actions/submit-oauth-app-for-review.ts",
+        "apps/web/lib/auth/index.ts",
+        "apps/web/lib/auth/admin.ts",
+        "apps/web/lib/auth/confirm-email-change.ts",
+        "apps/web/lib/auth/constants.ts",
+        "apps/web/lib/auth/hash-token.ts",
+        "apps/web/lib/auth/lock-account.ts",
+        "apps/web/lib/auth/options.ts",
+        "apps/web/lib/auth/password.ts",
+        "apps/web/lib/auth/publishable-key.ts",
+        "apps/web/lib/auth/rate-limit-request.ts",
+        "apps/web/lib/auth/request-email-change.ts",
+        "apps/web/lib/auth/session.ts",
+        "apps/web/lib/auth/token-cache.ts",
+        "apps/web/lib/auth/track-dub-lead.ts",
+        "apps/web/lib/auth/utils.ts",
+        "apps/web/lib/auth/workspace.ts",
+        "apps/web/lib/axiom/server.ts",
+        "apps/web/lib/cron/index.ts",
+        "apps/web/lib/cron/enqueue-batch-jobs.ts",
+        "apps/web/lib/edge-config/index.ts",
+        "apps/web/lib/email/render-trial-email.tsx",
+        "apps/web/lib/fetchers/index.ts",
+        "apps/web/lib/integrations/oauth-provider.ts",
+        "apps/web/lib/jobs/index.ts",
+        "apps/web/lib/jobs/send-jobs.ts",
+        "apps/web/lib/middleware/app.ts",
+        "apps/web/lib/openapi/index.ts",
+        "apps/web/lib/planetscale/index.ts",
+        "apps/web/lib/prisma/index.ts",
+        "apps/web/lib/qr/api.tsx",
+        "apps/web/lib/qr/index.tsx",
+        "apps/web/lib/qr/utils.tsx",
+        "apps/web/lib/stripe/index.ts",
+        "apps/web/lib/stripe/cancellation-feedback.ts",
+        "apps/web/lib/tinybird/index.ts",
+        "apps/web/lib/upstash/index.ts",
+        "apps/web/playwright/assert-local-database.ts",
+        "apps/web/playwright/README.md",
+        "apps/web/playwright/workspaces/auth.setup.ts",
+        "apps/web/prisma/schema/job.prisma",
+        "apps/web/prisma/schema/oauth.prisma",
+        "apps/web/ui/token-avatar.tsx",
+        "apps/web/ui/account/delete-account.tsx",
+        "apps/web/ui/account/update-default-workspace.tsx",
+        "apps/web/ui/account/update-subscription.tsx",
+        "apps/web/ui/account/upload-avatar.tsx",
+        "apps/web/ui/account/user-id.tsx",
+        "apps/web/ui/analytics/analytics-area-chart.tsx",
+        "apps/web/ui/analytics/analytics-card.tsx",
+        "apps/web/ui/analytics/analytics-export-button.tsx",
+        "apps/web/ui/analytics/analytics-funnel-chart.tsx",
+        "apps/web/ui/analytics/analytics-loading-spinner.tsx",
+        "apps/web/ui/analytics/analytics-options.tsx",
+        "apps/web/ui/analytics/analytics-provider.tsx",
+        "apps/web/ui/analytics/analytics-tabs.tsx",
+        "apps/web/ui/analytics/bar-list.tsx",
+        "apps/web/ui/analytics/chart-section.tsx",
+        "apps/web/ui/analytics/chart-view-switcher.tsx",
+        "apps/web/ui/analytics/continent-icon.tsx",
+        "apps/web/ui/analytics/device-icon.tsx",
+        "apps/web/ui/analytics/device-section.tsx",
+        "apps/web/ui/analytics/index.tsx",
+        "apps/web/ui/analytics/link-preview.tsx",
+        "apps/web/ui/analytics/location-section.tsx"
+      ],
+      "metrics": {
+        "treeExpansions": 146,
+        "blobFetches": 84,
+        "selectedFiles": 84,
+        "selectedLineRanges": 84,
+        "selectedContentBytes": 242621,
+        "aiReadCalls": 0,
+        "prunedPathCount": 0,
+        "wallClockMs": 187830,
+        "profileMatches": [
+          {
+            "profileId": "next-web",
+            "confidence": 0.9,
+            "matchedSignals": [
+              {
+                "path": "package.json",
+                "signal": "manifest"
+              },
+              {
+                "path": "apps/web/package.json",
+                "signal": "manifest"
+              }
+            ]
+          }
+        ],
+        "budgetsRemaining": {
+          "selectedFiles": 36,
+          "selectedLineRanges": 516,
+          "plannerContentBytes": -2621,
+          "aiReadCalls": 20
+        }
+      },
+      "architectureComponents": [
+        "users",
+        "frontend",
+        "backend",
+        "auth"
+      ],
+      "architectureError": null,
+      "durationMs": 191179
+    },
+    {
+      "id": "spring-java",
+      "repository": "spring-projects/spring-petclinic",
+      "revision": "500158f732419217507c7656904b8e6aa1bcc0d6",
+      "expectedProfile": "spring-java",
+      "status": "underdetermined",
+      "detectedProfile": "unknown",
+      "profileMatches": [],
+      "missing": [
+        "supported stack profile was not identified"
+      ],
+      "diagnostics": [
+        {
+          "code": "profile_confidence_low",
+          "message": "selected source slice does not identify a supported stack profile"
+        }
+      ],
+      "selectedFiles": [
+        "src/main/java/org/springframework/samples/petclinic/package-info.java",
+        "src/main/java/org/springframework/samples/petclinic/PetClinicApplication.java",
+        "src/main/java/org/springframework/samples/petclinic/PetClinicRuntimeHints.java",
+        "src/main/resources/application-mysql.properties",
+        "src/main/resources/application-postgres.properties",
+        "src/main/resources/db/h2/data.sql",
+        "src/main/resources/db/h2/schema.sql",
+        "src/main/resources/db/mysql/data.sql",
+        "src/main/resources/db/mysql/petclinic_db_setup_mysql.txt",
+        "src/main/resources/db/mysql/schema.sql",
+        "src/main/resources/db/mysql/user.sql",
+        "src/main/resources/db/postgres/data.sql",
+        "src/main/resources/db/postgres/petclinic_db_setup_postgres.txt",
+        "src/main/resources/db/postgres/schema.sql"
+      ],
+      "metrics": {
+        "treeExpansions": 23,
+        "blobFetches": 14,
+        "selectedFiles": 14,
+        "selectedLineRanges": 14,
+        "selectedContentBytes": 25114,
+        "aiReadCalls": 0,
+        "prunedPathCount": 0,
+        "wallClockMs": 14120,
+        "profileMatches": [],
+        "budgetsRemaining": {
+          "selectedFiles": 106,
+          "selectedLineRanges": 586,
+          "plannerContentBytes": 214886,
+          "aiReadCalls": 20
+        }
+      },
+      "architectureComponents": [
+        "users",
+        "backend",
+        "db"
+      ],
+      "architectureError": null,
+      "durationMs": 16659
+    },
+    {
+      "id": "fastapi-react",
+      "repository": "fastapi/full-stack-fastapi-template",
+      "revision": "f4bcfaba7c85be3c6332cc74a20819f586dcdbc6",
+      "expectedProfile": "fastapi-python",
+      "status": "completed",
+      "detectedProfile": "fastapi-python",
+      "profileMatches": [
+        {
+          "profileId": "fastapi-python",
+          "confidence": 0.88,
+          "matchedSignals": []
+        }
+      ],
+      "missing": [],
+      "diagnostics": [],
+      "selectedFiles": [
+        "backend/Dockerfile",
+        "backend/README.md",
+        "backend/app/__init__.py",
+        "backend/app/crud.py",
+        "backend/app/initial_data.py",
+        "backend/app/main.py",
+        "backend/app/models.py",
+        "backend/app/utils.py",
+        "backend/app/alembic/env.py",
+        "backend/app/alembic/versions/1a31ce608336_add_cascade_delete_relationships.py",
+        "backend/app/alembic/versions/9c0a54914c78_add_max_length_for_string_varchar_.py",
+        "backend/app/alembic/versions/d98dd8ec85a3_edit_replace_id_integers_in_all_models_.py",
+        "backend/app/alembic/versions/e2412789c190_initialize_models.py",
+        "backend/app/alembic/versions/fe56fa70289e_add_created_at_to_user_and_item.py",
+        "backend/app/api/__init__.py",
+        "backend/app/api/deps.py",
+        "backend/app/api/main.py",
+        "backend/app/api/routes/__init__.py",
+        "backend/app/api/routes/items.py",
+        "backend/app/api/routes/login.py",
+        "backend/app/api/routes/private.py",
+        "backend/app/api/routes/users.py",
+        "backend/app/api/routes/utils.py",
+        "backend/app/core/__init__.py",
+        "backend/app/core/config.py",
+        "backend/app/core/db.py",
+        "backend/app/core/security.py",
+        "backend/tests/__init__.py",
+        "backend/tests/conftest.py",
+        "backend/tests/api/__init__.py",
+        "backend/tests/api/routes/__init__.py",
+        "backend/tests/api/routes/test_items.py",
+        "backend/tests/api/routes/test_login.py",
+        "backend/tests/api/routes/test_private.py",
+        "backend/tests/api/routes/test_users.py",
+        "backend/tests/crud/__init__.py",
+        "backend/tests/crud/test_user.py",
+        "backend/tests/scripts/__init__.py",
+        "backend/tests/utils/__init__.py",
+        "backend/tests/utils/item.py",
+        "backend/tests/utils/user.py",
+        "backend/tests/utils/utils.py",
+        "frontend/package.json",
+        "frontend/Dockerfile.playwright",
+        "frontend/README.md",
+        "frontend/src/main.tsx",
+        "frontend/src/routeTree.gen.ts",
+        "frontend/src/client/index.ts",
+        "frontend/src/client/client/index.ts",
+        "frontend/src/client/core/auth.gen.ts",
+        "frontend/src/components/theme-provider.tsx",
+        "frontend/src/components/Admin/AddUser.tsx",
+        "frontend/src/components/Admin/columns.tsx",
+        "frontend/src/components/Admin/DeleteUser.tsx",
+        "frontend/src/components/Admin/EditUser.tsx",
+        "frontend/src/components/Admin/UserActionsMenu.tsx",
+        "frontend/src/components/Common/Appearance.tsx",
+        "frontend/src/components/Common/AuthLayout.tsx",
+        "frontend/src/components/Common/DataTable.tsx",
+        "frontend/src/components/Common/ErrorComponent.tsx",
+        "frontend/src/components/Common/Footer.tsx",
+        "frontend/src/components/Common/Logo.tsx",
+        "frontend/src/components/Common/NotFound.tsx",
+        "frontend/src/components/Items/AddItem.tsx",
+        "frontend/src/components/Items/columns.tsx",
+        "frontend/src/components/Items/DeleteItem.tsx",
+        "frontend/src/components/Items/EditItem.tsx",
+        "frontend/src/components/Items/ItemActionsMenu.tsx",
+        "frontend/src/components/Pending/PendingItems.tsx",
+        "frontend/src/components/Pending/PendingUsers.tsx",
+        "frontend/src/components/Sidebar/AppSidebar.tsx",
+        "frontend/src/components/Sidebar/Main.tsx",
+        "frontend/src/components/Sidebar/User.tsx",
+        "frontend/src/components/UserSettings/ChangePassword.tsx",
+        "frontend/src/components/UserSettings/DeleteAccount.tsx",
+        "frontend/src/components/UserSettings/DeleteConfirmation.tsx",
+        "frontend/src/components/UserSettings/UserInformation.tsx",
+        "frontend/src/components/ui/alert.tsx",
+        "frontend/src/components/ui/avatar.tsx",
+        "frontend/src/components/ui/badge.tsx",
+        "frontend/src/components/ui/button-group.tsx",
+        "frontend/src/components/ui/button.tsx",
+        "frontend/src/components/ui/card.tsx",
+        "frontend/src/components/ui/checkbox.tsx",
+        "frontend/src/components/ui/dialog.tsx",
+        "frontend/src/components/ui/dropdown-menu.tsx",
+        "frontend/src/components/ui/form.tsx",
+        "frontend/src/components/ui/input.tsx",
+        "frontend/src/components/ui/label.tsx",
+        "frontend/src/components/ui/loading-button.tsx",
+        "frontend/src/components/ui/pagination.tsx",
+        "frontend/src/components/ui/password-input.tsx",
+        "frontend/src/components/ui/select.tsx",
+        "frontend/src/components/ui/separator.tsx",
+        "frontend/src/components/ui/sheet.tsx",
+        "frontend/src/components/ui/sidebar.tsx"
+      ],
+      "metrics": {
+        "treeExpansions": 37,
+        "blobFetches": 96,
+        "selectedFiles": 96,
+        "selectedLineRanges": 96,
+        "selectedContentBytes": 246153,
+        "aiReadCalls": 0,
+        "prunedPathCount": 0,
+        "wallClockMs": 54406,
+        "profileMatches": [
+          {
+            "profileId": "fastapi-python",
+            "confidence": 0.88,
+            "matchedSignals": []
+          }
+        ],
+        "budgetsRemaining": {
+          "selectedFiles": 24,
+          "selectedLineRanges": 504,
+          "plannerContentBytes": -6153,
+          "aiReadCalls": 20
+        }
+      },
+      "architectureComponents": [],
+      "architectureError": "line range must start at 1 and end at or after startLine",
+      "durationMs": 55969
+    },
+    {
+      "id": "go-web-service",
+      "repository": "gogs/gogs",
+      "revision": "35ff5d98e3ed84697807ffdeaaca744223e85344",
+      "expectedProfile": "go-api",
+      "status": "completed",
+      "detectedProfile": "go-api",
+      "profileMatches": [
+        {
+          "profileId": "go-api",
+          "confidence": 0.85,
+          "matchedSignals": [
+            {
+              "path": "go.mod",
+              "signal": "manifest"
+            }
+          ]
+        },
+        {
+          "profileId": "node-api",
+          "confidence": 0.82,
+          "matchedSignals": [
+            {
+              "path": "package.json",
+              "signal": "manifest"
+            }
+          ]
+        }
+      ],
+      "missing": [],
+      "diagnostics": [],
+      "selectedFiles": [
+        "go.mod",
+        "package.json",
+        "AGENTS.md",
+        "Dockerfile",
+        "Dockerfile.next",
+        "mockgen.go",
+        "README.md",
+        "cmd/gogs/main.go",
+        "cmd/gogs/admin.go",
+        "cmd/gogs/backup.go",
+        "cmd/gogs/cmd.go",
+        "cmd/gogs/hook.go",
+        "cmd/gogs/import.go",
+        "cmd/gogs/restore.go",
+        "cmd/gogs/serv.go",
+        "cmd/gogs/internal/web/cache.go",
+        "cmd/gogs/internal/web/repo_context.go",
+        "cmd/gogs/internal/web/web_repo.go",
+        "cmd/gogs/internal/web/web.go",
+        "cmd/gogs/internal/web/webapi_repo.go",
+        "cmd/gogs/internal/web/webapi_user.go",
+        "cmd/gogs/internal/web/webapi.go",
+        "cmd/gogs/internal/web/webapp_dev.go",
+        "cmd/gogs/internal/web/webapp_prod.go",
+        "cmd/gogs/internal/web/webapp_render_test.go",
+        "conf/embed_test.go",
+        "conf/embed.go",
+        "conf/auth.d/github.conf.example",
+        "conf/auth.d/ldap_bind_dn.conf.example",
+        "conf/auth.d/ldap_simple_auth.conf.example",
+        "conf/auth.d/pam.conf.example",
+        "conf/auth.d/smtp.conf.example",
+        "docker-next/README.md",
+        "docker/README.md",
+        "docker/runtime/backup-job.sh",
+        "docs/README.md",
+        "docs/advancing/authentication.mdx",
+        "docs/api-reference/collaborators-and-deploy-keys/add-a-deploy-key.mdx",
+        "docs/api-reference/collaborators-and-deploy-keys/get-a-deploy-key.mdx",
+        "docs/api-reference/collaborators-and-deploy-keys/list-deploy-keys.mdx",
+        "docs/api-reference/collaborators-and-deploy-keys/remove-a-deploy-key.mdx",
+        "docs/api-reference/users/get-the-authenticated-user.mdx",
+        "docs/dev/database_schema.md",
+        "internal/app/api_test.go",
+        "internal/app/api.go",
+        "internal/app/metrics.go",
+        "internal/auth/auth.go",
+        "internal/auth/github/config.go",
+        "internal/auth/github/provider.go",
+        "internal/auth/ldap/config.go",
+        "internal/auth/ldap/provider.go",
+        "internal/auth/ldap/README.md",
+        "internal/auth/pam/config.go",
+        "internal/auth/pam/pam_stub.go",
+        "internal/auth/pam/pam.go",
+        "internal/auth/pam/provider.go",
+        "internal/auth/smtp/config.go",
+        "internal/auth/smtp/provider.go",
+        "internal/authx/basic_test.go",
+        "internal/authx/basic.go",
+        "internal/avatar/avatar_test.go",
+        "internal/avatar/avatar.go",
+        "internal/conf/computed_test.go",
+        "internal/conf/computed.go",
+        "internal/conf/conf_test.go",
+        "internal/conf/conf.go",
+        "internal/conf/log_test.go",
+        "internal/conf/log.go",
+        "internal/conf/mocks.go",
+        "internal/conf/static_minwinsvc.go",
+        "internal/conf/static_test.go",
+        "internal/conf/static.go"
+      ],
+      "metrics": {
+        "treeExpansions": 203,
+        "blobFetches": 72,
+        "selectedFiles": 72,
+        "selectedLineRanges": 72,
+        "selectedContentBytes": 248324,
+        "aiReadCalls": 0,
+        "prunedPathCount": 0,
+        "wallClockMs": 115169,
+        "profileMatches": [
+          {
+            "profileId": "go-api",
+            "confidence": 0.85,
+            "matchedSignals": [
+              {
+                "path": "go.mod",
+                "signal": "manifest"
+              }
+            ]
+          },
+          {
+            "profileId": "node-api",
+            "confidence": 0.82,
+            "matchedSignals": [
+              {
+                "path": "package.json",
+                "signal": "manifest"
+              }
+            ]
+          }
+        ],
+        "budgetsRemaining": {
+          "selectedFiles": 48,
+          "selectedLineRanges": 528,
+          "plannerContentBytes": -8324,
+          "aiReadCalls": 20
+        }
+      },
+      "architectureComponents": [
+        "users",
+        "backend",
+        "auth",
+        "db",
+        "github"
+      ],
+      "architectureError": null,
+      "durationMs": 117087
+    },
+    {
+      "id": "android-kotlin",
+      "repository": "android/nowinandroid",
+      "revision": "2982e63cb691ad49cd009aab43dc206fee6699c2",
+      "expectedProfile": "android-kotlin",
+      "status": "underdetermined",
+      "detectedProfile": "unknown",
+      "profileMatches": [],
+      "missing": [
+        "supported stack profile was not identified"
+      ],
+      "diagnostics": [
+        {
+          "code": "profile_confidence_low",
+          "message": "selected source slice does not identify a supported stack profile"
+        }
+      ],
+      "selectedFiles": [
+        "app/src/main/AndroidManifest.xml"
+      ],
+      "metrics": {
+        "treeExpansions": 17,
+        "blobFetches": 1,
+        "selectedFiles": 1,
+        "selectedLineRanges": 1,
+        "selectedContentBytes": 3359,
+        "aiReadCalls": 0,
+        "prunedPathCount": 0,
+        "wallClockMs": 5936,
+        "profileMatches": [],
+        "budgetsRemaining": {
+          "selectedFiles": 119,
+          "selectedLineRanges": 599,
+          "plannerContentBytes": 236641,
+          "aiReadCalls": 20
+        }
+      },
+      "architectureComponents": [],
+      "architectureError": "No architecture components detected",
+      "durationMs": 7999
+    },
+    {
+      "id": "rust-service",
+      "repository": "meilisearch/meilisearch",
+      "revision": "fccb3537c728d30cb52ef0fb4e00ce239713ec30",
+      "expectedProfile": "rust-service",
+      "status": "completed",
+      "detectedProfile": "rust-service",
+      "profileMatches": [
+        {
+          "profileId": "rust-service",
+          "confidence": 0.85,
+          "matchedSignals": [
+            {
+              "path": "Cargo.toml",
+              "signal": "manifest"
+            },
+            {
+              "path": "crates/build-info/Cargo.toml",
+              "signal": "manifest"
+            },
+            {
+              "path": "crates/dump/Cargo.toml",
+              "signal": "manifest"
+            },
+            {
+              "path": "crates/file-store/Cargo.toml",
+              "signal": "manifest"
+            },
+            {
+              "path": "crates/filter-parser/Cargo.toml",
+              "signal": "manifest"
+            },
+            {
+              "path": "crates/filter-parser/fuzz/Cargo.toml",
+              "signal": "manifest"
+            },
+            {
+              "path": "crates/flatten-serde-json/Cargo.toml",
+              "signal": "manifest"
+            },
+            {
+              "path": "crates/flatten-serde-json/fuzz/Cargo.toml",
+              "signal": "manifest"
+            },
+            {
+              "path": "crates/fuzzers/Cargo.toml",
+              "signal": "manifest"
+            },
+            {
+              "path": "crates/http-client/Cargo.toml",
+              "signal": "manifest"
+            },
+            {
+              "path": "crates/index-scheduler/Cargo.toml",
+              "signal": "manifest"
+            }
+          ]
+        }
+      ],
+      "missing": [],
+      "diagnostics": [],
+      "selectedFiles": [
+        "Cargo.toml",
+        "AGENTS.md",
+        "Dockerfile",
+        "README.md",
+        ".github/workflows/db-change-comments.yml",
+        ".github/workflows/db-change-missing.yml",
+        "crates/build-info/Cargo.toml",
+        "crates/build-info/build.rs",
+        "crates/build-info/src/lib.rs",
+        "crates/build-info/src/main.rs",
+        "crates/dump/Cargo.toml",
+        "crates/dump/README.md",
+        "crates/dump/src/error.rs",
+        "crates/dump/src/lib.rs",
+        "crates/dump/src/writer.rs",
+        "crates/dump/src/reader/mod.rs",
+        "crates/file-store/Cargo.toml",
+        "crates/file-store/src/lib.rs",
+        "crates/filter-parser/Cargo.toml",
+        "crates/filter-parser/README.md",
+        "crates/filter-parser/fuzz/Cargo.toml",
+        "crates/filter-parser/fuzz/fuzz_targets/parse.rs",
+        "crates/filter-parser/src/condition.rs",
+        "crates/filter-parser/src/constraint.rs",
+        "crates/filter-parser/src/error.rs",
+        "crates/filter-parser/src/lib.rs",
+        "crates/filter-parser/src/main.rs",
+        "crates/filter-parser/src/value.rs",
+        "crates/flatten-serde-json/Cargo.toml",
+        "crates/flatten-serde-json/README.md",
+        "crates/flatten-serde-json/benches/benchmarks.rs",
+        "crates/flatten-serde-json/fuzz/Cargo.toml",
+        "crates/flatten-serde-json/fuzz/fuzz_targets/flatten.rs",
+        "crates/flatten-serde-json/src/lib.rs",
+        "crates/flatten-serde-json/src/main.rs",
+        "crates/fuzzers/Cargo.toml",
+        "crates/fuzzers/README.md",
+        "crates/fuzzers/src/lib.rs",
+        "crates/fuzzers/src/bin/fuzz-indexing.rs",
+        "crates/http-client/Cargo.toml",
+        "crates/http-client/src/lib.rs",
+        "crates/http-client/src/policy.rs",
+        "crates/http-client/src/reqwest/error.rs",
+        "crates/http-client/src/reqwest/mod.rs",
+        "crates/http-client/src/reqwest/request.rs",
+        "crates/http-client/src/reqwest/resolver.rs",
+        "crates/http-client/src/ureq/config.rs",
+        "crates/http-client/src/ureq/mod.rs",
+        "crates/http-client/src/ureq/resolver.rs",
+        "crates/index-scheduler/Cargo.toml",
+        "crates/index-scheduler/src/dump.rs"
+      ],
+      "metrics": {
+        "treeExpansions": 137,
+        "blobFetches": 51,
+        "selectedFiles": 51,
+        "selectedLineRanges": 51,
+        "selectedContentBytes": 250563,
+        "aiReadCalls": 0,
+        "prunedPathCount": 0,
+        "wallClockMs": 79844,
+        "profileMatches": [
+          {
+            "profileId": "rust-service",
+            "confidence": 0.85,
+            "matchedSignals": [
+              {
+                "path": "Cargo.toml",
+                "signal": "manifest"
+              },
+              {
+                "path": "crates/build-info/Cargo.toml",
+                "signal": "manifest"
+              },
+              {
+                "path": "crates/dump/Cargo.toml",
+                "signal": "manifest"
+              },
+              {
+                "path": "crates/file-store/Cargo.toml",
+                "signal": "manifest"
+              },
+              {
+                "path": "crates/filter-parser/Cargo.toml",
+                "signal": "manifest"
+              },
+              {
+                "path": "crates/filter-parser/fuzz/Cargo.toml",
+                "signal": "manifest"
+              },
+              {
+                "path": "crates/flatten-serde-json/Cargo.toml",
+                "signal": "manifest"
+              },
+              {
+                "path": "crates/flatten-serde-json/fuzz/Cargo.toml",
+                "signal": "manifest"
+              },
+              {
+                "path": "crates/fuzzers/Cargo.toml",
+                "signal": "manifest"
+              },
+              {
+                "path": "crates/http-client/Cargo.toml",
+                "signal": "manifest"
+              },
+              {
+                "path": "crates/index-scheduler/Cargo.toml",
+                "signal": "manifest"
+              }
+            ]
+          }
+        ],
+        "budgetsRemaining": {
+          "selectedFiles": 69,
+          "selectedLineRanges": 549,
+          "plannerContentBytes": -10563,
+          "aiReadCalls": 20
+        }
+      },
+      "architectureComponents": [
+        "users",
+        "backend"
+      ],
+      "architectureError": null,
+      "durationMs": 80659
+    },
+    {
+      "id": "laravel-php",
+      "repository": "monicahq/monica",
+      "revision": "dab74273acc5c9e0ba713a9f7c2c71c24ab16993",
+      "expectedProfile": "laravel-app",
+      "status": "underdetermined",
+      "detectedProfile": "unknown",
+      "profileMatches": [],
+      "missing": [
+        "supported stack profile was not identified"
+      ],
+      "diagnostics": [
+        {
+          "code": "profile_confidence_low",
+          "message": "selected source slice does not identify a supported stack profile"
+        }
+      ],
+      "selectedFiles": [
+        "app/Actions/AttemptToAuthenticateSocialite.php",
+        "app/Actions/AttemptToAuthenticateWebauthn.php",
+        "app/Actions/Fortify/CreateNewUser.php",
+        "app/Actions/Fortify/PasswordValidationRules.php",
+        "app/Actions/Fortify/RedirectIfTwoFactorAuthenticatable.php",
+        "app/Actions/Fortify/ResetUserPassword.php",
+        "app/Actions/Fortify/TwoFactorChallengeView.php",
+        "app/Actions/Fortify/UpdateUserPassword.php",
+        "app/Actions/Fortify/UpdateUserProfileInformation.php",
+        "app/Actions/Jetstream/DeleteUser.php",
+        "app/Actions/Jetstream/UserProfile.php",
+        "app/Console/Commands/GetVersion.php",
+        "app/Console/Commands/NewAddressBookSubscription.php",
+        "app/Console/Commands/SetupApplication.php",
+        "app/Console/Commands/SetupDocumentation.php",
+        "app/Console/Commands/SetupScout.php",
+        "app/Console/Commands/TestReminders.php",
+        "app/Console/Commands/WaitForDb.php",
+        "app/Console/Commands/Local/MonicaLocalize.php",
+        "app/Console/Commands/Local/SetupDummyAccount.php",
+        "app/Console/Commands/Local/UpdateAddressBookSubscription.php",
+        "app/Console/Scheduling/CronEvent.php",
+        "app/Console/Scheduling/Schedule.php",
+        "app/Domains/Contact/Dav/Exporter.php",
+        "app/Domains/Contact/Dav/ExportVCalendarResource.php",
+        "app/Domains/Contact/Dav/ExportVCardResource.php",
+        "app/Domains/Contact/Dav/IDavResource.php",
+        "app/Domains/Contact/Dav/Importer.php",
+        "app/Domains/Contact/Dav/ImportResource.php",
+        "app/Domains/Contact/Dav/ImportVCalendarResource.php",
+        "app/Domains/Contact/Dav/ImportVCardResource.php",
+        "app/Domains/Contact/Dav/Order.php",
+        "app/Domains/Contact/Dav/VCalendarImporter.php",
+        "app/Domains/Contact/Dav/VCalendarResource.php",
+        "app/Domains/Contact/Dav/VCardResource.php",
+        "app/Domains/Contact/Dav/Event/TokenDeleteEvent.php",
+        "app/Domains/Contact/Dav/Jobs/CleanSyncToken.php",
+        "app/Domains/Contact/Dav/Jobs/UpdateVCalendar.php",
+        "app/Domains/Contact/Dav/Jobs/UpdateVCard.php",
+        "app/Domains/Contact/Dav/Services/ExportVCalendar.php",
+        "app/Domains/Contact/Dav/Services/ExportVCard.php",
+        "app/Domains/Contact/Dav/Services/GetEtag.php",
+        "app/Domains/Contact/Dav/Services/ImportVCalendar.php",
+        "app/Domains/Contact/Dav/Services/ImportVCard.php",
+        "app/Domains/Contact/Dav/Services/ReadVObject.php",
+        "app/Domains/Contact/Dav/Web/DAVRedirect.php",
+        "app/Domains/Contact/DavClient/Jobs/DeleteLocalVCard.php",
+        "app/Domains/Contact/DavClient/Jobs/DeleteMultipleVCard.php",
+        "app/Domains/Contact/DavClient/Jobs/DeleteVCard.php",
+        "app/Domains/Contact/DavClient/Jobs/GetMultipleVCard.php",
+        "app/Domains/Contact/DavClient/Jobs/GetVCard.php",
+        "app/Domains/Contact/DavClient/Jobs/PushVCard.php",
+        "app/Domains/Contact/DavClient/Jobs/SynchronizeAddressBooks.php",
+        "app/Domains/Contact/DavClient/Jobs/UpdateAddressBooks.php",
+        "app/Domains/Contact/DavClient/Services/CreateAddressBookSubscription.php",
+        "app/Domains/Contact/DavClient/Services/SynchronizeAddressBook.php",
+        "app/Domains/Contact/DavClient/Services/UpdateSubscriptionLocalSyncToken.php",
+        "app/Domains/Contact/ManageAvatar/Services/DestroyAvatar.php",
+        "app/Domains/Contact/ManageAvatar/Services/UpdatePhotoAsAvatar.php",
+        "app/Domains/Contact/ManageCalls/Services/CreateCall.php",
+        "app/Domains/Contact/ManageCalls/Services/DestroyCall.php",
+        "app/Domains/Contact/ManageCalls/Services/UpdateCall.php",
+        "app/Domains/Contact/ManageContact/Dav/ExportAddress.php",
+        "app/Domains/Contact/ManageContact/Dav/ExportGender.php",
+        "app/Domains/Contact/ManageContact/Dav/ExportLabels.php",
+        "app/Domains/Contact/ManageContact/Dav/ExportNames.php",
+        "app/Domains/Contact/ManageContact/Dav/ExportTimestamp.php",
+        "app/Domains/Contact/ManageContact/Dav/ExportWorkInformation.php",
+        "app/Domains/Contact/ManageContact/Dav/ImportAddress.php",
+        "app/Domains/Contact/ManageContact/Dav/ImportContact.php",
+        "app/Domains/Contact/ManageContact/Dav/ImportLabels.php",
+        "app/Domains/Contact/ManageContact/Services/CopyContactToAnotherVault.php",
+        "app/Domains/Contact/ManageContact/Services/CreateContact.php",
+        "app/Domains/Contact/ManageContact/Services/DestroyContact.php",
+        "app/Domains/Contact/ManageContact/Services/MoveContactToAnotherVault.php",
+        "app/Domains/Contact/ManageContact/Services/ToggleArchiveContact.php",
+        "app/Domains/Contact/ManageContact/Services/ToggleFavoriteContact.php",
+        "app/Domains/Contact/ManageContact/Services/UpdateContact.php",
+        "app/Domains/Contact/ManageContact/Services/UpdateContactSortOrder.php",
+        "app/Domains/Contact/ManageContact/Services/UpdateContactTemplate.php",
+        "app/Domains/Contact/ManageContact/Services/UpdateContactView.php",
+        "app/Domains/Contact/ManageContactAddresses/Services/AssociateAddressToContact.php",
+        "app/Domains/Contact/ManageContactAddresses/Services/RemoveAddressFromContact.php",
+        "app/Domains/Contact/ManageContactImportantDates/Dav/ExportCalendarImportantDates.php",
+        "app/Domains/Contact/ManageContactImportantDates/Dav/ExportImportantDates.php",
+        "app/Domains/Contact/ManageContactImportantDates/Dav/ImportCalendarContactImportantDates.php",
+        "app/Domains/Contact/ManageContactImportantDates/Dav/ImportImportantDates.php",
+        "app/Domains/Contact/ManageContactImportantDates/Services/CreateContactImportantDate.php",
+        "app/Domains/Contact/ManageContactImportantDates/Services/DestroyContactImportantDate.php",
+        "app/Domains/Contact/ManageContactImportantDates/Services/UpdateContactImportantDate.php",
+        "app/Domains/Contact/ManageContactInformation/Dav/ExportContactInformation.php",
+        "app/Domains/Contact/ManageContactInformation/Dav/ImportContactInformation.php",
+        "app/Domains/Contact/ManageContactInformation/Services/CreateContactInformation.php",
+        "app/Domains/Contact/ManageContactInformation/Services/DestroyContactInformation.php",
+        "app/Domains/Contact/ManageContactInformation/Services/UpdateContactInformation.php",
+        "app/Domains/Contact/ManageDocuments/Events/FileDeleted.php"
+      ],
+      "metrics": {
+        "treeExpansions": 229,
+        "blobFetches": 96,
+        "selectedFiles": 96,
+        "selectedLineRanges": 96,
+        "selectedContentBytes": 240100,
+        "aiReadCalls": 0,
+        "prunedPathCount": 0,
+        "wallClockMs": 134155,
+        "profileMatches": [],
+        "budgetsRemaining": {
+          "selectedFiles": 24,
+          "selectedLineRanges": 504,
+          "plannerContentBytes": -100,
+          "aiReadCalls": 20
+        }
+      },
+      "architectureComponents": [],
+      "architectureError": "GitHub API 403: {\n\t\"message\": \"API rate limit exceeded for user ID 192183571. If you reach out to GitHub Support for help, please include the request ID 4CDB:1EE9B0:407162:6297E9:6AE9BAB8 and timestamp 2026-11-03 10:43:05 UTC. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service (https:\\/\\/docs.github.com\\/en\\/site-policy\\/github-terms\\/github-terms-of-service)\",\n\t\"documentation_url\": \"https://docs.github.com/en/rest/using-the-rest-api/getting-started-with-the-rest-api#rate-limiting\",\n\t\"status\": \"403\"\n}\n",
+      "durationMs": 137299
+    },
+    {
+      "id": "dotnet-services",
+      "repository": "dotnet/eShop",
+      "revision": "913acea66708a59595351174cee9b29f37179d29",
+      "expectedProfile": "dotnet-services",
+      "status": "failed",
+      "detectedProfile": "unknown",
+      "error": "GitHub API 403: {\n\t\"message\": \"API rate limit exceeded for user ID 192183571. If you reach out to GitHub Support for help, please include the request ID 7489:E97DC:414C21:638B47:6AE9BAB9 and timestamp 2026-11-03 10:43:05 UTC. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service (https:\\/\\/docs.github.com\\/en\\/site-policy\\/github-terms\\/github-terms-of-service)\",\n\t\"documentation_url\": \"https://docs.github.com/en/rest/using-the-rest-api/getting-started-with-the-rest-api#rate-limiting\",\n\t\"status\": \"403\"\n}\n",
+      "durationMs": 253
+    }
+  ]
+}

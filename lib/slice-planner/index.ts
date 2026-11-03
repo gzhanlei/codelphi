@@ -62,12 +62,40 @@ export function hasNodeApiProfile(files: SelectedSourceFile[], has: (fragment: s
   return hasFileSuffix(files, "package.json") && (has("fastify") || has("express") || has("hono"));
 }
 
+export function hasSpringJavaProfile(files: SelectedSourceFile[], has: (fragment: string) => boolean) {
+  return hasFileSuffix(files, "pom.xml") && (has("spring-boot") || has("@SpringBootApplication") || has("@RestController"));
+}
+
+export function hasFastapiProfile(files: SelectedSourceFile[], has: (fragment: string) => boolean) {
+  return files.some((file) => file.path.endsWith(".py")) && has("fastapi");
+}
+
 export function hasGoProfile(files: SelectedSourceFile[]) {
   return hasFileSuffix(files, "go.mod");
 }
 
-export function hasAndroidProfile(files: SelectedSourceFile[], has: (fragment: string) => boolean) {
-  return hasFileSuffix(files, "AndroidManifest.xml") && (hasFileSuffix(files, "build.gradle") || has("activity") || has("service"));
+function hasAndroidManifest(files: SelectedSourceFile[]) {
+  return files.some((file) => file.path === "AndroidManifest.xml" || file.path.endsWith("/AndroidManifest.xml"));
+}
+
+export function hasAndroidKotlinProfile(files: SelectedSourceFile[]) {
+  return hasAndroidManifest(files) && files.some((file) => file.path.endsWith(".kt"));
+}
+
+export function hasRustServiceProfile(files: SelectedSourceFile[]) {
+  return hasFileSuffix(files, "Cargo.toml") || files.some((file) => file.path.endsWith(".rs"));
+}
+
+export function hasLaravelProfile(files: SelectedSourceFile[], has: (fragment: string) => boolean) {
+  return hasFileSuffix(files, "composer.json") && (has("laravel/framework") || hasFileSuffix(files, "artisan"));
+}
+
+export function hasDotnetServicesProfile(files: SelectedSourceFile[]) {
+  return files.some((file) => file.path.endsWith(".csproj") || file.path.endsWith(".sln")) && files.some((file) => file.path.endsWith(".cs"));
+}
+
+export function hasAndroidProfile(files: SelectedSourceFile[]) {
+  return hasAndroidManifest(files) && files.some((file) => file.path.endsWith(".java"));
 }
 
 function hasFileSuffix(files: SelectedSourceFile[], suffix: string) {
@@ -80,8 +108,14 @@ function profileCandidates(files: SelectedSourceFile[], content: Map<string, str
   const candidates = [
     { profileId: "next-web" as const, confidence: 0.9, paths: ["package.json", "app/page.tsx"], matches: hasNextWebProfile(files, has) },
     { profileId: "node-api" as const, confidence: 0.82, paths: ["package.json"], matches: hasNodeApiProfile(files, has) },
+    { profileId: "spring-java" as const, confidence: 0.92, paths: ["pom.xml"], matches: hasSpringJavaProfile(files, has) },
+    { profileId: "fastapi-python" as const, confidence: 0.88, paths: ["requirements.txt", "pyproject.toml"], matches: hasFastapiProfile(files, has) },
     { profileId: "go-api" as const, confidence: 0.85, paths: ["go.mod"], matches: hasGoProfile(files) },
-    { profileId: "android-native" as const, confidence: 0.88, paths: ["AndroidManifest.xml"], matches: hasAndroidProfile(files, has) },
+    { profileId: "android-kotlin" as const, confidence: 0.9, paths: ["build.gradle.kts", "libs.versions.toml", "AndroidManifest.xml"], matches: hasAndroidKotlinProfile(files) },
+    { profileId: "rust-service" as const, confidence: 0.85, paths: ["Cargo.toml"], matches: hasRustServiceProfile(files) },
+    { profileId: "laravel-app" as const, confidence: 0.86, paths: ["composer.json", "artisan"], matches: hasLaravelProfile(files, has) },
+    { profileId: "dotnet-services" as const, confidence: 0.94, paths: ["*.csproj", "*.sln"], matches: hasDotnetServicesProfile(files) },
+    { profileId: "android-native" as const, confidence: 0.88, paths: ["AndroidManifest.xml"], matches: hasAndroidProfile(files) },
   ];
   return candidates;
 }
@@ -98,10 +132,10 @@ export function matchProfiles(files: SelectedSourceFile[], content: Map<string, 
 }
 
 const priorityPatterns = [
-  /AndroidManifest\.xml$/,
-  /(?:package\.json|go\.mod|Cargo\.toml|pom\.xml|build\.gradle)$/,
-  /(?:page\.tsx|route\.ts|main\.go|server\.ts|index\.ts)$/,
-  /(?:Activity|Service|NativeBridge)\.java$/,
+  /(?:^|\/)app\/src\/main\/AndroidManifest\.xml$/,
+  /(?:package\.json|go\.mod|Cargo\.toml|pom\.xml|composer\.json|requirements\.txt|pyproject\.toml|build\.gradle(?:\.kts)?|libs\.versions\.toml|.*\.csproj|.*\.sln)$/,
+  /(?:page\.tsx|route\.ts|main\.go|server\.ts|index\.ts|artisan)$/,
+  /(?:^|\/)app\/src\/main\/(?:java|kotlin)\/.*(?:Activity|Service|NativeBridge)(?:\.java|\.kt)$/,
   /(?:jni|raop|httpd).*\.c$/i,
 ];
 
@@ -283,7 +317,12 @@ class DeterministicSlicePlanner implements SlicePlanner {
       .filter((entry) => !entry.pruned && entry.type === "blob" && entry.signals.some((signal) => interestingSignals.has(signal)))
       .sort((a, b) => candidatePriority(a) - candidatePriority(b) || basename(a.path).localeCompare(basename(b.path)));
     for (const entry of candidates) {
-      await this.selectFile(index, state, entry.path, entry.signals, reasonFor(entry.signals));
+      try {
+        await this.selectFile(index, state, entry.path, entry.signals, reasonFor(entry.signals));
+      } catch (error) {
+        if (error instanceof SourceIndexError && ["path_pruned", "binary_source", "blob_too_large"].includes(error.code)) continue;
+        throw error;
+      }
     }
   }
 

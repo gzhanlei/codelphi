@@ -236,7 +236,7 @@ describe("Slice Planner", () => {
       plannerVersion: "v1",
       profileVersion: "v1",
     }, await createRemoteSourceIndex({ owner: "gzhanlei", repo: "commerce", revision }, { access: {}, scopeRoots: [{ path: "apps/mobile" }], backend }));
-    expect(android.slice?.metrics.profileMatches[0]?.profileId).toBe("android-native");
+    expect(android.slice?.metrics.profileMatches[0]?.profileId).toBe("android-kotlin");
   });
 
   it("keeps valid scope roots and reports only invalid scope roots", async () => {
