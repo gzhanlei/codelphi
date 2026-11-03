@@ -47,13 +47,13 @@ describe("organization invitations", () => {
   it("adds an existing user directly", async () => {
     const db = createInvitationDb();
     const result = await inviteOrganizationMember({ sub: "owner-sub" }, { email: "known@example.com", role: "editor" }, db.execute, { id: 1, slug: "default", name: "Default Workspace", role: "owner" });
-    expect(result).toEqual({ status: "member_added", email: "known@example.com", role: "editor" });
+    expect(result).toEqual({ status: "member_added", email: "known@example.com", role: "editor", emailSent: false });
     expect(db.memberships).toContainEqual({ organizationId: 1, userId: 9, role: "editor" });
   });
 
   it("stores a pending invitation and claims it on first login", async () => {
     const db = createInvitationDb();
-    expect(await inviteOrganizationMember({ sub: "owner-sub" }, { email: "new@example.com", role: "viewer" }, db.execute, { id: 1, slug: "default", name: "Default Workspace", role: "owner" })).toEqual({ status: "invitation_pending", email: "new@example.com", role: "viewer" });
+    expect(await inviteOrganizationMember({ sub: "owner-sub" }, { email: "new@example.com", role: "viewer" }, db.execute, { id: 1, slug: "default", name: "Default Workspace", role: "owner" }, async () => false)).toMatchObject({ status: "invitation_pending", email: "new@example.com", role: "viewer", emailSent: false });
     expect(db.invitations[0]).toMatchObject({ organizationId: 1, email: "new@example.com", role: "viewer", status: "pending" });
 
     const user = { sub: "known-sub", email: "new@example.com" };

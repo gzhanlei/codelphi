@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { currentOrganization, type Organization, type OrganizationRole } from "./organizations";
 import { getDb } from "./db";
+import { invitationUrl, issueInvitationToken } from "./invitation-tokens";
+import { sendInvitationEmail } from "./invitation-email";
 import type { SessionUser } from "./types";
 
 type Execute = (statement: string, parameters: Array<string | number | null>) => Promise<unknown>;
@@ -15,6 +17,8 @@ export interface InviteResult {
   status: "member_added" | "invitation_pending";
   email: string;
   role: InviteRole;
+  inviteUrl?: string;
+  emailSent: boolean;
 }
 
 async function userIdByEmail(email: string, execute: Execute) {
@@ -22,7 +26,7 @@ async function userIdByEmail(email: string, execute: Execute) {
   return rows[0]?.id;
 }
 
-export async function inviteOrganizationMember(profile: SessionUser, input: unknown, execute: Execute = (sql, parameters) => getDb().execute(sql, parameters), organization?: Organization): Promise<InviteResult> {
+export async function inviteOrganizationMember(profile: SessionUser, input: unknown, execute: Execute = (sql, parameters) => getDb().execute(sql, parameters), organization?: Organization, mailer: typeof sendInvitationEmail = sendInvitationEmail): Promise<InviteResult> {
   const workspace = organization ?? await currentOrganization(profile);
   if (workspace.role !== "owner") throw new Error("forbidden");
   const { email, role } = inviteSchema.parse(input);
@@ -34,7 +38,7 @@ export async function inviteOrganizationMember(profile: SessionUser, input: unkn
        ON DUPLICATE KEY UPDATE role = VALUES(role), updated_at = CURRENT_TIMESTAMP(3)`,
       [workspace.id, userId, role],
     );
-    return { status: "member_added", email, role };
+    return { status: "member_added", email, role, emailSent: false };
   }
   await execute(
     `INSERT INTO organization_invitations (organization_id, email, role, invited_by)
@@ -42,13 +46,16 @@ export async function inviteOrganizationMember(profile: SessionUser, input: unkn
      ON DUPLICATE KEY UPDATE role = VALUES(role), status = 'pending', updated_at = CURRENT_TIMESTAMP(3)`,
     [email, role, profile.sub],
   );
-  return { status: "invitation_pending", email, role };
+  const token = await issueInvitationToken(workspace.id, email, execute);
+  const inviteUrl = invitationUrl(token);
+  const emailSent = await mailer({ to: email, organizationName: workspace.name, role, inviteUrl });
+  return { status: "invitation_pending", email, role, inviteUrl, emailSent };
 }
 
 export async function claimOrganizationInvitations(profile: SessionUser, execute: Execute = (sql, parameters) => getDb().execute(sql, parameters)) {
   if (!profile.email) return;
   const [invitations] = await execute(
-    "SELECT organization_id, role FROM organization_invitations WHERE email = ? AND status = 'pending'",
+    "SELECT organization_id, role FROM organization_invitations WHERE email = ? AND status = 'pending' AND token_hash IS NULL",
     [profile.email],
   ) as [Array<{ organization_id: number; role: InviteRole }>, unknown];
   for (const invitation of invitations) {

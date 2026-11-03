@@ -6,9 +6,9 @@ import { currentOrganization } from "@/lib/organizations";
 
 export const dynamic = "force-dynamic";
 
-export default async function OrganizationsPage({ searchParams }: { searchParams: Promise<{ invited?: string }> }) {
+export default async function OrganizationsPage({ searchParams }: { searchParams: Promise<{ invited?: string; inviteUrl?: string; emailSent?: string }> }) {
   const user = await requireSessionUser();
-  const { invited } = await searchParams;
+  const { invited, inviteUrl, emailSent } = await searchParams;
   const organization = await currentOrganization(user);
   const organizations = await listUserOrganizations(user);
 
@@ -21,11 +21,15 @@ export default async function OrganizationsPage({ searchParams }: { searchParams
       <div className="panel">
         {organization.role === "owner" ? <form className="invite-form" action="/organizations/invite" method="post">
           <h2>邀请成员</h2>
-          <p>输入对方的 Chandler 邮箱，选择 editor 或 viewer。首次登录后自动接受邀请。</p>
+          <p>输入对方的电子邮箱，选择 editor 或 viewer。系统会通过 Chandler 发送注册邮件；对方登录或注册后，打开邀请链接即可加入工作区。</p>
           <label className="field"><span>邮箱</span><input name="email" type="email" required placeholder="partner@example.com" /></label>
           <label className="field role-field"><span>角色</span><select name="role" defaultValue="editor"><option value="editor">editor</option><option value="viewer">viewer</option></select></label>
           <button className="primary-button" type="submit">邀请</button>
-          {invited ? <p className="success-text">{invited === "member_added" ? "成员已加入工作区。" : "邀请已创建，对方首次登录后自动加入。"}</p> : null}
+          {invited ? <div className="invite-result">
+            <p className="success-text">{invited === "member_added" ? "成员已加入工作区。" : "邀请已创建，对方登录或注册后即可加入。"}</p>
+            {inviteUrl ? <p><a href={inviteUrl} target="_blank" rel="noreferrer">打开邀请链接</a>
+            {emailSent === "true" ? " · Chandler 注册邮件已发送" : " · 该邮箱已注册或未发送注册邮件，请复制邀请链接发送给对方"}</p> : null}
+          </div> : null}
         </form> : null}
       </div>
       <div className="panel">

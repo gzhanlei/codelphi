@@ -11,6 +11,10 @@ export async function POST(request: Request) {
   try {
     const result = await inviteOrganizationMember(user, { email: String(form.get("email") ?? ""), role: String(form.get("role") ?? "") });
     const url = new URL(`/organizations?invited=${result.status}`, request.url);
+    if (result.inviteUrl) {
+      url.searchParams.set("inviteUrl", result.inviteUrl);
+      url.searchParams.set("emailSent", String(result.emailSent));
+    }
     return NextResponse.redirect(url, { status: 303 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "invite_failed";
