@@ -104,6 +104,12 @@ export function textLineCount(content: string) {
   return lines.at(-1) === "" ? lines.length - 1 : lines.length;
 }
 
+function boundedLineRange(lines: string[], startLine: number, endLine: number, maxLines: number) {
+  const start = Math.max(1, Math.min(startLine, lines.length || 1));
+  const end = Math.max(start, Math.min(lines.length || 1, endLine, start + maxLines - 1));
+  return { startLine: start, endLine: end, lines: lines.slice(start - 1, end) };
+}
+
 class RemoteSourceRevision implements OpenedRemoteSourceRevision {
   readonly identity: SourceRevisionIdentity;
   readonly scopeRoots: SourceScopeRoot[];
@@ -181,9 +187,10 @@ class RemoteSourceRevision implements OpenedRemoteSourceRevision {
     const content = decodeUtf8(bytes);
     const rawLines = content.split("\n");
     const lines = rawLines.at(-1) === "" ? rawLines.slice(0, -1) : rawLines;
-    const startLine = Math.min(request.startLine, lines.length);
-    const endLine = Math.min(lines.length, request.endLine, startLine + this.budgets.maxLinesPerRead - 1);
-    const selected = lines.slice(startLine - 1, endLine);
+    const range = boundedLineRange(lines, request.startLine, request.endLine, this.budgets.maxLinesPerRead);
+    const startLine = range.startLine;
+    const endLine = range.endLine;
+    const selected = range.lines;
     const byteSize = Buffer.byteLength(selected.join("\n"), "utf8");
     this.consumeContentBytes(byteSize);
 

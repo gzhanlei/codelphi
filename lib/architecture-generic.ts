@@ -1,6 +1,6 @@
 import { architectureDocumentSchema, architectureDraftInputSchema, markerLine, buildArchitectureDocument as buildRadarArchitectureDocument, type ArchitectureDocument, type ArchitectureDraftInput } from "./architecture-draft";
 
-type GenericId = "frontend" | "backend" | "auth" | "db" | "github" | "llm" | "webhook" | "analysis" | "android-ui" | "android-service" | "native-bridge" | "native-core" | "media-sink";
+type GenericId = "frontend" | "backend" | "auth" | "db" | "github" | "llm" | "webhook" | "analysis" | "android-ui" | "android-data" | "android-local-db" | "android-network" | "android-service" | "native-bridge" | "native-core" | "media-sink";
 type Component = ArchitectureDocument["components"][number];
 type Connection = ArchitectureDocument["connections"][number];
 
@@ -13,12 +13,15 @@ const rules: Record<GenericId, EvidenceRule> = {
   frontend: { path: /(?:^|\/)app\/.*page\.tsx$|(?:^|\/)src\/(?:App|main)\.tsx$|(?:^|\/)pages\/(?:index|_app)\.tsx$|(?:^|\/)resources\/js\/.*\.tsx$/, markers: ["export default", "export function", "createRoot", "ReactDOM"] },
   backend: { path: /(?:^|\/)internal\/.*\.go$|(?:^|\/)app\/api\/.*route\.ts$|(?:^|\/)src\/main\/(?:java|kotlin)\/.*\.(?:java|kt)$|(?:^|\/)app\/.*\.py$|(?:^|\/)src\/.*\.rs$|(?:^|\/)app\/.*\.php$|(?:^|\/)src\/.*\.cs$|(?:^|\/)cmd\/.*\.go$/, markers: ["@SpringBootApplication", "@RestController", "class Controller", "APIRouter", "FastAPI", "func ", "Router::new", "Route::", "class Program", "namespace", "POST", "GET"] },
   auth: { path: /oauth|auth|chandler/i, markers: ["OAuth", "WorkMembership", "PKCE", "Spring Security", "JWT", "passport", "Authorize"] },
-  db: { path: /./, markers: ["go-sql-driver/mysql", "mysql2", "sql.Open", "database/sql", "spring.datasource", "JpaRepository", "SQLAlchemy", "EntityFrameworkCore", "gorm.Open", "DB::", "CREATE TABLE", "RoomDatabase"] },
+  db: { path: /./, markers: ["go-sql-driver/mysql", "mysql2", "sql.Open", "database/sql", "spring.datasource", "JpaRepository", "SQLAlchemy", "SQLModel", "sqlmodel", "EntityFrameworkCore", "gorm.Open", "DB::", "CREATE TABLE", "RoomDatabase"] },
   github: { path: /github/i, markers: ["api.github.com", "Installation"] },
   llm: { path: /ai|llm|gateway/i, markers: ["chat/completions", "OpenAI", "LLMGateway", "AI_API_KEY"] },
   webhook: { path: /webhook/i, markers: ["webhook", "push"] },
   analysis: { path: /analysis|spec/i, markers: ["analyzeWithAI", "insertSpecVersion", "SpecVersion"] },
   "android-ui": { path: /(?:^|\/)app\/src\/main\/(?:java|kotlin)\/.*(?:Activity\.java|Activity\.kt)$/, markers: ["extends Activity", "ComponentActivity", "AppCompatActivity", "setContent", "SurfaceView", "setContentView"] },
+  "android-data": { path: /(?:^|\/)core\/data\/.*\.kt$|(?:^|\/)data\/repository\/.*\.kt$/, markers: ["Repository", "DataSource", "Dao"] },
+  "android-local-db": { path: /(?:^|\/)core\/database\/.*\.kt$/, markers: ["@Database", "RoomDatabase", "NiaDatabase", "Dao"] },
+  "android-network": { path: /(?:^|\/)core\/network\/.*\.kt$/, markers: ["NiaNetworkDataSource", "Retrofit", "HttpClient", "Ktor"] },
   "android-service": { path: /(?:^|\/)app\/src\/main\/(?:java|kotlin)\/.*(?:Service\.java|Service\.kt)$/, markers: ["extends Service", "NsdManager", "onStartCommand"] },
   "native-bridge": { path: /(?:^|\/)app\/src\/main\/(?:java\/.*NativeBridge\.java|cpp\/.*\.c)$/, markers: ["System.loadLibrary", "JNI_OnLoad", "Java_com_", "C ↔ Java"] },
   "native-core": { path: /(?:^|\/)lib\/.*\.c$/, markers: ["raop_init", "httpd_start", "conn_request", "conn_init"] },
@@ -36,6 +39,9 @@ const presentation: Record<GenericId | "users", Omit<Component, "id" | "sources"
   github: { type: "external", label: "GitHub", sublabel: "仓库与安装凭据", pos: [640, 600], size: [150, 64] },
   llm: { type: "external", label: "LLM 网关", sublabel: "结构化产品分析", pos: [940, 490], size: [130, 64] },
   "android-ui": { type: "frontend", label: "Android UI", sublabel: "Activity / SurfaceView", pos: [340, 280], size: [150, 64] },
+  "android-data": { type: "backend", label: "数据与仓储层", sublabel: "Repository / DataSource", pos: [640, 490], size: [150, 64] },
+  "android-local-db": { type: "database", label: "本地数据存储", sublabel: "Room / SQLite", pos: [940, 280], size: [130, 64] },
+  "android-network": { type: "backend", label: "网络数据同步", sublabel: "Remote DataSource", pos: [940, 490], size: [150, 64] },
   "android-service": { type: "backend", label: "Android 服务", sublabel: "Foreground Service / NSD", pos: [640, 280], size: [150, 64] },
   "native-bridge": { type: "messagebus", label: "JNI 桥", sublabel: "Java ↔ Native 回调", pos: [940, 490], size: [150, 64] },
   "native-core": { type: "backend", label: "原生协议核心", sublabel: "C / RAOP / HTTPD", pos: [640, 490], size: [150, 64] },
@@ -54,6 +60,10 @@ const connectionDefinitions: Connection[] = [
   { id: "analysis-to-llm", from: "analysis", to: "llm", label: "代码 + diff" },
   { id: "analysis-to-db", from: "analysis", to: "db", label: "规格版本", fromSide: "top", toSide: "bottom" },
   { id: "users-to-android-ui", from: "users", to: "android-ui", label: "打开界面", variant: "emphasis" },
+  { id: "android-ui-to-data", from: "android-ui", to: "android-data", label: "状态 / 请求" },
+  { id: "android-data-to-local-db", from: "android-data", to: "android-local-db", label: "Room 读写" },
+  { id: "android-data-to-network", from: "android-data", to: "android-network", label: "远程同步" },
+  { id: "android-network-to-data", from: "android-network", to: "android-data", label: "数据刷新", variant: "dashed" },
   { id: "android-ui-to-service", from: "android-ui", to: "android-service", label: "启动 / Surface" },
   { id: "android-service-to-bridge", from: "android-service", to: "native-bridge", label: "nativeStart / 回调", fromSide: "bottom", toSide: "top" },
   { id: "native-bridge-to-core", from: "native-bridge", to: "native-core", label: "raop_init" },
@@ -62,11 +72,12 @@ const connectionDefinitions: Connection[] = [
   { id: "media-sink-to-android-ui", from: "media-sink", to: "android-ui", label: "Surface / AudioTrack", fromSide: "top", toSide: "bottom" },
 ];
 
-const componentOrder: Array<GenericId | "users"> = ["users", "frontend", "backend", "auth", "db", "webhook", "analysis", "github", "llm", "android-ui", "android-service", "native-bridge", "native-core", "media-sink"];
+const componentOrder: Array<GenericId | "users"> = ["users", "frontend", "backend", "auth", "db", "webhook", "analysis", "github", "llm", "android-ui", "android-data", "android-local-db", "android-network", "android-service", "native-bridge", "native-core", "media-sink"];
 
 function sourcesFor(id: GenericId, sources: ArchitectureDraftInput["sources"]) {
   const rule = rules[id];
   const matches = sources.flatMap((source) => {
+    if (id === "db" && source.path.includes("core/database/")) return [];
     if (!rule.path.test(source.path)) return [];
     const line = markerLine(source.content, rule.markers);
     return line === undefined ? [] : [{ path: source.path, line }];

@@ -107,7 +107,7 @@ function hasFileSuffix(files: SelectedSourceFile[], suffix: string) {
 
 function profileCandidates(files: SelectedSourceFile[], content: Map<string, string>) {
   const joined = [...content.entries()].map(([path, value]) => `${path}\n${value}`).join("\n");
-  const has = (fragment: string) => joined.toLowerCase().includes(fragment);
+  const has = (fragment: string) => joined.toLowerCase().includes(fragment.toLowerCase());
   const candidates = [
     { profileId: "next-web" as const, confidence: 0.9, paths: ["package.json", "app/page.tsx"], matches: hasNextWebProfile(files, has) },
     { profileId: "node-api" as const, confidence: 0.82, paths: ["package.json"], matches: hasNodeApiProfile(files, has) },
@@ -305,10 +305,10 @@ class DeterministicSlicePlanner implements SlicePlanner {
   }
 
   private async selectFromDirectory(index: OpenedRemoteSourceRevision, state: SlicePlanningState, path: string, depth: number) {
-    if (depth > 8 || state.budgetsRemaining.selectedFiles <= 0) return;
+    if (depth > 12 || state.budgetsRemaining.selectedFiles <= 0) return;
     const listing = await index.listDir(path);
     await this.selectListedFiles(index, state, listing.entries);
-    if (depth >= 8) return;
+    if (depth >= 12) return;
     for (const entry of listing.entries) {
       if (entry.pruned || entry.type !== "tree") continue;
       await this.selectFromDirectory(index, state, entry.path, depth + 1);

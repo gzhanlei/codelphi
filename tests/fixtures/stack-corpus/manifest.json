@@ -52,7 +52,10 @@
       "revision": "2982e63cb691ad49cd009aab43dc206fee6699c2",
       "expectedProfile": "android-kotlin",
       "sourceRoots": [
-        "app/src/main"
+        "app/src/main",
+        "core/data",
+        "core/database",
+        "core/network"
       ]
     },
     {
@@ -62,8 +65,7 @@
       "revision": "fccb3537c728d30cb52ef0fb4e00ce239713ec30",
       "expectedProfile": "rust-service",
       "sourceRoots": [
-        "crates",
-        "src"
+        "crates"
       ]
     },
     {

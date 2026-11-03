@@ -16,7 +16,7 @@ import {
   type SourceTreeApiEntry,
 } from "../lib/remote-source-index";
 import { SourceIndexError } from "../lib/remote-source-index";
-import { candidatePriority, compareProfiles, createSlicePlanner, confidenceLabel, hasDotnetServicesProfile, hasFastapiProfile, hasLaravelProfile, hasRustServiceProfile, hasSpringJavaProfile, reasonFor, toDiagnostic } from "../lib/slice-planner";
+import { candidatePriority, compareProfiles, createSlicePlanner, confidenceLabel, hasDotnetServicesProfile, hasFastapiProfile, hasLaravelProfile, hasRustServiceProfile, hasSpringJavaProfile, matchProfiles, reasonFor, toDiagnostic } from "../lib/slice-planner";
 import type { SelectedSourceFile } from "../lib/slice-planner";
 
 const revision = "9f31c0de7a41b8d2e5f60a93c4d78ba12ef50937";
@@ -180,6 +180,12 @@ describe("planner pure decisions", () => {
     expect(result.diagnostics[0]).toEqual({ code: "github_request_failed", message: "GitHub unavailable" });
   });
 
+  it("matches Spring annotations case-insensitively", () => {
+    const files = [{ path: "src/main/java/PetClinicApplication.java", blobSha: "sha", treeEntrySha: "sha", reason: "service" as const, byteSize: 100, lineRanges: [{ startLine: 1, endLine: 5, purpose: "service" }], signals: ["service" as const] }];
+    const matches = matchProfiles(files, new Map([[files[0].path, "import org.springframework.boot.autoconfigure.SpringBootApplication;\n@SpringBootApplication\npublic class PetClinicApplication {}"]]));
+    expect(matches.map((match) => match.profileId)).toContain("spring-java");
+  });
+
   it("matches extended mainstream profiles", () => {
     const file = (path: string) => ({ path, blobSha: "sha", treeEntrySha: "sha", reason: "service" as const, byteSize: 1, lineRanges: [], signals: ["service" as const] });
     expect(hasSpringJavaProfile([file("pom.xml")], () => true)).toBe(true);
@@ -229,6 +235,13 @@ describe("remote source runtime boundaries", () => {
       },
     };
   }
+
+  it("keeps line numbers valid for empty source files", async () => {
+    const index = await createRemoteSourceIndex(ref, { access: {}, scopeRoots: [{ path: "apps/checkout" }], backend: backendWithBlob("") });
+    const read = await index.readLines({ path: "apps/checkout/file.txt", startLine: 1, endLine: 1, requestedBy: "planner", reason: "empty file" });
+    expect(read.startLine).toBe(1);
+    expect(read.endLine).toBeGreaterThanOrEqual(read.startLine);
+  });
 
   it("reports null metadata for directories, pruned files, and absent entries", async () => {
     const index = await createRemoteSourceIndex(ref, { access: {}, scopeRoots: [{ path: "apps/checkout" }], backend: backendWithBlob("{}\n") });

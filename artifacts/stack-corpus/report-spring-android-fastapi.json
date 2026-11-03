@@ -1,0 +1,410 @@
+{
+  "version": 1,
+  "manifestUpdatedAt": "",
+  "generatedAt": "2026-11-03T16:09:51.526Z",
+  "summary": {
+    "total": 3,
+    "completed": 3,
+    "profileMatches": 3
+  },
+  "results": [
+    {
+      "id": "spring-java",
+      "repository": "spring-projects/spring-petclinic",
+      "revision": "500158f732419217507c7656904b8e6aa1bcc0d6",
+      "expectedProfile": "spring-java",
+      "status": "completed",
+      "detectedProfile": "spring-java",
+      "profileMatches": [
+        {
+          "profileId": "spring-java",
+          "confidence": 0.92,
+          "matchedSignals": []
+        }
+      ],
+      "missing": [],
+      "diagnostics": [],
+      "selectedFiles": [
+        "src/main/java/org/springframework/samples/petclinic/package-info.java",
+        "src/main/java/org/springframework/samples/petclinic/PetClinicApplication.java",
+        "src/main/java/org/springframework/samples/petclinic/PetClinicRuntimeHints.java",
+        "src/main/java/org/springframework/samples/petclinic/model/BaseEntity.java",
+        "src/main/java/org/springframework/samples/petclinic/model/NamedEntity.java",
+        "src/main/java/org/springframework/samples/petclinic/model/package-info.java",
+        "src/main/java/org/springframework/samples/petclinic/model/Person.java",
+        "src/main/java/org/springframework/samples/petclinic/owner/Owner.java",
+        "src/main/java/org/springframework/samples/petclinic/owner/OwnerController.java",
+        "src/main/java/org/springframework/samples/petclinic/owner/OwnerRepository.java",
+        "src/main/java/org/springframework/samples/petclinic/owner/package-info.java",
+        "src/main/java/org/springframework/samples/petclinic/owner/Pet.java",
+        "src/main/java/org/springframework/samples/petclinic/owner/PetController.java",
+        "src/main/java/org/springframework/samples/petclinic/owner/PetType.java",
+        "src/main/java/org/springframework/samples/petclinic/owner/PetTypeFormatter.java",
+        "src/main/java/org/springframework/samples/petclinic/owner/PetTypeRepository.java",
+        "src/main/java/org/springframework/samples/petclinic/owner/PetValidator.java",
+        "src/main/java/org/springframework/samples/petclinic/owner/Visit.java",
+        "src/main/java/org/springframework/samples/petclinic/owner/VisitController.java",
+        "src/main/java/org/springframework/samples/petclinic/system/CacheConfiguration.java",
+        "src/main/java/org/springframework/samples/petclinic/system/CrashController.java",
+        "src/main/java/org/springframework/samples/petclinic/system/package-info.java",
+        "src/main/java/org/springframework/samples/petclinic/system/WebConfiguration.java",
+        "src/main/java/org/springframework/samples/petclinic/system/WelcomeController.java",
+        "src/main/java/org/springframework/samples/petclinic/vet/package-info.java",
+        "src/main/java/org/springframework/samples/petclinic/vet/Specialty.java",
+        "src/main/java/org/springframework/samples/petclinic/vet/Vet.java",
+        "src/main/java/org/springframework/samples/petclinic/vet/VetController.java",
+        "src/main/java/org/springframework/samples/petclinic/vet/VetRepository.java",
+        "src/main/java/org/springframework/samples/petclinic/vet/Vets.java",
+        "src/main/resources/application-mysql.properties",
+        "src/main/resources/application-postgres.properties",
+        "src/main/resources/db/h2/data.sql",
+        "src/main/resources/db/h2/schema.sql",
+        "src/main/resources/db/mysql/data.sql",
+        "src/main/resources/db/mysql/petclinic_db_setup_mysql.txt",
+        "src/main/resources/db/mysql/schema.sql",
+        "src/main/resources/db/mysql/user.sql",
+        "src/main/resources/db/postgres/data.sql",
+        "src/main/resources/db/postgres/petclinic_db_setup_postgres.txt",
+        "src/main/resources/db/postgres/schema.sql"
+      ],
+      "metrics": {
+        "treeExpansions": 27,
+        "blobFetches": 41,
+        "selectedFiles": 41,
+        "selectedLineRanges": 41,
+        "selectedContentBytes": 81421,
+        "aiReadCalls": 0,
+        "prunedPathCount": 0,
+        "wallClockMs": 33466,
+        "profileMatches": [
+          {
+            "profileId": "spring-java",
+            "confidence": 0.92,
+            "matchedSignals": []
+          }
+        ],
+        "budgetsRemaining": {
+          "selectedFiles": 79,
+          "selectedLineRanges": 559,
+          "plannerContentBytes": 158579,
+          "aiReadCalls": 20
+        }
+      },
+      "architectureComponents": [
+        "users",
+        "backend",
+        "db"
+      ],
+      "architectureError": null,
+      "durationMs": 36765
+    },
+    {
+      "id": "fastapi-react",
+      "repository": "fastapi/full-stack-fastapi-template",
+      "revision": "f4bcfaba7c85be3c6332cc74a20819f586dcdbc6",
+      "expectedProfile": "fastapi-python",
+      "status": "completed",
+      "detectedProfile": "fastapi-python",
+      "profileMatches": [
+        {
+          "profileId": "fastapi-python",
+          "confidence": 0.88,
+          "matchedSignals": []
+        }
+      ],
+      "missing": [],
+      "diagnostics": [],
+      "selectedFiles": [
+        "backend/Dockerfile",
+        "backend/README.md",
+        "backend/app/__init__.py",
+        "backend/app/crud.py",
+        "backend/app/initial_data.py",
+        "backend/app/main.py",
+        "backend/app/models.py",
+        "backend/app/utils.py",
+        "backend/app/alembic/env.py",
+        "backend/app/alembic/versions/1a31ce608336_add_cascade_delete_relationships.py",
+        "backend/app/alembic/versions/9c0a54914c78_add_max_length_for_string_varchar_.py",
+        "backend/app/alembic/versions/d98dd8ec85a3_edit_replace_id_integers_in_all_models_.py",
+        "backend/app/alembic/versions/e2412789c190_initialize_models.py",
+        "backend/app/alembic/versions/fe56fa70289e_add_created_at_to_user_and_item.py",
+        "backend/app/api/__init__.py",
+        "backend/app/api/deps.py",
+        "backend/app/api/main.py",
+        "backend/app/api/routes/__init__.py",
+        "backend/app/api/routes/items.py",
+        "backend/app/api/routes/login.py",
+        "backend/app/api/routes/private.py",
+        "backend/app/api/routes/users.py",
+        "backend/app/api/routes/utils.py",
+        "backend/app/core/__init__.py",
+        "backend/app/core/config.py",
+        "backend/app/core/db.py",
+        "backend/app/core/security.py",
+        "backend/tests/__init__.py",
+        "backend/tests/conftest.py",
+        "backend/tests/api/__init__.py",
+        "backend/tests/api/routes/__init__.py",
+        "backend/tests/api/routes/test_items.py",
+        "backend/tests/api/routes/test_login.py",
+        "backend/tests/api/routes/test_private.py",
+        "backend/tests/api/routes/test_users.py",
+        "backend/tests/crud/__init__.py",
+        "backend/tests/crud/test_user.py",
+        "backend/tests/scripts/__init__.py",
+        "backend/tests/utils/__init__.py",
+        "backend/tests/utils/item.py",
+        "backend/tests/utils/user.py",
+        "backend/tests/utils/utils.py",
+        "frontend/package.json",
+        "frontend/Dockerfile.playwright",
+        "frontend/openapi-ts.config.ts",
+        "frontend/playwright.config.ts",
+        "frontend/README.md",
+        "frontend/vite.config.ts",
+        "frontend/src/main.tsx",
+        "frontend/src/routeTree.gen.ts",
+        "frontend/src/utils.ts",
+        "frontend/src/vite-env.d.ts",
+        "frontend/src/client/index.ts",
+        "frontend/src/client/client.gen.ts",
+        "frontend/src/client/sdk.gen.ts",
+        "frontend/src/client/types.gen.ts",
+        "frontend/src/client/client/index.ts",
+        "frontend/src/client/client/client.gen.ts",
+        "frontend/src/client/client/types.gen.ts",
+        "frontend/src/client/client/utils.gen.ts",
+        "frontend/src/client/core/auth.gen.ts",
+        "frontend/src/client/core/bodySerializer.gen.ts",
+        "frontend/src/client/core/params.gen.ts",
+        "frontend/src/client/core/pathSerializer.gen.ts",
+        "frontend/src/client/core/queryKeySerializer.gen.ts",
+        "frontend/src/client/core/serverSentEvents.gen.ts",
+        "frontend/src/client/core/types.gen.ts",
+        "frontend/src/client/core/utils.gen.ts",
+        "frontend/src/components/theme-provider.tsx",
+        "frontend/src/components/Admin/AddUser.tsx",
+        "frontend/src/components/Admin/columns.tsx",
+        "frontend/src/components/Admin/DeleteUser.tsx",
+        "frontend/src/components/Admin/EditUser.tsx",
+        "frontend/src/components/Admin/UserActionsMenu.tsx",
+        "frontend/src/components/Common/Appearance.tsx",
+        "frontend/src/components/Common/AuthLayout.tsx",
+        "frontend/src/components/Common/DataTable.tsx",
+        "frontend/src/components/Common/ErrorComponent.tsx",
+        "frontend/src/components/Common/Footer.tsx",
+        "frontend/src/components/Common/Logo.tsx",
+        "frontend/src/components/Common/NotFound.tsx",
+        "frontend/src/components/Items/AddItem.tsx",
+        "frontend/src/components/Items/columns.tsx",
+        "frontend/src/components/Items/DeleteItem.tsx",
+        "frontend/src/components/Items/EditItem.tsx",
+        "frontend/src/components/Items/ItemActionsMenu.tsx",
+        "frontend/src/components/Pending/PendingItems.tsx",
+        "frontend/src/components/Pending/PendingUsers.tsx",
+        "frontend/src/components/Sidebar/AppSidebar.tsx",
+        "frontend/src/components/Sidebar/Main.tsx"
+      ],
+      "metrics": {
+        "treeExpansions": 37,
+        "blobFetches": 90,
+        "selectedFiles": 90,
+        "selectedLineRanges": 90,
+        "selectedContentBytes": 240394,
+        "aiReadCalls": 0,
+        "prunedPathCount": 0,
+        "wallClockMs": 60968,
+        "profileMatches": [
+          {
+            "profileId": "fastapi-python",
+            "confidence": 0.88,
+            "matchedSignals": []
+          }
+        ],
+        "budgetsRemaining": {
+          "selectedFiles": 30,
+          "selectedLineRanges": 510,
+          "plannerContentBytes": -394,
+          "aiReadCalls": 20
+        }
+      },
+      "architectureComponents": [
+        "users",
+        "frontend",
+        "backend",
+        "db"
+      ],
+      "architectureError": null,
+      "durationMs": 108318
+    },
+    {
+      "id": "android-kotlin",
+      "repository": "android/nowinandroid",
+      "revision": "2982e63cb691ad49cd009aab43dc206fee6699c2",
+      "expectedProfile": "android-kotlin",
+      "status": "completed",
+      "detectedProfile": "android-kotlin",
+      "profileMatches": [
+        {
+          "profileId": "android-kotlin",
+          "confidence": 0.9,
+          "matchedSignals": [
+            {
+              "path": "app/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "core/data/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "core/database/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "core/network/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            }
+          ]
+        }
+      ],
+      "missing": [],
+      "diagnostics": [],
+      "selectedFiles": [
+        "app/src/main/AndroidManifest.xml",
+        "app/src/main/kotlin/com/google/samples/apps/nowinandroid/MainActivity.kt",
+        "app/src/main/kotlin/com/google/samples/apps/nowinandroid/MainActivityViewModel.kt",
+        "app/src/main/kotlin/com/google/samples/apps/nowinandroid/NiaApplication.kt",
+        "app/src/main/kotlin/com/google/samples/apps/nowinandroid/di/JankStatsModule.kt",
+        "app/src/main/kotlin/com/google/samples/apps/nowinandroid/navigation/TopLevelNavItem.kt",
+        "app/src/main/kotlin/com/google/samples/apps/nowinandroid/ui/NiaApp.kt",
+        "app/src/main/kotlin/com/google/samples/apps/nowinandroid/ui/NiaAppState.kt",
+        "app/src/main/kotlin/com/google/samples/apps/nowinandroid/util/ProfileVerifierLogger.kt",
+        "app/src/main/kotlin/com/google/samples/apps/nowinandroid/util/UiExtensions.kt",
+        "core/data/README.md",
+        "core/data/src/main/AndroidManifest.xml",
+        "core/data/src/main/kotlin/com/google/samples/apps/nowinandroid/core/data/SyncUtilities.kt",
+        "core/data/src/main/kotlin/com/google/samples/apps/nowinandroid/core/data/di/DataModule.kt",
+        "core/data/src/main/kotlin/com/google/samples/apps/nowinandroid/core/data/di/UserNewsResourceRepositoryModule.kt",
+        "core/data/src/main/kotlin/com/google/samples/apps/nowinandroid/core/data/model/NewsResource.kt",
+        "core/data/src/main/kotlin/com/google/samples/apps/nowinandroid/core/data/model/RecentSearchQuery.kt",
+        "core/data/src/main/kotlin/com/google/samples/apps/nowinandroid/core/data/model/Topic.kt",
+        "core/data/src/main/kotlin/com/google/samples/apps/nowinandroid/core/data/repository/AnalyticsExtensions.kt",
+        "core/data/src/main/kotlin/com/google/samples/apps/nowinandroid/core/data/repository/CompositeUserNewsResourceRepository.kt",
+        "core/data/src/main/kotlin/com/google/samples/apps/nowinandroid/core/data/repository/DefaultRecentSearchRepository.kt",
+        "core/data/src/main/kotlin/com/google/samples/apps/nowinandroid/core/data/repository/DefaultSearchContentsRepository.kt",
+        "core/data/src/main/kotlin/com/google/samples/apps/nowinandroid/core/data/repository/NewsRepository.kt",
+        "core/data/src/main/kotlin/com/google/samples/apps/nowinandroid/core/data/repository/OfflineFirstNewsRepository.kt",
+        "core/data/src/main/kotlin/com/google/samples/apps/nowinandroid/core/data/repository/OfflineFirstTopicsRepository.kt",
+        "core/data/src/main/kotlin/com/google/samples/apps/nowinandroid/core/data/repository/OfflineFirstUserDataRepository.kt",
+        "core/data/src/main/kotlin/com/google/samples/apps/nowinandroid/core/data/repository/RecentSearchRepository.kt",
+        "core/data/src/main/kotlin/com/google/samples/apps/nowinandroid/core/data/repository/SearchContentsRepository.kt",
+        "core/data/src/main/kotlin/com/google/samples/apps/nowinandroid/core/data/repository/TopicsRepository.kt",
+        "core/data/src/main/kotlin/com/google/samples/apps/nowinandroid/core/data/repository/UserDataRepository.kt",
+        "core/data/src/main/kotlin/com/google/samples/apps/nowinandroid/core/data/repository/UserNewsResourceRepository.kt",
+        "core/data/src/main/kotlin/com/google/samples/apps/nowinandroid/core/data/util/ConnectivityManagerNetworkMonitor.kt",
+        "core/data/src/main/kotlin/com/google/samples/apps/nowinandroid/core/data/util/NetworkMonitor.kt",
+        "core/data/src/main/kotlin/com/google/samples/apps/nowinandroid/core/data/util/SyncManager.kt",
+        "core/data/src/main/kotlin/com/google/samples/apps/nowinandroid/core/data/util/TimeZoneMonitor.kt",
+        "core/data/src/test/kotlin/com/google/samples/apps/nowinandroid/core/data/CompositeUserNewsResourceRepositoryTest.kt",
+        "core/data/src/test/kotlin/com/google/samples/apps/nowinandroid/core/data/UserNewsResourceTest.kt",
+        "core/data/src/test/kotlin/com/google/samples/apps/nowinandroid/core/data/model/NetworkEntityTest.kt",
+        "core/data/src/test/kotlin/com/google/samples/apps/nowinandroid/core/data/repository/OfflineFirstNewsRepositoryTest.kt",
+        "core/data/src/test/kotlin/com/google/samples/apps/nowinandroid/core/data/repository/OfflineFirstTopicsRepositoryTest.kt",
+        "core/data/src/test/kotlin/com/google/samples/apps/nowinandroid/core/data/repository/OfflineFirstUserDataRepositoryTest.kt",
+        "core/data/src/test/kotlin/com/google/samples/apps/nowinandroid/core/data/repository/TestSynchronizer.kt",
+        "core/data/src/test/kotlin/com/google/samples/apps/nowinandroid/core/data/testdoubles/TestNewsResourceDao.kt",
+        "core/data/src/test/kotlin/com/google/samples/apps/nowinandroid/core/data/testdoubles/TestNiaNetworkDataSource.kt",
+        "core/data/src/test/kotlin/com/google/samples/apps/nowinandroid/core/data/testdoubles/TestTopicDao.kt",
+        "core/data/src/test/kotlin/com/google/samples/apps/nowinandroid/core/database/model/PopulatedNewsResourceKtTest.kt",
+        "core/database/README.md",
+        "core/database/src/androidTest/kotlin/com/google/samples/apps/nowinandroid/core/database/dao/DatabaseTest.kt",
+        "core/database/src/androidTest/kotlin/com/google/samples/apps/nowinandroid/core/database/dao/NewsResourceDaoTest.kt",
+        "core/database/src/androidTest/kotlin/com/google/samples/apps/nowinandroid/core/database/dao/TopicDaoTest.kt",
+        "core/database/src/main/AndroidManifest.xml",
+        "core/database/src/main/kotlin/com/google/samples/apps/nowinandroid/core/database/DatabaseMigrations.kt",
+        "core/database/src/main/kotlin/com/google/samples/apps/nowinandroid/core/database/NiaDatabase.kt",
+        "core/database/src/main/kotlin/com/google/samples/apps/nowinandroid/core/database/dao/NewsResourceDao.kt",
+        "core/database/src/main/kotlin/com/google/samples/apps/nowinandroid/core/database/dao/NewsResourceFtsDao.kt",
+        "core/database/src/main/kotlin/com/google/samples/apps/nowinandroid/core/database/dao/RecentSearchQueryDao.kt",
+        "core/database/src/main/kotlin/com/google/samples/apps/nowinandroid/core/database/dao/TopicDao.kt",
+        "core/database/src/main/kotlin/com/google/samples/apps/nowinandroid/core/database/dao/TopicFtsDao.kt",
+        "core/database/src/main/kotlin/com/google/samples/apps/nowinandroid/core/database/di/DaosModule.kt",
+        "core/database/src/main/kotlin/com/google/samples/apps/nowinandroid/core/database/di/DatabaseModule.kt",
+        "core/database/src/main/kotlin/com/google/samples/apps/nowinandroid/core/database/model/NewsResourceEntity.kt",
+        "core/database/src/main/kotlin/com/google/samples/apps/nowinandroid/core/database/model/NewsResourceFtsEntity.kt",
+        "core/database/src/main/kotlin/com/google/samples/apps/nowinandroid/core/database/model/NewsResourceTopicCrossRef.kt",
+        "core/database/src/main/kotlin/com/google/samples/apps/nowinandroid/core/database/model/PopulatedNewsResource.kt",
+        "core/database/src/main/kotlin/com/google/samples/apps/nowinandroid/core/database/model/RecentSearchQueryEntity.kt",
+        "core/database/src/main/kotlin/com/google/samples/apps/nowinandroid/core/database/model/TopicEntity.kt",
+        "core/database/src/main/kotlin/com/google/samples/apps/nowinandroid/core/database/model/TopicFtsEntity.kt",
+        "core/database/src/main/kotlin/com/google/samples/apps/nowinandroid/core/database/util/InstantConverter.kt",
+        "core/network/README.md",
+        "core/network/src/demo/kotlin/com/google/samples/apps/nowinandroid/core/network/di/FlavoredNetworkModule.kt",
+        "core/network/src/main/AndroidManifest.xml",
+        "core/network/src/main/kotlin/JvmUnitTestDemoAssetManager.kt",
+        "core/network/src/main/kotlin/com/google/samples/apps/nowinandroid/core/network/NiaNetworkDataSource.kt",
+        "core/network/src/main/kotlin/com/google/samples/apps/nowinandroid/core/network/demo/DemoAssetManager.kt",
+        "core/network/src/main/kotlin/com/google/samples/apps/nowinandroid/core/network/demo/DemoNiaNetworkDataSource.kt",
+        "core/network/src/main/kotlin/com/google/samples/apps/nowinandroid/core/network/di/NetworkModule.kt",
+        "core/network/src/main/kotlin/com/google/samples/apps/nowinandroid/core/network/model/NetworkChangeList.kt",
+        "core/network/src/main/kotlin/com/google/samples/apps/nowinandroid/core/network/model/NetworkNewsResource.kt",
+        "core/network/src/main/kotlin/com/google/samples/apps/nowinandroid/core/network/model/NetworkTopic.kt",
+        "core/network/src/main/kotlin/com/google/samples/apps/nowinandroid/core/network/retrofit/RetrofitNiaNetwork.kt",
+        "core/network/src/prod/kotlin/com/google/samples/apps/nowinandroid/core/network/di/FlavoredNetworkModule.kt",
+        "core/network/src/test/kotlin/com/google/samples/apps/nowinandroid/core/network/demo/DemoNiaNetworkDataSourceTest.kt"
+      ],
+      "metrics": {
+        "treeExpansions": 126,
+        "blobFetches": 82,
+        "selectedFiles": 82,
+        "selectedLineRanges": 82,
+        "selectedContentBytes": 238594,
+        "aiReadCalls": 0,
+        "prunedPathCount": 0,
+        "wallClockMs": 106938,
+        "profileMatches": [
+          {
+            "profileId": "android-kotlin",
+            "confidence": 0.9,
+            "matchedSignals": [
+              {
+                "path": "app/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "core/data/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "core/database/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "core/network/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              }
+            ]
+          }
+        ],
+        "budgetsRemaining": {
+          "selectedFiles": 38,
+          "selectedLineRanges": 518,
+          "plannerContentBytes": 1406,
+          "aiReadCalls": 20
+        }
+      },
+      "architectureComponents": [
+        "users",
+        "backend",
+        "android-ui",
+        "android-data",
+        "android-local-db",
+        "android-network"
+      ],
+      "architectureError": null,
+      "durationMs": 157906
+    }
+  ]
+}

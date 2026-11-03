@@ -136,6 +136,41 @@ describe("architecture draft", () => {
     expect(document.components.flatMap((component) => component.sources ?? []).every((source) => source.line && source.line > 0)).toBe(true);
   });
 
+  it("builds an Android Compose data architecture from repository evidence", () => {
+    const document = buildArchitectureDocument({
+      productName: "Now in Android",
+      productSlug: "android-kotlin",
+      owner: "android",
+      name: "nowinandroid",
+      revision: "43d8ce7b96f7e7deff9bb3b8429eb8ca361466ea",
+      sources: [
+        { path: "app/src/main/kotlin/com/google/samples/apps/nowinandroid/MainActivity.kt", content: "1: class MainActivity : ComponentActivity() {}" },
+        { path: "core/data/src/main/kotlin/com/google/samples/apps/nowinandroid/core/data/repository/OfflineFirstNewsRepository.kt", content: "1: class OfflineFirstNewsRepository : NewsRepository {}" },
+        { path: "core/database/src/main/kotlin/com/google/samples/apps/nowinandroid/core/database/NiaDatabase.kt", content: "1: @Database\n2: abstract class NiaDatabase : RoomDatabase() {}" },
+        { path: "core/network/src/main/kotlin/com/google/samples/apps/nowinandroid/core/network/NiaNetworkDataSource.kt", content: "1: interface NiaNetworkDataSource {}" },
+      ],
+    });
+    expect(document.components.map((component) => component.id)).toEqual(["users", "android-ui", "android-data", "android-local-db", "android-network"]);
+    expect(document.connections).toContainEqual(expect.objectContaining({ from: "android-ui", to: "android-data" }));
+    expect(document.connections).toContainEqual(expect.objectContaining({ from: "android-data", to: "android-local-db" }));
+  });
+
+  it("builds a FastAPI and SQLModel service architecture", () => {
+    const document = buildArchitectureDocument({
+      productName: "FastAPI Template",
+      productSlug: "fastapi-react",
+      owner: "fastapi",
+      name: "full-stack-fastapi-template",
+      revision: "43d8ce7b96f7e7deff9bb3b8429eb8ca361466ea",
+      sources: [
+        { path: "frontend/src/main.tsx", content: "1: createRoot(document.getElementById(\"root\")!).render(<App />)" },
+        { path: "backend/app/main.py", content: "1: app = FastAPI()" },
+        { path: "backend/app/models.py", content: "1: from sqlmodel import SQLModel\n2: class User(SQLModel, table=True): pass" },
+      ],
+    });
+    expect(document.components.map((component) => component.id)).toEqual(["users", "frontend", "backend", "db"]);
+  });
+
   it("rejects stale source content", () => {
     const stale = { productName: "Radar", productSlug: "radar", owner: "gzhanlei", name: "radar", revision: "43d8ce7b96f7e7deff9bb3b8429eb8ca361466ea", sources: sources().map((source) => ({ ...source, content: "1: unrelated" })) };
     expect(() => buildArchitectureDocument(stale)).toThrow("No architecture components detected");
