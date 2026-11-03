@@ -36,7 +36,7 @@ describe("GitHub source backend", () => {
   it("falls back to GITHUB_TOKEN when access options are omitted", async () => {
     vi.stubEnv("GITHUB_TOKEN", "environment-token");
     const headers: Record<string, string>[] = [];
-    const backend = createGitHubSourceBackend({ fetchImpl: async (_url, init) => {
+    const backend = createGitHubSourceBackend({ access: {}, fetchImpl: async (_url, init) => {
       headers.push(init?.headers as Record<string, string>);
       return Response.json({ sha: "root", truncated: false, tree: [{ path: "README.md", type: "blob", sha: "blob", mode: "100644", size: 3 }] });
     } });

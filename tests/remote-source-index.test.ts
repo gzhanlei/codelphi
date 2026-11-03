@@ -95,7 +95,7 @@ describe("Remote Source Index", () => {
     const { backend } = createBackend();
     const index = await createRemoteSourceIndex(
       { owner: "gzhanlei", repo: "commerce", revision },
-      { scopeRoots: [{ path: "apps/checkout" }], backend },
+      { access: {}, scopeRoots: [{ path: "apps/checkout" }], backend },
     );
     expect(index.identity).toMatchObject({ repository: "gzhanlei/commerce", revision, rootTreeSha: "tree-root", backend: "github_api" });
 
@@ -122,7 +122,7 @@ describe("Remote Source Index", () => {
     };
     const index = await createRemoteSourceIndex(
       { owner: "gzhanlei", repo: "commerce", revision },
-      { scopeRoots: [{ path: "apps/checkout" }], backend, dependencies: { filesystem } },
+      { access: {}, scopeRoots: [{ path: "apps/checkout" }], backend, dependencies: { filesystem } },
     );
     const first = await index.readLines({
       path: "apps/checkout/src/server.ts",
@@ -187,6 +187,7 @@ describe("Remote Source Index", () => {
       },
     };
     const index = await createRemoteSourceIndex({ owner: "gzhanlei", repo: "commerce", revision }, {
+      access: {},
       scopeRoots: [{ path: "apps/checkout" }],
       backend,
       pruning: { excludedExtensions: [".png"], maxTrackedSourceBytes: 1_000 },
@@ -204,7 +205,7 @@ describe("Remote Source Index", () => {
 
   it("enforces the configured blob cache size and allows root manifests", async () => {
     const { backend } = createBackend();
-    const index = await createRemoteSourceIndex({ owner: "gzhanlei", repo: "commerce", revision }, { scopeRoots: [{ path: "apps/checkout" }], backend, cache: { maxCachedBlobs: 1 } });
+    const index = await createRemoteSourceIndex({ owner: "gzhanlei", repo: "commerce", revision }, { access: {}, scopeRoots: [{ path: "apps/checkout" }], backend, cache: { maxCachedBlobs: 1 } });
     const rootManifest = await index.readLines({ path: "README.md", startLine: 1, endLine: 1, requestedBy: "profile", reason: "root manifest" });
     expect(rootManifest.lines[0]).toBe("checkout platform");
     await index.readLines({ path: "apps/checkout/package.json", startLine: 1, endLine: 1, requestedBy: "profile", reason: "manifest" });
@@ -217,7 +218,7 @@ describe("Remote Source Index", () => {
     const { backend } = createBackend();
     const index = await createRemoteSourceIndex(
       { owner: "gzhanlei", repo: "commerce", revision },
-      { scopeRoots: [{ path: "apps/checkout" }], backend },
+      { access: {}, scopeRoots: [{ path: "apps/checkout" }], backend },
     );
     await expect(index.readLines({ path: "apps/checkout/src/server.ts", startLine: 0, endLine: 1, requestedBy: "planner", reason: "invalid" })).rejects.toThrow("line range must start at 1");
     expect(await index.statPath("apps/checkout/missing.ts")).toBeNull();
@@ -253,7 +254,7 @@ describe("Remote Source Index", () => {
         return new TextEncoder().encode(files.get(path)!);
       },
     };
-    const index = await createRemoteSourceIndex({ owner: "gzhanlei", repo: "commerce", revision }, { scopeRoots: [{ path: "apps/checkout" }], backend });
+    const index = await createRemoteSourceIndex({ owner: "gzhanlei", repo: "commerce", revision }, { access: {}, scopeRoots: [{ path: "apps/checkout" }], backend });
     expect(index.identity.status).toBe("partial");
     expect((await index.listRoot()).status).toBe("partial");
     expect(await index.statPath("apps/checkout/generated/x.ts")).toBeNull();
@@ -278,7 +279,7 @@ describe("Remote Source Index", () => {
 
   it("rejects root files that are outside product scope", async () => {
     const { backend } = createBackend();
-    const index = await createRemoteSourceIndex({ owner: "gzhanlei", repo: "commerce", revision }, { scopeRoots: [{ path: "apps/checkout" }], backend });
+    const index = await createRemoteSourceIndex({ owner: "gzhanlei", repo: "commerce", revision }, { access: {}, scopeRoots: [{ path: "apps/checkout" }], backend });
     await expect(index.readLines({ path: "LICENSE", startLine: 1, endLine: 1, requestedBy: "ai_explorer", reason: "root file" })).rejects.toThrow("path is outside product scope");
   });
 
@@ -299,7 +300,7 @@ describe("Remote Source Index", () => {
         return new TextEncoder().encode(content);
       },
     };
-    const index = await createRemoteSourceIndex({ owner: "gzhanlei", repo: "commerce", revision }, { scopeRoots: [{ path: "apps/checkout" }], backend });
+    const index = await createRemoteSourceIndex({ owner: "gzhanlei", repo: "commerce", revision }, { access: {}, scopeRoots: [{ path: "apps/checkout" }], backend });
     await expect(index.readLines({ path: "apps/checkout/bad.ts", startLine: 1, endLine: 1, requestedBy: "planner", reason: "verify" })).rejects.toThrow("blob SHA mismatch");
   });
 });

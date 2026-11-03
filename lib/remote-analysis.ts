@@ -14,8 +14,8 @@ export interface RemoteAnalysisRequest {
 }
 
 export interface RemoteAnalysisRuntime {
-  planner?: SlicePlanner;
-  budgets?: SliceBudgets;
+  planner: SlicePlanner;
+  budgets: SliceBudgets;
 }
 
 export interface RemoteAnalysisResult {
@@ -69,19 +69,20 @@ export function sliceToSourceFiles(slice: SourceSlice, index: OpenedRemoteSource
   }));
 }
 
-export async function getRemoteAnalysisSources(request: RemoteAnalysisRequest, runtime: RemoteAnalysisRuntime = {}): Promise<RemoteAnalysisResult> {
+export async function getRemoteAnalysisSources(request: RemoteAnalysisRequest, runtime: RemoteAnalysisRuntime): Promise<RemoteAnalysisResult> {
   const revision: SourceRevisionRef = {
     owner: request.repository.owner,
     repo: request.repository.repo,
     revision: request.repository.revision,
   };
   const index = await createRemoteSourceIndex(revision, { scopeRoots: request.scopeRoots, access: request.access, backend: request.backend });
-  const planner = runtime.planner ?? createSlicePlanner();
+  const planner = runtime.planner;
+  const budgets = runtime.budgets;
   const result = await planner.plan({
     product: request.product,
     repository: request.repository,
     scopeRoots: request.scopeRoots,
-    budgets: runtime.budgets ?? analysisSliceBudgets,
+    budgets,
     plannerVersion: "remote-analysis-v1",
     profileVersion: "remote-analysis-v1",
   }, index);

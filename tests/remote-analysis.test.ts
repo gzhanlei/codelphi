@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { getRemoteAnalysisSources, parseSourceRoots, sliceToSourceFiles } from "../lib/remote-analysis";
 import { gitBlobSha, type OpenedRemoteSourceRevision, type RemoteSourceBackend, type SourceLineRequest, type SourceLineSlice, type SourceRevisionRef } from "../lib/remote-source-index";
-import type { SlicePlanner } from "../lib/slice-planner";
+import { analysisSliceBudgets } from "../lib/remote-analysis";
+import { createSlicePlanner, type SlicePlanner } from "../lib/slice-planner";
 
 const revision = "9f31c0de7a41b8d2e5f60a93c4d78ba12ef50937";
 
@@ -93,7 +94,64 @@ describe("remote analysis adapter", () => {
       access: { token: "token" },
       scopeRoots: [{ path: "apps/checkout" }],
       backend,
-    }, { planner })).rejects.toThrow("Remote source slice failed: unknown planner failure");
+    }, { planner, budgets: analysisSliceBudgets })).rejects.toThrow("Remote source slice failed: unknown planner failure");
+  });
+
+  it("rejects a planner slice with no selected source files", async () => {
+    const backend: RemoteSourceBackend = {
+      kind: "github_api",
+      async resolveRevision() {
+        return { rootTreeSha: "tree-root" };
+      },
+      async listTree() {
+        return { entries: [], truncated: false };
+      },
+      async fetchBlob() {
+        return new TextEncoder().encode("{}");
+      },
+    };
+    const planner: SlicePlanner = {
+      resolveScope: async () => ({ status: "resolved", unresolved: [], scopeRoots: [{ path: "apps/checkout" }] }),
+      plan: async () => ({
+        status: "underdetermined",
+        missing: [],
+        diagnostics: [],
+        slice: {
+          product: { id: 1, slug: "checkout", name: "Checkout" },
+          repository: "gzhanlei/commerce",
+          revision,
+          scopeRoots: [{ path: "apps/checkout" }],
+          files: [],
+          evidenceClaims: [],
+          plannerVersion: "v1",
+          profileVersion: "v1",
+          confidence: "low",
+          unresolved: [],
+          metrics: {
+            treeExpansions: 0,
+            blobFetches: 0,
+            selectedFiles: 0,
+            selectedLineRanges: 0,
+            selectedContentBytes: 0,
+            aiReadCalls: 0,
+            prunedPathCount: 0,
+            wallClockMs: 0,
+            profileMatches: [],
+            budgetsRemaining: { selectedFiles: 0, selectedLineRanges: 0, plannerContentBytes: 0, aiReadCalls: 0 },
+          },
+        },
+      }),
+      evaluateTargetedRead: () => { throw new Error("unused"); },
+      applyTargetedRead: (state) => state,
+      finalize: async () => ({ status: "failed", missing: [], diagnostics: [] }),
+    };
+    await expect(getRemoteAnalysisSources({
+      product: { id: 1, slug: "checkout", name: "Checkout" },
+      repository: { owner: "gzhanlei", repo: "commerce", revision: revision },
+      access: { token: "token" },
+      scopeRoots: [{ path: "apps/checkout" }],
+      backend,
+    }, { planner, budgets: analysisSliceBudgets })).rejects.toThrow("No supported source files found");
   });
 
   it("plans and returns numbered sources through the remote index", async () => {
@@ -133,6 +191,9 @@ describe("remote analysis adapter", () => {
       access: { token: "test-token" },
       scopeRoots: [{ path: "apps/checkout", role: "web" }],
       backend,
+    }, {
+      planner: createSlicePlanner({ now: Date.now }),
+      budgets: analysisSliceBudgets,
     });
     expect(result.sources.map((source) => source.path)).toEqual([
       "apps/checkout/package.json",

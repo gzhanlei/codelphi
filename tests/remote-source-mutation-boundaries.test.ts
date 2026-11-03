@@ -4,7 +4,9 @@ import {
   classifyEntry,
   contentPruneReason,
   createRemoteSourceIndex,
+  defaultRemoteSourceDependencies,
   gitBlobSha,
+  resolveRemoteSourceDependencies,
   scopePruneReason,
   textLineCount,
   type RemoteSourceBackend,
@@ -13,7 +15,7 @@ import {
   type SourceTreeApiEntry,
 } from "../lib/remote-source-index";
 import { SourceIndexError } from "../lib/remote-source-index";
-import { candidatePriority, confidenceLabel, reasonFor, toDiagnostic } from "../lib/slice-planner";
+import { candidatePriority, compareProfiles, createSlicePlanner, confidenceLabel, reasonFor, toDiagnostic } from "../lib/slice-planner";
 import type { SelectedSourceFile } from "../lib/slice-planner";
 
 const revision = "9f31c0de7a41b8d2e5f60a93c4d78ba12ef50937";
@@ -91,8 +93,18 @@ describe("planner pure decisions", () => {
       ["apps/checkout/src/helper.ts", 5],
     ] as const;
     for (const [path, priority] of expected) {
-      expect(candidatePriority({ ...file(path, ["entrypoint"]), parentPath: "", type: "blob", sha: "sha", expanded: false })).toBe(priority);
+      expect(candidatePriority({ ...file(path, ["entrypoint"]), parentPath: "", type: "blob", sha: "sha" })).toBe(priority);
     }
+  });
+
+  it("distinguishes profile confidence and stable profile identifiers", () => {
+    const left = { profileId: "go-api" as const, confidence: 0.85, matchedSignals: [] };
+    const right = { profileId: "next-web" as const, confidence: 0.9, matchedSignals: [] };
+    const tieA = { ...left };
+    const tieB = { ...left, profileId: "next-web" as const };
+    expect(compareProfiles(right, left)).toBeLessThan(0);
+    expect(compareProfiles(left, right)).toBeGreaterThan(0);
+    expect(compareProfiles(tieA, tieB)).toBeLessThan(0);
   });
 
   it("maps every reason and confidence boundary", () => {
@@ -106,10 +118,52 @@ describe("planner pure decisions", () => {
     expect(reasonFor(["frontend"])).toBe("service");
     expect(reasonFor(["native"])).toBe("service");
     expect(reasonFor([])).toBe("service");
+    expect(reasonFor(["unknown" as "manifest"])).toBe("service");
     expect(confidenceLabel(0.72)).toBe("high");
     expect(confidenceLabel(0.719999)).toBe("medium");
     expect(confidenceLabel(0.5)).toBe("medium");
     expect(confidenceLabel(0.499999)).toBe("low");
+  });
+
+  it("resolves explicit dependencies once and preserves default dependencies", () => {
+    const now = () => new Date("2026-11-03T00:00:00.000Z");
+    const filesystem = { async mkdir() {}, async writeFile() {} };
+    expect(resolveRemoteSourceDependencies(undefined)).toEqual(defaultRemoteSourceDependencies);
+    expect(resolveRemoteSourceDependencies({})).toEqual(defaultRemoteSourceDependencies);
+    expect(resolveRemoteSourceDependencies({ filesystem, now })).toEqual({ filesystem, now });
+    expect(resolveRemoteSourceDependencies({ now })).toEqual({ filesystem: defaultRemoteSourceDependencies.filesystem, now });
+  });
+
+  it("classifies a non-budget source index failure as failed planning", async () => {
+    const sourceError = new (await import("../lib/remote-source-index")).SourceIndexError("github_request_failed", "GitHub unavailable");
+    const backend: RemoteSourceBackend = {
+      kind: "github_api",
+      async resolveRevision() {
+        return { rootTreeSha: "tree-root" };
+      },
+      async listTree(_source, _treeSha, path): Promise<{ entries: SourceTreeApiEntry[]; truncated: boolean }> {
+        const entries: SourceTreeApiEntry[] = path === "" ? [{ path: "apps", type: "tree", sha: "tree-apps" }] : path === "apps" ? [{ path: "apps/checkout", type: "tree", sha: "tree-checkout" }] : path === "apps/checkout" ? [
+          { path: "apps/checkout/package.json", type: "blob", sha: gitBlobSha('{"dependencies":{"express":"1"}}'), size: 34 },
+          { path: "apps/checkout/child", type: "tree", sha: "tree-child" },
+        ] : [];
+        if (path !== "apps/checkout/child") return { entries, truncated: false };
+        throw sourceError;
+      },
+      async fetchBlob() {
+        throw sourceError;
+      },
+    };
+    const index = await createRemoteSourceIndex(ref, { access: {}, scopeRoots: [{ path: "apps/checkout" }], backend });
+    const result = await createSlicePlanner({ now: () => 1 }).plan({
+      product: { id: 1, slug: "checkout", name: "Checkout" },
+      repository: ref,
+      scopeRoots: [{ path: "apps/checkout" }],
+      budgets: { maxSelectedFiles: 5, maxSelectedLineRanges: 5, maxPlannerContentBytes: 1000, maxAiContextSourceBytes: 1000, maxAiReadCalls: 1, maxComponents: 1, maxConnections: 1, maxRepairRounds: 1 },
+      plannerVersion: "v1",
+      profileVersion: "v1",
+    }, index);
+    expect(result.status).toBe("failed");
+    expect(result.diagnostics[0]).toEqual({ code: "github_request_failed", message: "GitHub unavailable" });
   });
 
   it("preserves source index diagnostics and maps ordinary failures", () => {
@@ -147,8 +201,44 @@ describe("remote source runtime boundaries", () => {
     };
   }
 
+  it("reports null metadata for directories, pruned files, and absent entries", async () => {
+    const index = await createRemoteSourceIndex(ref, { access: {}, scopeRoots: [{ path: "apps/checkout" }], backend: backendWithBlob("{}\n") });
+    await index.listDir("apps/checkout");
+    expect(await index.statPath("apps/checkout/src")).toBeNull();
+    expect(await index.statPath("apps/checkout/file.bin")).toBeNull();
+    expect(await index.statPath("apps/checkout/missing.ts")).toBeNull();
+  });
+
+  it("enforces exact blob byte boundaries and reads blobs without Git sizes", async () => {
+    const content = "12345";
+    const backend: RemoteSourceBackend = {
+      kind: "github_api",
+      async resolveRevision() {
+        return { rootTreeSha: "tree-root" };
+      },
+      async listTree(_source, _treeSha, path): Promise<{ entries: SourceTreeApiEntry[]; truncated: boolean }> {
+        const entries: SourceTreeApiEntry[] = path === "" ? [{ path: "apps", type: "tree", sha: "tree-apps" }] : path === "apps" ? [{ path: "apps/checkout", type: "tree", sha: "tree-checkout" }] : path === "apps/checkout" ? [
+          { path: "apps/checkout/exact.txt", type: "blob", sha: gitBlobSha(content), size: 5 },
+          { path: "apps/checkout/oversized.txt", type: "blob", sha: gitBlobSha(content), size: 6 },
+          { path: "apps/checkout/no-size.txt", type: "blob", sha: gitBlobSha(content) },
+        ] : [];
+        return { entries, truncated: false };
+      },
+      async fetchBlob(_source, path) {
+        return new TextEncoder().encode(content);
+      },
+    };
+    const exact = await createRemoteSourceIndex(ref, { access: {}, scopeRoots: [{ path: "apps/checkout" }], backend, budgets: { maxBlobBytes: 5 } });
+    await expect(exact.readLines({ path: "apps/checkout/exact.txt", startLine: 1, endLine: 1, requestedBy: "planner", reason: "exact" })).resolves.toMatchObject({ lines: ["12345"] });
+    const oversized = await createRemoteSourceIndex(ref, { access: {}, scopeRoots: [{ path: "apps/checkout" }], backend, budgets: { maxBlobBytes: 5 } });
+    await expect(oversized.readLines({ path: "apps/checkout/oversized.txt", startLine: 1, endLine: 1, requestedBy: "planner", reason: "oversized" })).rejects.toThrow("source blob exceeds max bytes");
+    const noSize = await createRemoteSourceIndex(ref, { access: {}, scopeRoots: [{ path: "apps/checkout" }], backend, budgets: { maxBlobBytes: 0 } });
+    await expect(noSize.readLines({ path: "apps/checkout/no-size.txt", startLine: 1, endLine: 1, requestedBy: "planner", reason: "unknown size is allowed" })).resolves.toMatchObject({ lines: ["12345"] });
+  });
+
   it("reports cache metadata when Git omitted blob size and clamps reads by budget", async () => {
     const index = await createRemoteSourceIndex(ref, {
+      access: {},
       scopeRoots: scopes,
       backend: backendWithBlob("line one\nline two\nline three\nline four\nline five\nline six\nline seven\nline eight\n", undefined, true),
       budgets: { maxLinesPerRead: 3 },
@@ -173,6 +263,7 @@ describe("remote source runtime boundaries", () => {
     const bytes = new TextEncoder().encode(content);
     const fullBudget = bytes.byteLength + Buffer.byteLength("one\ntwo");
     const exact = await createRemoteSourceIndex(ref, {
+      access: {},
       scopeRoots: scopes,
       backend: backendWithBlob(content),
       budgets: { maxTotalContentBytes: fullBudget, maxBlobBytes: 1_000 },
@@ -180,6 +271,7 @@ describe("remote source runtime boundaries", () => {
     await exact.readLines({ path: "apps/checkout/file.txt", startLine: 1, endLine: 2, requestedBy: "planner", reason: "exact" });
 
     const oneByteShort = await createRemoteSourceIndex(ref, {
+      access: {},
       scopeRoots: scopes,
       backend: backendWithBlob(content),
       budgets: { maxTotalContentBytes: fullBudget - 1, maxBlobBytes: 1_000 },
@@ -203,7 +295,7 @@ describe("remote source runtime boundaries", () => {
         return invalid;
       },
     };
-    const index = await createRemoteSourceIndex(ref, { scopeRoots: scopes, backend });
+    const index = await createRemoteSourceIndex(ref, { access: {}, scopeRoots: scopes, backend });
     await expect(index.readLines({ path: "apps/checkout/file.dat", startLine: 1, endLine: 1, requestedBy: "planner", reason: "invalid" })).rejects.toThrow("not valid UTF-8");
   });
 });

@@ -52,6 +52,7 @@ describe("Remote Source Index behavior", () => {
     const { backend, calls } = createControlledBackend();
     const written: Array<{ path: string; text: string }> = [];
     const index = await createRemoteSourceIndex(ref, {
+      access: {},
       scopeRoots: [{ path: "apps/checkout", role: "web" }],
       backend,
       budgets: { maxTreeExpansions: 3, maxBlobFetches: 2, maxBlobBytes: 1_000, maxLinesPerRead: 3, maxTotalContentBytes: 10_000 },
@@ -151,6 +152,7 @@ describe("Remote Source Index behavior", () => {
   it("enforces read, blob, tree, and content budgets", async () => {
     const { backend } = createControlledBackend();
     const index = await createRemoteSourceIndex(ref, {
+      access: {},
       scopeRoots: [{ path: "apps/checkout" }],
       backend,
       budgets: { maxTreeExpansions: 0, maxBlobFetches: 1, maxBlobBytes: 10, maxLinesPerRead: 3, maxTotalContentBytes: 10 },
@@ -158,6 +160,7 @@ describe("Remote Source Index behavior", () => {
     await expect(index.listDir("apps")).rejects.toThrow("tree expansion budget was exhausted");
 
     const contentBudget = await createRemoteSourceIndex(ref, {
+      access: {},
       scopeRoots: [{ path: "apps/checkout" }],
       backend,
       budgets: { maxTreeExpansions: 3, maxBlobFetches: 1, maxBlobBytes: 1_000, maxLinesPerRead: 3, maxTotalContentBytes: 5 },
@@ -165,6 +168,7 @@ describe("Remote Source Index behavior", () => {
     await expect(contentBudget.readLines({ path: "apps/checkout/package.json", startLine: 1, endLine: 1, requestedBy: "profile", reason: "manifest" })).rejects.toThrow("remote source content budget was exhausted");
 
     const openWithBlobs = await createRemoteSourceIndex(ref, {
+      access: {},
       scopeRoots: [{ path: "apps/checkout" }],
       backend,
       budgets: { maxTreeExpansions: 3, maxBlobFetches: 1, maxBlobBytes: 1_000, maxLinesPerRead: 3, maxTotalContentBytes: 10_000 },
@@ -173,6 +177,7 @@ describe("Remote Source Index behavior", () => {
     await expect(openWithBlobs.readLines({ path: "apps/checkout/src/server.ts", startLine: 1, endLine: 1, requestedBy: "profile", reason: "entrypoint" })).rejects.toThrow("blob fetch budget was exhausted");
 
     const oversized = await createRemoteSourceIndex(ref, {
+      access: {},
       scopeRoots: [{ path: "apps/checkout" }],
       backend,
       budgets: { maxTreeExpansions: 3, maxBlobFetches: 1, maxBlobBytes: 10, maxLinesPerRead: 3, maxTotalContentBytes: 10_000 },
@@ -184,7 +189,7 @@ describe("Remote Source Index behavior", () => {
 describe("Slice Planner behavior", () => {
   it("selects exact deterministic source files and profile metrics", async () => {
     const { backend } = createControlledBackend();
-    const index = await createRemoteSourceIndex(ref, { scopeRoots: [{ path: "apps/checkout", role: "web" }], backend });
+    const index = await createRemoteSourceIndex(ref, { access: {}, scopeRoots: [{ path: "apps/checkout", role: "web" }], backend });
     const planner = createSlicePlanner({ now: () => 1_000 });
     const result = await planner.plan({
       product: { id: 7, slug: "checkout", name: "Checkout" },
@@ -274,8 +279,8 @@ describe("Slice Planner behavior", () => {
         return new TextEncoder().encode(files.get(path)!);
       },
     };
-    const index = await createRemoteSourceIndex(ref, { scopeRoots: [{ path: "apps/api" }], backend });
-    const result = await createSlicePlanner().plan({
+    const index = await createRemoteSourceIndex(ref, { access: {}, scopeRoots: [{ path: "apps/api" }], backend });
+    const result = await createSlicePlanner({ now: () => Date.now() }).plan({
       product: { id: 8, slug: "api", name: "API" },
       repository: ref,
       scopeRoots: [{ path: "apps/api" }],
@@ -311,7 +316,7 @@ describe("Slice Planner behavior", () => {
   });
 
   it("gates every targeted read and records exact approval state", async () => {
-    const planner = createSlicePlanner();
+    const planner = createSlicePlanner({ now: () => Date.now() });
     const state: SlicePlanningState = {
       input: {
         product: { id: 7, slug: "checkout", name: "Checkout" },

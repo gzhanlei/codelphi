@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createRemoteSourceIndex, gitBlobSha, type RemoteSourceBackend } from "../lib/remote-source-index";
+import { SourceIndexError, createRemoteSourceIndex, gitBlobSha, type RemoteSourceBackend } from "../lib/remote-source-index";
 import { createSlicePlanner, hasNextWebProfile, hasNodeApiProfile, matchProfiles, scopeErrorMessage, type SlicePlanningState, type StackProfileId } from "../lib/slice-planner";
 
 const revision = "9f31c0de7a41b8d2e5f60a93c4d78ba12ef50937";
@@ -62,9 +62,9 @@ describe("Slice Planner", () => {
   it("rejects products without product scope", async () => {
     const index = await createRemoteSourceIndex(
       { owner: "gzhanlei", repo: "commerce", revision },
-      { scopeRoots: [], backend: createCheckoutBackend() },
+      { access: {}, scopeRoots: [], backend: createCheckoutBackend() },
     );
-    const planner = createSlicePlanner();
+    const planner = createSlicePlanner({ now: () => Date.now() });
     const result = await planner.plan({
       product: { id: 1, slug: "checkout", name: "Checkout" },
       repository: { owner: "gzhanlei", repo: "commerce", revision },
@@ -80,9 +80,9 @@ describe("Slice Planner", () => {
   it("builds a deterministic slice from manifests and entrypoints", async () => {
     const index = await createRemoteSourceIndex(
       { owner: "gzhanlei", repo: "commerce", revision },
-      { scopeRoots: [{ path: "apps/checkout", role: "web" }], backend: createCheckoutBackend() },
+      { access: {}, scopeRoots: [{ path: "apps/checkout", role: "web" }], backend: createCheckoutBackend() },
     );
-    const planner = createSlicePlanner();
+    const planner = createSlicePlanner({ now: () => Date.now() });
     const result = await planner.plan({
       product: { id: 1, slug: "checkout", name: "Checkout" },
       repository: { owner: "gzhanlei", repo: "commerce", revision },
@@ -108,9 +108,9 @@ describe("Slice Planner", () => {
   it("returns underdetermined when a scope root is absent or no profile is supported", async () => {
     const index = await createRemoteSourceIndex(
       { owner: "gzhanlei", repo: "commerce", revision },
-      { scopeRoots: [{ path: "services/api", role: "api" }], backend: createCheckoutBackend() },
+      { access: {}, scopeRoots: [{ path: "services/api", role: "api" }], backend: createCheckoutBackend() },
     );
-    const planner = createSlicePlanner();
+    const planner = createSlicePlanner({ now: () => Date.now() });
     const input = {
       product: { id: 1, slug: "api", name: "API" },
       repository: { owner: "gzhanlei", repo: "commerce", revision },
@@ -123,7 +123,7 @@ describe("Slice Planner", () => {
 
     const sourceIndex = await createRemoteSourceIndex(
       { owner: "gzhanlei", repo: "commerce", revision },
-      { scopeRoots: [{ path: "apps/checkout", role: "web" }], backend: createCheckoutBackend() },
+      { access: {}, scopeRoots: [{ path: "apps/checkout", role: "web" }], backend: createCheckoutBackend() },
     );
     const unsupported = await planner.plan({ ...input, scopeRoots: [{ path: "apps/checkout", role: "web" }], budgets: { ...input.budgets, maxSelectedFiles: 0 } }, sourceIndex);
     expect(unsupported.status).toBe("underdetermined");
@@ -131,7 +131,7 @@ describe("Slice Planner", () => {
 
     const boundedIndex = await createRemoteSourceIndex(
       { owner: "gzhanlei", repo: "commerce", revision },
-      { scopeRoots: [{ path: "apps/checkout", role: "web" }], backend: createCheckoutBackend(), budgets: { maxTreeExpansions: 0 } },
+      { access: {}, scopeRoots: [{ path: "apps/checkout", role: "web" }], backend: createCheckoutBackend(), budgets: { maxTreeExpansions: 0 } },
     );
     const budgeted = await planner.plan({ ...input, scopeRoots: [{ path: "apps/checkout", role: "web" }] }, boundedIndex);
     expect(budgeted.status).toBe("underdetermined");
@@ -165,8 +165,8 @@ describe("Slice Planner", () => {
         return new TextEncoder().encode(files.get(path)!);
       },
     };
-    const index = await createRemoteSourceIndex({ owner: "gzhanlei", repo: "commerce", revision }, { scopeRoots: [{ path: "apps/checkout" }], backend });
-    const result = await createSlicePlanner().plan({
+    const index = await createRemoteSourceIndex({ owner: "gzhanlei", repo: "commerce", revision }, { access: {}, scopeRoots: [{ path: "apps/checkout" }], backend });
+    const result = await createSlicePlanner({ now: () => Date.now() }).plan({
       product: { id: 1, slug: "checkout", name: "Checkout" },
       repository: { owner: "gzhanlei", repo: "commerce", revision },
       scopeRoots: [{ path: "apps/checkout" }],
@@ -179,7 +179,7 @@ describe("Slice Planner", () => {
   });
 
   it("matches Go and Android profiles from scoped manifests and entrypoints", async () => {
-    const planner = createSlicePlanner();
+    const planner = createSlicePlanner({ now: () => Date.now() });
     const budgets = { maxSelectedFiles: 20, maxSelectedLineRanges: 100, maxPlannerContentBytes: 100_000, maxAiContextSourceBytes: 100_000, maxAiReadCalls: 10, maxComponents: 12, maxConnections: 24, maxRepairRounds: 2 };
 
     const files = new Map([
@@ -225,7 +225,7 @@ describe("Slice Planner", () => {
       budgets,
       plannerVersion: "v1",
       profileVersion: "v1",
-    }, await createRemoteSourceIndex({ owner: "gzhanlei", repo: "commerce", revision }, { scopeRoots: [{ path: "services/api" }], backend }));
+    }, await createRemoteSourceIndex({ owner: "gzhanlei", repo: "commerce", revision }, { access: {}, scopeRoots: [{ path: "services/api" }], backend }));
     expect(go.slice?.metrics.profileMatches[0]?.profileId).toBe("go-api");
 
     const android = await planner.plan({
@@ -235,8 +235,29 @@ describe("Slice Planner", () => {
       budgets,
       plannerVersion: "v1",
       profileVersion: "v1",
-    }, await createRemoteSourceIndex({ owner: "gzhanlei", repo: "commerce", revision }, { scopeRoots: [{ path: "apps/mobile" }], backend }));
+    }, await createRemoteSourceIndex({ owner: "gzhanlei", repo: "commerce", revision }, { access: {}, scopeRoots: [{ path: "apps/mobile" }], backend }));
     expect(android.slice?.metrics.profileMatches[0]?.profileId).toBe("android-native");
+  });
+
+  it("keeps valid scope roots and reports only invalid scope roots", async () => {
+    const planner = createSlicePlanner({ now: () => Date.now() });
+    const index = {
+      listDir: async (path: string) => {
+        if (path === "apps/api") return { path, entries: [], truncated: false, status: "indexed", metrics: { entryCount: 0, prunedCount: 0 } };
+        throw new SourceIndexError("tree_not_found", "missing");
+      },
+    } as unknown as Parameters<typeof planner.resolveScope>[1];
+    const resolution = await planner.resolveScope({
+      product: { id: 1, slug: "api", name: "API" },
+      repository: { owner: "gzhanlei", repo: "commerce", revision },
+      scopeRoots: [{ path: "apps/api" }, { path: "services/missing" }],
+      budgets: { maxSelectedFiles: 1, maxSelectedLineRanges: 1, maxPlannerContentBytes: 1, maxAiContextSourceBytes: 1, maxAiReadCalls: 1, maxComponents: 1, maxConnections: 1, maxRepairRounds: 1 },
+      plannerVersion: "v1",
+      profileVersion: "v1",
+    }, index);
+    expect(resolution.status).toBe("not_found");
+    expect(resolution.scopeRoots).toEqual([{ path: "apps/api" }]);
+    expect(resolution.unresolved).toEqual(["scope root does not exist: services/missing"]);
   });
 
   it("completes a finalized state when a profile is present", async () => {
@@ -249,7 +270,7 @@ describe("Slice Planner", () => {
   });
 
   it("gates targeted reads and records approved evidence", () => {
-    const planner = createSlicePlanner();
+    const planner = createSlicePlanner({ now: () => Date.now() });
     const state: SlicePlanningState = {
       input: {
         product: { id: 1, slug: "checkout", name: "Checkout" },
@@ -272,6 +293,7 @@ describe("Slice Planner", () => {
       budgetsRemaining: { selectedFiles: 10, selectedLineRanges: 100, plannerContentBytes: 10_000, aiReadCalls: 0, startedAt: Date.now() },
     };
     expect(planner.evaluateTargetedRead(state, { path: "outside.ts", startLine: 1, endLine: 1, requestedBy: "ai_explorer", reason: "outside" }).allowed).toBe(false);
+    expect(planner.evaluateTargetedRead(state, { path: "apps/checkout/file.ts", startLine: 1, endLine: 0, requestedBy: "ai_explorer", reason: "reversed" }).allowed).toBe(false);
     expect(planner.evaluateTargetedRead(state, { path: "apps/checkout/file.ts", startLine: 0, endLine: 1, requestedBy: "ai_explorer", reason: "invalid" }).allowed).toBe(false);
     expect(planner.evaluateTargetedRead(state, { path: "apps/checkout/file.ts", startLine: 1, endLine: 1, requestedBy: "ai_explorer", reason: "no budget" }).allowed).toBe(false);
     state.budgetsRemaining.aiReadCalls = 1;

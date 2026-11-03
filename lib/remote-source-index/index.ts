@@ -1,6 +1,5 @@
-import { mkdir, writeFile } from "node:fs/promises";
 import { basename, dirname, join, normalize, resolve, sep } from "node:path";
-import { SourceIndexError, defaultRemoteSourceBudgets, defaultSourcePruningPolicy, gitBlobSha, type EvidenceRootRequest, type EvidenceRootResult, type FileSystemAdapter, type OpenedRemoteSourceRevision, type RemoteSourceBackend, type RemoteSourceIndexDependencies, type RemoteSourceIndexOptions, type RemoteSourceBudgets, type SourceBlobMeta, type SourceCacheOptions, type SourceIndexStatus, type SourceLineRequest, type SourceLineSlice, type SourceMetrics, type SourcePruningPolicy, type PruneReason, type SourceRevisionIdentity, type SourceRevisionRef, type SourceScopeRoot, type SourceSignal, type SourceTreeApiEntry, type SourceTreeEntry, type SourceTreeListing } from "./types";
+import { SourceIndexError, defaultRemoteSourceBudgets, defaultRemoteSourceDependencies, defaultSourcePruningPolicy, gitBlobSha, type EvidenceRootRequest, type FileSystemAdapter, type EvidenceRootResult, type OpenedRemoteSourceRevision, type RemoteSourceBackend, type RemoteSourceIndexDependencies, type RemoteSourceIndexOptions, type RemoteSourceBudgets, type ResolvedRemoteSourceIndexDependencies, type SourceBlobMeta, type SourceCacheOptions, type SourceIndexStatus, type SourceLineRequest, type SourceLineSlice, type SourceMetrics, type SourcePruningPolicy, type PruneReason, type SourceRevisionIdentity, type SourceRevisionRef, type SourceScopeRoot, type SourceSignal, type SourceTreeApiEntry, type SourceTreeEntry, type SourceTreeListing } from "./types";
 import { createGitHubSourceBackend } from "./github-backend";
 
 interface CachedBlob {
@@ -40,7 +39,7 @@ const baseSignalRules: Array<{ match: (path: string, name: string) => boolean; s
   { match: (_path, name) => /(?:repository|model|entity)/.test(name), signals: ["repository"] },
   { match: (_path, name) => /(?:database|db|postgres|mysql|sqlite)/.test(name) || /\.sql$/.test(name), signals: ["database", "migration"] },
   { match: (_path, name) => /(?:queue|worker|job)/.test(name), signals: ["queue", "worker"] },
-  { match: (_path, name) => /(?:auth|oauth|identity|permission)/.test(name), signals: ["auth"] },
+  { match: (path, name) => /(?:^|\/)(?:oauth|auth)(?:\/|\.)/.test(path) || /(?:auth|oauth)/.test(name), signals: ["auth"] },
   { match: (_path, name) => /(?:dockerfile|docker-compose|deploy|k8s|kubernetes)/.test(name), signals: ["deployment"] },
   { match: (path, name) => /\.(?:tsx|jsx)$/.test(name) || hasSegment(path, "app") && /\.tsx$/.test(name), signals: ["frontend"] },
   { match: (_path, name) => /\.(?:java|kt|swift|m|mm|c|cc|cpp|h|hpp)$/.test(name), signals: ["native"] },
@@ -68,8 +67,8 @@ function excludedPruneReason(path: string, policy: SourcePruningPolicy): PruneRe
 export function contentPruneReason(path: string, raw: SourceTreeApiEntry, policy: SourcePruningPolicy, extension?: string): PruneReason | undefined {
   if (raw.type !== "blob") return undefined;
   if (/(?:^|\/)(?:generated|__generated__)(?:\/|$)/.test(path)) return "generated";
-  if (policy.excludedExtensions.includes(extension ?? "")) return "binary_asset";
-  if ((raw.size ?? 0) > policy.maxTrackedSourceBytes) return "too_large";
+  if (extension !== undefined && policy.excludedExtensions.includes(extension)) return "binary_asset";
+  if (raw.size !== undefined && raw.size > policy.maxTrackedSourceBytes) return "too_large";
   return undefined;
 }
 
@@ -94,7 +93,6 @@ export function classifyEntry(parentPath: string, raw: SourceTreeApiEntry, polic
     size: raw.size,
     extension,
     signals: raw.type === "blob" ? baseSignals(path) : [],
-    expanded: false,
     pruned: pruneReason ? { reason: pruneReason } : undefined,
   };
 }
@@ -118,7 +116,7 @@ class RemoteSourceRevision implements OpenedRemoteSourceRevision {
   private readonly now: () => Date;
   private readonly state: SourceIndexState;
 
-  constructor(ref: SourceRevisionRef, identity: SourceRevisionIdentity, rootListing: SourceTreeListing, options: RemoteSourceIndexOptions, backend: RemoteSourceBackend) {
+  constructor(ref: SourceRevisionRef, identity: SourceRevisionIdentity, rootListing: SourceTreeListing, options: RemoteSourceIndexOptions, dependencies: ResolvedRemoteSourceIndexDependencies, backend: RemoteSourceBackend) {
     this.ref = ref;
     this.identity = identity;
     this.scopeRoots = options.scopeRoots;
@@ -126,8 +124,8 @@ class RemoteSourceRevision implements OpenedRemoteSourceRevision {
     this.budgets = { ...defaultRemoteSourceBudgets, ...options.budgets };
     this.policy = { ...defaultSourcePruningPolicy, ...options.pruning };
     this.cache = { maxCachedBlobs: 64, ...options.cache };
-    this.filesystem = options.dependencies?.filesystem ?? { mkdir, writeFile };
-    this.now = options.dependencies?.now ?? (() => new Date());
+    this.filesystem = dependencies.filesystem;
+    this.now = dependencies.now;
     this.state = { entries: new Map(), listings: new Map(), blobs: new Map(), metrics: { treeExpansions: 0, blobFetches: 0, contentBytes: 0 } };
     this.state.listings.set("", rootListing);
     for (const entry of rootListing.entries) this.state.entries.set(entry.path, entry);
@@ -153,7 +151,9 @@ class RemoteSourceRevision implements OpenedRemoteSourceRevision {
     const normalized = normalizeSourcePath(path);
     this.assertAllowed(normalized, "stat");
     const entry = await this.findEntry(normalized);
-    if (!entry || entry.type !== "blob" || entry.pruned) return null;
+    if (!entry) return null;
+    if (entry.type !== "blob") return null;
+    if (entry.pruned) return null;
     const cached = this.state.blobs.get(normalized);
     return {
       path: normalized,
@@ -237,14 +237,17 @@ class RemoteSourceRevision implements OpenedRemoteSourceRevision {
   }
 
   private async findEntry(path: string): Promise<SourceTreeEntry | null> {
-    if (!path) return { path: "", parentPath: "", type: "tree", sha: this.identity.rootTreeSha, signals: [], expanded: true };
+    if (!path) return { path: "", parentPath: "", type: "tree", sha: this.identity.rootTreeSha, signals: [] };
     const cached = this.state.entries.get(path);
     if (cached) return cached;
     const parentPath = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
     const parent = await this.findEntry(parentPath);
-    if (!parent || parent.type !== "tree" || parent.pruned) return null;
+    if (!parent) return null;
+    if (parent.type !== "tree") return null;
+    if (parent.pruned) return null;
     await this.ensureListing(parentPath);
-    return this.state.entries.get(path) ?? null;
+    const entry = this.state.entries.get(path);
+    return entry ?? null;
   }
 
   private async ensureListing(path: string): Promise<SourceTreeListing> {
@@ -255,7 +258,6 @@ class RemoteSourceRevision implements OpenedRemoteSourceRevision {
     if (this.state.metrics.treeExpansions >= this.budgets.maxTreeExpansions) throw new SourceIndexError("budget_exhausted", "tree expansion budget was exhausted");
     const response = await this.backend.listTree(this.ref, entry.sha, path);
     const listing = this.createListing(path, response.entries, response.truncated);
-    entry.expanded = true;
     this.state.listings.set(path, listing);
     this.state.metrics.treeExpansions += 1;
     return listing;
@@ -280,7 +282,8 @@ class RemoteSourceRevision implements OpenedRemoteSourceRevision {
     const cached = this.state.blobs.get(path);
     if (cached && cached.blobSha === entry.sha) return cached.bytes;
     if (this.state.metrics.blobFetches >= this.budgets.maxBlobFetches) throw new SourceIndexError("budget_exhausted", "blob fetch budget was exhausted");
-    if ((entry.size ?? 0) > this.budgets.maxBlobBytes) throw new SourceIndexError("blob_too_large", `source blob exceeds max bytes: ${path}`);
+    const blobSize = entry.size;
+    if (blobSize !== undefined && blobSize > this.budgets.maxBlobBytes) throw new SourceIndexError("blob_too_large", `source blob exceeds max bytes: ${path}`);
 
     const bytes = await this.backend.fetchBlob(this.ref, path, entry.sha);
     const actualSha = gitBlobSha(bytes);
@@ -323,9 +326,26 @@ function decodeUtf8(bytes: Uint8Array) {
   }
 }
 
+export function resolveRemoteSourceDependencies(dependencies?: RemoteSourceIndexDependencies): ResolvedRemoteSourceIndexDependencies {
+  if (dependencies) {
+    return {
+      backend: dependencies.backend,
+      filesystem: dependencies.filesystem || defaultRemoteSourceDependencies.filesystem,
+      now: dependencies.now || defaultRemoteSourceDependencies.now,
+    };
+  }
+  return defaultRemoteSourceDependencies;
+}
+
+function resolveRemoteSourceBackend(options: RemoteSourceIndexOptions, dependencies: ResolvedRemoteSourceIndexDependencies): RemoteSourceBackend {
+  if (options.backend) return options.backend;
+  if (dependencies.backend) return dependencies.backend;
+  return createGitHubSourceBackend({ access: options.access });
+}
+
 export async function createRemoteSourceIndex(ref: SourceRevisionRef, options: RemoteSourceIndexOptions): Promise<OpenedRemoteSourceRevision> {
-  const dependencies: RemoteSourceIndexDependencies = options.dependencies ?? {};
-  const backend = options.backend ?? dependencies.backend ?? createGitHubSourceBackend({ access: options.access });
+  const dependencies = resolveRemoteSourceDependencies(options.dependencies);
+  const backend = resolveRemoteSourceBackend(options, dependencies);
   const identity = await backend.resolveRevision(ref);
   const response = await backend.listTree({ ...ref, revision: ref.revision }, identity.rootTreeSha, "");
   const policy: SourcePruningPolicy = { ...defaultSourcePruningPolicy, ...options.pruning };
@@ -346,7 +366,7 @@ export async function createRemoteSourceIndex(ref: SourceRevisionRef, options: R
     rootTreeSha: identity.rootTreeSha,
     backend: backend.kind,
     status: rootListing.status,
-  }, rootListing, options, backend);
+  }, rootListing, options, dependencies, backend);
 }
 
 export { normalizeSourcePath };

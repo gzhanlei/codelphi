@@ -2,7 +2,8 @@ import type { PoolConnection } from "mysql2/promise";
 import { getDb } from "./db";
 import { analyzeWithAI, type AnalysisResult } from "./ai";
 import { getChangeContext, getRepository, type GitHubRepository, type SourceFile } from "./github";
-import { getRemoteAnalysisSources, parseSourceRoots } from "./remote-analysis";
+import { analysisSliceBudgets, getRemoteAnalysisSources, parseSourceRoots } from "./remote-analysis";
+import { createSlicePlanner } from "./slice-planner";
 import { insertSpecVersion } from "./spec-versions";
 import { generateArchitectureVersion } from "./architecture-version";
 import { errorMessage } from "./error-message";
@@ -187,6 +188,7 @@ async function performAnalysis(run: RunContext) {
     getChangeContext(repo, run.beforeSha, run.afterSha, access),
     loadSourceRoots(run.productId),
   ]);
+  const planner = createSlicePlanner({ now: Date.now });
   const remote = await getRemoteAnalysisSources({
     product: {
       id: run.productId,
@@ -196,7 +198,7 @@ async function performAnalysis(run: RunContext) {
     repository: { owner: repo.owner, repo: repo.name, revision: run.afterSha },
     access,
     scopeRoots: sourceRoots.length > 0 ? sourceRoots : [{ path: "", role: "shared" }],
-  });
+  }, { planner, budgets: analysisSliceBudgets });
   const sources = remote.sources;
   const result = await analyzeWithAI(sources, change);
   assertEvidence(result, new Set([

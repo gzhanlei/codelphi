@@ -24,7 +24,9 @@ export function reasonFor(signals: SourceSignal[]): SelectedSourceReason {
     ["frontend", "service"],
     ["native", "service"],
   ];
-  return reasons.find(([signal]) => signals.includes(signal))?.[1] ?? "service";
+  const matched = reasons.find(([signal]) => signals.includes(signal));
+  if (matched) return matched[1];
+  return "service";
 }
 
 export function confidenceLabel(confidence: number): SliceConfidence {
@@ -36,6 +38,12 @@ export function scopeErrorMessage(error: unknown, path: string) {
     return `scope root does not exist: ${path}`;
   }
   return `scope root could not be indexed: ${path}`;
+}
+
+export function compareProfiles(left: StackProfileMatch, right: StackProfileMatch) {
+  const confidence = right.confidence - left.confidence;
+  if (confidence !== 0) return confidence;
+  return left.profileId.localeCompare(right.profileId);
 }
 
 function matchCandidate(candidate: { paths: string[] }, files: SelectedSourceFile[]) {
@@ -86,7 +94,7 @@ export function matchProfiles(files: SelectedSourceFile[], content: Map<string, 
       confidence: candidate.confidence,
       matchedSignals: matchedSignals(candidate, files),
     }))
-    .sort((a, b) => b.confidence - a.confidence || a.profileId.localeCompare(b.profileId));
+    .sort((a, b) => compareProfiles(a, b));
 }
 
 const priorityPatterns = [
@@ -165,13 +173,11 @@ class DeterministicSlicePlanner implements SlicePlanner {
     state.profileMatches = matchProfiles([...state.selected.values()], state.fileContents);
     const topProfile = state.profileMatches[0];
     const confidence = topProfile ? topProfile.confidence : 0.2;
-    if (!topProfile) {
-      state.diagnostics.push({ code: "profile_confidence_low", subject: undefined, message: "selected source slice does not identify a supported stack profile" });
-    } else if (confidence < 0.5) {
-      state.diagnostics.push({ code: "profile_confidence_low", subject: topProfile.profileId, message: "selected source slice does not identify a supported stack profile" });
+    const sliceConfidence = confidenceLabel(confidence);
+    if (sliceConfidence === "low") {
+      state.diagnostics.push({ code: "profile_confidence_low", subject: topProfile?.profileId, message: "selected source slice does not identify a supported stack profile" });
     }
 
-    const sliceConfidence = confidenceLabel(confidence);
     const slice = this.createSourceSlice(state, sliceConfidence);
     state.phase = "done";
     return sliceConfidence === "low"
@@ -325,11 +331,11 @@ export function toDiagnostic(error: unknown): PlannerDiagnostic {
 }
 
 export interface SlicePlannerOptions {
-  now?: () => number;
+  now: () => number;
 }
 
-export function createSlicePlanner(options: SlicePlannerOptions = {}): SlicePlanner {
-  return new DeterministicSlicePlanner(options.now ?? Date.now);
+export function createSlicePlanner(options: SlicePlannerOptions): SlicePlanner {
+  return new DeterministicSlicePlanner(options.now);
 }
 
 export * from "./types";

@@ -42,15 +42,16 @@ describe("slice planner budget and traversal behavior", () => {
       ["apps/mobile/MainActivity.java", "class MainActivity {}\n"],
       ["apps/mobile/package.json", "{}\n"],
       ["apps/mobile/AndroidManifest.xml", "<manifest />\n"],
+      ["apps/mobile/icon.png", "binary\n"],
     ]);
     const tree = (path: string) => ({ path, type: "tree" as const, sha: `tree-${path}` });
     const blob = (path: string) => ({ path, type: "blob" as const, sha: "filled-by-backend" });
     const trees = new Map<string, SourceTreeApiEntry[]>([
       ["", [tree("apps")]],
       ["apps", [tree("apps/mobile")]],
-      ["apps/mobile", [blob("apps/mobile/helper.ts"), blob("apps/mobile/raop.c"), blob("apps/mobile/MainActivity.java"), blob("apps/mobile/package.json"), blob("apps/mobile/AndroidManifest.xml")]],
+      ["apps/mobile", [blob("apps/mobile/helper.ts"), blob("apps/mobile/raop.c"), blob("apps/mobile/MainActivity.java"), blob("apps/mobile/package.json"), blob("apps/mobile/AndroidManifest.xml"), blob("apps/mobile/icon.png"), tree("apps/mobile/src")]],
     ]);
-    const index = await createRemoteSourceIndex(ref, { scopeRoots: [{ path: "apps/mobile" }], backend: backendFrom(files, trees) });
+    const index = await createRemoteSourceIndex(ref, { access: {}, scopeRoots: [{ path: "apps/mobile" }], backend: backendFrom(files, trees) });
     const result = await createSlicePlanner({ now: () => 20 }).plan({
       product: { id: 1, slug: "mobile", name: "Mobile" },
       repository: ref,
@@ -59,6 +60,8 @@ describe("slice planner budget and traversal behavior", () => {
       plannerVersion: "v1",
       profileVersion: "v1",
     }, index);
+    expect(result.status).toBe("completed");
+    expect(result.diagnostics).toEqual([]);
     expect(result.slice?.files.map((file) => file.path)).toEqual([
       "apps/mobile/AndroidManifest.xml",
       "apps/mobile/package.json",
@@ -87,9 +90,11 @@ describe("slice planner budget and traversal behavior", () => {
       ["apps/api/src", [blob("apps/api/src/server.ts"), tree("apps/api/src/domain")]],
       ["apps/api/src/domain", [blob("apps/api/src/domain/database.ts"), tree("apps/api/src/domain/core")]],
       ["apps/api/src/domain/core", [blob("apps/api/src/domain/core/queue.ts"), tree("apps/api/src/domain/core/leaf")]],
-      ["apps/api/src/domain/core/leaf", [blob("apps/api/src/domain/core/leaf/database.ts")]],
+      ["apps/api/src/domain/core/leaf", [blob("apps/api/src/domain/core/leaf/database.ts"), tree("apps/api/src/domain/core/leaf/too-deep")]],
+      ["apps/api/src/domain/core/leaf/too-deep", [blob("apps/api/src/domain/core/leaf/too-deep/excluded.ts"), tree("apps/api/src/domain/core/leaf/too-deep/deeper")]],
+      ["apps/api/src/domain/core/leaf/too-deep/deeper", [blob("apps/api/src/domain/core/leaf/too-deep/deeper/excluded.ts")]],
     ]);
-    const index = await createRemoteSourceIndex(ref, { scopeRoots: [{ path: "apps/api" }], backend: backendFrom(files, trees) });
+    const index = await createRemoteSourceIndex(ref, { access: {}, scopeRoots: [{ path: "apps/api" }], backend: backendFrom(files, trees) });
     const result = await createSlicePlanner({ now: () => 30 }).plan({
       product: { id: 2, slug: "api", name: "API" },
       repository: ref,
@@ -106,6 +111,7 @@ describe("slice planner budget and traversal behavior", () => {
       "apps/api/src/domain/core/queue.ts",
       "apps/api/src/domain/core/leaf/database.ts",
     ]);
+    expect(result.slice?.files.some((file) => file.path.includes("too-deep"))).toBe(false);
   });
 
   it("stops at file, line-range, and byte budgets", async () => {
@@ -130,7 +136,7 @@ describe("slice planner budget and traversal behavior", () => {
       budgets: { ...baseBudgets, maxSelectedFiles: 2 },
       plannerVersion: "v1",
       profileVersion: "v1",
-    }, await createRemoteSourceIndex(ref, { scopeRoots: scopes, backend: backendFrom(files, trees) }));
+    }, await createRemoteSourceIndex(ref, { access: {}, scopeRoots: scopes, backend: backendFrom(files, trees) }));
     expect(fileBudget.slice?.files.map((file) => file.path)).toEqual(["apps/api/go.mod", "apps/api/server.ts"]);
     expect(fileBudget.slice?.metrics.budgetsRemaining).toEqual({
       selectedFiles: 0,
@@ -146,7 +152,7 @@ describe("slice planner budget and traversal behavior", () => {
       budgets: { ...baseBudgets, maxSelectedLineRanges: 2 },
       plannerVersion: "v1",
       profileVersion: "v1",
-    }, await createRemoteSourceIndex(ref, { scopeRoots: scopes, backend: backendFrom(files, trees) }));
+    }, await createRemoteSourceIndex(ref, { access: {}, scopeRoots: scopes, backend: backendFrom(files, trees) }));
     expect(lineBudget.slice?.files.map((file) => file.path)).toEqual(["apps/api/go.mod", "apps/api/server.ts"]);
     expect(lineBudget.slice?.files.map((file) => file.lineRanges)).toEqual([
       [{ startLine: 1, endLine: 1, purpose: "manifest" }],
@@ -162,7 +168,7 @@ describe("slice planner budget and traversal behavior", () => {
       budgets: { ...baseBudgets, maxPlannerContentBytes: firstTwoBytes },
       plannerVersion: "v1",
       profileVersion: "v1",
-    }, await createRemoteSourceIndex(ref, { scopeRoots: scopes, backend: backendFrom(files, trees) }));
+    }, await createRemoteSourceIndex(ref, { access: {}, scopeRoots: scopes, backend: backendFrom(files, trees) }));
     expect(byteLimited.slice?.files.map((file) => file.path)).toEqual(["apps/api/go.mod", "apps/api/server.ts"]);
     expect(byteLimited.slice?.metrics.budgetsRemaining.plannerContentBytes).toBe(0);
     expect(byteLimited.slice?.metrics.selectedContentBytes).toBe(firstTwoBytes);
@@ -186,7 +192,7 @@ describe("slice planner budget and traversal behavior", () => {
       budgets: baseBudgets,
       plannerVersion: "v1",
       profileVersion: "v1",
-    }, await createRemoteSourceIndex(ref, { scopeRoots: scopes, backend: backendFrom(files, trees) }));
+    }, await createRemoteSourceIndex(ref, { access: {}, scopeRoots: scopes, backend: backendFrom(files, trees) }));
     expect(result.status).toBe("underdetermined");
     expect(result.missing).toEqual(["scope root does not exist: services/missing"]);
     expect(result.diagnostics[0]?.code).toBe("scope_root_not_found");

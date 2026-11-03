@@ -25,7 +25,7 @@ function repositoryPath(ref: { owner: string; repo: string }) {
 }
 
 export interface GitHubSourceBackendOptions {
-  access?: GitHubAccess;
+  access: GitHubAccess;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
 }
@@ -39,9 +39,8 @@ function mapTreeEntries(tree: Array<z.infer<typeof treeResponseSchema>["tree"][n
   return tree.map((entry) => ({ path: entry.path, type: entry.type, sha: entry.sha, mode: entry.mode, size: entry.size }));
 }
 
-export function createGitHubSourceBackend(options: GitHubSourceBackendOptions = {}): RemoteSourceBackend {
-  const fetchImpl = options.fetchImpl || fetch;
-  const timeoutMs = options.timeoutMs || 30_000;
+export function createGitHubSourceBackend(options: GitHubSourceBackendOptions): RemoteSourceBackend {
+  const { access, fetchImpl = fetch, timeoutMs = 30_000 } = options;
 
   async function request(path: string, access: GitHubAccess) {
     const token = await resolveGitHubToken(access);
@@ -62,15 +61,15 @@ export function createGitHubSourceBackend(options: GitHubSourceBackendOptions = 
   return {
     kind: "github_api",
     async resolveRevision(ref: SourceRevisionRef) {
-      const data = treeResponseSchema.parse(await request(`${repositoryPath(ref)}/git/trees/${ref.revision}`, options.access ?? {}));
+      const data = treeResponseSchema.parse(await request(`${repositoryPath(ref)}/git/trees/${ref.revision}`, access));
       return { rootTreeSha: data.sha };
     },
     async listTree(ref: SourceRevisionRef, treeSha: string) {
-      const data = treeResponseSchema.parse(await request(`${repositoryPath(ref)}/git/trees/${encodeURIComponent(treeSha)}`, options.access ?? {}));
+      const data = treeResponseSchema.parse(await request(`${repositoryPath(ref)}/git/trees/${encodeURIComponent(treeSha)}`, access));
       return { entries: mapTreeEntries(data.tree), truncated: data.truncated };
     },
     async fetchBlob(ref: SourceRevisionRef, _path: string, blobSha: string) {
-      const data = blobResponseSchema.parse(await request(`${repositoryPath(ref)}/git/blobs/${encodeURIComponent(blobSha)}`, options.access ?? {}));
+      const data = blobResponseSchema.parse(await request(`${repositoryPath(ref)}/git/blobs/${encodeURIComponent(blobSha)}`, access));
       return decodeBlob(data);
     },
   };

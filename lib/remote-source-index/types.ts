@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
 import type { GitHubAccess } from "../github-access";
 
 export type RepositorySlug = string;
@@ -70,7 +71,6 @@ export interface SourceTreeEntry extends SourceTreeApiEntry {
   parentPath: string;
   extension?: string;
   signals: SourceSignal[];
-  expanded: boolean;
   pruned?: {
     reason: PruneReason;
     detail?: string;
@@ -177,9 +177,15 @@ export interface RemoteSourceIndexDependencies {
   now?: () => Date;
 }
 
+export interface ResolvedRemoteSourceIndexDependencies {
+  backend?: RemoteSourceBackend;
+  filesystem: FileSystemAdapter;
+  now: () => Date;
+}
+
 export interface RemoteSourceIndexOptions {
   scopeRoots: SourceScopeRoot[];
-  access?: GitHubAccess;
+  access: GitHubAccess;
   backend?: RemoteSourceBackend;
   budgets?: Partial<RemoteSourceBudgets>;
   pruning?: Partial<SourcePruningPolicy>;
@@ -229,6 +235,11 @@ export function gitBlobSha(content: string | Uint8Array) {
   digest.update(bytes);
   return digest.copy().digest("hex");
 }
+
+export const defaultRemoteSourceDependencies: ResolvedRemoteSourceIndexDependencies = {
+  filesystem: { mkdir, writeFile },
+  now: () => new Date(),
+};
 
 export const defaultRemoteSourceBudgets: RemoteSourceBudgets = {
   maxTreeExpansions: 400,
