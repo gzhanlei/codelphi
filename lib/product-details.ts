@@ -43,9 +43,14 @@ async function loadBehaviorChanges(releases: ReleaseRow[]) {
   }));
 }
 
-export async function getProductDetails(slug: string) {
+export async function getProductDetails(slug: string, organizationId?: number) {
   const db = getDb();
-  const [products] = await db.execute("SELECT id, slug, name, description FROM products WHERE slug = ?", [slug]);
+  const [products] = await db.execute(
+    organizationId === undefined
+      ? "SELECT id, slug, name, description FROM products WHERE slug = ?"
+      : "SELECT id, slug, name, description FROM products WHERE slug = ? AND organization_id = ?",
+    organizationId === undefined ? [slug] : [slug, organizationId],
+  );
   const product = (products as Array<{ id: number; slug: string; name: string; description: string }>)[0];
   if (!product) return null;
 

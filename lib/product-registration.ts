@@ -31,13 +31,13 @@ export async function resolveGitHubRegistration(input: ProductInput, github: Git
   }
 }
 
-async function insertRegistration(input: ProductInput, repository: GitHubRepository, defaultBranch: string) {
+async function insertRegistration(input: ProductInput & { organizationId?: number }, repository: GitHubRepository, defaultBranch: string) {
   const connection = await getDb().getConnection();
   try {
     await connection.beginTransaction();
     const [productResult] = await connection.execute(
-      "INSERT INTO products (slug, name, description) VALUES (?, ?, ?)",
-      [input.slug, input.name, input.description],
+      "INSERT INTO products (slug, name, description, organization_id) VALUES (?, ?, ?, ?)",
+      [input.slug, input.name, input.description, input.organizationId ?? 1],
     );
     const productId = Number((productResult as { insertId: number }).insertId);
     const [repositoryResult] = await connection.execute(
@@ -54,7 +54,7 @@ async function insertRegistration(input: ProductInput, repository: GitHubReposit
   }
 }
 
-export async function registerProduct(input: ProductInput) {
+export async function registerProduct(input: ProductInput & { organizationId?: number }) {
   const resolved = await resolveGitHubRegistration(input);
   const repositoryId = await insertRegistration(input, resolved.repository, resolved.defaultBranch);
   return { slug: input.slug, analyze: input.analyze, repositoryId, afterSha: resolved.afterSha };

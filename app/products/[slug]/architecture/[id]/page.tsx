@@ -2,13 +2,15 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
 import { requireSessionUser } from "@/lib/session";
+import { requireOrganization } from "@/lib/organizations";
 import { getArchitectureDocument } from "@/lib/architecture-store";
 import { routeEntityId } from "@/lib/editor-route";
 
 export default async function ProductArchitecturePage({ params }: { params: Promise<{ slug: string; id: string }> }) {
   const user = await requireSessionUser();
+  const organization = await requireOrganization(user);
   const { slug, id } = await params;
-  const document = await getArchitectureDocument(routeEntityId(id));
+  const document = await getArchitectureDocument(routeEntityId(id), organization.id);
   if (!document || document.status !== "accepted" || document.productSlug !== slug) notFound();
 
   return (

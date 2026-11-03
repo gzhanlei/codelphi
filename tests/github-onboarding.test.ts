@@ -24,7 +24,7 @@ describe("GitHub onboarding services", () => {
     expect(await completeInstallationSetup(-1, { getLatest, getInstallation, save })).toBe("installation_id");
     expect(await completeInstallationSetup(42, { getLatest, getInstallation, save })).toBeNull();
     expect(await completeInstallationSetup(1, { getLatest, getInstallation, save })).toBeNull();
-    expect(save).toHaveBeenCalledWith(1, { id: 42, account: { login: "gzhanlei", type: "User" } });
+    expect(save).toHaveBeenCalledWith(1, { id: 42, account: { login: "gzhanlei", type: "User" } }, 1);
   });
 
   it("handles missing apps and installation API failures", async () => {

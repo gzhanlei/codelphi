@@ -35,7 +35,7 @@ describe("GitHub integration persistence", () => {
       return [[]];
     });
     await saveInstallation(1, { id: 42, account: { login: "gzhanlei", type: "User" } }, execute);
-    expect(execute).toHaveBeenCalledWith(expect.stringContaining("ON DUPLICATE KEY UPDATE"), expect.arrayContaining([42, "active"]));
+    expect(execute).toHaveBeenCalledWith(expect.stringContaining("ON DUPLICATE KEY UPDATE"), expect.arrayContaining([42, 1]));
     expect(await listConnectionStates(execute)).toEqual([{ id: 9, accountLogin: "gzhanlei", accountType: "User", status: "active", appSlug: "radar-test", installationId: 42 }]);
   });
 });

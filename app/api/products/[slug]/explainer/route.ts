@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { NextRequest, NextResponse } from "next/server";
 import { requireSessionUser } from "@/lib/session";
+import { requireOrganization } from "@/lib/organizations";
 import { getProductDetails } from "@/lib/product-details";
 import { buildProductOverview } from "@/lib/product-overview";
 import { exportProductExplainer } from "@/lib/explainer-export";
@@ -11,9 +12,10 @@ import { artifactSandboxHeaders } from "@/lib/artifact-response";
 import { errorMessage } from "@/lib/error-message";
 
 export async function GET(_request: NextRequest, context: { params: Promise<{ slug: string }> }) {
-  await requireSessionUser();
+  const user = await requireSessionUser();
+  const organization = await requireOrganization(user);
   const { slug } = await context.params;
-  const details = await getProductDetails(slug);
+  const details = await getProductDetails(slug, organization.id);
   if (!details) return NextResponse.json({ error: "产品不存在" }, { status: 404 });
   const overview = buildProductOverview(details);
   try {

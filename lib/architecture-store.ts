@@ -99,15 +99,16 @@ export async function getLatestArchitectureDocument(productId: number) {
   return row ? mapArchitectureRow(row) : undefined;
 }
 
-export async function getArchitectureDocument(id: number) {
+export async function getArchitectureDocument(id: number, organizationId?: number) {
   const [rows] = await getDb().execute(
     `SELECT d.id, d.product_id AS productId, d.spec_version_id AS specVersionId, d.revision, d.status,
             d.spec_json AS specJson, d.spec_sha256 AS specSha256, d.artifact_path AS artifactPath,
             d.artifact_sha256 AS artifactSha256, d.validation_receipt AS validationReceipt,
             d.visual_receipt AS visualReceipt, d.error_message AS errorMessage,
             p.slug AS productSlug, p.name AS productName
-     FROM architecture_documents d JOIN products p ON p.id = d.product_id WHERE d.id = ?`,
-    [id],
+     FROM architecture_documents d JOIN products p ON p.id = d.product_id
+     WHERE d.id = ? AND (p.organization_id = ? OR ? IS NULL)`,
+    [id, organizationId ?? null, organizationId ?? null],
   );
   const row = (rows as Array<ArchitectureDocumentRecord & { id: number }>)[0];
   if (!row) return undefined;

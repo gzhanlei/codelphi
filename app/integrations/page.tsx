@@ -5,6 +5,7 @@ import { PatFallbackCard } from "@/components/pat-fallback-card";
 import { getLatestGitHubApp, listConnectionStates } from "@/lib/github-integrations";
 import { requireSessionUser } from "@/lib/session";
 import { integrationFeedback } from "@/lib/integration-ui";
+import { requireOrganization } from "@/lib/organizations";
 
 export const dynamic = "force-dynamic";
 
@@ -19,13 +20,14 @@ const messages: Record<string, string> = {
 
 export default async function IntegrationsPage({ searchParams }: { searchParams: Promise<{ error?: string; success?: string }> }) {
   const user = await requireSessionUser();
+  const organization = await requireOrganization(user);
   const { error, success } = await searchParams;
-  const [app, connections] = await Promise.all([getLatestGitHubApp(), listConnectionStates()]);
+  const [app, connections] = await Promise.all([getLatestGitHubApp(), listConnectionStates(organization.id)]);
   const hasPat = Boolean(process.env.GITHUB_TOKEN?.trim());
   const feedback = integrationFeedback(error, success, messages);
 
   return (
-    <AppShell user={user}>
+    <AppShell user={user} organizationName={organization.name}>
       <div className="page-heading">
         <div><span className="eyebrow">INTEGRATIONS</span><h1>连接与集成</h1><p>用只读权限连接代码仓库，不让凭据进入浏览器或产品数据库明文。</p></div>
       </div>

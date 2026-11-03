@@ -7,15 +7,17 @@ import { getProductDetails } from "@/lib/product-details";
 import { featureIdFromParam } from "@/lib/spec-editor-client";
 import { buildProductOverview } from "@/lib/product-overview";
 import { requireSessionUser } from "@/lib/session";
+import { requireOrganization } from "@/lib/organizations";
 
 export const dynamic = "force-dynamic";
 
 export default async function ProductPage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<{ view?: string; mode?: string; feature?: string }> }) {
   const user = await requireSessionUser();
+  const organization = await requireOrganization(user);
   const { slug } = await params;
   const { view = "overview", mode = "spec", feature } = await searchParams;
   const featureId = featureIdFromParam(feature);
-  const details = await getProductDetails(slug);
+  const details = await getProductDetails(slug, organization.id);
   if (!details) notFound();
   const overview = buildProductOverview(details);
 

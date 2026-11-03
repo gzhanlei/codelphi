@@ -3,32 +3,36 @@ import { AppShell } from "@/components/app-shell";
 import { ProductGrid, ReleaseTimeline, type DashboardProduct, type DashboardRelease } from "@/components/dashboard-lists";
 import { getDb } from "@/lib/db";
 import { requireSessionUser } from "@/lib/session";
+import { requireOrganization } from "@/lib/organizations";
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const user = await requireSessionUser();
+  const organization = await requireOrganization(user);
   const db = getDb();
   const [productRows] = await db.execute(
     `SELECT p.id, p.slug, p.name, p.description,
             (SELECT COUNT(*) FROM features f WHERE f.product_id = p.id AND f.active = 1) AS featureCount,
             (SELECT COUNT(*) FROM releases r WHERE r.product_id = p.id) AS releaseCount,
             (SELECT MAX(r.committed_at) FROM releases r WHERE r.product_id = p.id) AS lastRelease
-     FROM products p ORDER BY p.name`,
+     FROM products p WHERE p.organization_id = ? ORDER BY p.name`,
+    [organization.id],
   );
   const products = productRows as DashboardProduct[];
   const [releaseRows] = await db.execute(
     `SELECT r.id, r.title, r.summary, r.committed_at AS committedAt,
             p.name AS productName, p.slug AS productSlug
      FROM releases r JOIN products p ON p.id = r.product_id
-     ORDER BY r.committed_at DESC LIMIT 8`,
+     WHERE p.organization_id = ? ORDER BY r.committed_at DESC LIMIT 8`,
+    [organization.id],
   );
   const releases = releaseRows as DashboardRelease[];
   const featureTotal = products.reduce((sum, product) => sum + Number(product.featureCount), 0);
   const releaseTotal = products.reduce((sum, product) => sum + Number(product.releaseCount), 0);
 
   return (
-    <AppShell user={user}>
+    <AppShell user={user} organizationName={organization.name}>
       <div className="page-heading">
         <div><span className="eyebrow">YOUR PRODUCT PULSE</span><h1>产品总览</h1><p>所有产品的当前规格与最新变化，集中在这里。</p></div>
         <div className="page-actions"><span className="date-chip">{new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "short" }).format(new Date())}</span><Link href="/products/new" className="primary-button">＋ 添加产品</Link></div>

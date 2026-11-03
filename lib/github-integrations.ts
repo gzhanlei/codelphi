@@ -74,21 +74,27 @@ export async function getLatestGitHubApp(execute: Execute = (sql, parameters) =>
   return row ? readApp(row) : null;
 }
 
-export async function saveInstallation(appId: number, installation: Installation, execute: Execute = (sql, parameters) => getDb().execute(sql, parameters)) {
+export async function saveInstallation(appId: number, installation: Installation, organizationOrExecute: number | Execute = 1, maybeExecute?: Execute) {
+  const organizationId = typeof organizationOrExecute === "number" ? organizationOrExecute : 1;
+  const execute = typeof organizationOrExecute === "function" ? organizationOrExecute : maybeExecute ?? ((sql, parameters) => getDb().execute(sql, parameters));
   await execute(
-    `INSERT INTO github_connections (app_id, installation_id, account_login, account_type, status)
-     VALUES (?, ?, ?, ?, 'active')
-     ON DUPLICATE KEY UPDATE account_login = VALUES(account_login), account_type = VALUES(account_type), status = 'active', updated_at = CURRENT_TIMESTAMP(3)`,
-    [appId, installation.id, installation.account.login, installation.account.type, "active"],
+    `INSERT INTO github_connections (app_id, installation_id, account_login, account_type, status, organization_id)
+     VALUES (?, ?, ?, ?, 'active', ?)
+     ON DUPLICATE KEY UPDATE account_login = VALUES(account_login), account_type = VALUES(account_type), status = 'active', organization_id = VALUES(organization_id), updated_at = CURRENT_TIMESTAMP(3)`,
+    [appId, installation.id, installation.account.login, installation.account.type, organizationId],
   );
 }
 
-export async function listConnectionStates(execute: Execute = (sql, parameters) => getDb().execute(sql, parameters)) {
+export async function listConnectionStates(organizationIdOrExecute?: number | Execute, maybeExecute?: Execute) {
+  const organizationId = typeof organizationIdOrExecute === "number" ? organizationIdOrExecute : undefined;
+  const execute = typeof organizationIdOrExecute === "function" ? organizationIdOrExecute : maybeExecute ?? ((sql, parameters) => getDb().execute(sql, parameters));
   const [rows] = await execute(
     `SELECT c.id, c.account_login AS accountLogin, c.account_type AS accountType,
             c.status, a.slug AS appSlug, c.installation_id AS installationId
-     FROM github_connections c JOIN github_apps a ON a.id = c.app_id ORDER BY c.account_login`,
-    [],
+     FROM github_connections c JOIN github_apps a ON a.id = c.app_id
+     WHERE c.organization_id = ? OR ? IS NULL
+     ORDER BY c.account_login`,
+    [organizationId ?? null, organizationId ?? null],
   ) as [Array<{ id: number; accountLogin: string; accountType: string; status: string; appSlug: string; installationId: number }>, unknown];
   return rows;
 }
