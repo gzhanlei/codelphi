@@ -16,8 +16,8 @@ function createInvitationDb() {
       return [{ affectedRows: 1 }];
     }
     if (sql.includes("INSERT INTO organization_invitations")) {
-      const [email, role] = parameters as [string, string];
-      invitations.push({ organizationId: 1, email, role, status: "pending" });
+      const [organizationId, email, role] = parameters as [number, string, string];
+      invitations.push({ organizationId, email, role, status: "pending" });
       return [{ insertId: invitations.length }];
     }
     if (sql.includes("SELECT organization_id, role FROM organization_invitations")) {
@@ -55,6 +55,10 @@ describe("organization invitations", () => {
     const db = createInvitationDb();
     expect(await inviteOrganizationMember({ sub: "owner-sub" }, { email: "new@example.com", role: "viewer" }, db.execute, { id: 1, slug: "default", name: "Default Workspace", role: "owner" }, async () => false)).toMatchObject({ status: "invitation_pending", email: "new@example.com", role: "viewer", emailSent: false });
     expect(db.invitations[0]).toMatchObject({ organizationId: 1, email: "new@example.com", role: "viewer", status: "pending" });
+    const insertCall = db.execute.mock.calls.find((call) => String(call[0]).includes("INSERT INTO organization_invitations"));
+    expect(insertCall?.[0]).toContain("SELECT ?, ?, ?, u.id FROM users u WHERE u.chandler_sub = ?");
+    expect(insertCall?.[0]).not.toContain("FROM organizations o JOIN users u");
+    expect(insertCall?.[1]).toEqual([1, "new@example.com", "viewer", "owner-sub"]);
 
     const user = { sub: "known-sub", email: "new@example.com" };
     db.users.set("new@example.com", { id: 9, sub: "known-sub", email: "new@example.com" });
@@ -63,9 +67,15 @@ describe("organization invitations", () => {
     expect(db.invitations[0].status).toBe("accepted");
   });
 
+  it("rejects non-owners before writing invitations", async () => {
+    const db = createInvitationDb();
+    await expect(inviteOrganizationMember({ sub: "owner-sub" }, { email: "new@example.com", role: "viewer" }, db.execute, { id: 1, slug: "default", name: "Default Workspace", role: "viewer" }, async () => false)).rejects.toThrow("forbidden");
+    expect(db.invitations).toHaveLength(0);
+  });
+
   it("rejects invalid emails and non-editor roles", async () => {
     const db = createInvitationDb();
-    await expect(inviteOrganizationMember({ sub: "owner-sub" }, { email: "bad", role: "editor" }, db.execute, { id: 1, slug: "default", name: "Default Workspace", role: "owner" })).rejects.toThrow();
-    await expect(inviteOrganizationMember({ sub: "owner-sub" }, { email: "new@example.com", role: "owner" }, db.execute, { id: 1, slug: "default", name: "Default Workspace", role: "owner" })).rejects.toThrow();
+    await expect(inviteOrganizationMember({ sub: "owner-sub" }, { email: "bad", role: "editor" }, db.execute, { id: 1, slug: "default", name: "Default Workspace", role: "owner" }, async () => false)).rejects.toThrow();
+    await expect(inviteOrganizationMember({ sub: "owner-sub" }, { email: "new@example.com", role: "owner" }, db.execute, { id: 1, slug: "default", name: "Default Workspace", role: "owner" }, async () => false)).rejects.toThrow();
   });
 });

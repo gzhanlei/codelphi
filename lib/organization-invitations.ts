@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { currentOrganization, type Organization, type OrganizationRole } from "./organizations";
+import { type Organization, type OrganizationRole } from "./organizations";
 import { getDb } from "./db";
 import { invitationUrl, issueInvitationToken } from "./invitation-tokens";
 import { sendInvitationEmail } from "./invitation-email";
@@ -26,9 +26,8 @@ async function userIdByEmail(email: string, execute: Execute) {
   return rows[0]?.id;
 }
 
-export async function inviteOrganizationMember(profile: SessionUser, input: unknown, execute: Execute = (sql, parameters) => getDb().execute(sql, parameters), organization?: Organization, mailer: typeof sendInvitationEmail = sendInvitationEmail): Promise<InviteResult> {
-  const workspace = organization ?? await currentOrganization(profile);
-  if (workspace.role !== "owner") throw new Error("forbidden");
+export async function inviteOrganizationMember(profile: SessionUser, input: unknown, execute: Execute, organization: Organization, mailer: typeof sendInvitationEmail = sendInvitationEmail): Promise<InviteResult> {
+  if (organization.role !== "owner") throw new Error("forbidden");
   const { email, role } = inviteSchema.parse(input);
   const userId = await userIdByEmail(email, execute);
   if (userId) {
@@ -36,19 +35,19 @@ export async function inviteOrganizationMember(profile: SessionUser, input: unkn
       `INSERT INTO organization_members (organization_id, user_id, role)
        VALUES (?, ?, ?)
        ON DUPLICATE KEY UPDATE role = VALUES(role), updated_at = CURRENT_TIMESTAMP(3)`,
-      [workspace.id, userId, role],
+      [organization.id, userId, role],
     );
     return { status: "member_added", email, role, emailSent: false };
   }
   await execute(
     `INSERT INTO organization_invitations (organization_id, email, role, invited_by)
-     SELECT o.id, ?, ?, u.id FROM organizations o JOIN users u ON u.chandler_sub = ?
+     SELECT ?, ?, ?, u.id FROM users u WHERE u.chandler_sub = ?
      ON DUPLICATE KEY UPDATE role = VALUES(role), status = 'pending', updated_at = CURRENT_TIMESTAMP(3)`,
-    [email, role, profile.sub],
+    [organization.id, email, role, profile.sub],
   );
-  const token = await issueInvitationToken(workspace.id, email, execute);
+  const token = await issueInvitationToken(organization.id, email, execute);
   const inviteUrl = invitationUrl(token);
-  const emailSent = await mailer({ to: email, organizationName: workspace.name, role, inviteUrl });
+  const emailSent = await mailer({ to: email, organizationName: organization.name, role, inviteUrl });
   return { status: "invitation_pending", email, role, inviteUrl, emailSent };
 }
 

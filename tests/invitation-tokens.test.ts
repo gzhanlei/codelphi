@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { acceptOrganizationInvitation, getInvitationByToken, hashInvitationToken, invitationUrl, issueInvitationToken } from "../lib/invitation-tokens";
+import { acceptOrganizationInvitation, getInvitationByToken, hashInvitationToken, invitationExpiryDate, invitationUrl, issueInvitationToken } from "../lib/invitation-tokens";
 import { sendInvitationEmail } from "../lib/invitation-email";
 
 function tokenDb() {
@@ -17,6 +17,7 @@ function tokenDb() {
 
 describe("invitation tokens", () => {
   it("issues hashed expiring tokens without exposing the hash in the URL", async () => {
+    expect(invitationExpiryDate(0)).toBe("1970-01-08 00:00:00");
     const db = tokenDb();
     const token = await issueInvitationToken(1, "new@example.com", db.execute);
     expect(token).toMatch(/^[A-Za-z0-9_-]{40,}$/);

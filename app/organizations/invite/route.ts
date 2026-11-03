@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireSessionUser } from "@/lib/session";
 import { inviteOrganizationMember } from "@/lib/organization-invitations";
 import { currentOrganization } from "@/lib/organizations";
+import { getDb } from "@/lib/db";
 
 export async function POST(request: Request) {
   const user = await requireSessionUser();
@@ -9,7 +10,7 @@ export async function POST(request: Request) {
   if (organization.role !== "owner") return NextResponse.json({ error: "forbidden" }, { status: 403 });
   const form = await request.formData();
   try {
-    const result = await inviteOrganizationMember(user, { email: String(form.get("email") ?? ""), role: String(form.get("role") ?? "") });
+    const result = await inviteOrganizationMember(user, { email: String(form.get("email") ?? ""), role: String(form.get("role") ?? "") }, (sql, parameters) => getDb().execute(sql, parameters), organization);
     const url = new URL(`/organizations?invited=${result.status}`, request.url);
     if (result.inviteUrl) {
       url.searchParams.set("inviteUrl", result.inviteUrl);

@@ -15,8 +15,8 @@ export function hashInvitationToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
 }
 
-function expiryDate() {
-  return new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 19).replace("T", " ");
+export function invitationExpiryDate(nowMs: number) {
+  return new Date(nowMs + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 19).replace("T", " ");
 }
 
 export function invitationUrl(token: string) {
@@ -29,7 +29,7 @@ export async function issueInvitationToken(organizationId: number, email: string
     `UPDATE organization_invitations
      SET token_hash = ?, expires_at = ?, status = 'pending', accepted_at = NULL, updated_at = CURRENT_TIMESTAMP(3)
      WHERE organization_id = ? AND email = ?`,
-    [hashInvitationToken(token), expiryDate(), organizationId, email],
+    [hashInvitationToken(token), invitationExpiryDate(Date.now()), organizationId, email],
   );
   return token;
 }
