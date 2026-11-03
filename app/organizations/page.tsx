@@ -22,8 +22,8 @@ export default async function OrganizationsPage({ searchParams }: { searchParams
         {organization.role === "owner" ? <form className="invite-form" action="/organizations/invite" method="post">
           <h2>邀请成员</h2>
           <p>输入对方的电子邮箱，选择 editor 或 viewer。系统会通过 Chandler 发送注册邮件；对方登录或注册后，打开邀请链接即可加入工作区。</p>
-          <label className="field"><span>邮箱</span><input name="email" type="email" required placeholder="partner@example.com" /></label>
-          <label className="field role-field"><span>角色</span><select name="role" defaultValue="editor"><option value="editor">editor</option><option value="viewer">viewer</option></select></label>
+          <label className="field" style={{ flex: "0 0 260px", width: 260, maxWidth: 260 }}><span>邮箱</span><input name="email" type="email" required placeholder="partner@example.com" /></label>
+          <label className="field role-field" style={{ flex: "0 0 120px", width: 120, maxWidth: 120 }}><span>角色</span><select name="role" defaultValue="editor"><option value="editor">editor</option><option value="viewer">viewer</option></select></label>
           <button className="primary-button" type="submit">邀请</button>
           {invited ? <div className="invite-result">
             <p className="success-text">{invited === "member_added" ? "成员已加入工作区。" : "邀请已创建，对方登录或注册后即可加入。"}</p>
