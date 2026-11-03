@@ -9,7 +9,8 @@
       "revision": "6b463b4bdd9ed2fd9aa416f67b5b77d317b1471e",
       "expectedProfile": "next-web",
       "sourceRoots": [
-        ""
+        "apps/web",
+        "packages"
       ]
     },
     {
@@ -61,7 +62,8 @@
       "revision": "fccb3537c728d30cb52ef0fb4e00ce239713ec30",
       "expectedProfile": "rust-service",
       "sourceRoots": [
-        ""
+        "crates",
+        "src"
       ]
     },
     {

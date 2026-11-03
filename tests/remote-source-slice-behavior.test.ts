@@ -208,8 +208,8 @@ describe("Slice Planner behavior", () => {
     expect(slice.confidence).toBe("high");
     expect(slice.files.map((file) => [file.path, file.reason, file.signals])).toEqual([
       ["apps/checkout/package.json", "manifest", ["manifest"]],
-      ["apps/checkout/app/page.tsx", "entrypoint", ["entrypoint", "frontend"]],
-      ["apps/checkout/src/server.ts", "entrypoint", ["entrypoint"]],
+      ["apps/checkout/app/page.tsx", "entrypoint", ["entrypoint", "service", "frontend"]],
+      ["apps/checkout/src/server.ts", "entrypoint", ["entrypoint", "service"]],
     ]);
     expect(slice.files.every((file) => /^[0-9a-f]{40}$/.test(file.blobSha))).toBe(true);
     expect(slice.evidenceClaims.map((claim) => [claim.path, claim.kind, claim.confidence])).toEqual([
@@ -236,6 +236,7 @@ describe("Slice Planner behavior", () => {
         { profileId: "next-web", confidence: 0.9, matchedSignals: [
           { path: "apps/checkout/package.json", signal: "manifest" },
           { path: "apps/checkout/app/page.tsx", signal: "entrypoint" },
+          { path: "apps/checkout/app/page.tsx", signal: "service" },
           { path: "apps/checkout/app/page.tsx", signal: "frontend" },
         ] },
         { profileId: "node-api", confidence: 0.82, matchedSignals: [{ path: "apps/checkout/package.json", signal: "manifest" }] },

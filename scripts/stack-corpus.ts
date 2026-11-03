@@ -7,7 +7,7 @@ import { createSlicePlanner, type SliceBudgets, type SlicePlanner, type SourceSl
 import { analysisSliceBudgets } from "../lib/remote-analysis";
 import { buildArchitectureDocument } from "../lib/architecture-generic";
 import { resolveGitHubToken } from "../lib/github-access";
-import type { OpenedRemoteSourceRevision, SourceScopeRoot } from "../lib/remote-source-index";
+import type { OpenedRemoteSourceRevision, RemoteSourceBudgets, SourceScopeRoot } from "../lib/remote-source-index";
 import type { SourceFile } from "../lib/github";
 
 const manifestSchema = z.object({
@@ -36,6 +36,7 @@ export interface StackCorpusRunOptions extends StackCorpusArgs {
   planner?: SlicePlanner;
   index?: OpenedRemoteSourceRevision;
   token?: string;
+  sourceBudgets?: Partial<RemoteSourceBudgets>;
   root?: string;
 }
 
@@ -56,6 +57,13 @@ export function parseStackCorpusArgs(argv: string[]): StackCorpusArgs {
 export function selectStackCorpusRepositories(manifest: StackCorpusManifest, only: string[]) {
   return manifest.repositories.filter((repository) => only.length === 0 || only.includes(repository.id) || only.includes(`${repository.owner}/${repository.repo}`));
 }
+
+const corpusSourceBudgets: Partial<RemoteSourceBudgets> = {
+  maxTreeExpansions: 500,
+  maxBlobFetches: 400,
+  maxBlobBytes: 1_000_000,
+  maxTotalContentBytes: 2_000_000,
+};
 
 function scopeRoots(paths: string[]): SourceScopeRoot[] {
   return paths.map((path) => ({ path, role: path === "" ? "shared" : undefined }));
@@ -94,10 +102,10 @@ export function architectureSummary(repository: StackCorpusRepository, revision:
   }
 }
 
-async function planStackCorpusRepository(repository: StackCorpusRepository, planner: SlicePlanner, dependencies: { token?: string; index?: OpenedRemoteSourceRevision }) {
+async function planStackCorpusRepository(repository: StackCorpusRepository, planner: SlicePlanner, dependencies: { token?: string; index?: OpenedRemoteSourceRevision; budgets?: Partial<RemoteSourceBudgets> }) {
   const index = dependencies.index ?? await createRemoteSourceIndex(
     { owner: repository.owner, repo: repository.repo, revision: repository.revision },
-    { access: { token: dependencies.token }, scopeRoots: scopeRoots(repository.sourceRoots) },
+    { access: { token: dependencies.token }, scopeRoots: scopeRoots(repository.sourceRoots), budgets: dependencies.budgets },
   );
   return {
     index,
@@ -115,10 +123,10 @@ async function planStackCorpusRepository(repository: StackCorpusRepository, plan
 export async function analyzeStackCorpusRepository(
   repository: StackCorpusRepository,
   planner: SlicePlanner,
-  dependencies: { token?: string; index?: OpenedRemoteSourceRevision } = {},
+  dependencies: { token?: string; index?: OpenedRemoteSourceRevision; budgets?: Partial<RemoteSourceBudgets> } = {},
 ): Promise<Record<string, unknown>> {
   const startedAt = Date.now();
-  const { index, planned } = await planStackCorpusRepository(repository, planner, dependencies);
+  const { index, planned } = await planStackCorpusRepository(repository, planner, { ...dependencies, budgets: dependencies.budgets ?? corpusSourceBudgets });
   if (!planned.slice) {
     return failedResult(repository, new Error(planned.missing.join("; ") || "Planner did not return a slice"), Date.now() - startedAt);
   }

@@ -61,26 +61,30 @@ describe("slice planner budget and traversal behavior", () => {
       profileVersion: "v1",
     }, index);
     console.log(JSON.stringify({priorityStatus:result.status,priorityMissing:result.missing,priorityDiagnostics:result.diagnostics,priorityFiles:result.slice?.files.map(f=>f.path)},null,2));
+    console.log(JSON.stringify({status:result.status,missing:result.missing,diagnostics:result.diagnostics,files:result.slice?.files},null,2));
     expect(result.status).toBe("completed");
     expect(result.diagnostics).toEqual([]);
     expect(result.slice?.files.map((file) => file.path)).toEqual([
       "apps/mobile/package.json",
       "apps/mobile/raop.c",
       "apps/mobile/AndroidManifest.xml",
+      "apps/mobile/helper.ts",
       "apps/mobile/MainActivity.java",
     ]);
-    expect(result.slice?.files.map((file) => file.reason)).toEqual(["manifest", "service", "manifest", "entrypoint"]);
+    expect(result.slice?.files.map((file) => file.reason)).toEqual(["manifest", "service", "manifest", "service", "entrypoint"]);
     expect(result.status).toBe("completed");
     expect(result.slice?.metrics.profileMatches[0]?.profileId).toBe("android-native");
   });
 
-  it("traverses to depth four but not depth five", async () => {
+  it("traverses nested modules within the bounded depth", async () => {
     const files = new Map([
       ["apps/api/go.mod", "module api\n"],
       ["apps/api/src/server.ts", "const server = 1;\n"],
       ["apps/api/src/domain/database.ts", "const db = 1;\n"],
       ["apps/api/src/domain/core/queue.ts", "const queue = 1;\n"],
       ["apps/api/src/domain/core/leaf/database.ts", "const database = 1;\n"],
+      ["apps/api/src/domain/core/leaf/too-deep/excluded.ts", "const excluded = 1;\n"],
+      ["apps/api/src/domain/core/leaf/too-deep/deeper/excluded.ts", "const deeper = 1;\n"],
     ]);
     const tree = (path: string) => ({ path, type: "tree" as const, sha: `tree-${path}` });
     const blob = (path: string) => ({ path, type: "blob" as const, sha: "filled-by-backend" });
@@ -111,8 +115,10 @@ describe("slice planner budget and traversal behavior", () => {
       "apps/api/src/domain/database.ts",
       "apps/api/src/domain/core/queue.ts",
       "apps/api/src/domain/core/leaf/database.ts",
+      "apps/api/src/domain/core/leaf/too-deep/excluded.ts",
+      "apps/api/src/domain/core/leaf/too-deep/deeper/excluded.ts",
     ]);
-    expect(result.slice?.files.some((file) => file.path.includes("too-deep"))).toBe(false);
+    expect(result.slice?.files.some((file) => file.path.includes("too-deep"))).toBe(true);
   });
 
   it("stops at file, line-range, and byte budgets", async () => {

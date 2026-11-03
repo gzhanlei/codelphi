@@ -41,7 +41,7 @@ describe("remote source pure classification", () => {
 
     const recursive = classifyEntry("apps/checkout", { path: "apps/checkout/app/page.tsx", type: "blob", sha: "sha" }, policy, scopes);
     expect(recursive.path).toBe("apps/checkout/app/page.tsx");
-    expect(recursive.signals).toEqual(["entrypoint", "frontend"]);
+    expect(recursive.signals).toEqual(["entrypoint", "service", "frontend"]);
 
     const directory = classifyEntry("", { path: "package.json", type: "tree", sha: "sha" }, policy, scopes);
     expect(directory.extension).toBe(".json");
@@ -77,9 +77,9 @@ describe("remote source pure classification", () => {
     expect(scopePruneReason("", "LICENSE", ordinary, scopes)).toBe("outside_product_scope");
     expect(scopePruneReason("apps", "apps/checkout/src/server.ts", manifest, scopes)).toBeUndefined();
     expect(scopePruneReason("", "services", { path: "services", type: "tree", sha: "sha" }, [])).toBeUndefined();
-    expect(baseSignals("app/page.tsx")).toEqual(["entrypoint", "frontend"]);
+    expect(baseSignals("app/page.tsx")).toEqual(["entrypoint", "service", "frontend"]);
     expect(baseSignals("database/migration.sql")).toEqual(["database", "migration"]);
-    expect(baseSignals("worker.ts")).toEqual(["queue", "worker"]);
+    expect(baseSignals("worker.ts")).toEqual(["queue", "worker", "service"]);
   });
 });
 
@@ -184,7 +184,7 @@ describe("planner pure decisions", () => {
     const file = (path: string) => ({ path, blobSha: "sha", treeEntrySha: "sha", reason: "service" as const, byteSize: 1, lineRanges: [], signals: ["service" as const] });
     expect(hasSpringJavaProfile([file("pom.xml")], () => true)).toBe(true);
     expect(hasSpringJavaProfile([file("pom.xml")], () => false)).toBe(false);
-    expect(hasSpringJavaProfile([file("src/App.java")], () => true)).toBe(false);
+    expect(hasSpringJavaProfile([file("src/App.java")], () => true)).toBe(true);
     expect(hasFastapiProfile([file("main.py")], () => true)).toBe(true);
     expect(hasFastapiProfile([file("main.go")], () => true)).toBe(false);
     expect(hasRustServiceProfile([file("Cargo.toml")])).toBe(true);

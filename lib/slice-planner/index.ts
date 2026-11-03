@@ -63,7 +63,8 @@ export function hasNodeApiProfile(files: SelectedSourceFile[], has: (fragment: s
 }
 
 export function hasSpringJavaProfile(files: SelectedSourceFile[], has: (fragment: string) => boolean) {
-  return hasFileSuffix(files, "pom.xml") && (has("spring-boot") || has("@SpringBootApplication") || has("@RestController"));
+  const javaSource = files.some((file) => file.path.endsWith(".java"));
+  return (hasFileSuffix(files, "pom.xml") || javaSource) && (has("spring-boot") || has("@SpringBootApplication") || has("@RestController"));
 }
 
 export function hasFastapiProfile(files: SelectedSourceFile[], has: (fragment: string) => boolean) {
@@ -87,11 +88,13 @@ export function hasRustServiceProfile(files: SelectedSourceFile[]) {
 }
 
 export function hasLaravelProfile(files: SelectedSourceFile[], has: (fragment: string) => boolean) {
-  return hasFileSuffix(files, "composer.json") && (has("laravel/framework") || hasFileSuffix(files, "artisan"));
+  const phpSource = files.some((file) => file.path.endsWith(".php"));
+  return (hasFileSuffix(files, "composer.json") || phpSource) && (has("laravel/framework") || has("illuminate") || hasFileSuffix(files, "artisan") || files.some((file) => file.path.startsWith("app/Providers/")));
 }
 
 export function hasDotnetServicesProfile(files: SelectedSourceFile[]) {
-  return files.some((file) => file.path.endsWith(".csproj") || file.path.endsWith(".sln")) && files.some((file) => file.path.endsWith(".cs"));
+  const csharpSource = files.some((file) => file.path.endsWith(".cs"));
+  return (files.some((file) => file.path.endsWith(".csproj") || file.path.endsWith(".sln")) || csharpSource) && csharpSource;
 }
 
 export function hasAndroidProfile(files: SelectedSourceFile[]) {
@@ -302,10 +305,10 @@ class DeterministicSlicePlanner implements SlicePlanner {
   }
 
   private async selectFromDirectory(index: OpenedRemoteSourceRevision, state: SlicePlanningState, path: string, depth: number) {
-    if (depth > 4 || state.budgetsRemaining.selectedFiles <= 0) return;
+    if (depth > 8 || state.budgetsRemaining.selectedFiles <= 0) return;
     const listing = await index.listDir(path);
     await this.selectListedFiles(index, state, listing.entries);
-    if (depth >= 5) return;
+    if (depth >= 8) return;
     for (const entry of listing.entries) {
       if (entry.pruned || entry.type !== "tree") continue;
       await this.selectFromDirectory(index, state, entry.path, depth + 1);

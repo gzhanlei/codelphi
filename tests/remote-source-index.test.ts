@@ -84,9 +84,9 @@ describe("remote source classification", () => {
     expect(scopePruneReason("", "README.md", raw, scopes)).toBeUndefined();
     expect(scopePruneReason("", "services", { path: "services", type: "tree", sha: "sha" }, scopes)).toBe("outside_product_scope");
     expect(scopePruneReason("apps", "apps/checkout/src/server.ts", { ...raw, path: "apps/checkout/src/server.ts" }, scopes)).toBeUndefined();
-    expect(baseSignals("app/page.tsx")).toEqual(["entrypoint", "frontend"]);
+    expect(baseSignals("app/page.tsx")).toEqual(["entrypoint", "service", "frontend"]);
     expect(baseSignals("database/migration.sql")).toEqual(["database", "migration"]);
-    expect(baseSignals("worker.ts")).toEqual(["queue", "worker"]);
+    expect(baseSignals("worker.ts")).toEqual(["queue", "worker", "service"]);
   });
 });
 

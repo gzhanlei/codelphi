@@ -41,7 +41,7 @@ const baseSignalRules: Array<{ match: (path: string, name: string) => boolean; s
   { match: (_path, name) => /(?:database|db|postgres|mysql|sqlite)/.test(name) || /\.sql$/.test(name), signals: ["database", "migration"] },
   { match: (_path, name) => /(?:queue|worker|job)/.test(name), signals: ["queue", "worker"] },
   { match: (path, name) => /(?:^|\/)(?:oauth|auth)(?:\/|\.)/.test(path) || /(?:auth|oauth)/.test(name), signals: ["auth"] },
-  { match: (path) => /\.(?:java|kt|py|cs|php|go|rs|rb)$/.test(path), signals: ["service"] },
+  { match: (path) => /\.(?:java|kt|py|cs|php|go|rs|rb|ts|tsx|jsx|mjs|cjs)$/.test(path), signals: ["service"] },
   { match: (_path, name) => /(?:dockerfile|docker-compose|deploy|k8s|kubernetes)/.test(name), signals: ["deployment"] },
   { match: (path, name) => /\.(?:tsx|jsx)$/.test(name) || hasSegment(path, "app") && /\.tsx$/.test(name), signals: ["frontend"] },
   { match: (_path, name) => /\.(?:java|kt|swift|m|mm|c|cc|cpp|h|hpp)$/.test(name), signals: ["native"] },
@@ -181,7 +181,7 @@ class RemoteSourceRevision implements OpenedRemoteSourceRevision {
     const content = decodeUtf8(bytes);
     const rawLines = content.split("\n");
     const lines = rawLines.at(-1) === "" ? rawLines.slice(0, -1) : rawLines;
-    const startLine = request.startLine;
+    const startLine = Math.min(request.startLine, lines.length);
     const endLine = Math.min(lines.length, request.endLine, startLine + this.budgets.maxLinesPerRead - 1);
     const selected = lines.slice(startLine - 1, endLine);
     const byteSize = Buffer.byteLength(selected.join("\n"), "utf8");
