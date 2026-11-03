@@ -44,7 +44,7 @@ export function buildProductOverview(input: ProductOverviewInput) {
   const evidencePaths = new Set(input.scenarios.flatMap((scenario) => evidenceItems(scenario.evidence).map((item) => item.path)));
   return {
     slug: input.product.slug,
-    headline: input.product.description.trim() || "从 GitHub 代码维护可追溯的产品规格",
+    headline: input.product.description.trim() || "产品概览",
     freshness: specLabel(specVersionId, revision),
     analysisLabel: analysisLabel(input.latestRun ? input.latestRun.status : undefined),
     capabilities: input.features.map((feature) => ({

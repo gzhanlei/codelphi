@@ -54,7 +54,7 @@ describe("product overview", () => {
 
   it("does not invent an architecture link or a spec version", () => {
     const overview = buildProductOverview({ product: { id: 1, slug: "radar", name: "Radar", description: "" }, features: [], scenarios: [], releases: [], behaviorChanges: [], latestRun: undefined, architecture: { id: 6, specVersionId: 9, revision: "deadbeef", status: "failed", errorMessage: "Layout failed" } });
-    expect(overview.headline).toBe("从 GitHub 代码维护可追溯的产品规格");
+    expect(overview.headline).toBe("产品概览");
     expect(overview.freshness).toBe("Spec v9 · deadbee");
     expect(overview.architecture).toMatchObject({ status: "failed", errorMessage: "Layout failed" });
     expect(overview.architecture?.href).toBeUndefined();
