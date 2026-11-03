@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { getDb } from "./db";
 import { upsertRadarUser } from "./users";
 import { requiredEnv } from "./env";
+import { claimOrganizationInvitations } from "./organization-invitations";
 import type { SessionUser } from "./types";
 
 export type OrganizationRole = "owner" | "editor" | "viewer";
@@ -32,6 +33,7 @@ function defaultOrganization(profile: SessionUser): Organization {
 export async function ensureUserWorkspace(profile: SessionUser, execute: Execute = (sql, parameters) => getDb().execute(sql, parameters)) {
   const query = dbQuery(execute);
   await upsertRadarUser(profile, execute);
+  await claimOrganizationInvitations(profile, execute);
   const defaultOrg = defaultOrganization(profile);
   const existing = await query<Organization>(
     `SELECT o.id, o.slug, o.name, m.role FROM organizations o JOIN organization_members m ON m.organization_id = o.id
