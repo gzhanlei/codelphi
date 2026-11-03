@@ -85,7 +85,6 @@ export interface SourceTreeListing {
   metrics: {
     entryCount: number;
     prunedCount: number;
-    expandedCount: number;
   };
 }
 
@@ -241,6 +240,6 @@ export const defaultRemoteSourceBudgets: RemoteSourceBudgets = {
 
 export const defaultSourcePruningPolicy: SourcePruningPolicy = {
   excludedPrefixes: [".git/", "node_modules/", "vendor/", "third_party/", "dist/", "build/", "out/", "coverage/"],
-  excludedExtensions: [".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf", ".zip", ".gz", ".mp4", ".mov", ".woff", ".woff2", ".lock"],
+  excludedExtensions: [".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf", ".zip", ".gz", ".mp4", ".mov", ".woff", ".woff2", ".lock", ".bin"],
   maxTrackedSourceBytes: 1_000_000,
 };

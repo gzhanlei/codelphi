@@ -24,10 +24,6 @@ function repositoryPath(ref: { owner: string; repo: string }) {
   return `/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repo)}`;
 }
 
-function encodeSourcePath(path: string) {
-  return path.split("/").map(encodeURIComponent).join("/");
-}
-
 export interface GitHubSourceBackendOptions {
   access?: GitHubAccess;
   fetchImpl?: typeof fetch;
@@ -44,8 +40,8 @@ function mapTreeEntries(tree: Array<z.infer<typeof treeResponseSchema>["tree"][n
 }
 
 export function createGitHubSourceBackend(options: GitHubSourceBackendOptions = {}): RemoteSourceBackend {
-  const fetchImpl = options.fetchImpl ?? fetch;
-  const timeoutMs = options.timeoutMs ?? 30_000;
+  const fetchImpl = options.fetchImpl || fetch;
+  const timeoutMs = options.timeoutMs || 30_000;
 
   async function request(path: string, access: GitHubAccess) {
     const token = await resolveGitHubToken(access);
@@ -80,4 +76,4 @@ export function createGitHubSourceBackend(options: GitHubSourceBackendOptions = 
   };
 }
 
-export { repositoryPath, encodeSourcePath };
+export { repositoryPath };

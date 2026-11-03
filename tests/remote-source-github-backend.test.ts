@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createGitHubSourceBackend } from "../lib/remote-source-index/github-backend";
 
 const ref = { owner: "gzhanlei", repo: "commerce", revision: "a".repeat(40) };
@@ -31,6 +31,19 @@ describe("GitHub source backend", () => {
       "https://api.github.com/repos/gzhanlei/commerce/git/trees/tree-root",
       "https://api.github.com/repos/gzhanlei/commerce/git/blobs/blob-sha",
     ]);
+  });
+
+  it("falls back to GITHUB_TOKEN when access options are omitted", async () => {
+    vi.stubEnv("GITHUB_TOKEN", "environment-token");
+    const headers: Record<string, string>[] = [];
+    const backend = createGitHubSourceBackend({ fetchImpl: async (_url, init) => {
+      headers.push(init?.headers as Record<string, string>);
+      return Response.json({ sha: "root", truncated: false, tree: [{ path: "README.md", type: "blob", sha: "blob", mode: "100644", size: 3 }] });
+    } });
+    expect(await backend.resolveRevision(ref)).toEqual({ rootTreeSha: "root" });
+    expect(await backend.listTree(ref, "root", "")).toEqual({ entries: [{ path: "README.md", type: "blob", sha: "blob", mode: "100644", size: 3 }], truncated: false });
+    expect(headers[0].Authorization).toBe("Bearer environment-token");
+    vi.unstubAllEnvs();
   });
 
   it("surfaces GitHub API failures as source index errors", async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createRemoteSourceIndex, gitBlobSha, type RemoteSourceBackend } from "../lib/remote-source-index";
+import { baseSignals, contentPruneReason, createRemoteSourceIndex, dependencyPruneReason, gitBlobSha, scopePruneReason, type RemoteSourceBackend } from "../lib/remote-source-index";
 
 const revision = "9f31c0de7a41b8d2e5f60a93c4d78ba12ef50937";
 
@@ -37,13 +37,13 @@ function createBackend() {
     async resolveRevision() {
       return { rootTreeSha: "tree-root" };
     },
-    async listTree(_ref, treeSha, path) {
+    async listTree(_source, treeSha, path) {
       calls.trees += 1;
       const entries = trees.get(path) ?? [];
       if (entries.length === 0 || path === "third_party/sdk") throw new Error(`unexpected tree path ${path}`);
       return { entries, truncated: false };
     },
-    async fetchBlob(_ref, path, _blobSha) {
+    async fetchBlob(_source, path, _blobSha) {
       calls.blobs += 1;
       const content = files.get(path);
       if (!content) throw new Error(`unexpected blob path ${path}`);
@@ -52,6 +52,43 @@ function createBackend() {
   };
   return { backend, calls, files };
 }
+
+describe("remote source classification", () => {
+  it("maps dependency prefixes to exact prune reasons", () => {
+    expect(dependencyPruneReason("third_party")).toBe("third_party");
+    expect(dependencyPruneReason("third_party/sdk")).toBe("third_party");
+    expect(dependencyPruneReason("vendor")).toBe("third_party");
+    expect(dependencyPruneReason("vendor/lib")).toBe("third_party");
+    expect(dependencyPruneReason("node_modules")).toBe("dependency_directory");
+    expect(dependencyPruneReason("node_modules/pkg")).toBe("dependency_directory");
+    expect(dependencyPruneReason("dist")).toBe("build_output");
+    expect(dependencyPruneReason("build/app")).toBe("build_output");
+  });
+
+  it("maps content signals and size limits to prune reasons", () => {
+    const raw = { path: "app/thing.ts", type: "blob" as const, sha: "sha" };
+    const policy = { excludedPrefixes: [], excludedExtensions: [".png"], maxTrackedSourceBytes: 10 };
+    expect(contentPruneReason("generated/thing.ts", raw, policy)).toBe("generated");
+    expect(contentPruneReason("a/__generated__/thing.ts", raw, policy)).toBe("generated");
+    expect(contentPruneReason("icon.png", { ...raw, path: "icon.png" }, policy, ".png")).toBe("binary_asset");
+    expect(contentPruneReason("huge.ts", { ...raw, path: "huge.ts", size: 11 }, policy, ".ts")).toBe("too_large");
+    expect(contentPruneReason("just-enough.ts", { ...raw, path: "just-enough.ts", size: 10 }, policy, ".ts")).toBeUndefined();
+    expect(contentPruneReason("tree", { path: "tree", type: "tree", sha: "sha" }, policy)).toBeUndefined();
+  });
+
+  it("keeps scope roots, ancestors, and root manifests while pruning other root entries", () => {
+    const raw = { path: "README.md", type: "blob" as const, sha: "sha" };
+    const scopes = [{ path: "apps/checkout" }];
+    expect(scopePruneReason("", "apps", { path: "apps", type: "tree", sha: "sha" }, scopes)).toBeUndefined();
+    expect(scopePruneReason("", "apps/checkout", { ...raw, path: "apps/checkout" }, scopes)).toBeUndefined();
+    expect(scopePruneReason("", "README.md", raw, scopes)).toBeUndefined();
+    expect(scopePruneReason("", "services", { path: "services", type: "tree", sha: "sha" }, scopes)).toBe("outside_product_scope");
+    expect(scopePruneReason("apps", "apps/checkout/src/server.ts", { ...raw, path: "apps/checkout/src/server.ts" }, scopes)).toBeUndefined();
+    expect(baseSignals("app/page.tsx")).toEqual(["entrypoint", "frontend"]);
+    expect(baseSignals("database/migration.sql")).toEqual(["database", "migration"]);
+    expect(baseSignals("worker.ts")).toEqual(["queue", "worker"]);
+  });
+});
 
 describe("Remote Source Index", () => {
   it("lazily expands scoped trees and prunes dependency directories", async () => {
@@ -141,7 +178,7 @@ describe("Remote Source Index", () => {
       async resolveRevision() {
         return { rootTreeSha: "tree-root" };
       },
-      async listTree(_ref, _treeSha, path) {
+      async listTree(_source, _treeSha, path) {
         if (path) throw new Error("unexpected expansion");
         return { entries: rootEntries, truncated: false };
       },
@@ -192,6 +229,59 @@ describe("Remote Source Index", () => {
     expect(after?.lineCount).toBeGreaterThan(0);
   });
 
+  it("falls back to Node filesystem, reports partial indexes, and validates sparse evidence", async () => {
+    const { mkdtemp, readFile, rm } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const files = new Map([["apps/checkout/package.json", "{\n  \"name\": \"checkout\"\n}\n"], ["apps/checkout/binary.bin", "not-utf8\n"]]);
+    const sha = (path: string) => gitBlobSha(files.get(path)!);
+    const backend: RemoteSourceBackend = {
+      kind: "github_api",
+      async resolveRevision() {
+        return { rootTreeSha: "root" };
+      },
+      async listTree(_source, _treeSha, path) {
+        if (path === "") return { truncated: true, entries: [{ path: "apps", type: "tree", sha: "tree-apps" }] };
+        if (path === "apps") return { truncated: false, entries: [{ path: "apps/checkout", type: "tree", sha: "tree-checkout" }] };
+        return { truncated: false, entries: [
+          { path: "apps/checkout/package.json", type: "blob", sha: sha("apps/checkout/package.json"), size: Buffer.byteLength(files.get("apps/checkout/package.json")!) },
+          { path: "apps/checkout/binary.bin", type: "blob", sha: sha("apps/checkout/binary.bin"), size: 9 },
+          { path: "apps/checkout/src", type: "tree", sha: "tree-src" },
+        ] };
+      },
+      async fetchBlob(_source, path) {
+        return new TextEncoder().encode(files.get(path)!);
+      },
+    };
+    const index = await createRemoteSourceIndex({ owner: "gzhanlei", repo: "commerce", revision }, { scopeRoots: [{ path: "apps/checkout" }], backend });
+    expect(index.identity.status).toBe("partial");
+    expect((await index.listRoot()).status).toBe("partial");
+    expect(await index.statPath("apps/checkout/generated/x.ts")).toBeNull();
+    await expect(index.readLines({ path: "apps/checkout/src", startLine: 1, endLine: 1, requestedBy: "planner", reason: "tree" })).rejects.toThrow("source file was not found");
+    await expect(index.readLines({ path: "apps/checkout/binary.bin", startLine: 1, endLine: 1, requestedBy: "planner", reason: "binary" })).rejects.toThrow("source file is pruned (binary_asset)");
+
+    const root = await mkdtemp(join(tmpdir(), "radar-evidence-"));
+    const result = await index.materializeEvidenceRoot({
+      revision: { owner: "gzhanlei", repo: "commerce", revision },
+      scopeRoots: [{ path: "apps/checkout" }],
+      paths: [
+        { path: "apps/checkout/package.json", blobSha: sha("apps/checkout/package.json") },
+        { path: "apps/checkout/package.json", blobSha: "wrong-sha" },
+      ],
+      outputRoot: root,
+    });
+    expect(result.verified).toBe(false);
+    expect(result.fileCount).toBe(1);
+    expect(await readFile(join(root, "apps/checkout/package.json"), "utf8")).toBe(files.get("apps/checkout/package.json"));
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("rejects root files that are outside product scope", async () => {
+    const { backend } = createBackend();
+    const index = await createRemoteSourceIndex({ owner: "gzhanlei", repo: "commerce", revision }, { scopeRoots: [{ path: "apps/checkout" }], backend });
+    await expect(index.readLines({ path: "LICENSE", startLine: 1, endLine: 1, requestedBy: "ai_explorer", reason: "root file" })).rejects.toThrow("path is outside product scope");
+  });
+
   it("rejects blob content whose Git SHA does not match the pinned tree entry", async () => {
     const content = "export const bad = true;\n";
     const backend: RemoteSourceBackend = {
@@ -199,12 +289,12 @@ describe("Remote Source Index", () => {
       async resolveRevision() {
         return { rootTreeSha: "tree-root" };
       },
-      async listTree(_ref, _treeSha, path) {
+      async listTree(_source, _treeSha, path) {
         if (path === "apps") return { entries: [{ path: "apps/checkout", type: "tree", sha: "tree-checkout" }], truncated: false };
         if (path === "apps/checkout") return { entries: [{ path: "apps/checkout/bad.ts", type: "blob", sha: "bad-sha", size: content.length }], truncated: false };
         return { entries: [{ path: "apps", type: "tree", sha: "tree-apps" }], truncated: false };
       },
-      async fetchBlob(_ref, path, _blobSha) {
+      async fetchBlob(_source, path, _blobSha) {
         if (path !== "apps/checkout/bad.ts") throw new Error("unexpected blob");
         return new TextEncoder().encode(content);
       },

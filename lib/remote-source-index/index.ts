@@ -21,6 +21,10 @@ function normalizeSourcePath(path: string) {
   return normalize(path).replaceAll(sep, "/").replace(/^\.?\//, "").replace(/\/+$/g, "");
 }
 
+function childPath(parentPath: string, name: string) {
+  return parentPath ? `${parentPath}/${name}` : name;
+}
+
 function isDescendant(path: string, scopePath: string) {
   return path === scopePath || path.startsWith(`${scopePath}/`);
 }
@@ -44,12 +48,12 @@ const baseSignalRules: Array<{ match: (path: string, name: string) => boolean; s
   { match: (_path, name) => /(?:generated|\.pb\.go|\.g\.dart|\.next)/.test(name), signals: ["generated"] },
 ];
 
-function baseSignals(path: string): SourceSignal[] {
+export function baseSignals(path: string): SourceSignal[] {
   const name = basename(path).toLowerCase();
   return baseSignalRules.filter((rule) => rule.match(path, name)).flatMap((rule) => rule.signals);
 }
 
-function dependencyPruneReason(path: string): PruneReason {
+export function dependencyPruneReason(path: string): PruneReason {
   if (path === "third_party" || path.startsWith("third_party/") || path === "vendor" || path.startsWith("vendor/")) return "third_party";
   if (path === "node_modules" || path.startsWith("node_modules/")) return "dependency_directory";
   return "build_output";
@@ -61,7 +65,7 @@ function excludedPruneReason(path: string, policy: SourcePruningPolicy): PruneRe
     : undefined;
 }
 
-function contentPruneReason(path: string, raw: SourceTreeApiEntry, policy: SourcePruningPolicy, extension?: string): PruneReason | undefined {
+export function contentPruneReason(path: string, raw: SourceTreeApiEntry, policy: SourcePruningPolicy, extension?: string): PruneReason | undefined {
   if (raw.type !== "blob") return undefined;
   if (/(?:^|\/)(?:generated|__generated__)(?:\/|$)/.test(path)) return "generated";
   if (policy.excludedExtensions.includes(extension ?? "")) return "binary_asset";
@@ -69,7 +73,7 @@ function contentPruneReason(path: string, raw: SourceTreeApiEntry, policy: Sourc
   return undefined;
 }
 
-function scopePruneReason(parentPath: string, path: string, raw: SourceTreeApiEntry, scopeRoots: SourceScopeRoot[]): PruneReason | undefined {
+export function scopePruneReason(parentPath: string, path: string, raw: SourceTreeApiEntry, scopeRoots: SourceScopeRoot[]): PruneReason | undefined {
   if (parentPath !== "" || scopeRoots.length === 0) return undefined;
   if (scopeRoots.some((scope) => isDescendant(path, scope.path) || scope.path.startsWith(`${path}/`))) return undefined;
   if (raw.type === "blob" && baseSignals(path).includes("manifest")) return undefined;
@@ -77,7 +81,7 @@ function scopePruneReason(parentPath: string, path: string, raw: SourceTreeApiEn
 }
 
 function classifyEntry(parentPath: string, raw: SourceTreeApiEntry, policy: SourcePruningPolicy, scopeRoots: SourceScopeRoot[]): SourceTreeEntry {
-  const path = raw.path;
+  const path = parentPath && !raw.path.startsWith(`${parentPath}/`) ? childPath(parentPath, raw.path) : raw.path;
   const extension = path.includes(".") ? `.${path.split(".").pop()?.toLowerCase()}` : undefined;
   const pruneReason = excludedPruneReason(path, policy) ?? contentPruneReason(path, raw, policy, extension) ?? scopePruneReason(parentPath, path, raw, scopeRoots);
 
@@ -175,7 +179,7 @@ class RemoteSourceRevision implements OpenedRemoteSourceRevision {
     const content = decodeUtf8(bytes);
     const rawLines = content.split("\n");
     const lines = rawLines.at(-1) === "" ? rawLines.slice(0, -1) : rawLines;
-    const startLine = Math.max(1, request.startLine);
+    const startLine = request.startLine;
     const endLine = Math.min(lines.length, request.endLine, startLine + this.budgets.maxLinesPerRead - 1);
     const selected = lines.slice(startLine - 1, endLine);
     const byteSize = Buffer.byteLength(selected.join("\n"), "utf8");
@@ -233,9 +237,12 @@ class RemoteSourceRevision implements OpenedRemoteSourceRevision {
   }
 
   private async findEntry(path: string): Promise<SourceTreeEntry | null> {
+    if (!path) return { path: "", parentPath: "", type: "tree", sha: this.identity.rootTreeSha, signals: [], expanded: true };
     const cached = this.state.entries.get(path);
     if (cached) return cached;
     const parentPath = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+    const parent = await this.findEntry(parentPath);
+    if (!parent || parent.type !== "tree" || parent.pruned) return null;
     await this.ensureListing(parentPath);
     return this.state.entries.get(path) ?? null;
   }
@@ -265,7 +272,6 @@ class RemoteSourceRevision implements OpenedRemoteSourceRevision {
       metrics: {
         entryCount: entries.length,
         prunedCount: entries.filter((entry) => entry.pruned).length,
-        expandedCount: entries.filter((entry) => entry.type === "tree" && entry.expanded).length,
       },
     };
   }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createRemoteSourceIndex, gitBlobSha, type RemoteSourceBackend } from "../lib/remote-source-index";
-import { createSlicePlanner, type SlicePlanningState, type StackProfileId } from "../lib/slice-planner";
+import { createSlicePlanner, hasNextWebProfile, hasNodeApiProfile, matchProfiles, scopeErrorMessage, type SlicePlanningState, type StackProfileId } from "../lib/slice-planner";
 
 const revision = "9f31c0de7a41b8d2e5f60a93c4d78ba12ef50937";
 
@@ -36,6 +36,27 @@ function createCheckoutBackend(): RemoteSourceBackend {
     },
   };
 }
+
+describe("slice profile boundaries", () => {
+  const files = (paths: string[]) => paths.map((path) => ({ path, blobSha: "sha", treeEntrySha: "sha", reason: "manifest" as const, byteSize: 1, lineRanges: [], signals: ["manifest" as const] }));
+  it("requires independent evidence for stack profiles", () => {
+    expect(hasNextWebProfile(files(["package.json"]), () => false)).toBe(false);
+    expect(hasNextWebProfile(files(["app/page.tsx"]), () => false)).toBe(false);
+    expect(hasNextWebProfile(files(["package.json", "app/page.tsx"]), () => false)).toBe(true);
+    expect(hasNextWebProfile(files(["package.json", "app/page.tsx"]), () => true)).toBe(true);
+    expect(hasNodeApiProfile(files(["package.json"]), () => false)).toBe(false);
+    expect(hasNodeApiProfile(files(["package.json"]), () => true)).toBe(true);
+    expect(scopeErrorMessage(new Error("boom"), "apps/api")).toBe("scope root could not be indexed: apps/api");
+    expect(scopeErrorMessage({ code: "tree_not_found" }, "apps/api")).toBe("scope root could not be indexed: apps/api");
+  });
+
+  it("sorts matched profiles by confidence and includes owning signals", () => {
+    const selected = files(["package.json", "go.mod"]);
+    const matches = matchProfiles(selected, new Map([["package.json", JSON.stringify({ dependencies: { express: "4" } })]]));
+    expect(matches.map((match) => [match.profileId, match.confidence])).toEqual([["go-api", 0.85], ["node-api", 0.82]]);
+    expect(matches[1].matchedSignals).toEqual([{ path: "package.json", signal: "manifest" }]);
+  });
+});
 
 describe("Slice Planner", () => {
   it("rejects products without product scope", async () => {
@@ -218,6 +239,15 @@ describe("Slice Planner", () => {
     expect(android.slice?.metrics.profileMatches[0]?.profileId).toBe("android-native");
   });
 
+  it("completes a finalized state when a profile is present", async () => {
+    const planner = createSlicePlanner({ now: () => 10 });
+    const state = {
+      profileMatches: [{ profileId: "go-api", confidence: 0.85, matchedSignals: [] }],
+      diagnostics: [],
+    } as unknown as SlicePlanningState;
+    await expect(planner.finalize(state)).resolves.toEqual({ status: "completed", missing: [], diagnostics: [] });
+  });
+
   it("gates targeted reads and records approved evidence", () => {
     const planner = createSlicePlanner();
     const state: SlicePlanningState = {
@@ -239,10 +269,12 @@ describe("Slice Planner", () => {
       profileMatches: [],
       unresolved: [],
       diagnostics: [],
-      budgetsRemaining: { selectedFiles: 10, selectedLineRanges: 100, plannerContentBytes: 10_000, aiReadCalls: 1, startedAt: Date.now() },
+      budgetsRemaining: { selectedFiles: 10, selectedLineRanges: 100, plannerContentBytes: 10_000, aiReadCalls: 0, startedAt: Date.now() },
     };
     expect(planner.evaluateTargetedRead(state, { path: "outside.ts", startLine: 1, endLine: 1, requestedBy: "ai_explorer", reason: "outside" }).allowed).toBe(false);
     expect(planner.evaluateTargetedRead(state, { path: "apps/checkout/file.ts", startLine: 0, endLine: 1, requestedBy: "ai_explorer", reason: "invalid" }).allowed).toBe(false);
+    expect(planner.evaluateTargetedRead(state, { path: "apps/checkout/file.ts", startLine: 1, endLine: 1, requestedBy: "ai_explorer", reason: "no budget" }).allowed).toBe(false);
+    state.budgetsRemaining.aiReadCalls = 1;
     const decision = planner.evaluateTargetedRead(state, { path: "apps/checkout/file.ts", startLine: 1, endLine: 2, requestedBy: "ai_explorer", reason: "verify edge" });
     expect(decision.allowed).toBe(true);
     if (!decision.allowed) return;

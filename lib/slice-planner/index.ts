@@ -5,7 +5,7 @@ import { SourceIndexError, type SourceLineSlice, type SourceSignal, type SourceT
 import type { EvidenceClaim, PlannerDiagnostic, ProductSliceInput, ScopeResolution, SelectedSourceFile, SelectedSourceReason, SliceConfidence, SlicePlanResult, SlicePlanningState, SlicePlanner, StackProfileId, StackProfileMatch, TargetedReadApproval, TargetedReadDecision, TargetedReadRequest } from "./types";
 import type { OpenedRemoteSourceRevision } from "../remote-source-index/types";
 
-const sourceDirectoryNames = new Set(["app", "apps", "src", "lib", "internal", "routes", "services", "cmd", "pages"]);
+const sourceDirectoryNames = new Set(["app", "apps", "src", "lib", "internal", "routes", "services", "cmd", "pages", "java", "cpp"]);
 const interestingSignals = new Set<SourceSignal>(["manifest", "entrypoint", "route", "service", "database", "migration", "queue", "worker", "auth", "deployment", "frontend", "native"]);
 
 function contentSha(lines: string[]) {
@@ -31,7 +31,7 @@ export function confidenceLabel(confidence: number): SliceConfidence {
   return confidence >= 0.72 ? "high" : confidence >= 0.5 ? "medium" : "low";
 }
 
-function scopeErrorMessage(error: unknown, path: string) {
+export function scopeErrorMessage(error: unknown, path: string) {
   if (error instanceof SourceIndexError && ["path_outside_product_scope", "tree_not_found", "path_not_found"].includes(error.code)) {
     return `scope root does not exist: ${path}`;
   }
@@ -46,19 +46,19 @@ function matchedSignals(candidate: { paths: string[] }, files: SelectedSourceFil
   return matchCandidate(candidate, files).flatMap((file) => file.signals.map((signal) => ({ path: file.path, signal })));
 }
 
-function hasNextWebProfile(files: SelectedSourceFile[], has: (fragment: string) => boolean) {
+export function hasNextWebProfile(files: SelectedSourceFile[], has: (fragment: string) => boolean) {
   return hasFileSuffix(files, "package.json") && (has("\"next\"") || hasFileSuffix(files, "app/page.tsx"));
 }
 
-function hasNodeApiProfile(files: SelectedSourceFile[], has: (fragment: string) => boolean) {
+export function hasNodeApiProfile(files: SelectedSourceFile[], has: (fragment: string) => boolean) {
   return hasFileSuffix(files, "package.json") && (has("fastify") || has("express") || has("hono"));
 }
 
-function hasGoProfile(files: SelectedSourceFile[]) {
+export function hasGoProfile(files: SelectedSourceFile[]) {
   return hasFileSuffix(files, "go.mod");
 }
 
-function hasAndroidProfile(files: SelectedSourceFile[], has: (fragment: string) => boolean) {
+export function hasAndroidProfile(files: SelectedSourceFile[], has: (fragment: string) => boolean) {
   return hasFileSuffix(files, "AndroidManifest.xml") && (hasFileSuffix(files, "build.gradle") || has("activity") || has("service"));
 }
 
@@ -78,7 +78,7 @@ function profileCandidates(files: SelectedSourceFile[], content: Map<string, str
   return candidates;
 }
 
-function matchProfiles(files: SelectedSourceFile[], content: Map<string, string>): StackProfileMatch[] {
+export function matchProfiles(files: SelectedSourceFile[], content: Map<string, string>): StackProfileMatch[] {
   return profileCandidates(files, content)
     .filter((candidate) => candidate.matches)
     .map((candidate) => ({
@@ -185,6 +185,12 @@ class DeterministicSlicePlanner implements SlicePlanner {
         prunedPathCount: 0,
         wallClockMs: this.now() - state.budgetsRemaining.startedAt,
         profileMatches: state.profileMatches,
+        budgetsRemaining: {
+          selectedFiles: state.budgetsRemaining.selectedFiles,
+          selectedLineRanges: state.budgetsRemaining.selectedLineRanges,
+          plannerContentBytes: state.budgetsRemaining.plannerContentBytes,
+          aiReadCalls: state.budgetsRemaining.aiReadCalls,
+        },
       },
     };
   }
@@ -239,19 +245,34 @@ class DeterministicSlicePlanner implements SlicePlanner {
   }
 
   private async selectFromDirectory(index: OpenedRemoteSourceRevision, state: SlicePlanningState, path: string, depth: number) {
-    if (depth > 2 || state.budgetsRemaining.selectedFiles <= 0) return;
+    if (depth > 4 || state.budgetsRemaining.selectedFiles <= 0) return;
     const listing = await index.listDir(path);
     await this.selectListedFiles(index, state, listing.entries);
-    if (depth >= 2) return;
+    if (depth >= 4) return;
     for (const entry of listing.entries) {
-      if (entry.pruned || entry.type !== "tree" || !sourceDirectoryNames.has(basename(entry.path))) continue;
+      if (entry.pruned || entry.type !== "tree") continue;
       await this.selectFromDirectory(index, state, entry.path, depth + 1);
     }
   }
 
+  private readonly priorityPatterns = [
+  /AndroidManifest\.xml$/,
+  /(?:package\.json|go\.mod|Cargo\.toml|pom\.xml|build\.gradle)$/,
+  /(?:page\.tsx|route\.ts|main\.go|server\.ts|index\.ts)$/,
+  /(?:Activity|Service|NativeBridge)\.java$/,
+  /(?:jni|raop|httpd).*\.c$/i,
+];
+
+  private candidatePriority(entry: SourceTreeEntry) {
+    const priority = this.priorityPatterns.findIndex((pattern: RegExp) => pattern.test(entry.path));
+    return priority === -1 ? this.priorityPatterns.length : priority;
+}
+
   private async selectListedFiles(index: OpenedRemoteSourceRevision, state: SlicePlanningState, entries: SourceTreeEntry[]) {
-    for (const entry of entries) {
-      if (entry.pruned || entry.type !== "blob" || !entry.signals.some((signal) => interestingSignals.has(signal))) continue;
+    const candidates = entries
+      .filter((entry) => !entry.pruned && entry.type === "blob" && entry.signals.some((signal) => interestingSignals.has(signal)))
+      .sort((a, b) => this.candidatePriority(a) - this.candidatePriority(b) || basename(a.path).localeCompare(basename(b.path)));
+    for (const entry of candidates) {
       await this.selectFile(index, state, entry.path, entry.signals, reasonFor(entry.signals));
     }
   }
@@ -294,8 +315,7 @@ class DeterministicSlicePlanner implements SlicePlanner {
 
 function toDiagnostic(error: unknown): PlannerDiagnostic {
   if (error instanceof SourceIndexError) {
-    const code = error.code as PlannerDiagnostic["code"];
-    return { code: code ?? "budget_exhausted", message: error.message };
+    return { code: error.code as PlannerDiagnostic["code"], message: error.message };
   }
   return { code: "budget_exhausted", message: error instanceof Error ? error.message : "slice planning failed" };
 }

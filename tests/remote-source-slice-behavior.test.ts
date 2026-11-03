@@ -225,6 +225,7 @@ describe("Slice Planner behavior", () => {
       selectedContentBytes: slice.files.reduce((total, file) => total + file.byteSize, 0),
       aiReadCalls: 0,
       prunedPathCount: 0,
+      budgetsRemaining: { selectedFiles: 7, selectedLineRanges: 97, plannerContentBytes: 100_000 - slice.metrics.selectedContentBytes, aiReadCalls: 2 },
       wallClockMs: 0,
       profileMatches: [
         { profileId: "next-web", confidence: 0.9, matchedSignals: [
@@ -284,11 +285,11 @@ describe("Slice Planner behavior", () => {
     }, index);
     expect(result.slice?.files.map((file) => [file.path, file.reason])).toEqual([
       ["apps/api/package.json", "manifest"],
-      ["apps/api/routes.ts", "route"],
-      ["apps/api/orders.db.ts", "database"],
-      ["apps/api/queue.ts", "queue"],
       ["apps/api/auth.ts", "auth"],
       ["apps/api/Dockerfile", "manifest"],
+      ["apps/api/orders.db.ts", "database"],
+      ["apps/api/queue.ts", "queue"],
+      ["apps/api/routes.ts", "route"],
     ]);
     expect(result.slice?.metrics.profileMatches[0]?.profileId).toBe("node-api");
   });

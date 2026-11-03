@@ -1,7 +1,8 @@
 import type { PoolConnection } from "mysql2/promise";
 import { getDb } from "./db";
 import { analyzeWithAI, type AnalysisResult } from "./ai";
-import { getChangeContext, getRepository, getSourceSnapshot, type GitHubRepository, type SourceFile } from "./github";
+import { getChangeContext, getRepository, type GitHubRepository, type SourceFile } from "./github";
+import { getRemoteAnalysisSources, parseSourceRoots } from "./remote-analysis";
 import { insertSpecVersion } from "./spec-versions";
 import { generateArchitectureVersion } from "./architecture-version";
 import { errorMessage } from "./error-message";
@@ -15,6 +16,8 @@ export interface RunContext {
   beforeSha: string | null;
   afterSha: string;
   connectionId: number | null;
+  productSlug?: string;
+  productName?: string;
 }
 
 type ChangeContext = Awaited<ReturnType<typeof getChangeContext>>;
@@ -159,7 +162,7 @@ export async function queueAnalysis(repositoryId: number, beforeSha: string | nu
 
 async function loadRun(runId: number) {
   const [rows] = await getDb().execute(
-    `SELECT r.id, r.repository_id AS repositoryId, p.id AS productId,
+    `SELECT r.id, r.repository_id AS repositoryId, p.id AS productId, p.slug AS productSlug, p.name AS productName,
             repo.owner, repo.name, r.before_sha AS beforeSha, r.after_sha AS afterSha, repo.connection_id AS connectionId
      FROM analysis_runs r
      JOIN repositories repo ON repo.id = r.repository_id
@@ -170,17 +173,36 @@ async function loadRun(runId: number) {
   return (rows as RunContext[])[0];
 }
 
+async function loadSourceRoots(productId: number) {
+  const [rows] = await getDb().execute("SELECT source_roots AS sourceRoots FROM products WHERE id = ?", [productId]);
+  const product = (rows as Array<{ sourceRoots: unknown }>)[0];
+  return parseSourceRoots(product?.sourceRoots);
+}
+
 async function performAnalysis(run: RunContext) {
   await getDb().execute("UPDATE analysis_runs SET status = 'running', started_at = CURRENT_TIMESTAMP(3), error_message = NULL WHERE id = ?", [run.id]);
   const repo: GitHubRepository = await getRepository({ owner: run.owner, name: run.name, defaultBranch: "main" }, { connectionId: run.connectionId });
   const access = { connectionId: run.connectionId };
-  const [change, sources] = await Promise.all([
+  const [change, sourceRoots] = await Promise.all([
     getChangeContext(repo, run.beforeSha, run.afterSha, access),
-    getSourceSnapshot(repo, run.afterSha, access),
+    loadSourceRoots(run.productId),
   ]);
-  if (sources.length === 0) throw new Error("No supported source files found");
+  const remote = await getRemoteAnalysisSources({
+    product: {
+      id: run.productId,
+      slug: run.productSlug ?? String(run.productId),
+      name: run.productName ?? `Product ${run.productId}`,
+    },
+    repository: { owner: repo.owner, repo: repo.name, revision: run.afterSha },
+    access,
+    scopeRoots: sourceRoots.length > 0 ? sourceRoots : [{ path: "", role: "shared" }],
+  });
+  const sources = remote.sources;
   const result = await analyzeWithAI(sources, change);
-  assertEvidence(result, new Set([...sources.map((file) => file.path), ...change.files.map((file) => file.path)]));
+  assertEvidence(result, new Set([
+    ...remote.slice.files.map((file) => file.path),
+    ...change.files.map((file) => file.path),
+  ]));
   await saveAnalysisAndArchitecture(run, result, change, sources);
 }
 

@@ -132,6 +132,12 @@ export interface SliceMetrics {
   prunedPathCount: number;
   wallClockMs: number;
   profileMatches: StackProfileMatch[];
+  budgetsRemaining: {
+    selectedFiles: number;
+    selectedLineRanges: number;
+    plannerContentBytes: number;
+    aiReadCalls: number;
+  };
 }
 
 export interface SourceSlice {
