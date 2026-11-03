@@ -66,7 +66,7 @@ export interface ScopeResolution {
   status: ScopeResolutionStatus;
   scopeRoots: SourceScopeRoot[];
   workspaceMap?: WorkspaceMap;
-  unresolved?: string[];
+  unresolved: string[];
 }
 
 export interface StackProfileMatch {

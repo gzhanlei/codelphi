@@ -261,7 +261,7 @@ describe("Slice Planner", () => {
       },
       revision: {} as SlicePlanningState["revision"],
       phase: "targeted_exploration" as SlicePlanningState["phase"],
-      scope: { status: "resolved", scopeRoots: [{ path: "apps/checkout" }] },
+      scope: { status: "resolved", unresolved: [], scopeRoots: [{ path: "apps/checkout" }] },
       selected: new Map(),
       fileContents: new Map(),
       evidenceClaims: [],

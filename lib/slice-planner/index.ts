@@ -89,6 +89,19 @@ export function matchProfiles(files: SelectedSourceFile[], content: Map<string, 
     .sort((a, b) => b.confidence - a.confidence || a.profileId.localeCompare(b.profileId));
 }
 
+const priorityPatterns = [
+  /AndroidManifest\.xml$/,
+  /(?:package\.json|go\.mod|Cargo\.toml|pom\.xml|build\.gradle)$/,
+  /(?:page\.tsx|route\.ts|main\.go|server\.ts|index\.ts)$/,
+  /(?:Activity|Service|NativeBridge)\.java$/,
+  /(?:jni|raop|httpd).*\.c$/i,
+];
+
+export function candidatePriority(entry: SourceTreeEntry) {
+  const priority = priorityPatterns.findIndex((pattern) => pattern.test(entry.path));
+  return priority === -1 ? priorityPatterns.length : priority;
+}
+
 class DeterministicSlicePlanner implements SlicePlanner {
   constructor(private readonly now: () => number) {}
 
@@ -107,14 +120,14 @@ class DeterministicSlicePlanner implements SlicePlanner {
     }
     return unresolved.length > 0
       ? { status: "not_found", scopeRoots: input.scopeRoots.filter((scope) => !unresolved.some((item) => item.endsWith(scope.path))), unresolved }
-      : { status: "resolved", scopeRoots: input.scopeRoots };
+      : { status: "resolved", unresolved: [], scopeRoots: input.scopeRoots };
   }
 
   async plan(input: ProductSliceInput, index: OpenedRemoteSourceRevision): Promise<SlicePlanResult> {
     try {
       const scope = await this.resolveScope(input, index);
-      if (scope.status === "ambiguous") return { status: "scope_ambiguous", workspaceMap: scope.workspaceMap, missing: scope.unresolved ?? [], diagnostics: [{ code: "scope_ambiguous", message: "product scope roots are ambiguous" }] };
-      if (scope.status !== "resolved") return { status: "underdetermined", missing: scope.unresolved ?? [], diagnostics: [{ code: "scope_root_not_found", message: "one or more scope roots were not found" }] };
+      if (scope.status === "ambiguous") return { status: "scope_ambiguous", workspaceMap: scope.workspaceMap, missing: scope.unresolved, diagnostics: [{ code: "scope_ambiguous", message: "product scope roots are ambiguous" }] };
+      if (scope.status !== "resolved") return { status: "underdetermined", missing: scope.unresolved, diagnostics: [{ code: "scope_root_not_found", message: "one or more scope roots were not found" }] };
 
       const state: SlicePlanningState = {
         input,
@@ -151,15 +164,19 @@ class DeterministicSlicePlanner implements SlicePlanner {
     state.phase = "profile_matching";
     state.profileMatches = matchProfiles([...state.selected.values()], state.fileContents);
     const topProfile = state.profileMatches[0];
-    const confidence = topProfile?.confidence ?? 0.2;
-    if (!topProfile || confidence < 0.5) state.diagnostics.push({ code: "profile_confidence_low", subject: topProfile?.profileId, message: "selected source slice does not identify a supported stack profile" });
+    const confidence = topProfile ? topProfile.confidence : 0.2;
+    if (!topProfile) {
+      state.diagnostics.push({ code: "profile_confidence_low", subject: undefined, message: "selected source slice does not identify a supported stack profile" });
+    } else if (confidence < 0.5) {
+      state.diagnostics.push({ code: "profile_confidence_low", subject: topProfile.profileId, message: "selected source slice does not identify a supported stack profile" });
+    }
 
     const sliceConfidence = confidenceLabel(confidence);
     const slice = this.createSourceSlice(state, sliceConfidence);
     state.phase = "done";
-    return topProfile && sliceConfidence !== "low"
-      ? { status: "completed", slice, missing: [], diagnostics: state.diagnostics }
-      : { status: "underdetermined", slice, missing: ["supported stack profile was not identified"], diagnostics: state.diagnostics };
+    return sliceConfidence === "low"
+      ? { status: "underdetermined", slice, missing: ["supported stack profile was not identified"], diagnostics: state.diagnostics }
+      : { status: "completed", slice, missing: [], diagnostics: state.diagnostics };
   }
 
   private createSourceSlice(state: SlicePlanningState, sliceConfidence: SliceConfidence) {
@@ -248,30 +265,17 @@ class DeterministicSlicePlanner implements SlicePlanner {
     if (depth > 4 || state.budgetsRemaining.selectedFiles <= 0) return;
     const listing = await index.listDir(path);
     await this.selectListedFiles(index, state, listing.entries);
-    if (depth >= 4) return;
+    if (depth >= 5) return;
     for (const entry of listing.entries) {
       if (entry.pruned || entry.type !== "tree") continue;
       await this.selectFromDirectory(index, state, entry.path, depth + 1);
     }
   }
 
-  private readonly priorityPatterns = [
-  /AndroidManifest\.xml$/,
-  /(?:package\.json|go\.mod|Cargo\.toml|pom\.xml|build\.gradle)$/,
-  /(?:page\.tsx|route\.ts|main\.go|server\.ts|index\.ts)$/,
-  /(?:Activity|Service|NativeBridge)\.java$/,
-  /(?:jni|raop|httpd).*\.c$/i,
-];
-
-  private candidatePriority(entry: SourceTreeEntry) {
-    const priority = this.priorityPatterns.findIndex((pattern: RegExp) => pattern.test(entry.path));
-    return priority === -1 ? this.priorityPatterns.length : priority;
-}
-
   private async selectListedFiles(index: OpenedRemoteSourceRevision, state: SlicePlanningState, entries: SourceTreeEntry[]) {
     const candidates = entries
       .filter((entry) => !entry.pruned && entry.type === "blob" && entry.signals.some((signal) => interestingSignals.has(signal)))
-      .sort((a, b) => this.candidatePriority(a) - this.candidatePriority(b) || basename(a.path).localeCompare(basename(b.path)));
+      .sort((a, b) => candidatePriority(a) - candidatePriority(b) || basename(a.path).localeCompare(basename(b.path)));
     for (const entry of candidates) {
       await this.selectFile(index, state, entry.path, entry.signals, reasonFor(entry.signals));
     }
@@ -313,7 +317,7 @@ class DeterministicSlicePlanner implements SlicePlanner {
   }
 }
 
-function toDiagnostic(error: unknown): PlannerDiagnostic {
+export function toDiagnostic(error: unknown): PlannerDiagnostic {
   if (error instanceof SourceIndexError) {
     return { code: error.code as PlannerDiagnostic["code"], message: error.message };
   }

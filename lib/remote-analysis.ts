@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { createRemoteSourceIndex, type OpenedRemoteSourceRevision, type SourceRevisionRef, type SourceScopeRoot } from "./remote-source-index";
-import { createSlicePlanner, type SliceBudgets, type SourceSlice } from "./slice-planner";
+import { createSlicePlanner, type SliceBudgets, type SlicePlanner, type SourceSlice } from "./slice-planner";
 import type { GitHubAccess } from "./github-access";
 import type { SourceFile } from "./github";
 import type { RemoteSourceBackend } from "./remote-source-index";
@@ -11,6 +11,11 @@ export interface RemoteAnalysisRequest {
   access: GitHubAccess;
   scopeRoots: SourceScopeRoot[];
   backend?: RemoteSourceBackend;
+}
+
+export interface RemoteAnalysisRuntime {
+  planner?: SlicePlanner;
+  budgets?: SliceBudgets;
 }
 
 export interface RemoteAnalysisResult {
@@ -64,19 +69,19 @@ export function sliceToSourceFiles(slice: SourceSlice, index: OpenedRemoteSource
   }));
 }
 
-export async function getRemoteAnalysisSources(request: RemoteAnalysisRequest): Promise<RemoteAnalysisResult> {
+export async function getRemoteAnalysisSources(request: RemoteAnalysisRequest, runtime: RemoteAnalysisRuntime = {}): Promise<RemoteAnalysisResult> {
   const revision: SourceRevisionRef = {
     owner: request.repository.owner,
     repo: request.repository.repo,
     revision: request.repository.revision,
   };
   const index = await createRemoteSourceIndex(revision, { scopeRoots: request.scopeRoots, access: request.access, backend: request.backend });
-  const planner = createSlicePlanner();
+  const planner = runtime.planner ?? createSlicePlanner();
   const result = await planner.plan({
     product: request.product,
     repository: request.repository,
     scopeRoots: request.scopeRoots,
-    budgets: analysisSliceBudgets,
+    budgets: runtime.budgets ?? analysisSliceBudgets,
     plannerVersion: "remote-analysis-v1",
     profileVersion: "remote-analysis-v1",
   }, index);

@@ -80,7 +80,7 @@ export function scopePruneReason(parentPath: string, path: string, raw: SourceTr
   return "outside_product_scope";
 }
 
-function classifyEntry(parentPath: string, raw: SourceTreeApiEntry, policy: SourcePruningPolicy, scopeRoots: SourceScopeRoot[]): SourceTreeEntry {
+export function classifyEntry(parentPath: string, raw: SourceTreeApiEntry, policy: SourcePruningPolicy, scopeRoots: SourceScopeRoot[]): SourceTreeEntry {
   const path = parentPath && !raw.path.startsWith(`${parentPath}/`) ? childPath(parentPath, raw.path) : raw.path;
   const extension = path.includes(".") ? `.${path.split(".").pop()?.toLowerCase()}` : undefined;
   const pruneReason = excludedPruneReason(path, policy) ?? contentPruneReason(path, raw, policy, extension) ?? scopePruneReason(parentPath, path, raw, scopeRoots);
@@ -99,7 +99,7 @@ function classifyEntry(parentPath: string, raw: SourceTreeApiEntry, policy: Sour
   };
 }
 
-function textLineCount(content: string) {
+export function textLineCount(content: string) {
   const lines = content.split("\n");
   return lines.at(-1) === "" ? lines.length - 1 : lines.length;
 }
@@ -329,14 +329,17 @@ export async function createRemoteSourceIndex(ref: SourceRevisionRef, options: R
   const identity = await backend.resolveRevision(ref);
   const response = await backend.listTree({ ...ref, revision: ref.revision }, identity.rootTreeSha, "");
   const policy: SourcePruningPolicy = { ...defaultSourcePruningPolicy, ...options.pruning };
+  const rootEntries = response.entries.map((entry) => classifyEntry("", entry, policy, options.scopeRoots));
   const rootListing = {
     path: "",
-    entries: response.entries.map((entry) => classifyEntry("", entry, policy, options.scopeRoots)),
+    entries: rootEntries,
     truncated: response.truncated,
     status: (response.truncated ? "partial" : "indexed") as SourceIndexStatus,
-    metrics: { entryCount: response.entries.length, prunedCount: 0, expandedCount: 0 },
+    metrics: {
+      entryCount: response.entries.length,
+      prunedCount: rootEntries.filter((entry) => entry.pruned).length,
+    },
   };
-  rootListing.metrics.prunedCount = rootListing.entries.filter((entry) => entry.pruned).length;
   return new RemoteSourceRevision(ref, {
     repository: `${ref.owner}/${ref.repo}`,
     revision: ref.revision,

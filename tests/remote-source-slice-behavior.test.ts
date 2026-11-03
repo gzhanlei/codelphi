@@ -77,7 +77,7 @@ describe("Remote Source Index behavior", () => {
 
     const root = await index.listRoot();
     expect(root.status).toBe("indexed");
-    expect(root.metrics).toEqual({ entryCount: 4, prunedCount: 2, expandedCount: 0 });
+    expect(root.metrics).toEqual({ entryCount: 4, prunedCount: 2 });
     expect(root.entries.map((entry) => [entry.path, entry.pruned?.reason])).toEqual([
       ["apps", undefined],
       ["README.md", undefined],
@@ -323,7 +323,7 @@ describe("Slice Planner behavior", () => {
       },
       revision: {} as SlicePlanningState["revision"],
       phase: "targeted_exploration",
-      scope: { status: "resolved", scopeRoots: [{ path: "apps/checkout" }] },
+      scope: { status: "resolved", unresolved: [], scopeRoots: [{ path: "apps/checkout" }] },
       selected: new Map(),
       fileContents: new Map(),
       evidenceClaims: [],
