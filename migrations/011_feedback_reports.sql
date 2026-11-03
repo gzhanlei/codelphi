@@ -1,0 +1,21 @@
+CREATE TABLE IF NOT EXISTS feedback_reports (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  organization_id BIGINT UNSIGNED NOT NULL,
+  product_id BIGINT UNSIGNED NOT NULL,
+  analysis_run_id BIGINT UNSIGNED NULL,
+  reporter_user_id BIGINT UNSIGNED NULL,
+  repository_full_name VARCHAR(191) NOT NULL,
+  revision VARCHAR(40) NOT NULL,
+  error_message TEXT NOT NULL,
+  architecture_error TEXT NULL,
+  status VARCHAR(16) NOT NULL DEFAULT 'new',
+  github_issue_url TEXT NULL,
+  submission_error TEXT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  KEY feedback_reports_org_created_idx (organization_id, created_at),
+  CONSTRAINT feedback_reports_org_fk FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  CONSTRAINT feedback_reports_product_fk FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+  CONSTRAINT feedback_reports_run_fk FOREIGN KEY (analysis_run_id) REFERENCES analysis_runs(id) ON DELETE SET NULL,
+  CONSTRAINT feedback_reports_user_fk FOREIGN KEY (reporter_user_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

@@ -13,6 +13,7 @@ export function AppShell({ user, organizationName, children }: { user: SessionUs
         <nav className="main-nav" aria-label="主导航">
           <Link href="/" className="nav-item active"><span>⌁</span>产品总览</Link>
           <Link href="/organizations" className="nav-item"><span>◈</span>我的工作区</Link>
+          <Link href="/admin/feedback" className="nav-item"><span>◌</span>反馈管理</Link>
           <Link href="/integrations" className="nav-item"><span>⌘</span>Integrations</Link>
           <a href="https://app.chandler.work" className="nav-item" target="_blank" rel="noreferrer"><span>↗</span>Chandler</a>
         </nav>

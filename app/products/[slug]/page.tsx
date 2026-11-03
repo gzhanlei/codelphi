@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AnalyzeButton } from "@/components/analyze-button";
+import { AnalysisFeedbackButton } from "@/components/analysis-feedback-button";
 import { AppShell } from "@/components/app-shell";
 import { ProductTabs, ProductView, RepositoryLink, RunStatus } from "@/components/product-navigation";
 import { getProductDetails } from "@/lib/product-details";
@@ -29,6 +30,7 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
         <AnalyzeButton slug={details.product.slug} />
       </div>
       <RunStatus run={details.latestRun} />
+      {(details.latestRun?.status === "failed" || details.architecture?.status === "failed") ? <AnalysisFeedbackButton slug={details.product.slug} /> : null}
       <ProductTabs slug={slug} view={view} featureCount={details.features.length} releaseCount={details.releases.length} />
       <ProductView view={view} productSlug={slug} features={details.features} scenarios={details.scenarios} releases={details.releases} changes={details.changes} behaviorChanges={details.behaviorChanges} mode={mode} featureId={featureId} overview={overview} />
     </AppShell>
