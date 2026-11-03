@@ -17,7 +17,8 @@ interface SourceIndexState {
 }
 
 function normalizeSourcePath(path: string) {
-  return normalize(path).replaceAll(sep, "/").replace(/^\.?\//, "").replace(/\/+$/g, "");
+  const normalized = normalize(path).replaceAll(sep, "/").replace(/^\.?\//, "").replace(/\/+$/g, "");
+  return normalized === "." ? "" : normalized;
 }
 
 function childPath(parentPath: string, name: string) {
@@ -25,7 +26,7 @@ function childPath(parentPath: string, name: string) {
 }
 
 function isDescendant(path: string, scopePath: string) {
-  return path === scopePath || path.startsWith(`${scopePath}/`);
+  return scopePath === "" || path === scopePath || path.startsWith(`${scopePath}/`);
 }
 
 function hasSegment(path: string, value: string) {

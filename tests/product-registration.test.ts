@@ -37,6 +37,16 @@ describe("product registration", () => {
     expect(github.getBranchHead).toHaveBeenCalledWith(expect.anything(), { connectionId: 9 });
   });
 
+  it("explains GitHub App 404 as a missing repository installation", async () => {
+    const github = {
+      getRepository: vi.fn(async () => {
+        throw new Error('GitHub API 404: {"message":"Not Found"}');
+      }),
+      getBranchHead: vi.fn(async () => "sha-404"),
+    };
+    await expect(resolveGitHubRegistration({ ...input, connectionId: 9 }, github)).rejects.toThrow("GitHub App 尚未授权该仓库");
+  });
+
   it("maps validation, duplicate and unexpected errors consistently", () => {
     let validation: ZodError;
     try { productInputSchema.parse({}); } catch (error) { validation = error as ZodError; }

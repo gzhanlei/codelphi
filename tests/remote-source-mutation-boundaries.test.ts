@@ -9,6 +9,7 @@ import {
   resolveRemoteSourceDependencies,
   scopePruneReason,
   textLineCount,
+  normalizeSourcePath,
   type RemoteSourceBackend,
   type SourcePruningPolicy,
   type SourceScopeRoot,
@@ -123,6 +124,19 @@ describe("planner pure decisions", () => {
     expect(confidenceLabel(0.719999)).toBe("medium");
     expect(confidenceLabel(0.5)).toBe("medium");
     expect(confidenceLabel(0.499999)).toBe("low");
+  });
+
+  it("normalizes the repository root to an empty path", () => {
+    expect(normalizeSourcePath("")).toBe("");
+    expect(normalizeSourcePath(".")).toBe("");
+    expect(normalizeSourcePath("./apps/checkout")).toBe("apps/checkout");
+  });
+
+  it("allows every root child when scope is the repository root", () => {
+    const rootScope = [{ path: "" }];
+    expect(scopePruneReason("", "apps", { path: "apps", type: "tree", sha: "sha" }, rootScope)).toBeUndefined();
+    expect(scopePruneReason("", "README.md", { path: "README.md", type: "blob", sha: "sha" }, rootScope)).toBeUndefined();
+    expect(scopePruneReason("apps", "apps/checkout", { path: "apps/checkout", type: "tree", sha: "sha" }, rootScope)).toBeUndefined();
   });
 
   it("resolves explicit dependencies once and preserves default dependencies", () => {

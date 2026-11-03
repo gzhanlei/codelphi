@@ -15,10 +15,20 @@ interface GitHubGateway {
 export async function resolveGitHubRegistration(input: ProductInput, github: GitHubGateway = { getRepository, getBranchHead }) {
   const repository = parseRepository(input.repository);
   const access = { connectionId: input.connectionId };
-  const metadata = await github.getRepository(repository, access);
-  const defaultBranch = input.defaultBranch || metadata.defaultBranch;
-  const afterSha = await github.getBranchHead({ ...repository, defaultBranch }, access);
-  return { repository, defaultBranch, afterSha };
+  try {
+    const metadata = await github.getRepository(repository, access);
+    const defaultBranch = input.defaultBranch || metadata.defaultBranch;
+    const afterSha = await github.getBranchHead({ ...repository, defaultBranch }, access);
+    return { repository, defaultBranch, afterSha };
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("GitHub API 404")) {
+      const guidance = input.connectionId
+        ? "GitHub App 尚未授权该仓库。请先在 GitHub 安装 radar-product-observer 并选择该仓库，或改用服务器 Token。"
+        : "仓库不存在，或服务器 Token 无权访问该仓库。";
+      throw new Error(`${guidance}（${error.message}）`);
+    }
+    throw error;
+  }
 }
 
 async function insertRegistration(input: ProductInput, repository: GitHubRepository, defaultBranch: string) {
