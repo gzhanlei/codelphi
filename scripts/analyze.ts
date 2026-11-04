@@ -1,21 +1,10 @@
 import "dotenv/config";
 import { getDb } from "../lib/db";
 import { queueAnalysis, runAnalysis } from "../lib/analysis";
-import { getCodeHostingAdapter, type CodeHostingProvider } from "../lib/code-hosting";
+import { resolveManualAnalysis } from "../lib/manual-analysis";
 
 function targetSlug() {
   return process.argv[2] ?? "radar";
-}
-
-async function findRepository(slug: string) {
-  const [rows] = await getDb().execute(
-    `SELECT r.id, r.provider, r.owner, r.name, r.default_branch AS defaultBranch
-     FROM repositories r JOIN products p ON p.id = r.product_id WHERE p.slug = ? LIMIT 1`,
-    [slug],
-  );
-  const repository = (rows as Array<{ id: number; provider: CodeHostingProvider; owner: string; name: string; defaultBranch: string }>)[0];
-  if (!repository) throw new Error(`No repository registered for ${slug}; run npm run db:seed first`);
-  return repository;
 }
 
 function errorSuffix(errorMessage?: string) {
@@ -33,12 +22,10 @@ async function analyze() {
   const slug = targetSlug();
   const db = getDb();
   try {
-    const repository = await findRepository(slug);
-    const adapter = getCodeHostingAdapter(repository.provider);
-    const metadata = await adapter.getRepository(repository, {});
-    const afterSha = await adapter.getBranchHead({ ...repository, ...metadata }, {});
-    const runId = await queueAnalysis(repository.id, null, afterSha, "manual");
-    console.log(`Analysis run ${runId} started for ${slug}@${afterSha.slice(0, 7)}`);
+    const analysis = await resolveManualAnalysis(slug);
+    if (!analysis) throw new Error(`No repository registered for ${slug}; run npm run db:seed first`);
+    const runId = await queueAnalysis(analysis.repositoryId, null, analysis.afterSha, "manual");
+    console.log(`Analysis run ${runId} started for ${slug}@${analysis.afterSha.slice(0, 7)}`);
     await runAnalysis(runId);
     await reportResult(runId);
   } finally {
