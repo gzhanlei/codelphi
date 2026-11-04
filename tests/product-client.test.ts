@@ -15,6 +15,7 @@ describe("product creation client", () => {
     await expect(createProduct(input, async () => new Response(JSON.stringify({ error: "已经注册" }), { status: 409 }))).rejects.toThrow("已经注册");
     await expect(createProduct(input, async () => new Response(JSON.stringify({}), { status: 201 }))).rejects.toThrow("添加产品失败");
     await expect(createProduct(input, async () => new Response(JSON.stringify({ error: "" }), { status: 409 }))).rejects.toThrow("");
+    await expect(createProduct(input, async () => new Response(JSON.stringify({ error: "" }), { status: 201 }))).rejects.toMatchObject({ message: "" });
   });
 });
 

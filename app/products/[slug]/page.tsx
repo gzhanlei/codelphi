@@ -4,6 +4,7 @@ import { AnalyzeButton } from "@/components/analyze-button";
 import { AnalysisFeedbackButton } from "@/components/analysis-feedback-button";
 import { AppShell } from "@/components/app-shell";
 import { ProductTabs, ProductView, RepositoryLink, RunStatus } from "@/components/product-navigation";
+import { RemoveProductButton } from "@/components/remove-product-button";
 import { getProductDetails } from "@/lib/product-details";
 import { featureIdFromParam } from "@/lib/spec-editor-client";
 import { buildProductOverview } from "@/lib/product-overview";
@@ -27,7 +28,10 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
       <Link href="/" className="back-link">← 所有产品</Link>
       <div className="page-heading product-heading">
         <div><span className="eyebrow">PRODUCT SPACE</span><h1>{details.product.name}</h1><p>{details.product.description}</p><RepositoryLink repository={details.repository} /></div>
-        <AnalyzeButton slug={details.product.slug} />
+        <div className="page-actions">
+          <AnalyzeButton slug={details.product.slug} />
+          {organization.role === "viewer" ? null : <RemoveProductButton slug={details.product.slug} name={details.product.name} />}
+        </div>
       </div>
       <RunStatus run={details.latestRun} />
       {(details.latestRun?.status === "failed" || details.architecture?.status === "failed") ? <AnalysisFeedbackButton slug={details.product.slug} /> : null}
