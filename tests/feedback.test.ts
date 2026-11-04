@@ -12,7 +12,7 @@ vi.mock("../lib/db", () => ({ getDb: () => ({ execute }) }));
 vi.mock("../lib/feedback-client", () => ({ submitProductFeedback: vi.fn(), submitGithubIssue: vi.fn() }));
 
 const details = {
-  product: { id: 3, slug: "chandler", name: "Chandler", description: "test" },
+  product: { id: 3, slug: "chandler", name: "Chandler", description: "test", descriptionSource: "manual", descriptionEvidence: null },
   repository: { owner: "gzhanlei", name: "workmembership", defaultBranch: "main" },
   latestRun: { status: "failed", errorMessage: "No architecture components detected" },
   features: [],

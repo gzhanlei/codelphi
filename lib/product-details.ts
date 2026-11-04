@@ -47,11 +47,11 @@ export async function getProductDetails(slug: string, organizationId?: number) {
   const db = getDb();
   const [products] = await db.execute(
     organizationId === undefined
-      ? "SELECT id, slug, name, description FROM products WHERE slug = ?"
-      : "SELECT id, slug, name, description FROM products WHERE slug = ? AND organization_id = ?",
+      ? "SELECT id, slug, name, description, description_source AS descriptionSource, description_evidence AS descriptionEvidence FROM products WHERE slug = ?"
+      : "SELECT id, slug, name, description, description_source AS descriptionSource, description_evidence AS descriptionEvidence FROM products WHERE slug = ? AND organization_id = ?",
     organizationId === undefined ? [slug] : [slug, organizationId],
   );
-  const product = (products as Array<{ id: number; slug: string; name: string; description: string }>)[0];
+  const product = (products as Array<{ id: number; slug: string; name: string; description: string; descriptionSource: "manual" | "generated"; descriptionEvidence: unknown }>)[0];
   if (!product) return null;
 
   const [repositories] = await db.execute("SELECT provider, owner, name, default_branch AS defaultBranch FROM repositories WHERE product_id = ?", [product.id]);
@@ -67,7 +67,7 @@ export async function getProductDetails(slug: string, organizationId?: number) {
   const [scenarios, changes, behaviorChanges, architecture] = await Promise.all([loadScenarios(features), loadChanges(releases), loadBehaviorChanges(releases), getLatestArchitectureDocument(product.id)]);
 
   return {
-    product,
+    product: { ...product, descriptionEvidence: parseJsonValue(product.descriptionEvidence) },
     repository: (repositories as Array<{ provider?: string; owner: string; name: string; defaultBranch: string }>)[0],
     latestRun: (runs as Array<{ status: string; errorMessage?: string }>)[0],
     features,

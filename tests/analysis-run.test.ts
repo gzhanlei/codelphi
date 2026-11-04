@@ -78,9 +78,9 @@ describe("analysis orchestration", () => {
     });
     adapter.getRepository.mockResolvedValue({ owner: "gzhanlei", name: "radar", defaultBranch: "main" });
     adapter.getChangeContext.mockResolvedValue({ message: "change", committedAt: "2026-11-01T00:00:00Z", url: "https://github.com/commit/sha", files: [] });
-    vi.mocked(getRemoteAnalysisSources).mockResolvedValue({ sources: [], slice: { files: [] }, index: { readLines } } as never);
+    vi.mocked(getRemoteAnalysisSources).mockResolvedValue({ sources: [], slice: { files: [{ path: "lib/db.ts" }] }, index: { readLines } } as never);
     readLines.mockImplementation(async (request) => ({ startLine: 1, lines: [`${request.path} complete evidence`] }));
-    vi.mocked(analyzeWithAI).mockResolvedValue({ release: { title: "v1", summary: "summary" }, features: [], changes: [] });
+    vi.mocked(analyzeWithAI).mockResolvedValue({ product: { description: "代码驱动的产品知识与变更中心。", evidence: [{ path: "lib/db.ts", startLine: 1 }] }, release: { title: "v1", summary: "summary" }, features: [], changes: [] });
   });
 
   it("reuses an existing queued run", async () => {
@@ -139,6 +139,15 @@ describe("analysis orchestration", () => {
     await runAnalysis(8);
     expect(readLines).not.toHaveBeenCalled();
     expect(vi.mocked(generateArchitectureVersion).mock.calls[0][0].sources).toEqual([]);
+  });
+
+  it("fills only a blank product description with traceable AI output", async () => {
+    await runAnalysis(8);
+    const update = connection.execute.mock.calls.find(([sql]) => String(sql).includes("UPDATE products SET description = ?"));
+    expect(update?.[0]).toContain("description_source = 'generated'");
+    expect(update?.[0]).toContain("WHERE id = ? AND description = ''");
+    expect(update?.[1]).toEqual(["代码驱动的产品知识与变更中心。", JSON.stringify([{ path: "lib/db.ts", startLine: 1 }]), 4]);
+    expect(connection.commit).toHaveBeenCalledOnce();
   });
 
   it("records a readable failure when loading the run fails", async () => {

@@ -11,4 +11,11 @@ describe("database migrations", () => {
     expect(addColumn).toBeLessThan(update);
     expect(addColumn).toBeLessThan(modify);
   });
+
+  it("stores product description provenance and evidence", () => {
+    const sql = readFileSync(new URL("../migrations/014_product_description_evidence.sql", import.meta.url), "utf8");
+    expect(sql).toContain("description_source");
+    expect(sql).toContain("description_evidence");
+    expect(sql).toContain("DEFAULT 'manual'");
+  });
 });

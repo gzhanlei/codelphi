@@ -5,7 +5,7 @@ const execute = vi.fn();
 vi.mock("../lib/db", () => ({ getDb: () => ({ execute }) }));
 vi.mock("../lib/architecture-store", () => ({ getLatestArchitectureDocument: vi.fn(async () => undefined) }));
 
-const product = { id: 4, slug: "radar", name: "Radar", description: "Product knowledge" };
+const product = { id: 4, slug: "radar", name: "Radar", description: "Product knowledge", descriptionSource: "generated", descriptionEvidence: JSON.stringify([{ path: "lib/analysis.ts", startLine: 185 }]) };
 
 describe("product details", () => {
   beforeEach(() => execute.mockReset());
@@ -26,6 +26,7 @@ describe("product details", () => {
     expect(details?.features).toEqual([]);
     expect(details?.releases).toEqual([]);
     expect(execute.mock.calls[0][1]).toEqual(["radar", 7]);
+    expect(execute.mock.calls[0][0]).toContain("organization_id = ?");
   });
 
   it("loads feature, release and parsed behavior evidence without an organization filter", async () => {
@@ -45,6 +46,9 @@ describe("product details", () => {
     expect(details?.scenarios).toHaveLength(1);
     expect(details?.changes).toHaveLength(1);
     expect(details?.behaviorChanges[0]).toMatchObject({ before: { old: true }, after: { new: true } });
+    expect(details?.latestRun?.status).toBe("succeeded");
+    expect(details?.product.descriptionEvidence).toEqual([{ path: "lib/analysis.ts", startLine: 185 }]);
     expect(execute.mock.calls[0][1]).toEqual(["radar"]);
+    expect(execute.mock.calls[0][0]).not.toContain("organization_id = ?");
   });
 });

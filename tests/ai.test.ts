@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { capEvidence, parseAnalysisContent } from "../lib/ai";
 
 const result = {
+  product: { description: "统一认证与产品知识中心。", evidence: [{ path: "app/auth/login/route.ts", startLine: 1 }] },
   release: { title: "改进登录", summary: "接入统一登录。" },
   changes: [{ featureName: "认证", kind: "changed", description: "使用 OAuth", userImpact: "统一账号", evidence: [{ path: "app/auth/login/route.ts", startLine: 1 }] }],
   features: [{ name: "认证", summary: "统一登录", scenarios: [{ reference: "HP-1", context: "未登录用户", action: "点击登录", outcome: "进入 Chandler 授权", category: "happy", evidence: [{ path: "app/auth/login/route.ts", startLine: 1 }] }] }],
@@ -25,10 +26,26 @@ describe("AI analysis output", () => {
     const empty = capEvidence({}) as { changes?: unknown; features?: unknown };
     expect(empty.changes).toBeUndefined();
     expect(empty.features).toBeUndefined();
-    const partial = capEvidence({ changes: [{}], features: [{ scenarios: [{}] }, {}] }) as { changes: Array<{ evidence?: unknown }>; features: Array<{ scenarios?: Array<{ evidence?: unknown }> }> };
+    const partial = capEvidence({ product: {}, changes: [{}], features: [{ scenarios: [{}] }, {}] }) as { product: { evidence?: unknown }; changes: Array<{ evidence?: unknown }>; features: Array<{ scenarios?: Array<{ evidence?: unknown }> }> };
+    expect(partial.product.evidence).toBeUndefined();
     expect(partial.changes[0].evidence).toBeUndefined();
     expect(partial.features[0].scenarios?.[0].evidence).toBeUndefined();
     expect(partial.features[1].scenarios).toBeUndefined();
+  });
+
+  it("requires traceable product description evidence", () => {
+    const missing = structuredClone(result) as Record<string, unknown>;
+    delete missing.product;
+    expect(() => parseAnalysisContent(JSON.stringify(missing))).toThrow();
+    const withoutEvidence = structuredClone(result);
+    withoutEvidence.product.evidence = [];
+    expect(() => parseAnalysisContent(JSON.stringify(withoutEvidence))).toThrow();
+  });
+
+  it("caps product description evidence", () => {
+    const oversized = structuredClone(result);
+    oversized.product.evidence = Array.from({ length: 7 }, (_, index) => ({ path: `lib/overview-${index}.ts`, startLine: index + 1 }));
+    expect(parseAnalysisContent(JSON.stringify(oversized)).product.evidence).toHaveLength(5);
   });
 
   it("rejects responses without a complete JSON object", () => {

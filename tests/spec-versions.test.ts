@@ -7,6 +7,7 @@ import { featureParentKey, insertSpecVersion } from "../lib/spec-versions";
 const run: RunContext = { id: 8, repositoryId: 3, productId: 4, owner: "gzhanlei", name: "radar", beforeSha: "a", afterSha: "b", connectionId: null, provider: "github", organizationId: 1, productSlug: "radar", productName: "Radar" };
 const scenario = { reference: "HP-1", context: "Visitor", action: "Signs in", outcome: "Dashboard", category: "happy" as const, evidence: [] };
 const result: AnalysisResult = {
+  product: { description: "Versioned product", evidence: [{ path: "lib/spec-versions.ts", startLine: 1 }] },
   release: { title: "Title", summary: "Summary" },
   changes: [],
   features: [

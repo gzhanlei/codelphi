@@ -28,6 +28,7 @@ export function assertEvidence(result: AnalysisResult, sources: Set<string>) {
   const check = (path: string) => {
     if (!sources.has(path)) invalid.push(path);
   };
+  for (const item of result.product.evidence) check(item.path);
   for (const feature of result.features) {
     for (const scenario of feature.scenarios) scenario.evidence.forEach((item) => check(item.path));
   }
@@ -116,6 +117,10 @@ async function saveResult(run: RunContext, result: AnalysisResult, change: Chang
   try {
     await connection.beginTransaction();
     await assertLatestRun(connection, run);
+    await connection.execute(
+      "UPDATE products SET description = ?, description_source = 'generated', description_evidence = ? WHERE id = ? AND description = ''",
+      [result.product.description, JSON.stringify(result.product.evidence), run.productId],
+    );
     const specVersionId = await insertSpecVersion(connection, run, result);
     await upsertGeneratedSpec(connection, run, result);
     await upsertRelease(connection, run, result, change, specVersionId);

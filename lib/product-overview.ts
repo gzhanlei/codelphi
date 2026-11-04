@@ -3,7 +3,7 @@ import { productArchitecturePath } from "./architecture-store";
 import type { BehaviorChangeRow, FeatureRow, ReleaseRow, ScenarioRow } from "./types";
 
 interface ProductOverviewInput {
-  product: { id: number; slug: string; name: string; description: string };
+  product: { id: number; slug: string; name: string; description: string; descriptionSource?: string; descriptionEvidence?: unknown };
   features: FeatureRow[];
   scenarios: ScenarioRow[];
   releases: ReleaseRow[];
@@ -45,6 +45,8 @@ export function buildProductOverview(input: ProductOverviewInput) {
   return {
     slug: input.product.slug,
     headline: input.product.description.trim() || "产品概览",
+    headlineSource: input.product.descriptionSource === undefined ? "manual" : input.product.descriptionSource,
+    headlineEvidence: evidenceItems(input.product.descriptionEvidence),
     freshness: specLabel(specVersionId, revision),
     analysisLabel: analysisLabel(input.latestRun ? input.latestRun.status : undefined),
     capabilities: input.features.map((feature) => ({

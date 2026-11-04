@@ -20,6 +20,10 @@ const scenarioSchema = z.object({
 });
 
 export const analysisSchema = z.object({
+  product: z.object({
+    description: z.string().trim().min(1).max(1_000),
+    evidence: z.array(evidenceSchema).min(1).max(5),
+  }),
   release: z.object({
     title: z.string().min(1).max(300),
     summary: z.string().min(1).max(8_000),
@@ -42,11 +46,13 @@ export type AnalysisResult = z.infer<typeof analysisSchema>;
 
 export function capEvidence(value: unknown) {
   const input = value as {
+    product?: { evidence?: unknown[] };
     changes?: Array<{ evidence?: unknown[] }>;
     features?: Array<{ scenarios?: Array<{ evidence?: unknown[] }> }>;
   };
   return {
     ...input,
+    product: input.product ? { ...input.product, evidence: input.product.evidence?.slice(0, 5) } : undefined,
     changes: input.changes?.map((change) => ({ ...change, evidence: change.evidence?.slice(0, 5) })),
     features: input.features?.map((feature) => ({
       ...feature,
@@ -95,13 +101,14 @@ async function requireSuccessfulAIResponse(response: Response) {
 export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext): Promise<AnalysisResult> {
   const prompt = [
     "你在维护一个内部产品知识库。仅根据给定代码和 diff 输出事实，不要补充猜测。",
-    "用简体中文生成：1) 当前产品功能规格；2) 本次发布的用户可感知变化。",
+    "用简体中文生成：1) 产品简介；2) 当前产品功能规格；3) 本次发布的用户可感知变化。",
+    "产品简介用一到两句话说明服务对象和核心能力，不超过 200 字，必须概括整个代码库而不是本次提交，并给出输入文件中的 evidence；不要只写产品名或营销词。",
     "规格按功能组织，每个场景包含情境、操作、结果，分类为 happy/edge/error，reference 使用 HP-n/EC-n/ER-n。",
     "当前产品功能规格必须覆盖输入代码里的全部主要用户功能，不得只总结本次提交。逐个检查输入中的页面、API、组件和业务模块；输入包含多个独立模块时，只返回一个功能属于不完整结果。",
     "优先保证功能覆盖，每个功能保留最关键的 1-5 个场景；不要因单个功能场景过多而遗漏其他功能。",
-    "每个场景和变化必须给 evidence；path 必须来自输入文件，startLine 使用输入的行号。没有用户变化的发布只生成 reviewed 项。",
+    "每个场景、变化和产品简介必须给 evidence；path 必须来自输入文件，startLine 使用输入的行号。没有用户变化的发布只生成 reviewed 项。",
     "只返回 JSON，不要 Markdown。结构：",
-    '{"release":{"title":"","summary":""},"changes":[{"featureName":"","kind":"added|changed|removed|fixed|reviewed","description":"","userImpact":"","evidence":[{"path":"","startLine":1}]}],"features":[{"name":"","summary":"","scenarios":[{"reference":"HP-1","context":"","action":"","outcome":"","category":"happy","evidence":[{"path":"","startLine":1}]}]}]}',
+    '{"product":{"description":"","evidence":[{"path":"","startLine":1}]},"release":{"title":"","summary":""},"changes":[{"featureName":"","kind":"added|changed|removed|fixed|reviewed","description":"","userImpact":"","evidence":[{"path":"","startLine":1}]}],"features":[{"name":"","summary":"","scenarios":[{"reference":"HP-1","context":"","action":"","outcome":"","category":"happy","evidence":[{"path":"","startLine":1}]}]}]}',
     `\n【本次提交】\n${change.message}\n\n【文件变化】\n${JSON.stringify(change.files).slice(0, 70_000)}`,
     `\n【当前代码，带行号】\n${sources.map((file) => `\n--- ${file.path} ---\n${file.content}`).join("\n")}`,
   ].join("\n");

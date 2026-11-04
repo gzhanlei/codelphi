@@ -4,6 +4,8 @@ import { buildExplainerMarkdown } from "../lib/product-explainer";
 const overview = {
   slug: "radar",
   headline: "产品知识中心",
+  headlineSource: "generated",
+  headlineEvidence: [{ path: "lib/analysis.ts", startLine: 185 }],
   freshness: "Spec v8 · abcdef1",
   analysisLabel: "最近分析成功",
   capabilities: [{ id: 1, name: "登录|统一认证", summary: "OAuth", source: "generated" as const, scenarioCount: 3, href: "/products/radar?view=spec&feature=1" }],

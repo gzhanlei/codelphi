@@ -5,6 +5,7 @@ import { assertLatestRun, upsertGeneratedSpec, upsertRelease, type RunContext } 
 
 const run: RunContext = { id: 2, repositoryId: 3, productId: 4, owner: "gzhanlei", name: "radar", beforeSha: null, afterSha: "sha-2", connectionId: null, provider: "github", organizationId: 1, productSlug: "radar", productName: "Radar" };
 const result: AnalysisResult = {
+  product: { description: "Authentication and product knowledge.", evidence: [{ path: "lib/db.ts", startLine: 1 }] },
   release: { title: "Title", summary: "Summary" },
   changes: [{ featureName: "Auth", kind: "changed", description: "Changed", userImpact: "", evidence: [] }],
   features: [{ name: "Auth", summary: "Auth", scenarios: [] }],
