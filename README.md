@@ -14,6 +14,7 @@
 - GitHub App Manifest 创建与安装、只读 Installation Token、AES-GCM 凭据加密、连接检查与本地断开。
 - Integrations 页面与添加产品时的 GitHub App/PAT 凭据选择；无凭据时提供配置引导。
 - Gitee、GitLab、Gitea 的工作区级连接配置与服务端验证；目前添加产品和架构分析仍仅支持 GitHub。
+- 代码平台 Provider 抽象：注册、分支与变更读取、源码后端及仓库链接统一通过 adapter；当前仅注册 GitHub 分析实现。
 - 自有 Git 服务使用 HTTPS 与 `REPOSITORY_HOST_ALLOWLIST` 精确主机/端口白名单；删除令牌连接会清除保存的凭据。
 - 两级功能树、功能与场景 CRUD、人工来源保护、软删除 tombstone 和父子层级事务保护。
 - 场景分类/全文筛选、列表与表格视图，以及基于场景推导的 SVG 用户流程图。

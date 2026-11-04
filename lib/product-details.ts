@@ -54,7 +54,7 @@ export async function getProductDetails(slug: string, organizationId?: number) {
   const product = (products as Array<{ id: number; slug: string; name: string; description: string }>)[0];
   if (!product) return null;
 
-  const [repositories] = await db.execute("SELECT owner, name, default_branch AS defaultBranch FROM repositories WHERE product_id = ?", [product.id]);
+  const [repositories] = await db.execute("SELECT provider, owner, name, default_branch AS defaultBranch FROM repositories WHERE product_id = ?", [product.id]);
   const [runs] = await db.execute(
     `SELECT r.status, r.error_message AS errorMessage FROM analysis_runs r
      JOIN repositories repo ON repo.id = r.repository_id WHERE repo.product_id = ? ORDER BY r.created_at DESC LIMIT 1`,
@@ -68,7 +68,7 @@ export async function getProductDetails(slug: string, organizationId?: number) {
 
   return {
     product,
-    repository: (repositories as Array<{ owner: string; name: string; defaultBranch: string }>)[0],
+    repository: (repositories as Array<{ provider?: string; owner: string; name: string; defaultBranch: string }>)[0],
     latestRun: (runs as Array<{ status: string; errorMessage?: string }>)[0],
     features,
     scenarios,

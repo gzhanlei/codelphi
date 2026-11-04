@@ -36,7 +36,7 @@ export function NewProductForm({ connections, hasServerToken }: { connections: A
     setPending(true);
     setError("");
     try {
-      const productSlug = await createProduct({ name, slug, repository, defaultBranch, description, analyze, connectionId });
+      const productSlug = await createProduct({ name, slug, repository, provider: "github", defaultBranch, description, analyze, connectionId });
       router.push(`/products/${productSlug}?view=spec`);
       router.refresh();
     } catch (cause) {

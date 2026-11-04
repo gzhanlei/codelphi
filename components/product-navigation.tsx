@@ -6,8 +6,10 @@ import { SpecWorkspace } from "./spec-workspace";
 import { buildFeatureTree, selectFeature } from "@/lib/feature-tree";
 import { scenariosForFeature } from "@/lib/spec-editor-ui";
 import type { BehaviorChangeRow, ChangeRow, FeatureRow, ReleaseRow, ScenarioRow } from "@/lib/types";
+import { getCodeHostingAdapter } from "@/lib/code-hosting";
 
 interface Repository {
+  provider?: string;
   owner: string;
   name: string;
   defaultBranch: string;
@@ -15,7 +17,8 @@ interface Repository {
 
 export function RepositoryLink({ repository }: { repository?: Repository }) {
   if (!repository) return null;
-  return <a className="repository-link" href={`https://github.com/${repository.owner}/${repository.name}`} target="_blank" rel="noreferrer">⌁ {repository.owner}/{repository.name} · {repository.defaultBranch} ↗</a>;
+  const adapter = getCodeHostingAdapter(repository.provider ?? "github");
+  return <a className="repository-link" href={adapter.repositoryUrl(repository)} target="_blank" rel="noreferrer">⌁ {repository.owner}/{repository.name} · {repository.defaultBranch} ↗</a>;
 }
 
 function RunError({ message }: { message?: string }) {

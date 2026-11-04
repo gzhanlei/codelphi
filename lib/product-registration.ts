@@ -1,37 +1,29 @@
 import { ZodError, type z } from "zod";
 import { queueAnalysis } from "./analysis";
 import { getDb } from "./db";
-import { getBranchHead, getRepository, parseRepository, type GitHubRepository } from "./github";
-import type { GitHubAccess } from "./github-access";
+import { getCodeHostingAdapter, type CodeHostingAdapter, type HostedRepository } from "./code-hosting";
 import type { productInputSchema } from "./product-input";
 
 type ProductInput = z.infer<typeof productInputSchema>;
+export type RepositoryRegistrationAdapter = Pick<CodeHostingAdapter, "provider" | "parseRepository" | "getRepository" | "getBranchHead" | "explainRegistrationError">;
 
-interface GitHubGateway {
-  getRepository: (repo: GitHubRepository, access?: GitHubAccess) => Promise<GitHubRepository>;
-  getBranchHead: (repo: GitHubRepository, access?: GitHubAccess) => Promise<string>;
-}
-
-export async function resolveGitHubRegistration(input: ProductInput & { organizationId?: number }, github: GitHubGateway = { getRepository, getBranchHead }) {
-  const repository = parseRepository(input.repository);
+export async function resolveRepositoryRegistration(
+  input: ProductInput & { organizationId?: number },
+  adapter: RepositoryRegistrationAdapter = getCodeHostingAdapter(input.provider),
+) {
+  const repository = adapter.parseRepository(input.repository);
   const access = { connectionId: input.connectionId, organizationId: input.organizationId ?? 1 };
   try {
-    const metadata = await github.getRepository(repository, access);
+    const metadata = await adapter.getRepository(repository, access);
     const defaultBranch = input.defaultBranch || metadata.defaultBranch;
-    const afterSha = await github.getBranchHead({ ...repository, defaultBranch }, access);
-    return { repository, defaultBranch, afterSha };
+    const afterSha = await adapter.getBranchHead({ ...repository, defaultBranch }, access);
+    return { repository: { ...repository, provider: adapter.provider }, defaultBranch, afterSha };
   } catch (error) {
-    if (error instanceof Error && error.message.startsWith("GitHub API 404")) {
-      const guidance = input.connectionId
-        ? "GitHub App 尚未授权该仓库。请先在 GitHub 安装 radar-product-observer 并选择该仓库，或改用服务器 Token。"
-        : "仓库不存在，或服务器 Token 无权访问该仓库。";
-      throw new Error(`${guidance}（${error.message}）`);
-    }
-    throw error;
+    throw adapter.explainRegistrationError?.(error, access) ?? error;
   }
 }
 
-async function insertRegistration(input: ProductInput & { organizationId?: number }, repository: GitHubRepository, defaultBranch: string) {
+async function insertRegistration(input: ProductInput & { organizationId?: number }, repository: HostedRepository, defaultBranch: string) {
   const connection = await getDb().getConnection();
   try {
     await connection.beginTransaction();
@@ -41,8 +33,8 @@ async function insertRegistration(input: ProductInput & { organizationId?: numbe
     );
     const productId = Number((productResult as { insertId: number }).insertId);
     const [repositoryResult] = await connection.execute(
-      "INSERT INTO repositories (product_id, owner, name, default_branch, connection_id) VALUES (?, ?, ?, ?, ?)",
-      [productId, repository.owner, repository.name, defaultBranch, input.connectionId],
+      "INSERT INTO repositories (product_id, provider, owner, name, default_branch, connection_id) VALUES (?, ?, ?, ?, ?, ?)",
+      [productId, repository.provider, repository.owner, repository.name, defaultBranch, input.connectionId],
     );
     await connection.commit();
     return Number((repositoryResult as { insertId: number }).insertId);
@@ -55,7 +47,7 @@ async function insertRegistration(input: ProductInput & { organizationId?: numbe
 }
 
 export async function registerProduct(input: ProductInput & { organizationId?: number }) {
-  const resolved = await resolveGitHubRegistration(input);
+  const resolved = await resolveRepositoryRegistration(input);
   const repositoryId = await insertRegistration(input, resolved.repository, resolved.defaultBranch);
   return { slug: input.slug, analyze: input.analyze, repositoryId, afterSha: resolved.afterSha };
 }
@@ -70,7 +62,7 @@ export function registrationError(error: unknown) {
     return { status: 400, message: error.issues[0]?.message ?? "输入无效" };
   }
   if (typeof error === "object" && error !== null && "code" in error && error.code === "ER_DUP_ENTRY") {
-    return { status: 409, message: "产品 Slug 或 GitHub 仓库已经注册" };
+    return { status: 409, message: "产品 Slug 或代码仓库已经注册" };
   }
   return {
     status: 400,

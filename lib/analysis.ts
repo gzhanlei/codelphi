@@ -1,7 +1,7 @@
 import type { PoolConnection } from "mysql2/promise";
 import { getDb } from "./db";
 import { analyzeWithAI, type AnalysisResult } from "./ai";
-import { getChangeContext, getRepository, type GitHubRepository, type SourceFile } from "./github";
+import { resolveAnalysisTarget, type ChangeContext, type CodeHostingProvider, type SourceFile } from "./code-hosting";
 import { analysisSliceBudgets, getRemoteAnalysisSources, parseSourceRoots } from "./remote-analysis";
 import { createSlicePlanner } from "./slice-planner";
 import { insertSpecVersion } from "./spec-versions";
@@ -17,12 +17,11 @@ export interface RunContext {
   beforeSha: string | null;
   afterSha: string;
   connectionId: number | null;
+  provider?: CodeHostingProvider;
   organizationId?: number;
   productSlug?: string;
   productName?: string;
 }
-
-type ChangeContext = Awaited<ReturnType<typeof getChangeContext>>;
 
 export function assertEvidence(result: AnalysisResult, sources: Set<string>) {
   const invalid: string[] = [];
@@ -166,7 +165,7 @@ async function loadRun(runId: number) {
   const [rows] = await getDb().execute(
     `SELECT r.id, r.repository_id AS repositoryId, p.id AS productId, p.slug AS productSlug, p.name AS productName,
             repo.owner, repo.name, r.before_sha AS beforeSha, r.after_sha AS afterSha, repo.connection_id AS connectionId,
-            p.organization_id AS organizationId
+            repo.provider, p.organization_id AS organizationId
      FROM analysis_runs r
      JOIN repositories repo ON repo.id = r.repository_id
      JOIN products p ON p.id = repo.product_id
@@ -184,21 +183,18 @@ async function loadSourceRoots(productId: number) {
 
 async function performAnalysis(run: RunContext) {
   await getDb().execute("UPDATE analysis_runs SET status = 'running', started_at = CURRENT_TIMESTAMP(3), error_message = NULL WHERE id = ?", [run.id]);
-  const access = { connectionId: run.connectionId, organizationId: run.organizationId ?? 1 };
-  const repo: GitHubRepository = await getRepository({ owner: run.owner, name: run.name, defaultBranch: "main" }, access);
+  const target = resolveAnalysisTarget(run);
+  const repo = await target.adapter.getRepository({ owner: run.owner, name: run.name, defaultBranch: "main" }, target.access);
   const [change, sourceRoots] = await Promise.all([
-    getChangeContext(repo, run.beforeSha, run.afterSha, access),
+    target.adapter.getChangeContext(repo, run.beforeSha, run.afterSha, target.access),
     loadSourceRoots(run.productId),
   ]);
   const planner = createSlicePlanner({ now: Date.now });
   const remote = await getRemoteAnalysisSources({
-    product: {
-      id: run.productId,
-      slug: run.productSlug ?? String(run.productId),
-      name: run.productName ?? `Product ${run.productId}`,
-    },
+    product: target.product,
     repository: { owner: repo.owner, repo: repo.name, revision: run.afterSha },
-    access,
+    access: target.access,
+    provider: target.adapter.provider,
     scopeRoots: sourceRoots.length > 0 ? sourceRoots : [{ path: "", role: "shared" }],
   }, { planner, budgets: analysisSliceBudgets });
   const sources = remote.sources;

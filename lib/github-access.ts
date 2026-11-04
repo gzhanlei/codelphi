@@ -1,12 +1,9 @@
 import { getInstallationAccessToken } from "./github-app";
 import { getConnectionWithApp } from "./github-integrations";
 import { requiredEnv } from "./env";
+import type { RepositoryAccess } from "./code-hosting/types";
 
-export interface GitHubAccess {
-  token?: string;
-  connectionId?: number | null;
-  organizationId?: number;
-}
+export type GitHubAccess = RepositoryAccess;
 
 interface Connection {
   installationId: number;

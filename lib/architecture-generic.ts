@@ -1,4 +1,5 @@
 import { architectureDocumentSchema, architectureDraftInputSchema, markerLine, buildArchitectureDocument as buildRadarArchitectureDocument, type ArchitectureDocument, type ArchitectureDraftInput } from "./architecture-draft";
+import { getCodeHostingAdapter } from "./code-hosting/registry";
 
 type GenericId = "frontend" | "backend" | "auth" | "db" | "github" | "llm" | "webhook" | "analysis" | "android-ui" | "android-data" | "android-local-db" | "android-network" | "android-service" | "native-bridge" | "native-core" | "media-sink";
 type Component = ArchitectureDocument["components"][number];
@@ -108,7 +109,7 @@ export function buildArchitectureDocument(value: ArchitectureDraftInput): Archit
       output: `${input.productSlug}-architecture.html`,
       locale: "zh-CN",
       quality_profile: "showcase",
-      repository: { url: `https://github.com/${input.owner}/${input.name}`, provider: "github", revision: input.revision },
+      repository: { url: getCodeHostingAdapter(input.provider).repositoryUrl(input), provider: input.provider, revision: input.revision },
       viewBox: [viewBoxWidth, viewBoxHeight],
     },
     components,

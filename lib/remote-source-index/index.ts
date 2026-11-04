@@ -1,6 +1,6 @@
 import { basename, dirname, join, normalize, resolve, sep } from "node:path";
 import { SourceIndexError, defaultRemoteSourceBudgets, defaultRemoteSourceDependencies, defaultSourcePruningPolicy, gitBlobSha, type EvidenceRootRequest, type FileSystemAdapter, type EvidenceRootResult, type OpenedRemoteSourceRevision, type RemoteSourceBackend, type RemoteSourceIndexDependencies, type RemoteSourceIndexOptions, type RemoteSourceBudgets, type ResolvedRemoteSourceIndexDependencies, type SourceBlobMeta, type SourceCacheOptions, type SourceIndexStatus, type SourceLineRequest, type SourceLineSlice, type SourceMetrics, type SourcePruningPolicy, type PruneReason, type SourceRevisionIdentity, type SourceRevisionRef, type SourceScopeRoot, type SourceSignal, type SourceTreeApiEntry, type SourceTreeEntry, type SourceTreeListing } from "./types";
-import { createGitHubSourceBackend } from "./github-backend";
+import { getCodeHostingAdapter } from "../code-hosting/registry";
 
 interface CachedBlob {
   path: string;
@@ -349,7 +349,7 @@ export function resolveRemoteSourceDependencies(dependencies?: RemoteSourceIndex
 function resolveRemoteSourceBackend(options: RemoteSourceIndexOptions, dependencies: ResolvedRemoteSourceIndexDependencies): RemoteSourceBackend {
   if (options.backend) return options.backend;
   if (dependencies.backend) return dependencies.backend;
-  return createGitHubSourceBackend({ access: options.access });
+  return getCodeHostingAdapter(options.provider ?? "github").createSourceBackend(options.access);
 }
 
 export async function createRemoteSourceIndex(ref: SourceRevisionRef, options: RemoteSourceIndexOptions): Promise<OpenedRemoteSourceRevision> {

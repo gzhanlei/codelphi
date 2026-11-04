@@ -1,14 +1,14 @@
 import { z } from "zod";
 import { createRemoteSourceIndex, type OpenedRemoteSourceRevision, type SourceRevisionRef, type SourceScopeRoot } from "./remote-source-index";
 import { createSlicePlanner, type SliceBudgets, type SlicePlanner, type SourceSlice } from "./slice-planner";
-import type { GitHubAccess } from "./github-access";
-import type { SourceFile } from "./github";
+import type { CodeHostingProvider, RepositoryAccess, SourceFile } from "./code-hosting/types";
 import type { RemoteSourceBackend } from "./remote-source-index";
 
 export interface RemoteAnalysisRequest {
   product: { id: number; slug: string; name: string };
   repository: { owner: string; repo: string; revision: string };
-  access: GitHubAccess;
+  access: RepositoryAccess;
+  provider?: CodeHostingProvider;
   scopeRoots: SourceScopeRoot[];
   backend?: RemoteSourceBackend;
 }
@@ -75,7 +75,7 @@ export async function getRemoteAnalysisSources(request: RemoteAnalysisRequest, r
     repo: request.repository.repo,
     revision: request.repository.revision,
   };
-  const index = await createRemoteSourceIndex(revision, { scopeRoots: request.scopeRoots, access: request.access, backend: request.backend });
+  const index = await createRemoteSourceIndex(revision, { scopeRoots: request.scopeRoots, access: request.access, provider: request.provider, backend: request.backend });
   const planner = runtime.planner;
   const budgets = runtime.budgets;
   const result = await planner.plan({

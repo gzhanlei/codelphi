@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
-import type { GitHubAccess } from "../github-access";
+import type { CodeHostingProvider, RepositoryAccess } from "../code-hosting/types";
 
 export type RepositorySlug = string;
 export type SourceRevisionSha = string;
@@ -185,7 +185,8 @@ export interface ResolvedRemoteSourceIndexDependencies {
 
 export interface RemoteSourceIndexOptions {
   scopeRoots: SourceScopeRoot[];
-  access: GitHubAccess;
+  access: RepositoryAccess;
+  provider?: CodeHostingProvider;
   backend?: RemoteSourceBackend;
   budgets?: Partial<RemoteSourceBudgets>;
   pruning?: Partial<SourcePruningPolicy>;

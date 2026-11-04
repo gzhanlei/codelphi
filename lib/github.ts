@@ -2,17 +2,10 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { resolveGitHubToken, type GitHubAccess } from "./github-access";
 import { normalizeChangeContext, numberedSourceContent, selectSourceCandidates } from "./github-source";
+import type { RepositoryRef, SourceFile } from "./code-hosting/types";
 
-export interface GitHubRepository {
-  owner: string;
-  name: string;
-  defaultBranch: string;
-}
-
-export interface SourceFile {
-  path: string;
-  content: string;
-}
+export type GitHubRepository = RepositoryRef;
+export type { SourceFile } from "./code-hosting/types";
 
 const repositorySchema = z.object({ default_branch: z.string().min(1) });
 const branchSchema = z.object({ commit: z.object({ sha: z.string().min(1) }) });

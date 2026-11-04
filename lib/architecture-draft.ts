@@ -1,15 +1,18 @@
 import { z } from "zod";
+import { codeHostingProviderSchema } from "./code-hosting/types";
+import { getCodeHostingAdapter } from "./code-hosting/registry";
 
 export const architectureDraftInputSchema = z.object({
   productName: z.string().min(1),
   productSlug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
   owner: z.string().min(1),
+  provider: codeHostingProviderSchema.default("github"),
   name: z.string().min(1),
   revision: z.string().regex(/^[a-fA-F0-9]{40}$/),
   sources: z.array(z.object({ path: z.string(), content: z.string() })),
 });
 
-export type ArchitectureDraftInput = z.infer<typeof architectureDraftInputSchema>;
+export type ArchitectureDraftInput = z.input<typeof architectureDraftInputSchema>;
 
 const sourceSchema = z.object({ path: z.string(), line: z.number().int().positive().optional(), end_line: z.number().int().positive().optional(), label: z.string().optional() });
 const componentSchema = z.object({
@@ -41,7 +44,7 @@ export const architectureDocumentSchema = z.object({
     output: z.string(),
     locale: z.literal("zh-CN"),
     quality_profile: z.literal("showcase"),
-    repository: z.object({ url: z.string().url(), provider: z.literal("github"), revision: z.string() }),
+    repository: z.object({ url: z.string().url(), provider: codeHostingProviderSchema, revision: z.string() }),
     viewBox: z.tuple([z.number(), z.number()]),
   }),
   components: z.array(componentSchema).min(2),
@@ -154,7 +157,7 @@ export function buildArchitectureDocument(value: ArchitectureDraftInput): Archit
       output: `${input.productSlug}-architecture.html`,
       locale: "zh-CN",
       quality_profile: "showcase",
-      repository: { url: `https://github.com/${input.owner}/${input.name}`, provider: "github", revision: input.revision },
+      repository: { url: getCodeHostingAdapter(input.provider).repositoryUrl(input), provider: input.provider, revision: input.revision },
       viewBox: [960, 720],
     },
     components,

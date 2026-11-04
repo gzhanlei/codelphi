@@ -6,13 +6,14 @@ import { ArchifyCommandError, deliverArchify, visualCheckArchify, type ArchifyRe
 import { buildArchitectureDocument } from "./architecture-generic";
 import { architectureArtifactPath, architectureSpecPath, getProductIdentity, safeArtifactAbsolutePath, saveArchitectureDocument, type ArchitectureDocumentInput } from "./architecture-store";
 import { errorMessage } from "./error-message";
-import type { SourceFile } from "./github";
+import type { CodeHostingProvider, SourceFile } from "./code-hosting/types";
 
 export interface ArchitectureRun {
   productId: number;
   owner: string;
   name: string;
   afterSha: string;
+  provider?: CodeHostingProvider;
 }
 
 interface ProductIdentity {
@@ -69,6 +70,7 @@ async function prepareArchitecture(input: GenerateArchitectureInput, services: A
     productName: product.name,
     productSlug: product.slug,
     owner: input.run.owner,
+    provider: input.run.provider ?? "github",
     name: input.run.name,
     revision: input.run.afterSha,
     sources: input.sources,

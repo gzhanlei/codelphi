@@ -29,7 +29,7 @@ interface WebhookDependencies {
 }
 
 async function findRepository(owner: string, name: string) {
-  const [rows] = await getDb().execute("SELECT id, default_branch AS defaultBranch FROM repositories WHERE owner = ? AND name = ? LIMIT 1", [owner, name]);
+  const [rows] = await getDb().execute("SELECT id, default_branch AS defaultBranch FROM repositories WHERE provider = 'github' AND owner = ? AND name = ? LIMIT 1", [owner, name]);
   return (rows as RepositoryTarget[])[0];
 }
 
