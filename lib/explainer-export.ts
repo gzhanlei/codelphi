@@ -24,7 +24,17 @@ function shouldIncludeArchitecture(input: ExplainerExportInput) {
 }
 
 function architectureRepository(architecture: ArchitectureDocumentRecord) {
-  return architectureDocumentSchema.parse(JSON.parse(architecture.specJson)).meta.repository.url;
+  return architectureDocumentSchema.parse(JSON.parse(architecture.specJson)).meta.repository?.url;
+}
+
+function evidenceRepositoryRoot(repositoryUrl: string | undefined, repoRoot: string | undefined) {
+  return repositoryUrl ? repoRoot : undefined;
+}
+
+function writeArchitectureSpec(root: string, input: ExplainerExportInput, includeArchitecture: boolean, specVersionId: number) {
+  if (!includeArchitecture || !input.architecture) return;
+  const path = safeArtifactAbsolutePath(`artifacts/products/${input.productSlug}/${specVersionId}/architecture.json`, root);
+  writeFileSync(path, input.architecture.specJson, { mode: 0o600 });
 }
 
 function explainerReceiptDirectory(productSlug: string, specVersionId: number, markdown: string, root: string) {
@@ -47,7 +57,7 @@ export async function exportProductExplainer(input: ExplainerExportInput, servic
   const artifactPath = safeArtifactAbsolutePath(artifactRelative, root);
   mkdirSync(dirname(specPath), { recursive: true });
   writeFileSync(specPath, markdown, { mode: 0o600 });
-  if (includeArchitecture && input.architecture) writeFileSync(safeArtifactAbsolutePath(`artifacts/products/${input.productSlug}/${specVersionId}/architecture.json`, root), input.architecture.specJson, { mode: 0o600 });
-  const receipt = await services.finalize({ input: specPath, output: artifactPath, repoRoot: includeArchitecture ? input.repoRoot : undefined, browserCheck: true, outDir: explainerReceiptDirectory(input.productSlug, specVersionId, markdown, root) });
+  writeArchitectureSpec(root, input, includeArchitecture, specVersionId);
+  const receipt = await services.finalize({ input: specPath, output: artifactPath, repoRoot: evidenceRepositoryRoot(repositoryUrl, input.repoRoot), browserCheck: true, outDir: explainerReceiptDirectory(input.productSlug, specVersionId, markdown, root) });
   return { specPath: specRelative, artifactPath: artifactRelative, receipt };
 }

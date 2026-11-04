@@ -45,11 +45,13 @@ npm run archify:prototype
 
 生成文件位于 `artifacts/products/<slug>/<specVersionId>/`，该目录不进入 Git。访问路径为 `/api/architecture/<id>`，需要有效 Radar 会话；响应使用无 `allow-same-origin` 的 sandbox CSP，并验证产品与 Spec Version 对应的受管路径。
 
-Archify 的源码证据验证需要匹配本地 Git checkout。当前仓库通过 `GITHUB_REPOSITORY` 自动识别；其他工作目录需在环境变量中显式配置 JSON 映射，未配置时仅记录架构生成失败，不伪造验证：
+Archify 的 Viewer 源码链接需要匹配本地 Git checkout 做第二次验证。当前仓库通过 `GITHUB_REPOSITORY` 自动识别；其他工作目录可在环境变量中显式配置 JSON 映射：
 
 ```bash
 RADAR_REPOSITORY_ROOTS='{"owner/repo":"/absolute/local/checkout"}'
 ```
+
+没有本地 checkout 的远程仓库仍然通过固定 revision 的 Tree/Blob 内容生成并验收架构，组件和关系不变；仅省略 `meta.repository`、组件 `sources` 和 Archify 的本地 Git 证据回执，不伪造 Viewer 源码链接。产品简介、功能与场景的证据不受此影响。
 
 Radar 使用专用模板，其他仓库使用基于源码内容和行号的通用架构生成器，均要求实现标记匹配；不会仅凭同名文件虚构组件。WorkMembership（Chandler）已通过真实分析和 accepted 验收。架构查看使用 `/products/<slug>/architecture/<id>` 原生页面并提供“返回产品概览”按钮，`prepare` 阶段的无组件、spec 写入失败等也会保存 `failed` 文档与错误信息。
 

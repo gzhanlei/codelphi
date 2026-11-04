@@ -59,7 +59,7 @@ export interface DeliverArchifyInput extends ArchifyCall {
   type: "architecture";
   input: string;
   output: string;
-  repoRoot: string;
+  repoRoot?: string;
 }
 
 async function archifyBin(bin?: string) {
@@ -68,7 +68,10 @@ async function archifyBin(bin?: string) {
 
 export async function deliverArchify(input: DeliverArchifyInput, runner: CommandRunner = execCommand) {
   const bin = await archifyBin(input.bin);
-  return runArchify([bin, "deliver", input.type, input.input, input.output, "--repo-root", input.repoRoot, "--quality", "showcase", "--json"], runner, input.timeoutMs ?? 180_000);
+  const args = [bin, "deliver", input.type, input.input, input.output];
+  if (input.repoRoot) args.push("--repo-root", input.repoRoot);
+  args.push("--quality", "showcase", "--json");
+  return runArchify(args, runner, input.timeoutMs ?? 180_000);
 }
 
 export async function visualCheckArchify(input: ArchifyCall & { artifact: string }, runner: CommandRunner = execCommand) {

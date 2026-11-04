@@ -60,6 +60,20 @@ describe("Explainer export", () => {
     expect(finalize).toHaveBeenCalledWith(expect.objectContaining({ outDir: join(root, `artifacts/products/radar/8/receipts/${digest}`) }));
   });
 
+  it("exports an accepted remote architecture without local Git evidence", async () => {
+    const root = mkdtempSync(join(tmpdir(), "radar-explainer-"));
+    const finalize = vi.fn(async () => ({ ok: true, command: "finalize" }));
+    const remoteSpec = JSON.parse(JSON.stringify(specDocument));
+    delete remoteSpec.meta.repository;
+    for (const component of remoteSpec.components) delete component.sources;
+    const remoteArchitecture = { ...architecture, specJson: JSON.stringify(remoteSpec) };
+    await exportProductExplainer({ productSlug: "radar", overview, architecture: remoteArchitecture, repoRoot: "/tmp/unused" }, { root, finalize });
+    const markdown = readFileSync(join(root, "artifacts/products/radar/8/explainer.md"), "utf8");
+    expect(markdown).toContain("@diagram architecture source=architecture.json");
+    expect(markdown).not.toContain("repo_url=");
+    expect(finalize).toHaveBeenCalledWith(expect.objectContaining({ repoRoot: undefined }));
+  });
+
   it("omits architecture evidence when it is not accepted", async () => {
     const root = mkdtempSync(join(tmpdir(), "radar-explainer-"));
     const finalize = vi.fn(async () => ({ ok: true, command: "finalize" }));

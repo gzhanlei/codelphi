@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { z } from "zod";
 import { ArchifyCommandError, deliverArchify, visualCheckArchify, type ArchifyReceipt, type DeliverArchifyInput } from "./archify-cli";
 import { buildArchitectureDocument } from "./architecture-generic";
+import { architectureDocumentSchema, type ArchitectureDocument } from "./architecture-draft";
 import { architectureArtifactPath, architectureSpecPath, getProductIdentity, safeArtifactAbsolutePath, saveArchitectureDocument, type ArchitectureDocumentInput } from "./architecture-store";
 import { errorMessage } from "./error-message";
 import type { CodeHostingProvider, SourceFile } from "./code-hosting/types";
@@ -59,22 +60,37 @@ function sha256(value: string | Buffer) {
   return createHash("sha256").update(value).digest("hex");
 }
 
+export function withoutRepositoryEvidence(document: ArchitectureDocument): ArchitectureDocument {
+  const meta = { ...document.meta };
+  delete meta.repository;
+  return architectureDocumentSchema.parse({
+    ...document,
+    meta,
+    components: document.components.map((component) => {
+      const next = { ...component };
+      delete next.sources;
+      return next;
+    }),
+  });
+}
+
 function errorReceipt(error: unknown) {
   return error instanceof ArchifyCommandError ? error.receipt : undefined;
 }
 
-async function prepareArchitecture(input: GenerateArchitectureInput, services: ArchitectureServices) {
+async function prepareArchitecture(input: GenerateArchitectureInput, services: ArchitectureServices, repositoryEvidence: boolean) {
   const product = input.product === undefined ? await getProductIdentity(input.run.productId) : input.product;
   if (!product) throw new Error("Product not found for architecture generation");
-  const spec = buildArchitectureDocument({
+  const authored = buildArchitectureDocument({
     productName: product.name,
     productSlug: product.slug,
     owner: input.run.owner,
-    provider: input.run.provider ?? "github",
+    provider: input.run.provider,
     name: input.run.name,
     revision: input.run.afterSha,
     sources: input.sources,
   });
+  const spec = repositoryEvidence ? authored : withoutRepositoryEvidence(authored);
   const specJson = `${JSON.stringify(spec, null, 2)}\n`;
   const specRelative = architectureSpecPath(product.slug, input.specVersionId);
   const artifactRelative = architectureArtifactPath(product.slug, input.specVersionId);
@@ -127,12 +143,11 @@ export async function generateArchitectureVersion(input: GenerateArchitectureInp
   let stage: "prepare" | "delivery" | "visual" = "prepare";
 
   try {
-    const prepared = await prepareArchitecture(input, services);
+    const repoRoot = services.repoRoot(input.run);
+    const prepared = await prepareArchitecture(input, services, repoRoot !== undefined);
     Object.assign(base, prepared.base);
     const { specPath, artifactPath, artifactRelative } = prepared;
     stage = "delivery";
-    const repoRoot = services.repoRoot(input.run);
-    if (!repoRoot) throw new Error(`No matching local checkout for ${input.run.owner}/${input.run.name}`);
     validationReceipt = await services.deliver({ type: "architecture", input: specPath, output: artifactPath, repoRoot });
     base.artifactPath = artifactRelative;
     base.artifactSha256 = sha256(readFileSync(artifactPath));

@@ -38,6 +38,9 @@ describe("architecture version generation", () => {
     expect(first).toMatchObject({ status: "accepted", productId: 4, specVersionId: 7, artifactPath: "artifacts/products/radar/7/architecture.html" });
     expect(first.specSha256).toHaveLength(64);
     expect(first.artifactSha256).toHaveLength(64);
+    const localSpec = JSON.parse(first.specJson);
+    expect(localSpec.meta.repository).toBeDefined();
+    expect(localSpec.components.some((component: { sources?: unknown[] }) => component.sources && component.sources.length > 0)).toBe(true);
     const second = await generateArchitectureVersion(input, { root, save, deliver, visualCheck, repoRoot });
     expect(second.specSha256).toBe(first.specSha256);
     expect(save).toHaveBeenCalledTimes(2);
@@ -66,13 +69,25 @@ describe("architecture version generation", () => {
     expect(visualCheck).not.toHaveBeenCalled();
   });
 
-  it("records a failure without calling Archify when no local checkout matches", async () => {
+  it("delivers a fixed-revision remote architecture without a local Git checkout", async () => {
     const { root, save } = fixture();
-    const deliver = vi.fn();
-    const visualCheck = vi.fn();
-    const result = await generateArchitectureVersion({ run, product, sources, specVersionId: 7 }, { root, save, deliver, visualCheck, repoRoot: () => undefined });
-    expect(result).toMatchObject({ status: "failed", errorMessage: "No matching local checkout for gzhanlei/radar" });
-    expect(deliver).not.toHaveBeenCalled();
+    const deliver = vi.fn(async ({ output }: { output: string }) => {
+      const { writeFileSync } = await import("node:fs");
+      writeFileSync(output, "<html>architecture</html>");
+      return { ok: true, command: "deliver" };
+    });
+    const visualCheck = vi.fn(async () => ({ ok: true, command: "visual-check" }));
+    const remoteRun = { ...run, name: "namedict" };
+    const remoteProduct = { ...product, slug: "namedict", name: "Namedict" };
+    const result = await generateArchitectureVersion({ run: remoteRun, product: remoteProduct, sources, specVersionId: 7 }, { root, save, deliver, visualCheck, repoRoot: () => undefined });
+    expect(result).toMatchObject({ status: "accepted", errorMessage: null });
+    expect(deliver).toHaveBeenCalledWith(expect.objectContaining({ repoRoot: undefined }));
+    expect(visualCheck).toHaveBeenCalledOnce();
+    const spec = JSON.parse(result.specJson);
+    expect(spec.meta.repository).toBeUndefined();
+    expect(spec.components.every((component: { sources?: unknown }) => component.sources === undefined)).toBe(true);
+    expect(spec.components.length).toBeGreaterThan(2);
+    expect(spec.connections.length).toBeGreaterThan(0);
   });
 
   it("persists prepare failures for unsupported content and spec write errors", async () => {

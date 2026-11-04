@@ -44,7 +44,7 @@ export const architectureDocumentSchema = z.object({
     output: z.string(),
     locale: z.literal("zh-CN"),
     quality_profile: z.literal("showcase"),
-    repository: z.object({ url: z.string().url(), provider: codeHostingProviderSchema, revision: z.string() }),
+    repository: z.object({ url: z.string().url(), provider: codeHostingProviderSchema, revision: z.string() }).optional(),
     viewBox: z.tuple([z.number(), z.number()]),
   }),
   components: z.array(componentSchema).min(2),

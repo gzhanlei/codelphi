@@ -30,6 +30,12 @@ describe("Archify CLI", () => {
     expect(runner).toHaveBeenCalledWith(process.execPath, ["/opt/archify/bin.mjs", "deliver", "architecture", "/tmp/spec.json", "/tmp/diagram.html", "--repo-root", "/tmp/repo", "--quality", "showcase", "--json"], expect.objectContaining({ shell: false, timeout: 180_000, maxBuffer: 16 * 1024 * 1024 }));
   });
 
+  it("omits repo-root for source specifications already verified at a remote revision", async () => {
+    const runner = vi.fn(async () => ({ stdout: JSON.stringify(delivered), stderr: "" }));
+    await deliverArchify({ type: "architecture", input: "/tmp/spec.json", output: "/tmp/diagram.html", bin: "/opt/archify/bin.mjs" }, runner);
+    expect(runner).toHaveBeenCalledWith(process.execPath, ["/opt/archify/bin.mjs", "deliver", "architecture", "/tmp/spec.json", "/tmp/diagram.html", "--quality", "showcase", "--json"], expect.objectContaining({ shell: false }));
+  });
+
   it("runs visual-check with JSON output and a bounded timeout", async () => {
     const runner = vi.fn(async () => ({ stdout: JSON.stringify({ ok: true, command: "visual-check" }), stderr: "" }));
     await visualCheckArchify({ artifact: "/tmp/diagram.html", bin: "/opt/archify/bin.mjs" }, runner);
