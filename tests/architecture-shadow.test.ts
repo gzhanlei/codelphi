@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildArchitectureDocument } from "../lib/architecture-generic";
-import { createLegacyArchitectureShadow, legacyArchitectureFacts } from "../lib/architecture/shadow";
+import { createDirectArchitectureShadow, createLegacyArchitectureShadow, legacyArchitectureFacts } from "../lib/architecture/shadow";
 import type { ArchitectureDocument } from "../lib/architecture-draft";
 import type { ArchitectureSignal } from "../lib/architecture/signals";
 
@@ -36,6 +36,16 @@ describe("legacy architecture shadow", () => {
     expect(shadow.signalCount).toBe(4);
     expect(shadow.factCounts).toBeNull();
     expect(shadow.coverage).toBeNull();
+  });
+
+  it("keeps direct fact diagnostics scoped to the available source slice", () => {
+    const shadow = createDirectArchitectureShadow({ revision, scope: "source-slice", sources });
+    expect(shadow.version).toBe(1);
+    expect(shadow.status).toBe("completed");
+    expect(shadow.scope).toBe("source-slice");
+    expect(shadow.coverage?.publishable).toBe(false);
+    expect(shadow.coverage?.unsupportedEdges).toEqual([]);
+    expect(shadow.coverage?.unreachableRuntimeUnits).toContain("store:mysql");
   });
 
   it("maps all legacy component and relationship categories without inventing event roots", () => {

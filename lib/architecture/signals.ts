@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { architectureEvidenceSchema, type ArchitectureEvidence } from "./facts";
+import { architectureEvidenceSchema } from "./facts";
+import { findArchitectureEvidence, type ArchitectureSource } from "./source";
 
 export const architectureSignalKindSchema = z.enum(["entrypoint", "deployable", "worker", "store", "external"]);
 export const architectureSignalSchema = z.object({
@@ -37,29 +38,17 @@ interface SignalRule {
 const signalRules: SignalRule[] = [
   { kind: "entrypoint", detector: "source-entrypoint", path: /(?:^|\/)app\/.*(?:page|route)\.tsx?$|(?:^|\/)pages\/index\.tsx$|(?:^|\/)cmd\/.*\/main\.go$|(?:^|\/)main\.go$|(?:^|\/)index\.php$|(?:^|\/)app\.json$|(?:Activity)\.(?:java|kt)$/, markers: [] },
   { kind: "deployable", detector: "process-entrypoint", path: /(?:^|\/)main\.go$|(?:^|\/)package\.json$/, markers: ["func main", "\"next\"", "\"start\""] },
-  { kind: "worker", detector: "async-worker", path: /worker|job|cron|scheduler|analysis/i, markers: ["func main", "after(", "setInterval", "cron", "NewRunner", "Worker"] },
+  { kind: "worker", detector: "async-worker", path: /worker|job|cron|scheduler|analysis/i, markers: ["func main", "after(", "setInterval", "cron", "NewRunner"] },
   { kind: "store", detector: "storage-usage", path: /./, markers: ["mysql2", "sql.Open", "database/sql", "new PDO", "RoomDatabase", "file_get_contents", "file_put_contents", "CREATE TABLE", "gorm.Open", "SQLAlchemy"] },
-  { kind: "external", detector: "external-sdk", path: /./, markers: ["api.github.com", "chat/completions", "NewQCloudClient", "cos.tencentcloudapi.com", "requestVirtualPayment", "Code2Session", "CreateTask", "OpenAI", "imgSecCheck"] },
+  { kind: "external", detector: "external-sdk", path: /./, markers: ["api.github.com", "chat/completions", "NewQCloudClient", "cos.tencentcloudapi.com", "requestVirtualPayment", "Code2Session", "CreateTask", "OpenAI", "imgSecCheck", "deliverArchify", "visualCheckArchify"] },
 ];
 
-interface SourceContent {
-  path: string;
-  content: string;
-}
-
-function numberedLine(line: string, index: number) {
-  const match = line.match(/^\s*(\d+):\s?/);
-  return match ? Number(match[1]) : index + 1;
-}
-
-function matchingLine(source: SourceContent, rule: SignalRule): ArchitectureEvidence | undefined {
+function matchingLine(source: ArchitectureSource, rule: SignalRule) {
   if (!rule.path.test(source.path)) return undefined;
-  const index = source.content.split("\n").findIndex((line) => rule.markers.length === 0 || rule.markers.some((marker) => line.toLowerCase().includes(marker.toLowerCase())));
-  if (index < 0) return undefined;
-  return { path: source.path, line: numberedLine(source.content.split("\n")[index], index), detector: rule.detector };
+  return findArchitectureEvidence(source, rule.markers, rule.detector);
 }
 
-export function collectArchitectureSignals(input: Pick<ArchitectureSignalInventory, "revision" | "scope">, sources: SourceContent[]): ArchitectureSignalInventory {
+export function collectArchitectureSignals(input: Pick<ArchitectureSignalInventory, "revision" | "scope">, sources: ArchitectureSource[]): ArchitectureSignalInventory {
   const signals = [...sources].sort((a, b) => a.path.localeCompare(b.path)).flatMap((source) => signalRules.flatMap((rule) => {
     const evidence = matchingLine(source, rule);
     if (!evidence) return [];

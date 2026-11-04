@@ -58,7 +58,7 @@ function architectureProblems(inventory: ArchitectureSignalInventory, facts: Arc
   const reached = reachableNodes(facts);
   return {
     unclassifiedCriticalSignals: inventory.signals.filter((signal) => signal.critical && !covered.has(signal.id)).sort((a, b) => a.id.localeCompare(b.id)),
-    unsupportedNodes: facts.nodes.filter((node) => node.kind !== "user" && node.evidence.length === 0).map((node) => node.id).sort(),
+    unsupportedNodes: facts.nodes.filter((node) => node.kind !== "user" && node.synthetic !== true && node.evidence.length === 0).map((node) => node.id).sort(),
     unsupportedEdges: facts.edges.filter((edge) => edge.evidence.length === 0).map((edge) => edge.id).sort(),
     unreachableRuntimeUnits: facts.nodes.filter((node) => runtimeNodeKinds.has(node.kind) && !reached.has(node.id)).map((node) => node.id).sort(),
   };

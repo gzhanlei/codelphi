@@ -6,7 +6,7 @@ import { createRemoteSourceIndex } from "../lib/remote-source-index";
 import { createSlicePlanner, type SliceBudgets, type SlicePlanner, type SourceSlice } from "../lib/slice-planner";
 import { analysisSliceBudgets } from "../lib/remote-analysis";
 import { buildArchitectureDocument } from "../lib/architecture-generic";
-import { createLegacyArchitectureShadow, type ArchitectureShadow } from "../lib/architecture/shadow";
+import { createDirectArchitectureShadow, createLegacyArchitectureShadow, unavailableArchitectureShadow, type ArchitectureShadow } from "../lib/architecture/shadow";
 import type { ArchitectureDocument } from "../lib/architecture-draft";
 import { resolveGitHubToken } from "../lib/github-access";
 import type { OpenedRemoteSourceRevision, RemoteSourceBudgets, SourceScopeRoot } from "../lib/remote-source-index";
@@ -97,7 +97,15 @@ export function shadowSummary(revision: string, sources: SourceFile[], document?
   try {
     return createLegacyArchitectureShadow({ revision, scope: "source-slice", sources, document });
   } catch (error) {
-    return { version: 1, status: "unavailable", scope: "source-slice", signalCount: 0, factCounts: null, coverage: null, error: error instanceof Error ? error.message : "Architecture shadow failed" };
+    return unavailableArchitectureShadow("source-slice", error instanceof Error ? error.message : "Architecture shadow failed");
+  }
+}
+
+export function architectureFactSummary(revision: string, sources: SourceFile[]): ArchitectureShadow & { error?: string } {
+  try {
+    return createDirectArchitectureShadow({ revision, scope: "source-slice", sources });
+  } catch (error) {
+    return unavailableArchitectureShadow("source-slice", error instanceof Error ? error.message : "Architecture fact analysis failed");
   }
 }
 
@@ -113,9 +121,9 @@ export function architectureSummary(repository: StackCorpusRepository, revision:
       sources,
     });
   } catch (error) {
-    return { architectureComponents: [] as string[], architectureError: error instanceof Error ? error.message : "Architecture generation failed", architectureShadow: shadowSummary(revision, sources) };
+    return { architectureComponents: [] as string[], architectureError: error instanceof Error ? error.message : "Architecture generation failed", architectureShadow: shadowSummary(revision, sources), architectureFacts: architectureFactSummary(revision, sources) };
   }
-  return { architectureComponents: architecture.components.map((component) => component.id), architectureError: null, architectureShadow: shadowSummary(revision, sources, architecture) };
+  return { architectureComponents: architecture.components.map((component) => component.id), architectureError: null, architectureShadow: shadowSummary(revision, sources, architecture), architectureFacts: architectureFactSummary(revision, sources) };
 }
 
 async function planStackCorpusRepository(repository: StackCorpusRepository, planner: SlicePlanner, dependencies: { token?: string; index?: OpenedRemoteSourceRevision; budgets?: Partial<RemoteSourceBudgets> }) {
@@ -164,6 +172,7 @@ export async function analyzeStackCorpusRepository(
     architectureComponents: architecture.architectureComponents,
     architectureError: architecture.architectureError,
     architectureShadow: architecture.architectureShadow,
+    architectureFacts: architecture.architectureFacts,
     durationMs: Date.now() - startedAt,
   };
 }
@@ -177,7 +186,8 @@ function failedResult(repository: StackCorpusRepository, error: unknown, duratio
     status: "failed",
     detectedProfile: "unknown",
     error: error instanceof Error ? error.message : "Unknown corpus error",
-    architectureShadow: { version: 1, status: "unavailable", scope: "unavailable", signalCount: 0, factCounts: null, coverage: null },
+    architectureShadow: unavailableArchitectureShadow("unavailable"),
+    architectureFacts: unavailableArchitectureShadow("unavailable"),
     durationMs,
   };
 }

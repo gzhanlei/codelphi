@@ -2,7 +2,7 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { architectureSummary, parseStackCorpusArgs, runStackCorpus, scopeRoots, selectStackCorpusRepositories, shadowSummary, resolveCorpusSourceBudgets, type StackCorpusManifest } from "../scripts/stack-corpus";
+import { architectureSummary, parseStackCorpusArgs, runStackCorpus, scopeRoots, selectStackCorpusRepositories, shadowSummary, resolveCorpusSourceBudgets, architectureFactSummary, type StackCorpusManifest } from "../scripts/stack-corpus";
 import { gitBlobSha, type OpenedRemoteSourceRevision, type RemoteSourceBackend } from "../lib/remote-source-index";
 import type { SlicePlanner } from "../lib/slice-planner";
 import type { ArchitectureDocument } from "../lib/architecture-draft";
@@ -123,7 +123,7 @@ describe("stack corpus runner", () => {
     planSpy.mockRestore();
     expect(report.summary.completed).toBe(1);
     expect(report.summary.profileMatches).toBe(1);
-    const result = (report.results as unknown as Array<{ architectureComponents: string[]; architectureError: string | null; detectedProfile: string; durationMs: number; architectureShadow: { status: string; scope: string; coverage: { publishable: boolean; unsupportedEdges: string[] } | null } }>)[0];
+    const result = (report.results as unknown as Array<{ architectureComponents: string[]; architectureError: string | null; detectedProfile: string; durationMs: number; architectureShadow: { status: string; scope: string; coverage: { publishable: boolean; unsupportedEdges: string[] } | null }; architectureFacts: { status: string; scope: string; coverage: { publishable: boolean } | null } }>)[0];
     expect(result.architectureComponents).toEqual(expect.arrayContaining(["users", "frontend", "backend"]));
     expect(result.architectureError).toBeNull();
     expect(result.detectedProfile).toBe("go-api");
@@ -132,6 +132,9 @@ describe("stack corpus runner", () => {
     expect(result.architectureShadow.scope).toBe("source-slice");
     expect(result.architectureShadow.coverage?.publishable).toBe(false);
     expect(result.architectureShadow.coverage?.unsupportedEdges.length).toBeGreaterThan(0);
+    expect(result.architectureFacts.status).toBe("completed");
+    expect(result.architectureFacts.scope).toBe("source-slice");
+    expect(result.architectureFacts.coverage?.publishable).toBe(false);
   });
 
   it("summarizes successful and failed architecture generation", () => {
@@ -145,6 +148,8 @@ describe("stack corpus runner", () => {
     expect(success.architectureComponents).toEqual(expect.arrayContaining(["users", "frontend", "backend"]));
     expect(success.architectureShadow.status).toBe("completed");
     expect(success.architectureShadow.coverage?.publishable).toBe(false);
+    expect(success.architectureFacts.status).toBe("completed");
+    expect(success.architectureFacts.coverage?.publishable).toBe(false);
     const failed = architectureSummary(repository, repository.revision, [{ path: "package.json", content: "1: unrelated" }]);
     expect(failed.architectureComponents).toEqual([]);
     expect(failed.architectureError).toBe("No architecture components detected");
@@ -160,6 +165,8 @@ describe("stack corpus runner", () => {
     expect(failed.version).toBe(1);
     expect(failed.signalCount).toBe(0);
     expect(failed.error).toBeTruthy();
+    expect(architectureFactSummary(revision, []).status).toBe("completed");
+    expect(architectureFactSummary("invalid", []).error).toBeTruthy();
   });
 
   it("throws when no repositories are selected", async () => {
@@ -203,6 +210,7 @@ describe("stack corpus runner", () => {
     expect(saved.version).toBe(1);
     expect(saved.manifestUpdatedAt).toBe("2026-11-03");
     expect(saved.results[0].architectureShadow).toEqual({ version: 1, status: "unavailable", scope: "unavailable", signalCount: 0, factCounts: null, coverage: null });
+    expect(saved.results[0].architectureFacts).toEqual({ version: 1, status: "unavailable", scope: "unavailable", signalCount: 0, factCounts: null, coverage: null });
   });
 
   it("records planner rejections with zero elapsed time and unavailable shadow data", async () => {

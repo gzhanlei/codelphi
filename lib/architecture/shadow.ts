@@ -2,6 +2,7 @@ import type { ArchitectureDocument } from "../architecture-draft";
 import { architectureFactSetSchema, type ArchitectureEvidence, type ArchitectureFactSet, type EdgeFact, type NodeFact } from "./facts";
 import { collectArchitectureSignals, type ArchitectureSignal, type ArchitectureSignalInventory } from "./signals";
 import { evaluateArchitectureCoverage, type ArchitectureCoverage } from "./coverage";
+import { analyzeArchitectureFacts } from "./extract";
 
 type Component = ArchitectureDocument["components"][number];
 type Connection = ArchitectureDocument["connections"][number];
@@ -16,7 +17,7 @@ interface LegacyShadowInput {
 export interface ArchitectureShadow {
   version: 1;
   status: "completed" | "unavailable";
-  scope: LegacyShadowInput["scope"];
+  scope: LegacyShadowInput["scope"] | "unavailable";
   signalCount: number;
   factCounts: { nodes: number; edges: number; roots: number } | null;
   coverage: ArchitectureCoverage | null;
@@ -34,6 +35,10 @@ const legacyBackendKinds = [
   { pattern: /agent/i, kind: "agent" },
   { pattern: /worker|analysis/i, kind: "worker" },
 ] as const;
+
+export function unavailableArchitectureShadow(scope: ArchitectureShadow["scope"], error?: string): ArchitectureShadow & { error?: string } {
+  return { version: 1, status: "unavailable", scope, signalCount: 0, factCounts: null, coverage: null, ...(error === undefined ? {} : { error }) };
+}
 
 function legacyNodeKind(component: Component): NodeFact["kind"] {
   const mapped = legacyKindByType[component.type];
@@ -101,6 +106,18 @@ export function legacyArchitectureFacts(revision: string, document: Architecture
     evidence: [],
   }));
   return architectureFactSetSchema.parse({ version: 1, revision, roots: legacyRoots(nodes, edges), nodes, edges, omissions: [] });
+}
+
+export function createDirectArchitectureShadow(input: Omit<LegacyShadowInput, "document">): ArchitectureShadow {
+  const { inventory, facts, coverage } = analyzeArchitectureFacts({ revision: input.revision, scope: input.scope }, input.sources);
+  return {
+    version: 1,
+    status: "completed",
+    scope: input.scope,
+    signalCount: inventory.signals.length,
+    factCounts: { nodes: facts.nodes.length, edges: facts.edges.length, roots: facts.roots.length },
+    coverage,
+  };
 }
 
 export function createLegacyArchitectureShadow(input: LegacyShadowInput): ArchitectureShadow {

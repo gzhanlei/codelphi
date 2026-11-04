@@ -7,13 +7,15 @@ export const architectureEvidenceSchema = z.object({
 }).strict();
 
 export const architectureNodeKindSchema = z.enum(["user", "frontend", "api", "worker", "agent", "database", "object-store", "queue", "external"]);
-export const architectureEdgeKindSchema = z.enum(["http", "sql", "poll", "schedule", "upload", "download", "oauth", "callback"]);
+export const architectureEdgeKindSchema = z.enum(["http", "sql", "poll", "schedule", "upload", "download", "oauth", "callback", "file", "process"]);
 
 export const architectureNodeFactSchema = z.object({
   id: z.string().min(1),
   kind: architectureNodeKindSchema,
   label: z.string().min(1),
   runtimeUnit: z.string().min(1).optional(),
+  sourcePaths: z.array(z.string().min(1)).optional(),
+  synthetic: z.literal(true).optional(),
   signalIds: z.array(z.string().min(1)),
   evidence: z.array(architectureEvidenceSchema),
 }).strict();
