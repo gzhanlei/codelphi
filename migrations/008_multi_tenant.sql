@@ -25,6 +25,7 @@ INSERT INTO organization_members (organization_id, user_id, role)
 SELECT 1, id, 'owner' FROM users
 ON DUPLICATE KEY UPDATE role = 'owner', updated_at = CURRENT_TIMESTAMP(3);
 
+ALTER TABLE products ADD COLUMN organization_id BIGINT UNSIGNED NULL;
 UPDATE products SET organization_id = 1 WHERE organization_id IS NULL;
 ALTER TABLE products MODIFY organization_id BIGINT UNSIGNED NOT NULL;
 ALTER TABLE products DROP INDEX slug;
