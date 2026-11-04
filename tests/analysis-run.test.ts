@@ -1,0 +1,131 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { queueAnalysis, runAnalysis } from "../lib/analysis";
+import { analyzeWithAI } from "../lib/ai";
+import { getRemoteAnalysisSources } from "../lib/remote-analysis";
+
+const execute = vi.fn();
+const connection = {
+  execute: vi.fn(),
+  beginTransaction: vi.fn(async () => undefined),
+  commit: vi.fn(async () => undefined),
+  rollback: vi.fn(async () => undefined),
+  release: vi.fn(),
+};
+const adapter = {
+  provider: "github" as const,
+  getRepository: vi.fn(),
+  getChangeContext: vi.fn(),
+};
+
+vi.mock("../lib/db", () => ({ getDb: () => ({ execute, getConnection: async () => connection }) }));
+vi.mock("../lib/code-hosting", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../lib/code-hosting")>(),
+  resolveAnalysisTarget: vi.fn((run) => ({
+    adapter,
+    access: { connectionId: run.connectionId, organizationId: run.organizationId },
+    product: { id: run.productId, slug: run.productSlug, name: run.productName },
+  })),
+}));
+vi.mock("../lib/ai", () => ({ analyzeWithAI: vi.fn() }));
+vi.mock("../lib/remote-analysis", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/remote-analysis")>(), getRemoteAnalysisSources: vi.fn() }));
+vi.mock("../lib/spec-versions", () => ({ insertSpecVersion: vi.fn(async () => 44) }));
+vi.mock("../lib/architecture-version", () => ({ generateArchitectureVersion: vi.fn(async () => ({})) }));
+
+const run = {
+  id: 8,
+  repositoryId: 3,
+  productId: 4,
+  owner: "gzhanlei",
+  name: "radar",
+  beforeSha: null,
+  afterSha: "sha-after",
+  connectionId: 42,
+  provider: "github",
+  organizationId: 7,
+  productSlug: "radar",
+  productName: "Radar",
+};
+
+let runRows: unknown[] = [];
+let sourceRows: unknown[] = [];
+let existingRunRows: unknown[] = [];
+let loadError: unknown;
+
+describe("analysis orchestration", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    runRows = [run];
+    sourceRows = [];
+    existingRunRows = [];
+    loadError = undefined;
+    execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("JOIN repositories repo")) {
+        if (loadError) throw loadError;
+        return [runRows];
+      }
+      if (sql.includes("source_roots")) return [sourceRows];
+      if (sql.includes("SELECT id FROM analysis_runs WHERE repository_id = ? AND after_sha = ?")) return [existingRunRows];
+      if (sql.includes("INSERT INTO analysis_runs")) return [{ insertId: 55 }];
+      return [{}];
+    });
+    connection.execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("SELECT id FROM analysis_runs WHERE repository_id = ?")) return [[{ id: 8 }]];
+      if (sql.includes("SELECT id FROM releases")) return [[{ id: 6 }]];
+      if (sql.includes("SELECT COUNT")) return [[{ count: 1 }]];
+      return [{}];
+    });
+    adapter.getRepository.mockResolvedValue({ owner: "gzhanlei", name: "radar", defaultBranch: "main" });
+    adapter.getChangeContext.mockResolvedValue({ message: "change", committedAt: "2026-11-01T00:00:00Z", url: "https://github.com/commit/sha", files: [] });
+    vi.mocked(getRemoteAnalysisSources).mockResolvedValue({ sources: [], slice: { files: [] } } as never);
+    vi.mocked(analyzeWithAI).mockResolvedValue({ release: { title: "v1", summary: "summary" }, features: [], changes: [] });
+  });
+
+  it("reuses an existing queued run", async () => {
+    existingRunRows = [{ id: 12 }];
+    await expect(queueAnalysis(3, null, "sha-after", "manual")).resolves.toBe(12);
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("inserts a new queued run", async () => {
+    await expect(queueAnalysis(3, null, "sha-after", "manual")).resolves.toBe(55);
+    expect(execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO analysis_runs"), [3, "manual", null, "sha-after"]);
+  });
+
+  it("ignores an analysis run that no longer needs work", async () => {
+    runRows = [];
+    await runAnalysis(8);
+    expect(adapter.getRepository).not.toHaveBeenCalled();
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses shared scope when no source roots are stored and commits the result", async () => {
+    await runAnalysis(8);
+    expect(getRemoteAnalysisSources).toHaveBeenCalledWith(expect.objectContaining({
+      provider: "github",
+      access: { connectionId: 42, organizationId: 7 },
+      scopeRoots: [{ path: "", role: "shared" }],
+    }), expect.anything());
+    expect(connection.commit).toHaveBeenCalledOnce();
+    expect(connection.release).toHaveBeenCalledOnce();
+    expect(execute).not.toHaveBeenCalledWith(expect.stringContaining("status = 'failed'"), expect.anything());
+  });
+
+  it("uses persisted source roots when present", async () => {
+    sourceRows = [{ sourceRoots: [{ path: "apps/web", role: "web" }] }];
+    await runAnalysis(8);
+    expect(getRemoteAnalysisSources).toHaveBeenCalledWith(expect.objectContaining({ scopeRoots: [{ path: "apps/web", role: "web" }] }), expect.anything());
+    expect(connection.commit).toHaveBeenCalledOnce();
+  });
+
+  it("records a readable failure when loading the run fails", async () => {
+    loadError = new Error("load failed");
+    await runAnalysis(8);
+    expect(execute).toHaveBeenCalledWith(expect.stringContaining("status = 'failed'"), ["load failed", 8]);
+  });
+
+  it("records a fallback failure for non-Error rejections", async () => {
+    loadError = "denied";
+    await runAnalysis(8);
+    expect(execute).toHaveBeenCalledWith(expect.stringContaining("status = 'failed'"), ["Unknown analysis error", 8]);
+  });
+});

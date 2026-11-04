@@ -3,7 +3,7 @@ import { getDb } from "../lib/db";
 import { queueAnalysis, runAnalysis } from "../lib/analysis";
 import { resolveManualAnalysis } from "../lib/manual-analysis";
 
-function targetSlug() {
+export function targetSlug() {
   return process.argv[2] ?? "radar";
 }
 
@@ -11,14 +11,14 @@ function errorSuffix(errorMessage?: string) {
   return errorMessage ? `: ${errorMessage}` : "";
 }
 
-async function reportResult(runId: number) {
+export async function reportResult(runId: number) {
   const [runs] = await getDb().execute("SELECT status, error_message AS errorMessage FROM analysis_runs WHERE id = ?", [runId]);
   const run = (runs as Array<{ status: string; errorMessage?: string }>)[0];
   console.log(`Analysis ${run.status}${errorSuffix(run.errorMessage)}`);
   if (run.status !== "succeeded") process.exitCode = 1;
 }
 
-async function analyze() {
+export async function analyze() {
   const slug = targetSlug();
   const db = getDb();
   try {
@@ -33,7 +33,9 @@ async function analyze() {
   }
 }
 
-analyze().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+if (process.argv[1]?.endsWith("analyze.ts")) {
+  analyze().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}
