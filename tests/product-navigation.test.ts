@@ -14,5 +14,6 @@ describe("repository links", () => {
   it("keeps legacy repositories on GitHub and handles a missing repository", () => {
     expect(renderToStaticMarkup(createElement(RepositoryLink, { repository: { owner: "gzhanlei", name: "radar", defaultBranch: "main" } }))).toContain("https://github.com/gzhanlei/radar");
     expect(renderToStaticMarkup(createElement(RepositoryLink, {}))).toBe("");
+    expect(() => renderToStaticMarkup(createElement(RepositoryLink, { repository: { provider: "", owner: "gzhanlei", name: "radar", defaultBranch: "main" } }))).toThrow();
   });
 });

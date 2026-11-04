@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { AnalysisStatusRefresh } from "./analysis-status-refresh";
 import { ProductChanges } from "./product-changes";
 import { ProductOverview } from "./product-overview";
 import { buildProductOverview, type ProductOverviewData } from "@/lib/product-overview";
@@ -28,7 +29,7 @@ function RunError({ message }: { message?: string }) {
 
 export function RunStatus({ run }: { run?: { status: string; errorMessage?: string } }) {
   if (!run) return null;
-  return <div className={`run-status ${run.status}`}><span>最近一次分析：{run.status}</span><RunError message={run.errorMessage} /></div>;
+  return <div className={`run-status ${run.status}`} role="status" aria-live="polite"><span>最近一次分析：{run.status}</span><RunError message={run.errorMessage} /><AnalysisStatusRefresh status={run.status} /></div>;
 }
 
 function tabClass(selected: boolean) {
