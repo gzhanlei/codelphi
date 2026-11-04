@@ -10,15 +10,20 @@ describe("code hosting provider registry", () => {
     expect(githubCodeHostingAdapter.repositoryUrl({ owner: "gzhanlei", name: "radar" })).toBe("https://github.com/gzhanlei/radar");
   });
 
-  it("resolves provider, access and product defaults for an analysis target", () => {
-    const fallback = resolveAnalysisTarget({ productId: 7, connectionId: null });
-    expect(fallback.adapter.provider).toBe("github");
-    expect(fallback.access).toEqual({ connectionId: null, organizationId: 1 });
-    expect(fallback.product).toEqual({ id: 7, slug: "7", name: "Product 7" });
+  it("passes persisted provider, access and product identity to an analysis target", () => {
+    const persisted = resolveAnalysisTarget({ productId: 7, productSlug: "7", productName: "Product 7", connectionId: null, organizationId: 1, provider: "github" });
+    expect(persisted.adapter.provider).toBe("github");
+    expect(persisted.access).toEqual({ connectionId: null, organizationId: 1 });
+    expect(persisted.product).toEqual({ id: 7, slug: "7", name: "Product 7" });
     const explicit = resolveAnalysisTarget({ productId: 8, productSlug: "shop", productName: "Shop", connectionId: 9, organizationId: 4, provider: "github" });
     expect(explicit.access).toEqual({ connectionId: 9, organizationId: 4 });
     expect(explicit.product).toEqual({ id: 8, slug: "shop", name: "Shop" });
   });
+
+  if (false) {
+    // @ts-expect-error persisted provider and organization are required inside analysis
+    resolveAnalysisTarget({ productId: 7, productSlug: "7", productName: "Product 7", connectionId: null });
+  }
 
   it("exposes a GitHub source backend through the provider contract", () => {
     const backend = getCodeHostingAdapter("github").createSourceBackend({ token: "test-token" });

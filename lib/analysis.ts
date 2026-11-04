@@ -17,10 +17,10 @@ export interface RunContext {
   beforeSha: string | null;
   afterSha: string;
   connectionId: number | null;
-  provider?: CodeHostingProvider;
-  organizationId?: number;
-  productSlug?: string;
-  productName?: string;
+  provider: CodeHostingProvider;
+  organizationId: number;
+  productSlug: string;
+  productName: string;
 }
 
 export function assertEvidence(result: AnalysisResult, sources: Set<string>) {

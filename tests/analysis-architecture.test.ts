@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AnalysisResult } from "../lib/ai";
 import { saveAnalysisAndArchitecture, type RunContext } from "../lib/analysis";
 
-const run: RunContext = { id: 8, repositoryId: 3, productId: 4, owner: "gzhanlei", name: "radar", beforeSha: "a", afterSha: "b", connectionId: null };
+const run: RunContext = { id: 8, repositoryId: 3, productId: 4, owner: "gzhanlei", name: "radar", beforeSha: "a", afterSha: "b", connectionId: null, provider: "github", organizationId: 1, productSlug: "radar", productName: "Radar" };
 const result: AnalysisResult = { release: { title: "Title", summary: "Summary" }, changes: [], features: [] };
 const change = { message: "change", committedAt: "2026-11-01T00:00:00Z", url: "https://example.com/commit/b", files: [] };
 const sources = [{ path: "lib/ai.ts", content: "1: code" }];
