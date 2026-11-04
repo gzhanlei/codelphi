@@ -14,7 +14,7 @@ describe("product registration", () => {
     const result = await resolveGitHubRegistration(input, github);
     expect(result.defaultBranch).toBe("main");
     expect(result.afterSha).toBe("sha-1");
-    expect(github.getBranchHead).toHaveBeenCalledWith({ owner: "gzhanlei", name: "salesbuddy", defaultBranch: "main" }, { connectionId: null });
+    expect(github.getBranchHead).toHaveBeenCalledWith({ owner: "gzhanlei", name: "salesbuddy", defaultBranch: "main" }, { connectionId: null, organizationId: 1 });
   });
 
   it("keeps an explicitly selected branch", async () => {
@@ -24,7 +24,7 @@ describe("product registration", () => {
     };
     const result = await resolveGitHubRegistration({ ...input, defaultBranch: "develop" }, github);
     expect(result.defaultBranch).toBe("develop");
-    expect(github.getBranchHead).toHaveBeenCalledWith(expect.objectContaining({ defaultBranch: "develop" }), { connectionId: null });
+    expect(github.getBranchHead).toHaveBeenCalledWith(expect.objectContaining({ defaultBranch: "develop" }), { connectionId: null, organizationId: 1 });
   });
 
   it("passes the selected installation connection to GitHub", async () => {
@@ -32,9 +32,9 @@ describe("product registration", () => {
       getRepository: vi.fn(async () => ({ owner: "gzhanlei", name: "salesbuddy", defaultBranch: "main" })),
       getBranchHead: vi.fn(async () => "sha-3"),
     };
-    await resolveGitHubRegistration({ ...input, connectionId: 9 }, github);
-    expect(github.getRepository).toHaveBeenCalledWith(expect.anything(), { connectionId: 9 });
-    expect(github.getBranchHead).toHaveBeenCalledWith(expect.anything(), { connectionId: 9 });
+    await resolveGitHubRegistration({ ...input, connectionId: 9, organizationId: 7 }, github);
+    expect(github.getRepository).toHaveBeenCalledWith(expect.anything(), { connectionId: 9, organizationId: 7 });
+    expect(github.getBranchHead).toHaveBeenCalledWith(expect.anything(), { connectionId: 9, organizationId: 7 });
   });
 
   it("explains GitHub App 404 as a missing repository installation", async () => {

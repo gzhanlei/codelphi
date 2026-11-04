@@ -12,9 +12,9 @@ interface GitHubGateway {
   getBranchHead: (repo: GitHubRepository, access?: GitHubAccess) => Promise<string>;
 }
 
-export async function resolveGitHubRegistration(input: ProductInput, github: GitHubGateway = { getRepository, getBranchHead }) {
+export async function resolveGitHubRegistration(input: ProductInput & { organizationId?: number }, github: GitHubGateway = { getRepository, getBranchHead }) {
   const repository = parseRepository(input.repository);
-  const access = { connectionId: input.connectionId };
+  const access = { connectionId: input.connectionId, organizationId: input.organizationId ?? 1 };
   try {
     const metadata = await github.getRepository(repository, access);
     const defaultBranch = input.defaultBranch || metadata.defaultBranch;

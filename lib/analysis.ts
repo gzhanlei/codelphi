@@ -17,6 +17,7 @@ export interface RunContext {
   beforeSha: string | null;
   afterSha: string;
   connectionId: number | null;
+  organizationId?: number;
   productSlug?: string;
   productName?: string;
 }
@@ -164,7 +165,8 @@ export async function queueAnalysis(repositoryId: number, beforeSha: string | nu
 async function loadRun(runId: number) {
   const [rows] = await getDb().execute(
     `SELECT r.id, r.repository_id AS repositoryId, p.id AS productId, p.slug AS productSlug, p.name AS productName,
-            repo.owner, repo.name, r.before_sha AS beforeSha, r.after_sha AS afterSha, repo.connection_id AS connectionId
+            repo.owner, repo.name, r.before_sha AS beforeSha, r.after_sha AS afterSha, repo.connection_id AS connectionId,
+            p.organization_id AS organizationId
      FROM analysis_runs r
      JOIN repositories repo ON repo.id = r.repository_id
      JOIN products p ON p.id = repo.product_id
@@ -182,8 +184,8 @@ async function loadSourceRoots(productId: number) {
 
 async function performAnalysis(run: RunContext) {
   await getDb().execute("UPDATE analysis_runs SET status = 'running', started_at = CURRENT_TIMESTAMP(3), error_message = NULL WHERE id = ?", [run.id]);
-  const repo: GitHubRepository = await getRepository({ owner: run.owner, name: run.name, defaultBranch: "main" }, { connectionId: run.connectionId });
-  const access = { connectionId: run.connectionId };
+  const access = { connectionId: run.connectionId, organizationId: run.organizationId ?? 1 };
+  const repo: GitHubRepository = await getRepository({ owner: run.owner, name: run.name, defaultBranch: "main" }, access);
   const [change, sourceRoots] = await Promise.all([
     getChangeContext(repo, run.beforeSha, run.afterSha, access),
     loadSourceRoots(run.productId),

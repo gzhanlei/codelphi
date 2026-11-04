@@ -13,6 +13,8 @@
 - Chandler OAuth 授权码 + PKCE（S256）登录、HttpOnly 会话、生产邮箱白名单。
 - GitHub App Manifest 创建与安装、只读 Installation Token、AES-GCM 凭据加密、连接检查与本地断开。
 - Integrations 页面与添加产品时的 GitHub App/PAT 凭据选择；无凭据时提供配置引导。
+- Gitee、GitLab、Gitea 的工作区级连接配置与服务端验证；目前添加产品和架构分析仍仅支持 GitHub。
+- 自有 Git 服务使用 HTTPS 与 `REPOSITORY_HOST_ALLOWLIST` 精确主机/端口白名单；删除令牌连接会清除保存的凭据。
 - 两级功能树、功能与场景 CRUD、人工来源保护、软删除 tombstone 和父子层级事务保护。
 - 场景分类/全文筛选、列表与表格视图，以及基于场景推导的 SVG 用户流程图。
 - GitHub push Webhook HMAC-SHA256 验签及默认分支过滤。
@@ -51,7 +53,7 @@ openssl rand -hex 32  # 填入 GITHUB_WEBHOOK_SECRET
 ```sql
 CREATE DATABASE radar CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 CREATE USER 'radar'@'%' IDENTIFIED BY 'replace-with-a-strong-password';
-GRANT SELECT, INSERT, UPDATE, CREATE, INDEX, ALTER, REFERENCES, DROP
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, INDEX, ALTER, REFERENCES, DROP
 ON radar.* TO 'radar'@'%';
 FLUSH PRIVILEGES;
 ```

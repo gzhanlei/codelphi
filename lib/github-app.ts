@@ -87,8 +87,11 @@ export async function getInstallationAccessToken(app: GitHubAppIdentity, install
 const installationSchema = z.object({
   id: z.number(),
   account: z.object({ login: z.string(), type: z.string() }),
+  suspended_at: z.string().nullable().optional(),
 });
 
 export async function getAppInstallation(app: GitHubAppIdentity, installationId: number, fetcher: Fetcher = fetch) {
-  return installationSchema.parse(await appApiFetch(app, `/app/installations/${installationId}`, {}, fetcher));
+  const installation = installationSchema.parse(await appApiFetch(app, `/app/installations/${installationId}`, {}, fetcher));
+  if (installation.suspended_at) throw new Error("GitHub installation is suspended");
+  return installation;
 }

@@ -1,7 +1,7 @@
 import { generateKeyPairSync } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { importSPKI, jwtVerify } from "jose";
-import { convertManifestCode, createAppJwt, getInstallationAccessToken, radarManifest } from "../lib/github-app";
+import { convertManifestCode, createAppJwt, getAppInstallation, getInstallationAccessToken, radarManifest } from "../lib/github-app";
 
 const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const pem = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
@@ -51,5 +51,13 @@ describe("GitHub App boundaries", () => {
     const init = fetcher.mock.calls[0][1];
     expect(init?.method).toBe("POST");
     expect((init?.headers as Record<string, string>).Authorization).toMatch(/^Bearer /);
+  });
+
+  it("rejects suspended installations before they can become active", async () => {
+    const account = { login: "radar-user", type: "User" };
+    const fetcher = vi.fn(async () => Response.json({ id: 42, account, suspended_at: "2026-11-01T00:00:00Z" }));
+    await expect(getAppInstallation(app, 42, fetcher)).rejects.toThrow("suspended");
+    fetcher.mockResolvedValueOnce(Response.json({ id: 42, account, suspended_at: null }));
+    await expect(getAppInstallation(app, 42, fetcher)).resolves.toMatchObject({ id: 42, account });
   });
 });

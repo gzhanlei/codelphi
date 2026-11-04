@@ -107,6 +107,25 @@ p { line-height: 1.7; }
 
 .auth-page { min-height: 100vh; display: grid; grid-template-columns: 1.15fr 1fr; }
 .integration-card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 25px; margin-bottom: 20px; }.integration-card-heading { display: flex; align-items: center; gap: 15px; margin-bottom: 22px; }.integration-card h2 { margin: 0 0 6px; font-size: 19px; }.integration-card p { margin: 0; color: var(--muted); font-size: 13px; }.integration-icon { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 10px; background: var(--green-light); color: var(--green); font-size: 25px; }.integration-empty { display: flex; align-items: center; justify-content: space-between; gap: 20px; border-top: 1px solid var(--line); padding-top: 20px; }.integration-summary { display: flex; align-items: center; gap: 18px; border-top: 1px solid var(--line); padding-top: 18px; }.integration-summary .secondary-button { margin-left: auto; }.integration-message { border-radius: 8px; padding: 12px 15px; margin-bottom: 18px; font-size: 13px; }.integration-message.error { color: #9b4237; background: #fff0ed; }.integration-message.success { color: var(--green); background: var(--green-light); }.connection-list { margin-top: 20px; border-top: 1px solid var(--line); }.connection-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 16px; padding: 16px 0; border-bottom: 1px solid #edf1ee; }.connection-row:last-child { border: 0; }.connection-row strong { display: block; margin-bottom: 5px; }.connection-row div > span { color: var(--muted); font-size: 11px; }.connection-status { display: inline-block; border-radius: 4px; padding: 4px 8px; font-size: 10px; white-space: nowrap; }.connection-status.active { color: var(--green); background: var(--green-light); }.connection-status.disconnected { color: var(--muted); background: #edf0ee; }.connection-actions { display: flex; align-items: center; gap: 5px; }.danger-link { color: #a0443d; }.fallback-card { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.repository-provider-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 20px; margin-bottom: 20px; }
+.repository-provider-grid .integration-card { min-width: 0; margin-bottom: 0; }
+.connection-guide { margin: -4px 0 22px; padding: 14px 16px; border-radius: 8px; background: #f4f7f4; }
+.connection-guide ol { margin: 0 0 9px; padding-left: 18px; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.connection-guide a, .connection-guide > span { color: var(--green); font-size: 11px; line-height: 1.6; }
+.connection-guide .allowlist-note { display: block; margin-top: 6px; color: var(--muted); }
+.connection-capability { margin: -8px 0 20px !important; padding: 10px 12px; border: 1px solid #d8e2dc; border-radius: 7px; font-size: 11px !important; line-height: 1.6; }
+.connection-guide code { font-size: 11px; }
+.token-integration-card form { padding-top: 20px; border-top: 1px solid var(--line); }
+.token-integration-card form .primary-button { margin-top: 4px; }
+.token-integration-card .connection-list { margin-top: 22px; }
+.token-integration-card .connection-row { grid-template-columns: minmax(0, 1fr) auto; }
+.token-integration-card .connection-actions { grid-column: 1 / -1; }
+.connection-meta { min-width: 0; }
+.connection-meta > span { display: block; overflow-wrap: anywhere; }
+.connection-meta .connection-error { margin-top: 6px; color: #9b4237; line-height: 1.5; }
+.form-success { margin: 0 0 14px; color: var(--green) !important; font-size: 12px !important; }
+.permission-note { padding-top: 18px; border-top: 1px solid var(--line); }
+@media (max-width: 1100px) { .repository-provider-grid { grid-template-columns: 1fr; } }
 .auth-visual { background: var(--navy); color: #fff; padding: 44px clamp(38px, 6vw, 88px); display: flex; flex-direction: column; position: relative; overflow: hidden; }
 .auth-visual::after { content: ""; position: absolute; width: 520px; height: 520px; border: 1px solid #31574b; border-radius: 50%; right: -200px; bottom: -180px; box-shadow: 0 0 0 80px #173b31, 0 0 0 160px #15362e; opacity: .55; }
 .auth-brand { display: flex; align-items: center; gap: 12px; font-size: 25px; z-index: 1; }.auth-statement { margin: auto 0; max-width: 580px; z-index: 1; }.auth-statement .eyebrow { color: #82d7ae; }.auth-statement h1 { font-family: Georgia, "Songti SC", serif; font-size: clamp(48px, 6vw, 78px); font-weight: 400; line-height: 1.15; letter-spacing: -2px; margin: 22px 0 25px; }.auth-statement p { max-width: 450px; color: #b3c8bf; font-size: 16px; }.auth-foot { color: #698e7f; font-size: 9px; letter-spacing: 1.5px; z-index: 1; }
@@ -122,6 +141,7 @@ p { line-height: 1.7; }
   .invite-form { display: grid; grid-template-columns: 1fr; align-items: stretch; max-width: 420px; }.invite-form .field, .invite-form .field.role-field { width: 100%; max-width: none; min-width: 0; }.invite-form .primary-button { justify-self: start; }
   .diff-grid { grid-template-columns: 1fr; }
   .connection-row { grid-template-columns: minmax(0, 1fr) auto; }.connection-actions { grid-column: 1 / -1; }.integration-summary { flex-wrap: wrap; }.integration-empty { flex-direction: column; align-items: flex-start; }
+  .fallback-card { flex-direction: column; align-items: flex-start; }
 }
 
 .product-overview { display: grid; gap: 24px; }

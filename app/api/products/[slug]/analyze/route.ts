@@ -14,15 +14,16 @@ export async function POST(_request: NextRequest, context: { params: Promise<{ s
   const { slug } = await context.params;
   const db = getDb();
   const [rows] = await db.execute(
-    `SELECT r.id, r.owner, r.name, r.default_branch AS defaultBranch
+    `SELECT r.id, r.owner, r.name, r.default_branch AS defaultBranch, r.connection_id AS connectionId
      FROM repositories r JOIN products p ON p.id = r.product_id WHERE p.slug = ? AND p.organization_id = ? LIMIT 1`,
     [slug, organization.id],
   );
-  const repository = (rows as Array<{ id: number; owner: string; name: string; defaultBranch: string }>)[0];
+  const repository = (rows as Array<{ id: number; owner: string; name: string; defaultBranch: string; connectionId: number | null }>)[0];
   if (!repository) return NextResponse.json({ error: "product_not_found" }, { status: 404 });
 
-  const metadata = await getRepository(repository);
-  const afterSha = await getBranchHead({ ...repository, ...metadata });
+  const access = { connectionId: repository.connectionId, organizationId: organization.id };
+  const metadata = await getRepository(repository, access);
+  const afterSha = await getBranchHead({ ...repository, ...metadata }, access);
   const runId = await queueAnalysis(repository.id, null, afterSha, "manual");
   after(() => runAnalysis(runId));
   return NextResponse.json({ accepted: true, runId }, { status: 202 });

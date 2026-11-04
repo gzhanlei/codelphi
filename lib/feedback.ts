@@ -118,7 +118,7 @@ const issueSchema = z.object({ html_url: z.string().url() });
 async function issueToken(explicitToken?: string) {
   if (explicitToken) return explicitToken;
   if (process.env.GITHUB_TOKEN) return resolveGitHubToken();
-  return resolveGitHubToken({ connectionId: 1 });
+  return resolveGitHubToken({ connectionId: 1, organizationId: 1 });
 }
 
 function issueCreationMessage(status: number) {

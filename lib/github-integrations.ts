@@ -80,9 +80,19 @@ export async function saveInstallation(appId: number, installation: Installation
   await execute(
     `INSERT INTO github_connections (app_id, installation_id, account_login, account_type, status, organization_id)
      VALUES (?, ?, ?, ?, 'active', ?)
-     ON DUPLICATE KEY UPDATE account_login = VALUES(account_login), account_type = VALUES(account_type), status = 'active', organization_id = VALUES(organization_id), updated_at = CURRENT_TIMESTAMP(3)`,
+     ON DUPLICATE KEY UPDATE
+       account_login = IF(organization_id = VALUES(organization_id), VALUES(account_login), account_login),
+       account_type = IF(organization_id = VALUES(organization_id), VALUES(account_type), account_type),
+       status = IF(organization_id = VALUES(organization_id), 'active', status),
+       updated_at = IF(organization_id = VALUES(organization_id), CURRENT_TIMESTAMP(3), updated_at)`,
     [appId, installation.id, installation.account.login, installation.account.type, organizationId],
   );
+  const [savedRows] = await execute(
+    "SELECT organization_id FROM github_connections WHERE installation_id = ? LIMIT 1",
+    [installation.id],
+  ) as [Array<{ organization_id: number }>, unknown];
+  const saved = savedRows[0];
+  if (!saved || Number(saved.organization_id) !== organizationId) throw new Error("GitHub installation belongs to another workspace");
 }
 
 export async function listConnectionStates(organizationIdOrExecute?: number | Execute, maybeExecute?: Execute) {
@@ -99,18 +109,26 @@ export async function listConnectionStates(organizationIdOrExecute?: number | Ex
   return rows;
 }
 
-export async function getConnectionWithApp(id: number, execute: Execute = (sql, parameters) => getDb().execute(sql, parameters)) {
+export async function getConnectionWithApp(id: number, organizationOrExecute?: number | Execute, maybeExecute?: Execute) {
+  const organizationId = typeof organizationOrExecute === "number" ? organizationOrExecute : undefined;
+  const execute = typeof organizationOrExecute === "function" ? organizationOrExecute : maybeExecute ?? ((sql, parameters) => getDb().execute(sql, parameters));
   const [rows] = await execute(
     `SELECT a.id, a.slug, a.app_id, a.client_id, a.client_secret_encrypted, a.pem_encrypted,
-            a.webhook_secret_encrypted, c.id AS connection_id, c.installation_id, c.account_login, c.account_type, c.status
-     FROM github_connections c JOIN github_apps a ON a.id = c.app_id WHERE c.id = ? LIMIT 1`,
-    [id],
-  ) as [Array<{ id: number; slug: string; app_id: number; client_id: string; client_secret_encrypted: string; pem_encrypted: string; webhook_secret_encrypted: string | null; connection_id: number; installation_id: number; account_login: string; account_type: string; status: string }>, unknown];
+            a.webhook_secret_encrypted, c.id AS connection_id, c.installation_id, c.account_login, c.account_type, c.status, c.organization_id
+     FROM github_connections c JOIN github_apps a ON a.id = c.app_id
+     WHERE c.id = ? AND (? IS NULL OR c.organization_id = ?) LIMIT 1`,
+    [id, organizationId ?? null, organizationId ?? null],
+  ) as [Array<{ id: number; slug: string; app_id: number; client_id: string; client_secret_encrypted: string; pem_encrypted: string; webhook_secret_encrypted: string | null; connection_id: number; installation_id: number; account_login: string; account_type: string; status: string; organization_id: number }>, unknown];
   const row = rows[0];
   if (!row) return null;
-  return { ...readApp(row), connectionId: row.connection_id, installationId: row.installation_id, accountLogin: row.account_login, accountType: row.account_type, status: row.status };
+  return { ...readApp(row), connectionId: row.connection_id, installationId: row.installation_id, accountLogin: row.account_login, accountType: row.account_type, status: row.status, organizationId: row.organization_id };
 }
 
-export async function setConnectionStatus(id: number, status: "active" | "disconnected", execute: Execute = (sql, parameters) => getDb().execute(sql, parameters)) {
-  await execute("UPDATE github_connections SET status = ?, updated_at = CURRENT_TIMESTAMP(3) WHERE id = ?", [status, id]);
+export async function setConnectionStatus(id: number, status: "active" | "disconnected", organizationOrExecute?: number | Execute, maybeExecute?: Execute) {
+  const organizationId = typeof organizationOrExecute === "number" ? organizationOrExecute : undefined;
+  const execute = typeof organizationOrExecute === "function" ? organizationOrExecute : maybeExecute ?? ((sql, parameters) => getDb().execute(sql, parameters));
+  await execute(
+    "UPDATE github_connections SET status = ?, updated_at = CURRENT_TIMESTAMP(3) WHERE id = ? AND (? IS NULL OR organization_id = ?)",
+    [status, id, organizationId ?? null, organizationId ?? null],
+  );
 }
