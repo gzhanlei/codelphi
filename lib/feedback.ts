@@ -115,12 +115,18 @@ export function feedbackIssueBody(report: FeedbackReport) {
 
 const issueSchema = z.object({ html_url: z.string().url() });
 
-export async function submitFeedbackToGitHub(id: number, options: { token?: string; fetcher?: typeof fetch } = {}) {
-  const report = await getFeedbackReport(id);
-  if (!report) throw new Error("feedback_not_found");
-  if (report.githubIssueUrl) return report.githubIssueUrl;
-  const fetcher = options.fetcher ?? fetch;
-  const token = options.token ?? await resolveGitHubToken({ connectionId: 1 });
+async function issueToken(explicitToken?: string) {
+  if (explicitToken) return explicitToken;
+  if (process.env.GITHUB_TOKEN) return resolveGitHubToken();
+  return resolveGitHubToken({ connectionId: 1 });
+}
+
+function issueCreationMessage(status: number) {
+  if (status === 403) return "GitHub issue creation failed: 403 (凭据缺少 issues:write 权限；当前 GitHub App 的 contents:read 不能创建 Issue)";
+  return `GitHub issue creation failed: ${status}`;
+}
+
+async function createGithubIssue(report: FeedbackReport, token: string, fetcher: typeof fetch) {
   const response = await fetcher("https://api.github.com/repos/gzhanlei/radar/issues", {
     method: "POST",
     headers: {
@@ -136,12 +142,21 @@ export async function submitFeedbackToGitHub(id: number, options: { token?: stri
     }),
     signal: AbortSignal.timeout(30_000),
   });
-  if (!response.ok) {
-    const message = `GitHub issue creation failed: ${response.status}`;
+  if (!response.ok) throw new Error(issueCreationMessage(response.status));
+  return issueSchema.parse(await response.json()).html_url;
+}
+
+export async function submitFeedbackToGitHub(id: number, options: { token?: string; fetcher?: typeof fetch } = {}) {
+  const report = await getFeedbackReport(id);
+  if (!report) throw new Error("feedback_not_found");
+  if (report.githubIssueUrl) return report.githubIssueUrl;
+  try {
+    const issueUrl = await createGithubIssue(report, await issueToken(options.token), options.fetcher ?? fetch);
+    await getDb().execute("UPDATE feedback_reports SET status = 'submitted', github_issue_url = ?, submission_error = NULL WHERE id = ?", [issueUrl, id]);
+    return issueUrl;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "GitHub issue creation failed";
     await getDb().execute("UPDATE feedback_reports SET status = 'failed', submission_error = ? WHERE id = ?", [message, id]);
-    throw new Error(message);
+    throw error;
   }
-  const issue = issueSchema.parse(await response.json());
-  await getDb().execute("UPDATE feedback_reports SET status = 'submitted', github_issue_url = ?, submission_error = NULL WHERE id = ?", [issue.html_url, id]);
-  return issue.html_url;
 }

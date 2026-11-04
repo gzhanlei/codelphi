@@ -144,6 +144,16 @@ describe("analysis failure feedback", () => {
     expect(JSON.parse(String(init?.body)).labels).toEqual(["feedback", "analysis-failure"]);
   });
 
+  it("explains missing issue write permission", async () => {
+    const report = {
+      id: 42, organizationId: 1, organizationName: "Default Workspace", productId: 3, productName: "Chandler", repositoryFullName: "gzhanlei/workmembership",
+      revision: "abcdef1234567890", errorMessage: "failed", architectureError: null, status: "new", githubIssueUrl: null, submissionError: null, createdAt: new Date(),
+    };
+    execute.mockImplementation(async (sql = "") => sql.includes("FROM feedback_reports f") ? [[report]] : [{ affectedRows: 1 }]);
+    const fetcher = vi.fn(async () => new Response("forbidden", { status: 403 }));
+    await expect(submitFeedbackToGitHub(42, { token: "test-token", fetcher })).rejects.toThrow("issues:write");
+  });
+
   it("restricts the admin backend to configured admins or the default workspace owner", () => {
     expect(isPlatformAdmin({ sub: "admin", email: "admin@example.com" }, { id: 1, slug: "default", name: "Default Workspace", role: "owner" }, new Set(["admin@example.com"]))).toBe(true);
     expect(isPlatformAdmin({ sub: "other", email: "other@example.com" }, { id: 1, slug: "default", name: "Default Workspace", role: "owner" }, new Set(["admin@example.com"]))).toBe(false);
