@@ -1,5 +1,6 @@
 import { architectureDocumentSchema, architectureDraftInputSchema, markerLine, buildArchitectureDocument as buildRadarArchitectureDocument, type ArchitectureDocument, type ArchitectureDraftInput } from "./architecture-draft";
 import { getCodeHostingAdapter } from "./code-hosting/registry";
+import { buildAIVlogArchitectureDocument, isAIVlogRepository } from "./architecture-aivlog";
 
 type GenericId = "frontend" | "backend" | "php-ui" | "php-app" | "auth" | "db" | "file-cache" | "github" | "llm" | "webhook" | "analysis" | "android-ui" | "android-data" | "android-local-db" | "android-network" | "android-service" | "native-bridge" | "native-core" | "media-sink";
 type Component = ArchitectureDocument["components"][number];
@@ -101,8 +102,27 @@ function createComponent(id: GenericId | "users", sources: ArchitectureDraftInpu
   return { id, ...presentation[id], sources: evidence };
 }
 
+export function assertConnectedArchitecture(components: Component[], connections: Connection[]) {
+  const reached = new Set([components[0].id]);
+  const pending = [components[0].id];
+  while (pending.length > 0) {
+    const current = pending.shift() as string;
+    for (const connection of connections) {
+      const touchesCurrent = connection.from === current || connection.to === current;
+      if (!touchesCurrent) continue;
+      const next = connection.from === current ? connection.to : connection.from;
+      if (reached.has(next)) continue;
+      reached.add(next);
+      pending.push(next);
+    }
+  }
+  const disconnected = components.filter((component) => !reached.has(component.id)).map((component) => component.id);
+  if (disconnected.length > 0) throw new Error(`Architecture evidence incomplete: disconnected components: ${disconnected.join(", ")}`);
+}
+
 export function buildArchitectureDocument(value: ArchitectureDraftInput): ArchitectureDocument {
   const input = architectureDraftInputSchema.parse(value);
+  if (isAIVlogRepository(input)) return buildAIVlogArchitectureDocument(value);
   if (input.owner === "gzhanlei" && input.name === "radar") return buildRadarArchitectureDocument(value);
   const sources = [...input.sources].sort((a, b) => a.path.localeCompare(b.path));
   const components = componentOrder.filter((id) => id === "users" || sourcesFor(id, sources).length > 0).map((id) => createComponent(id, sources));
@@ -112,6 +132,7 @@ export function buildArchitectureDocument(value: ArchitectureDraftInput): Archit
   const viewBoxWidth = Math.min(1200, Math.max(960, Math.max(...components.map((component) => component.pos[0] + component.size[0])) + 180));
   const connections = connectionDefinitions.filter((connection) => ids.has(connection.from as GenericId) && ids.has(connection.to as GenericId));
   if (connections.length === 0) throw new Error("Architecture evidence incomplete: no component relationships detected");
+  assertConnectedArchitecture(components, connections);
   return architectureDocumentSchema.parse({
     schema_version: 1,
     diagram_type: "architecture",

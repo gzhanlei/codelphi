@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { getRemoteAnalysisSources, loadRadarArchitectureSources, parseSourceRoots, sliceToSourceFiles } from "../lib/remote-analysis";
+import { getRemoteAnalysisSources, loadAIVlogArchitectureSources, loadRadarArchitectureSources, parseSourceRoots, sliceToSourceFiles } from "../lib/remote-analysis";
 import { gitBlobSha, type OpenedRemoteSourceRevision, type RemoteSourceBackend, type SourceLineRequest, type SourceLineSlice, type SourceRevisionRef } from "../lib/remote-source-index";
 import { analysisSliceBudgets } from "../lib/remote-analysis";
 import { createSlicePlanner, type SlicePlanner } from "../lib/slice-planner";
@@ -82,6 +82,31 @@ describe("remote analysis adapter", () => {
     expect(result.some((source) => source.path === "lib/analysis.ts")).toBe(true);
     expect(result.some((source) => source.path === "lib/ai.ts")).toBe(true);
     expect(readLines).toHaveBeenCalledWith(expect.objectContaining({ path: "lib/db.ts", startLine: 1, endLine: 600, requestedBy: "evidence_verifier" }));
+  });
+
+  it("loads complete AIVlog architecture evidence independently of the AI slice", async () => {
+    const readLines = vi.fn(async (request: SourceLineRequest) => ({
+      path: request.path,
+      blobSha: "blob",
+      treeEntrySha: "blob",
+      startLine: 1,
+      endLine: 2,
+      lines: [`${request.path} marker`, "second line"],
+      byteSize: 30,
+      lineCount: 2,
+      verified: true as const,
+      cacheState: "fetched" as const,
+      readReceipt: { requestedBy: request.requestedBy, reason: request.reason, fetchedAt: "2026-11-04T00:00:00.000Z" },
+    }));
+    const result = await loadAIVlogArchitectureSources({ readLines } as unknown as OpenedRemoteSourceRevision, [
+      { path: "miniprogram/utils/cloud.js", content: "1: truncated" },
+      { path: "custom/source.ts", content: "1: preserved" },
+    ]);
+    expect(result.find((source) => source.path === "miniprogram/utils/cloud.js")?.content).toBe("1: miniprogram/utils/cloud.js marker\n2: second line");
+    expect(result.find((source) => source.path === "custom/source.ts")?.content).toBe("1: preserved");
+    expect(result.some((source) => source.path === "backend/cmd/remoteagent/main.go")).toBe(true);
+    expect(result.some((source) => source.path === "backend/internal/worker/runner.go")).toBe(true);
+    expect(readLines).toHaveBeenCalledWith(expect.objectContaining({ path: "miniprogram/utils/cloud.js", startLine: 1, endLine: 600, requestedBy: "evidence_verifier" }));
   });
 
   it("rejects empty configured source roots", () => {

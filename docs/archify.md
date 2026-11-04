@@ -53,7 +53,7 @@ RADAR_REPOSITORY_ROOTS='{"owner/repo":"/absolute/local/checkout"}'
 
 没有本地 checkout 的远程仓库仍然通过固定 revision 的 Tree/Blob 内容生成并验收架构，组件和关系不变；仅省略 `meta.repository`、组件 `sources` 和 Archify 的本地 Git 证据回执，不伪造 Viewer 源码链接。产品简介、功能与场景的证据不受此影响。
 
-Radar 使用专用模板，其他仓库使用基于源码内容和行号的通用架构生成器，均要求实现标记匹配；不会仅凭同名文件虚构组件。WorkMembership（Chandler）已通过真实分析和 accepted 验收。架构查看使用 `/products/<slug>/architecture/<id>` 原生页面并提供“返回产品概览”按钮，`prepare` 阶段的无组件、spec 写入失败等也会保存 `failed` 文档与错误信息。
+Radar 与 AIVlog 使用专用模板，其他仓库使用基于源码内容和行号的通用架构生成器，均要求实现标记匹配；不会仅凭同名文件虚构组件。AIVlog 专用模板声明的每个证据文件与标记都必须存在。专用模板的证据文件按固定 revision 独立补充，不占用 AI 切片预算。所有组件还必须从用户入口沿关系连通；只有局部数据库边、但存在孤立用户或外部依赖的图会以 `disconnected components` 明确失败，不能进入 `accepted`。WorkMembership（Chandler）已通过真实分析和 accepted 验收。架构查看使用 `/products/<slug>/architecture/<id>` 原生页面并提供“返回产品概览”按钮，`prepare` 阶段的无组件、spec 写入失败等也会保存 `failed` 文档与错误信息。
 
 ## 阶段 3：原生产品概览
 

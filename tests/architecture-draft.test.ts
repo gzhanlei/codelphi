@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildArchitectureDocument } from "../lib/architecture-generic";
+import { assertConnectedArchitecture, buildArchitectureDocument } from "../lib/architecture-generic";
 import { buildArchitectureDocument as buildRadarArchitectureDocument } from "../lib/architecture-draft";
 
 const paths = [
@@ -25,7 +25,7 @@ const paths = [
 ];
 
 function sources(values = paths) {
-  const markers = "ProductView ProductTabs getProductDetails registerProduct POST mysql2 databaseConfig spec_versions CREATE TABLE WorkMembership OAuth chandler completeChandlerOAuth processGitHubWebhook verifyGitHubSignature push analyzeWithAI insertSpecVersion api.github.com resolveGitHubToken installation createAppJwt chatCompletionsUrl AI_API_KEY LLMGateway requireOrganization organization_members role class RemoteSourceRevision readLines fetchVerifiedBlob getRemoteAnalysisSources sliceToSourceFiles generateArchitectureVersion visualCheck deliverArchify visualCheckArchify";
+  const markers = "export default ProductView ProductTabs getProductDetails registerProduct POST mysql2 databaseConfig spec_versions CREATE TABLE WorkMembership OAuth chandler completeChandlerOAuth processGitHubWebhook verifyGitHubSignature push analyzeWithAI insertSpecVersion api.github.com resolveGitHubToken installation createAppJwt chatCompletionsUrl AI_API_KEY LLMGateway requireOrganization organization_members role class RemoteSourceRevision readLines fetchVerifiedBlob getRemoteAnalysisSources sliceToSourceFiles generateArchitectureVersion visualCheck deliverArchify visualCheckArchify";
   return values.map((path) => ({ path, content: `1: ${path} ${markers}` }));
 }
 
@@ -217,6 +217,41 @@ describe("architecture draft", () => {
     const input = { productName: "Radar", productSlug: "radar", owner: "gzhanlei", name: "radar", revision: "43d8ce7b96f7e7deff9bb3b8429eb8ca361466ea", sources: sources() };
     expect(() => buildRadarArchitectureDocument({ ...input, owner: "other" })).toThrow("only available for gzhanlei/radar");
     expect(() => buildRadarArchitectureDocument({ ...input, name: "other" })).toThrow("only available for gzhanlei/radar");
+  });
+
+  it("rejects one isolated external dependency even when the main application is connected", () => {
+    expect(() => buildArchitectureDocument({
+      productName: "Disconnected",
+      productSlug: "disconnected",
+      owner: "gzhanlei",
+      name: "disconnected",
+      revision: "43d8ce7b96f7e7deff9bb3b8429eb8ca361466ea",
+      sources: [
+        { path: "web/app/page.tsx", content: "1: export default function Home() {}" },
+        { path: "internal/server.go", content: "1: func main() {}" },
+        { path: "internal/db/db.go", content: "1: import _ \"github.com/go-sql-driver/mysql\"" },
+        { path: "lib/ai.ts", content: "1: AI_API_KEY" },
+      ],
+    })).toThrow("Architecture evidence incomplete: disconnected components: llm");
+  });
+
+  it("traverses relationships in both directions when checking connectivity", () => {
+    expect(() => assertConnectedArchitecture([{ id: "users" }, { id: "frontend" }] as never, [{ from: "frontend", to: "users" }] as never)).not.toThrow();
+  });
+
+  it("rejects disconnected components even when one database relationship exists", () => {
+    expect(() => buildArchitectureDocument({
+      productName: "Disconnected",
+      productSlug: "disconnected",
+      owner: "gzhanlei",
+      name: "disconnected",
+      revision: "43d8ce7b96f7e7deff9bb3b8429eb8ca361466ea",
+      sources: [
+        { path: "cmd/server/main.go", content: "1: func main() {}" },
+        { path: "internal/oauth/client.go", content: "1: // OAuth PKCE" },
+        { path: "internal/db/db.go", content: "1: import _ \"github.com/go-sql-driver/mysql\"" },
+      ],
+    })).toThrow("Architecture evidence incomplete: disconnected components");
   });
 
   it("rejects unsupported repositories and invalid revisions", () => {

@@ -2,7 +2,8 @@ import type { PoolConnection } from "mysql2/promise";
 import { getDb } from "./db";
 import { analyzeWithAI, type AnalysisResult } from "./ai";
 import { resolveAnalysisTarget, type ChangeContext, type CodeHostingProvider, type SourceFile } from "./code-hosting";
-import { analysisSliceBudgets, getRemoteAnalysisSources, loadRadarArchitectureSources, parseSourceRoots } from "./remote-analysis";
+import { analysisSliceBudgets, getRemoteAnalysisSources, loadAIVlogArchitectureSources, loadRadarArchitectureSources, parseSourceRoots } from "./remote-analysis";
+import { isAIVlogRepository } from "./architecture-aivlog";
 import { createSlicePlanner } from "./slice-planner";
 import { insertSpecVersion } from "./spec-versions";
 import { generateArchitectureVersion } from "./architecture-version";
@@ -209,9 +210,11 @@ async function performAnalysis(run: RunContext) {
     ...remote.slice.files.map((file) => file.path),
     ...change.files.map((file) => file.path),
   ]));
-  const architectureSources = run.owner === "gzhanlei" && run.name === "radar" && remote.index
-    ? () => loadRadarArchitectureSources(remote.index, sources)
-    : sources;
+  const architectureSources = remote.index && isAIVlogRepository(run)
+    ? () => loadAIVlogArchitectureSources(remote.index, sources)
+    : run.owner === "gzhanlei" && run.name === "radar" && remote.index
+      ? () => loadRadarArchitectureSources(remote.index, sources)
+      : sources;
   await saveAnalysisAndArchitecture(run, result, change, architectureSources);
 }
 

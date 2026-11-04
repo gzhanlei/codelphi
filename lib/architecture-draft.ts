@@ -56,7 +56,7 @@ type Component = ArchitectureDocument["components"][number];
 type Connection = ArchitectureDocument["connections"][number];
 type ComponentId = "users" | "radar-ui" | "chandler" | "next-api" | "tenancy" | "mysql" | "webhook" | "analysis" | "source-index" | "github" | "llm" | "archify";
 
-interface EvidenceCandidate {
+export interface EvidenceCandidate {
   path: string;
   markers: string[];
 }
@@ -150,15 +150,23 @@ export function markerLine(content: string, markers: string[]) {
   return index < 0 ? undefined : index + 1;
 }
 
-function componentSources(id: ComponentId, sources: ArchitectureDraftInput["sources"]) {
-  if (id === "users") return undefined;
-  const matches = evidence[id].flatMap((candidate) => {
+export function evidenceSources(candidates: EvidenceCandidate[], sources: ArchitectureDraftInput["sources"]) {
+  return candidates.flatMap((candidate) => {
     const source = sources.find((item) => item.path === candidate.path);
     if (!source) return [];
     const line = markerLine(source.content, candidate.markers);
     return line === undefined ? [] : [{ path: candidate.path, line }];
   });
+}
+
+export function optionalEvidenceSources(candidates: EvidenceCandidate[], sources: ArchitectureDraftInput["sources"]) {
+  const matches = evidenceSources(candidates, sources);
   return matches.length > 0 ? matches : undefined;
+}
+
+function componentSources(id: ComponentId, sources: ArchitectureDraftInput["sources"]) {
+  if (id === "users") return undefined;
+  return optionalEvidenceSources(evidence[id], sources);
 }
 
 function createComponent(id: ComponentId, sources: ArchitectureDraftInput["sources"]): Component {

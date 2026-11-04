@@ -18,7 +18,7 @@ const paths = [
   "lib/github-webhook.ts", "lib/analysis.ts", "lib/spec-versions.ts", "lib/github.ts", "lib/github-app.ts", "lib/ai.ts",
   "lib/organizations.ts", "lib/remote-source-index/index.ts", "lib/remote-analysis.ts", "lib/architecture-version.ts", "lib/archify-cli.ts",
 ];
-const sources = paths.map((path) => ({ path, content: `1: ${path} ProductView ProductTabs getProductDetails registerProduct POST mysql2 databaseConfig spec_versions CREATE TABLE WorkMembership OAuth chandler completeChandlerOAuth processGitHubWebhook verifyGitHubSignature push analyzeWithAI insertSpecVersion api.github.com resolveGitHubToken installation createAppJwt chatCompletionsUrl AI_API_KEY LLMGateway requireOrganization organization_members role RemoteSourceRevision readLines fetchVerifiedBlob getRemoteAnalysisSources sliceToSourceFiles generateArchitectureVersion visualCheck deliverArchify visualCheckArchify` }));
+const sources = paths.map((path) => ({ path, content: `1: ${path} export default ProductView ProductTabs getProductDetails registerProduct POST mysql2 databaseConfig spec_versions CREATE TABLE WorkMembership OAuth chandler completeChandlerOAuth processGitHubWebhook verifyGitHubSignature push analyzeWithAI insertSpecVersion api.github.com resolveGitHubToken installation createAppJwt chatCompletionsUrl AI_API_KEY LLMGateway requireOrganization organization_members role RemoteSourceRevision readLines fetchVerifiedBlob getRemoteAnalysisSources sliceToSourceFiles generateArchitectureVersion visualCheck deliverArchify visualCheckArchify` }));
 
 function fixture() {
   return { root: mkdtempSync(join(tmpdir(), "radar-architecture-version-")), save: vi.fn(async () => undefined), repoRoot: vi.fn(() => "/tmp/repo") };
