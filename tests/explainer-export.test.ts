@@ -27,7 +27,8 @@ const specDocument = buildArchitectureDocument({
     "app/products/[slug]/page.tsx", "components/product-navigation.tsx", "lib/chandler.ts", "app/auth/callback/route.ts",
     "app/api/products/route.ts", "lib/db.ts", "migrations/002_spec_versions.sql", "app/api/webhooks/github/route.ts",
     "lib/github-webhook.ts", "lib/analysis.ts", "lib/spec-versions.ts", "lib/github.ts", "lib/github-app.ts", "lib/ai.ts",
-  ].map((path) => ({ path, content: `1: ${path} ProductView ProductTabs getProductDetails registerProduct POST mysql2 databaseConfig spec_versions CREATE TABLE WorkMembership OAuth chandler completeChandlerOAuth processGitHubWebhook verifyGitHubSignature push analyzeWithAI insertSpecVersion api.github.com resolveGitHubToken installation createAppJwt chatCompletionsUrl AI_API_KEY LLMGateway` })),
+    "lib/organizations.ts", "lib/remote-source-index/index.ts", "lib/remote-analysis.ts", "lib/architecture-version.ts", "lib/archify-cli.ts",
+  ].map((path) => ({ path, content: `1: ${path} ProductView ProductTabs getProductDetails registerProduct POST mysql2 databaseConfig spec_versions CREATE TABLE WorkMembership OAuth chandler completeChandlerOAuth processGitHubWebhook verifyGitHubSignature push analyzeWithAI insertSpecVersion api.github.com resolveGitHubToken installation createAppJwt chatCompletionsUrl AI_API_KEY LLMGateway requireOrganization organization_members role RemoteSourceRevision readLines fetchVerifiedBlob getRemoteAnalysisSources sliceToSourceFiles generateArchitectureVersion visualCheck deliverArchify visualCheckArchify` })),
 });
 const architecture = {
   productId: 1,

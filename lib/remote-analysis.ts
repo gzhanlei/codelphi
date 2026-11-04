@@ -2,6 +2,7 @@ import { z } from "zod";
 import { createRemoteSourceIndex, type OpenedRemoteSourceRevision, type SourceRevisionRef, type SourceScopeRoot } from "./remote-source-index";
 import { createSlicePlanner, type SliceBudgets, type SlicePlanner, type SourceSlice } from "./slice-planner";
 import type { CodeHostingProvider, RepositoryAccess, SourceFile } from "./code-hosting/types";
+import { radarArchitectureEvidencePaths } from "./architecture-draft";
 import type { RemoteSourceBackend } from "./remote-source-index";
 
 export interface RemoteAnalysisRequest {
@@ -67,6 +68,21 @@ export function sliceToSourceFiles(slice: SourceSlice, index: OpenedRemoteSource
     }
     return { path: file.path, content: numbered.join("\n") };
   }));
+}
+
+export async function loadRadarArchitectureSources(index: OpenedRemoteSourceRevision, sources: SourceFile[]) {
+  const merged = new Map(sources.map((source) => [source.path, source]));
+  await Promise.all(radarArchitectureEvidencePaths.map(async (path) => {
+    const read = await index.readLines({
+      path,
+      startLine: 1,
+      endLine: 600,
+      requestedBy: "evidence_verifier",
+      reason: "complete Radar architecture evidence",
+    });
+    merged.set(path, { path, content: read.lines.map((line, offset) => `${read.startLine + offset}: ${line}`).join("\n") });
+  }));
+  return [...merged.values()].sort((a, b) => a.path.localeCompare(b.path));
 }
 
 export async function getRemoteAnalysisSources(request: RemoteAnalysisRequest, runtime: RemoteAnalysisRuntime): Promise<RemoteAnalysisResult> {

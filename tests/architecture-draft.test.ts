@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildArchitectureDocument } from "../lib/architecture-generic";
+import { buildArchitectureDocument as buildRadarArchitectureDocument } from "../lib/architecture-draft";
 
 const paths = [
   "app/products/[slug]/page.tsx",
@@ -16,10 +17,15 @@ const paths = [
   "lib/github.ts",
   "lib/github-app.ts",
   "lib/ai.ts",
+  "lib/organizations.ts",
+  "lib/remote-source-index/index.ts",
+  "lib/remote-analysis.ts",
+  "lib/architecture-version.ts",
+  "lib/archify-cli.ts",
 ];
 
 function sources(values = paths) {
-  const markers = "ProductView ProductTabs getProductDetails registerProduct POST mysql2 databaseConfig spec_versions CREATE TABLE WorkMembership OAuth chandler completeChandlerOAuth processGitHubWebhook verifyGitHubSignature push analyzeWithAI insertSpecVersion api.github.com resolveGitHubToken installation createAppJwt chatCompletionsUrl AI_API_KEY LLMGateway";
+  const markers = "ProductView ProductTabs getProductDetails registerProduct POST mysql2 databaseConfig spec_versions CREATE TABLE WorkMembership OAuth chandler completeChandlerOAuth processGitHubWebhook verifyGitHubSignature push analyzeWithAI insertSpecVersion api.github.com resolveGitHubToken installation createAppJwt chatCompletionsUrl AI_API_KEY LLMGateway requireOrganization organization_members role class RemoteSourceRevision readLines fetchVerifiedBlob getRemoteAnalysisSources sliceToSourceFiles generateArchitectureVersion visualCheck deliverArchify visualCheckArchify";
   return values.map((path) => ({ path, content: `1: ${path} ${markers}` }));
 }
 
@@ -36,34 +42,31 @@ describe("architecture draft", () => {
     const document = buildArchitectureDocument(input);
     expect(document.meta).toMatchObject({ title: "Radar 系统架构", output: "radar-architecture.html", quality_profile: "showcase" });
     expect(document.meta.repository).toMatchObject({ url: "https://github.com/gzhanlei/radar", revision: input.revision });
-    expect(document.components.map((component) => component.id)).toEqual(["users", "radar-ui", "chandler", "next-api", "mysql", "webhook", "analysis", "github", "llm"]);
+    expect(document.components.map((component) => component.id)).toEqual(["users", "radar-ui", "chandler", "next-api", "tenancy", "mysql", "webhook", "analysis", "source-index", "github", "llm", "archify"]);
     expect(document.components.flatMap((component) => component.sources ?? []).every((source) => paths.includes(source.path))).toBe(true);
     expect(buildArchitectureDocument(input)).toEqual(document);
   });
 
-  it("omits components and relationships whose evidence is absent", () => {
-    const document = buildArchitectureDocument({
+  it("fails closed when a required component loses its evidence", () => {
+    expect(() => buildArchitectureDocument({
       productName: "Radar",
       productSlug: "radar",
       owner: "gzhanlei",
       name: "radar",
       revision: "43d8ce7b96f7e7deff9bb3b8429eb8ca361466ea",
       sources: sources(paths.filter((path) => path !== "lib/ai.ts")),
-    });
-    expect(document.components.some((component) => component.id === "llm")).toBe(false);
-    expect(document.connections.some((connection) => connection.id === "analysis-to-llm")).toBe(false);
+    })).toThrow("Architecture evidence incomplete: llm");
   });
 
-  it("accepts a minimal user interface and frontend component", () => {
-    const document = buildArchitectureDocument({
+  it("rejects a deceptively small Radar diagram when core evidence is absent", () => {
+    expect(() => buildArchitectureDocument({
       productName: "Radar",
       productSlug: "radar",
       owner: "gzhanlei",
       name: "radar",
       revision: "43d8ce7b96f7e7deff9bb3b8429eb8ca361466ea",
       sources: sources(["components/product-navigation.tsx"]),
-    });
-    expect(document.components.map((component) => component.id)).toEqual(["users", "radar-ui"]);
+    })).toThrow("Architecture evidence incomplete:");
   });
 
   it("builds a generic architecture for non-Radar repositories with matching source evidence", () => {
@@ -173,12 +176,18 @@ describe("architecture draft", () => {
 
   it("rejects stale source content", () => {
     const stale = { productName: "Radar", productSlug: "radar", owner: "gzhanlei", name: "radar", revision: "43d8ce7b96f7e7deff9bb3b8429eb8ca361466ea", sources: sources().map((source) => ({ ...source, content: "1: unrelated" })) };
-    expect(() => buildArchitectureDocument(stale)).toThrow("No architecture components detected");
+    expect(() => buildArchitectureDocument(stale)).toThrow("Architecture evidence incomplete");
+  });
+
+  it("rejects a direct Radar template call for the wrong repository", () => {
+    const input = { productName: "Radar", productSlug: "radar", owner: "gzhanlei", name: "radar", revision: "43d8ce7b96f7e7deff9bb3b8429eb8ca361466ea", sources: sources() };
+    expect(() => buildRadarArchitectureDocument({ ...input, owner: "other" })).toThrow("only available for gzhanlei/radar");
+    expect(() => buildRadarArchitectureDocument({ ...input, name: "other" })).toThrow("only available for gzhanlei/radar");
   });
 
   it("rejects unsupported repositories and invalid revisions", () => {
     const input = { productName: "Empty", productSlug: "empty", owner: "gzhanlei", name: "radar", revision: "43d8ce7b96f7e7deff9bb3b8429eb8ca361466ea", sources: [] };
-    expect(() => buildArchitectureDocument(input)).toThrow("No architecture components detected");
+    expect(() => buildArchitectureDocument(input)).toThrow("Architecture evidence incomplete");
     expect(() => buildArchitectureDocument({ ...input, revision: "short", sources: sources() })).toThrow();
   });
 });

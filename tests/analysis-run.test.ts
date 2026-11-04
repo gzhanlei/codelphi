@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { queueAnalysis, runAnalysis } from "../lib/analysis";
 import { analyzeWithAI } from "../lib/ai";
 import { getRemoteAnalysisSources } from "../lib/remote-analysis";
+import { generateArchitectureVersion } from "../lib/architecture-version";
 
 const execute = vi.fn();
+const readLines = vi.fn();
 const connection = {
   execute: vi.fn(),
   beginTransaction: vi.fn(async () => undefined),
@@ -76,7 +78,8 @@ describe("analysis orchestration", () => {
     });
     adapter.getRepository.mockResolvedValue({ owner: "gzhanlei", name: "radar", defaultBranch: "main" });
     adapter.getChangeContext.mockResolvedValue({ message: "change", committedAt: "2026-11-01T00:00:00Z", url: "https://github.com/commit/sha", files: [] });
-    vi.mocked(getRemoteAnalysisSources).mockResolvedValue({ sources: [], slice: { files: [] } } as never);
+    vi.mocked(getRemoteAnalysisSources).mockResolvedValue({ sources: [], slice: { files: [] }, index: { readLines } } as never);
+    readLines.mockImplementation(async (request) => ({ startLine: 1, lines: [`${request.path} complete evidence`] }));
     vi.mocked(analyzeWithAI).mockResolvedValue({ release: { title: "v1", summary: "summary" }, features: [], changes: [] });
   });
 
@@ -115,6 +118,27 @@ describe("analysis orchestration", () => {
     await runAnalysis(8);
     expect(getRemoteAnalysisSources).toHaveBeenCalledWith(expect.objectContaining({ scopeRoots: [{ path: "apps/web", role: "web" }] }), expect.anything());
     expect(connection.commit).toHaveBeenCalledOnce();
+  });
+
+  it("supplements complete Radar architecture evidence after the AI slice", async () => {
+    await runAnalysis(8);
+    expect(readLines).toHaveBeenCalledWith(expect.objectContaining({ path: "lib/db.ts", requestedBy: "evidence_verifier" }));
+    expect(readLines).toHaveBeenCalledWith(expect.objectContaining({ path: "lib/ai.ts", requestedBy: "evidence_verifier" }));
+    expect(vi.mocked(generateArchitectureVersion).mock.calls[0][0].sources).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: "lib/db.ts", content: "1: lib/db.ts complete evidence" }),
+      expect.objectContaining({ path: "lib/analysis.ts", content: "1: lib/analysis.ts complete evidence" }),
+    ]));
+    expect(connection.commit).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { owner: "gzhanlei", name: "other" },
+    { owner: "other", name: "radar" },
+  ])("does not use the Radar evidence loader for $owner/$name", async (identity) => {
+    runRows = [{ ...run, ...identity }];
+    await runAnalysis(8);
+    expect(readLines).not.toHaveBeenCalled();
+    expect(vi.mocked(generateArchitectureVersion).mock.calls[0][0].sources).toEqual([]);
   });
 
   it("records a readable failure when loading the run fails", async () => {

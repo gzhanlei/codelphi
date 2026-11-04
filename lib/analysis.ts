@@ -2,7 +2,7 @@ import type { PoolConnection } from "mysql2/promise";
 import { getDb } from "./db";
 import { analyzeWithAI, type AnalysisResult } from "./ai";
 import { resolveAnalysisTarget, type ChangeContext, type CodeHostingProvider, type SourceFile } from "./code-hosting";
-import { analysisSliceBudgets, getRemoteAnalysisSources, parseSourceRoots } from "./remote-analysis";
+import { analysisSliceBudgets, getRemoteAnalysisSources, loadRadarArchitectureSources, parseSourceRoots } from "./remote-analysis";
 import { createSlicePlanner } from "./slice-planner";
 import { insertSpecVersion } from "./spec-versions";
 import { generateArchitectureVersion } from "./architecture-version";
@@ -135,10 +135,11 @@ interface AnalysisArchitectureDependencies {
   generateArchitecture: (input: { run: RunContext; sources: SourceFile[]; specVersionId: number }) => Promise<unknown>;
 }
 
-export async function saveAnalysisAndArchitecture(run: RunContext, result: AnalysisResult, change: ChangeContext, sources: SourceFile[], dependencies: AnalysisArchitectureDependencies = { saveResult, generateArchitecture: generateArchitectureVersion }) {
+export async function saveAnalysisAndArchitecture(run: RunContext, result: AnalysisResult, change: ChangeContext, sources: SourceFile[] | (() => Promise<SourceFile[]>), dependencies: AnalysisArchitectureDependencies = { saveResult, generateArchitecture: generateArchitectureVersion }) {
   const specVersionId = await dependencies.saveResult(run, result, change);
   try {
-    await dependencies.generateArchitecture({ run, sources, specVersionId });
+    const architectureSources = typeof sources === "function" ? await sources() : sources;
+    await dependencies.generateArchitecture({ run, sources: architectureSources, specVersionId });
     return { specVersionId, architectureError: null };
   } catch (error) {
     return { specVersionId, architectureError: errorMessage(error, "Architecture generation failed") };
@@ -203,7 +204,10 @@ async function performAnalysis(run: RunContext) {
     ...remote.slice.files.map((file) => file.path),
     ...change.files.map((file) => file.path),
   ]));
-  await saveAnalysisAndArchitecture(run, result, change, sources);
+  const architectureSources = run.owner === "gzhanlei" && run.name === "radar" && remote.index
+    ? () => loadRadarArchitectureSources(remote.index, sources)
+    : sources;
+  await saveAnalysisAndArchitecture(run, result, change, architectureSources);
 }
 
 async function runAnalysisSafely(runId: number) {
