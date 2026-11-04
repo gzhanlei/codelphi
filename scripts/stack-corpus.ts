@@ -5,7 +5,10 @@ import { z } from "zod";
 import { createRemoteSourceIndex } from "../lib/remote-source-index";
 import { createSlicePlanner, type SliceBudgets, type SlicePlanner, type SourceSlice } from "../lib/slice-planner";
 import { analysisSliceBudgets } from "../lib/remote-analysis";
-import { buildArchitectureDocument } from "../lib/architecture-generic";
+import { buildArchitectureDocument as buildGenericArchitectureDocument } from "../lib/architecture-generic";
+import { buildArchitectureDocument as buildRadarArchitectureDocument } from "../lib/architecture-draft";
+import { buildAIVlogArchitectureDocument } from "../lib/architecture-aivlog";
+import { loadArchitectureRepositorySources } from "../lib/architecture/remote";
 import { createDirectArchitectureShadow, createLegacyArchitectureShadow, unavailableArchitectureShadow, type ArchitectureShadow } from "../lib/architecture/shadow";
 import type { ArchitectureDocument } from "../lib/architecture-draft";
 import { resolveGitHubToken } from "../lib/github-access";
@@ -22,6 +25,8 @@ const manifestSchema = z.object({
     revision: z.string().regex(/^[0-9a-f]{40}$/),
     expectedProfile: z.string().min(1),
     sourceRoots: z.array(z.string()),
+    architectureScope: z.enum(["source-slice", "repository"]).optional(),
+    legacyTemplate: z.enum(["radar-v1", "aivlog-runtime-v1"]).optional(),
   })).min(1),
 });
 
@@ -93,26 +98,32 @@ async function readSliceSources(index: OpenedRemoteSourceRevision, slice: Source
   return sources;
 }
 
-export function shadowSummary(revision: string, sources: SourceFile[], document?: ArchitectureDocument): ArchitectureShadow & { error?: string } {
+export function shadowSummary(revision: string, sources: SourceFile[], document?: ArchitectureDocument, scope: "repository" | "source-slice" = "source-slice"): ArchitectureShadow & { error?: string } {
   try {
-    return createLegacyArchitectureShadow({ revision, scope: "source-slice", sources, document });
+    return createLegacyArchitectureShadow({ revision, scope, sources, document });
   } catch (error) {
-    return unavailableArchitectureShadow("source-slice", error instanceof Error ? error.message : "Architecture shadow failed");
+    return unavailableArchitectureShadow(scope, error instanceof Error ? error.message : "Architecture shadow failed");
   }
 }
 
-export function architectureFactSummary(revision: string, sources: SourceFile[]): ArchitectureShadow & { error?: string } {
+export function architectureFactSummary(revision: string, sources: SourceFile[], scope: "repository" | "source-slice" = "source-slice"): ArchitectureShadow & { error?: string } {
   try {
-    return createDirectArchitectureShadow({ revision, scope: "source-slice", sources });
+    return createDirectArchitectureShadow({ revision, scope, sources });
   } catch (error) {
-    return unavailableArchitectureShadow("source-slice", error instanceof Error ? error.message : "Architecture fact analysis failed");
+    return unavailableArchitectureShadow(scope, error instanceof Error ? error.message : "Architecture fact analysis failed");
   }
 }
 
-export function architectureSummary(repository: StackCorpusRepository, revision: string, sources: SourceFile[]) {
+function legacyArchitectureDocument(repository: StackCorpusRepository, input: Parameters<typeof buildGenericArchitectureDocument>[0]) {
+  if (repository.legacyTemplate === "radar-v1") return buildRadarArchitectureDocument(input);
+  if (repository.legacyTemplate === "aivlog-runtime-v1") return buildAIVlogArchitectureDocument(input);
+  return buildGenericArchitectureDocument(input);
+}
+
+export function architectureSummary(repository: StackCorpusRepository, revision: string, sources: SourceFile[], scope: "repository" | "source-slice" = "source-slice") {
   let architecture: ArchitectureDocument;
   try {
-    architecture = buildArchitectureDocument({
+    architecture = legacyArchitectureDocument(repository, {
       productName: repository.repo,
       productSlug: repository.id,
       owner: repository.owner,
@@ -121,9 +132,9 @@ export function architectureSummary(repository: StackCorpusRepository, revision:
       sources,
     });
   } catch (error) {
-    return { architectureComponents: [] as string[], architectureError: error instanceof Error ? error.message : "Architecture generation failed", architectureShadow: shadowSummary(revision, sources), architectureFacts: architectureFactSummary(revision, sources) };
+    return { architectureComponents: [] as string[], architectureError: error instanceof Error ? error.message : "Architecture generation failed", architectureShadow: shadowSummary(revision, sources, undefined, scope), architectureFacts: architectureFactSummary(revision, sources, scope) };
   }
-  return { architectureComponents: architecture.components.map((component) => component.id), architectureError: null, architectureShadow: shadowSummary(revision, sources, architecture), architectureFacts: architectureFactSummary(revision, sources) };
+  return { architectureComponents: architecture.components.map((component) => component.id), architectureError: null, architectureShadow: shadowSummary(revision, sources, architecture, scope), architectureFacts: architectureFactSummary(revision, sources, scope) };
 }
 
 async function planStackCorpusRepository(repository: StackCorpusRepository, planner: SlicePlanner, dependencies: { token?: string; index?: OpenedRemoteSourceRevision; budgets?: Partial<RemoteSourceBudgets> }) {
@@ -144,6 +155,25 @@ async function planStackCorpusRepository(repository: StackCorpusRepository, plan
   };
 }
 
+const architectureCorpusSourceBudgets: Partial<RemoteSourceBudgets> = {
+  maxTreeExpansions: 500,
+  maxBlobFetches: 240,
+  maxBlobBytes: 1_000_000,
+  maxTotalContentBytes: 4_000_000,
+};
+
+export async function loadCorpusArchitectureSources(repository: StackCorpusRepository, planned: { index: OpenedRemoteSourceRevision; sources: SourceFile[] }, dependencies: { token?: string; index?: OpenedRemoteSourceRevision }) {
+  if (repository.architectureScope !== "repository") {
+    return { sources: planned.sources, receipt: { scope: "source-slice" as const, directories: 0, files: planned.sources.length, bytes: 0 } };
+  }
+  const roots = scopeRoots(repository.sourceRoots);
+  const index = dependencies.index === undefined ? await createRemoteSourceIndex(
+    { owner: repository.owner, repo: repository.repo, revision: repository.revision },
+    { access: { token: dependencies.token }, scopeRoots: roots, budgets: architectureCorpusSourceBudgets },
+  ) : planned.index;
+  return loadArchitectureRepositorySources(index, roots);
+}
+
 export async function analyzeStackCorpusRepository(
   repository: StackCorpusRepository,
   planner: SlicePlanner,
@@ -154,8 +184,9 @@ export async function analyzeStackCorpusRepository(
   if (!planned.slice) {
     return failedResult(repository, new Error(planned.missing.join("; ") || "Planner did not return a slice"), Date.now() - startedAt);
   }
-  const sources = await readSliceSources(index, planned.slice);
-  const architecture = architectureSummary(repository, repository.revision, sources);
+  const plannedSources = await readSliceSources(index, planned.slice);
+  const architectureSource = await loadCorpusArchitectureSources(repository, { index, sources: plannedSources }, dependencies);
+  const architecture = architectureSummary(repository, repository.revision, architectureSource.sources, repository.architectureScope);
   const primaryProfile = planned.slice.metrics.profileMatches[0];
   return {
     id: repository.id,
@@ -173,6 +204,7 @@ export async function analyzeStackCorpusRepository(
     architectureError: architecture.architectureError,
     architectureShadow: architecture.architectureShadow,
     architectureFacts: architecture.architectureFacts,
+    architectureSource: architectureSource.receipt,
     durationMs: Date.now() - startedAt,
   };
 }

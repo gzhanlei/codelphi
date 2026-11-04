@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { architectureEvidenceSchema } from "./facts";
-import { findArchitectureEvidence, type ArchitectureSource } from "./source";
+import { findArchitectureEvidence, isArchitectureSourcePath, type ArchitectureSource } from "./source";
 
-export const architectureSignalKindSchema = z.enum(["entrypoint", "deployable", "worker", "store", "external"]);
+export const architectureSignalKindSchema = z.enum(["entrypoint", "deployable", "worker", "store", "external", "relationship"]);
 export const architectureSignalSchema = z.object({
   id: z.string().min(1),
   kind: architectureSignalKindSchema,
@@ -38,9 +38,12 @@ interface SignalRule {
 const signalRules: SignalRule[] = [
   { kind: "entrypoint", detector: "source-entrypoint", path: /(?:^|\/)app\/.*(?:page|route)\.tsx?$|(?:^|\/)pages\/index\.tsx$|(?:^|\/)cmd\/.*\/main\.go$|(?:^|\/)main\.go$|(?:^|\/)index\.php$|(?:^|\/)app\.json$|(?:Activity)\.(?:java|kt)$/, markers: [] },
   { kind: "deployable", detector: "process-entrypoint", path: /(?:^|\/)main\.go$|(?:^|\/)package\.json$/, markers: ["func main", "\"next\"", "\"start\""] },
-  { kind: "worker", detector: "async-worker", path: /worker|job|cron|scheduler|analysis/i, markers: ["func main", "after(", "setInterval", "cron", "NewRunner"] },
+  { kind: "worker", detector: "next-after-worker", path: /(?:^|\/)app\/api\/.*route\.ts$/, markers: ["after("] },
+  { kind: "worker", detector: "async-worker", path: /worker|job|cron|scheduler|analysis/i, markers: ["func main", "cron", "NewRunner"] },
+  { kind: "worker", detector: "async-worker", path: /(?:^|\/)(?:workers?|jobs?|cron|scheduler)(?:\/|\.)/i, markers: ["setInterval"] },
   { kind: "store", detector: "storage-usage", path: /./, markers: ["mysql2", "sql.Open", "database/sql", "new PDO", "RoomDatabase", "file_get_contents", "file_put_contents", "CREATE TABLE", "gorm.Open", "SQLAlchemy"] },
-  { kind: "external", detector: "external-sdk", path: /./, markers: ["api.github.com", "chat/completions", "NewQCloudClient", "cos.tencentcloudapi.com", "requestVirtualPayment", "Code2Session", "CreateTask", "OpenAI", "imgSecCheck", "deliverArchify", "visualCheckArchify"] },
+  { kind: "external", detector: "external-sdk", path: /./, markers: ["api.github.com", "chat/completions", "NewQCloudClient", "cos.tencentcloudapi.com", "requestVirtualPayment", "Code2Session", ".CreateTask(", "OpenAI", "ImgSecCheck(", "deliverArchify", "visualCheckArchify"] },
+  { kind: "relationship", detector: "miniprogram-api-call", path: /\.js$/i, markers: ["wx.cloud.callContainer"] },
 ];
 
 function matchingLine(source: ArchitectureSource, rule: SignalRule) {
@@ -49,7 +52,7 @@ function matchingLine(source: ArchitectureSource, rule: SignalRule) {
 }
 
 export function collectArchitectureSignals(input: Pick<ArchitectureSignalInventory, "revision" | "scope">, sources: ArchitectureSource[]): ArchitectureSignalInventory {
-  const signals = [...sources].sort((a, b) => a.path.localeCompare(b.path)).flatMap((source) => signalRules.flatMap((rule) => {
+  const signals = [...sources].filter((source) => isArchitectureSourcePath(source.path)).sort((a, b) => a.path.localeCompare(b.path)).flatMap((source) => signalRules.flatMap((rule) => {
     const evidence = matchingLine(source, rule);
     if (!evidence) return [];
     return [{ id: `${rule.kind}:${source.path}:${evidence.line}:${rule.detector}`, kind: rule.kind, critical: true, evidence }];

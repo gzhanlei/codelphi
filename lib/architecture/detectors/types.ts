@@ -25,8 +25,8 @@ export function emptyArchitectureFragment(): ArchitectureFragment {
   return { nodes: [], edges: [], roots: [], omissions: [] };
 }
 
-export function actorNode(id: "actor:users" | "actor:scheduler", label: string): NodeFact {
-  return { id, kind: id === "actor:users" ? "user" : "external", label, synthetic: true, signalIds: [], evidence: [] };
+export function actorNode(id: "actor:users" | "actor:scheduler" | "actor:cli-users", label: string): NodeFact {
+  return { id, kind: id === "actor:scheduler" ? "external" : "user", label, synthetic: true, signalIds: [], evidence: [] };
 }
 
 export function factEdge(id: string, from: string, to: string, kind: EdgeFact["kind"], label: string, evidence: EdgeFact["evidence"], signalIds: string[] = []): EdgeFact {

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-03",
+  "updatedAt": "2026-11-04",
   "repositories": [
     {
       "id": "next-fullstack",
@@ -81,6 +81,42 @@
         "database",
         "routes"
       ]
+    },
+    {
+      "id": "radar-baseline",
+      "owner": "gzhanlei",
+      "repo": "radar",
+      "revision": "171d407ca35375cdc3d7673c9c164b1740f0ffa4",
+      "expectedProfile": "next-web",
+      "sourceRoots": [
+        ""
+      ],
+      "architectureScope": "repository",
+      "legacyTemplate": "radar-v1"
+    },
+    {
+      "id": "aivlog-baseline",
+      "owner": "gzhanlei",
+      "repo": "AIVlog",
+      "revision": "13157624fb0d8b63e5072049c94824d4b6d2e609",
+      "expectedProfile": "go-api",
+      "sourceRoots": [
+        "backend",
+        "miniprogram"
+      ],
+      "architectureScope": "repository",
+      "legacyTemplate": "aivlog-runtime-v1"
+    },
+    {
+      "id": "namedict-baseline",
+      "owner": "gzhanlei",
+      "repo": "namedict",
+      "revision": "0aa2ac269c8bbeaa65d00f97d5b0405b39baca64",
+      "expectedProfile": "unknown",
+      "sourceRoots": [
+        ""
+      ],
+      "architectureScope": "repository"
     },
     {
       "id": "dotnet-services",

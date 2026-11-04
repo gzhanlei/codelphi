@@ -1,5 +1,5 @@
 import { posix } from "node:path";
-import { architectureRuntimeSources, findArchitectureEvidence, signalIdsForPaths } from "../source";
+import { architectureRuntimeSources, findAllArchitectureEvidence, findArchitectureEvidence, signalIdsForEvidence, signalIdsForPaths } from "../source";
 import type { NodeFact } from "../facts";
 import { actorNode, emptyArchitectureFragment, factEdge, type ArchitectureContext, type ArchitectureDetector, type ArchitectureFragment } from "./types";
 
@@ -28,11 +28,8 @@ export function miniProgramApiRelationships(context: ArchitectureContext, nodes:
   if (apis.length !== 1) return [];
   return miniprograms.flatMap((miniprogram) => {
     const sources = architectureRuntimeSources(miniprogram, context.sources);
-    const evidence = sources.flatMap((source) => {
-      const match = findArchitectureEvidence(source, ["wx.cloud.callContainer"], "miniprogram-cloud-api");
-      return match ? [match] : [];
-    });
-    return evidence.length > 0 ? [factEdge(`http:${miniprogram.id}->${apis[0].id}`, miniprogram.id, apis[0].id, "http", "云托管 API", evidence)] : [];
+    const evidence = sources.flatMap((source) => findAllArchitectureEvidence(source, ["wx.cloud.callContainer"], "miniprogram-cloud-api"));
+    return evidence.length > 0 ? [factEdge(`http:${miniprogram.id}->${apis[0].id}`, miniprogram.id, apis[0].id, "http", "云托管 API", evidence, signalIdsForEvidence(context.signals, evidence))] : [];
   });
 }
 

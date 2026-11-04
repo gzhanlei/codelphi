@@ -1,7 +1,7 @@
 import { architectureFactSetSchema, type ArchitectureFactSet, type EdgeFact, type NodeFact } from "./facts";
 import { collectArchitectureSignals, type ArchitectureSignalInventory } from "./signals";
 import { evaluateArchitectureCoverage } from "./coverage";
-import { uniqueEvidence, type ArchitectureSource } from "./source";
+import { uniqueEvidence, isArchitectureSourcePath, type ArchitectureSource } from "./source";
 import { nextArchitectureDetector } from "./detectors/next";
 import { goArchitectureDetector } from "./detectors/go";
 import { phpArchitectureDetector } from "./detectors/php";
@@ -77,8 +77,9 @@ function extractWithInventory(input: Pick<ArchitectureSignalInventory, "revision
 }
 
 export function analyzeArchitectureFacts(input: Pick<ArchitectureSignalInventory, "revision" | "scope">, sources: ArchitectureSource[]) {
-  const inventory = collectArchitectureSignals(input, sources);
-  const facts = extractWithInventory(input, sources, inventory);
+  const runtimeSources = sources.filter((source) => isArchitectureSourcePath(source.path));
+  const inventory = collectArchitectureSignals(input, runtimeSources);
+  const facts = extractWithInventory(input, runtimeSources, inventory);
   const coverage = evaluateArchitectureCoverage(inventory, facts);
   return { inventory, facts, coverage };
 }

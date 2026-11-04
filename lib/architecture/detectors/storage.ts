@@ -5,18 +5,23 @@ import { emptyArchitectureFragment, factEdge, type ArchitectureContext, type Arc
 const mysqlMarkers = ["sql.Open(\"mysql\"", "mysql2", "new PDO", "gorm.Open", "DB::", "CREATE TABLE"];
 const fileCacheMarkers = ["file_get_contents", "file_put_contents"];
 
-function storageNode(context: ArchitectureContext, id: string, kind: NodeFact["kind"], label: string, markers: string[], detector: string): NodeFact | undefined {
-  const evidence = uniqueEvidence(context.sources.flatMap((source) => {
+function storageEvidence(context: ArchitectureContext, markers: string[], detector: string) {
+  return uniqueEvidence(context.sources.flatMap((source) => {
     const match = findArchitectureEvidence(source, markers, detector);
     return match ? [match] : [];
   }));
-  if (evidence.length === 0) return undefined;
+}
+
+function storageNode(context: ArchitectureContext, id: string, kind: NodeFact["kind"], label: string, markers: string[], detector: string, supportingMarkers: string[] = markers): NodeFact | undefined {
+  const detected = storageEvidence(context, markers, detector);
+  if (detected.length === 0) return undefined;
+  const evidence = supportingMarkers === markers ? detected : storageEvidence(context, supportingMarkers, detector);
   return { id, kind, label, signalIds: signalIdsForPaths(context.signals, evidence.map((item) => item.path)), evidence };
 }
 
 function detectStorage(context: ArchitectureContext) {
   const fragment = emptyArchitectureFragment();
-  const mysql = storageNode(context, "store:mysql", "database", "MySQL", mysqlMarkers, "mysql-usage");
+  const mysql = storageNode(context, "store:mysql", "database", "MySQL", mysqlMarkers, "mysql-usage", [...mysqlMarkers, "database/sql"]);
   const files = storageNode(context, "store:file-cache", "object-store", "文件缓存", fileCacheMarkers, "file-cache-usage");
   if (mysql) fragment.nodes.push(mysql);
   if (files) fragment.nodes.push(files);
@@ -32,7 +37,7 @@ function storageCalls(node: NodeFact, context: ArchitectureContext, markers: str
 
 export function linkStorageRelationships(context: ArchitectureContext, nodes: NodeFact[]) {
   const storeIds = new Set(nodes.filter((node) => node.id.startsWith("store:")).map((node) => node.id));
-  return nodes.filter((node) => !storeIds.has(node.id) && (node.kind === "api" || node.kind === "worker" || node.kind === "agent")).flatMap((node) => {
+  return nodes.filter((node) => !storeIds.has(node.id) && ["api", "worker", "agent", "cli"].includes(node.kind)).flatMap((node) => {
     const edges = [];
     if (storeIds.has("store:mysql")) {
       const evidence = storageCalls(node, context, ["store.Open", "sql.Open", "mysql2", "new PDO", "getDb(", "DB::"], "mysql-caller");

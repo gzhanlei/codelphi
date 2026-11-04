@@ -6,7 +6,7 @@ export const architectureEvidenceSchema = z.object({
   detector: z.string().min(1),
 }).strict();
 
-export const architectureNodeKindSchema = z.enum(["user", "frontend", "api", "worker", "agent", "database", "object-store", "queue", "external"]);
+export const architectureNodeKindSchema = z.enum(["user", "frontend", "api", "worker", "agent", "cli", "database", "object-store", "queue", "external"]);
 export const architectureEdgeKindSchema = z.enum(["http", "sql", "poll", "schedule", "upload", "download", "oauth", "callback", "file", "process"]);
 
 export const architectureNodeFactSchema = z.object({

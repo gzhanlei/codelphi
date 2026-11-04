@@ -58,7 +58,8 @@ function tsSourcePaths(entry: ArchitectureSource, sources: ArchitectureSource[])
 }
 
 function nextNode(id: string, kind: "frontend" | "api", root: string, source: ArchitectureSource, context: ArchitectureContext, evidence: NonNullable<ReturnType<typeof findArchitectureEvidence>>): NodeFact {
-  const sourcePaths = tsSourcePaths(source, context.sources);
+  const deferred = /(?:^|\/)app\/api\/.*route\.ts$/.test(source.path) && findArchitectureEvidence(source, ["after("], "next-after-worker") !== undefined;
+  const sourcePaths = deferred ? [source.path] : tsSourcePaths(source, context.sources);
   const paths = [...sourcePaths, ...packagePath(context.sources, root)];
   const accepted = new Set(paths);
   const signalIds = context.signals.filter((signal) => ["entrypoint", "deployable"].includes(signal.kind) && accepted.has(signal.evidence.path)).map((signal) => signal.id).sort();

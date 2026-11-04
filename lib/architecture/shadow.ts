@@ -20,6 +20,7 @@ export interface ArchitectureShadow {
   scope: LegacyShadowInput["scope"] | "unavailable";
   signalCount: number;
   factCounts: { nodes: number; edges: number; roots: number } | null;
+  facts?: ArchitectureFactSet;
   coverage: ArchitectureCoverage | null;
 }
 
@@ -116,6 +117,7 @@ export function createDirectArchitectureShadow(input: Omit<LegacyShadowInput, "d
     scope: input.scope,
     signalCount: inventory.signals.length,
     factCounts: { nodes: facts.nodes.length, edges: facts.edges.length, roots: facts.roots.length },
+    facts,
     coverage,
   };
 }
@@ -130,6 +132,7 @@ export function createLegacyArchitectureShadow(input: LegacyShadowInput): Archit
     scope: input.scope,
     signalCount: inventory.signals.length,
     factCounts: { nodes: facts.nodes.length, edges: facts.edges.length, roots: facts.roots.length },
+    facts,
     coverage: evaluateArchitectureCoverage(inventory, facts),
   };
 }

@@ -6,17 +6,30 @@ export interface ArchitectureSource {
   content: string;
 }
 
+const runtimeSourcePattern = /\.(?:go|ts|tsx|js|jsx|php|json|sql|java|kt|kts|py|rs|cs|csproj|xml|ya?ml|toml|gradle|properties)$/i;
+const nonRuntimePathPattern = /(?:^|\/)(?:__tests__|tests?|fixtures?|mocks?)(?:\/|\.)|\.(?:test|spec|d)\.[a-z]+$|_test\.(?:go|py)$/i;
+
+export function isArchitectureSourcePath(path: string) {
+  return (path.endsWith("go.mod") || runtimeSourcePattern.test(path)) && !nonRuntimePathPattern.test(path) && !path.endsWith(".min.js");
+}
+
 function numberedLine(line: string, index: number) {
   const match = line.match(/^\s*(\d+):\s?/);
   return match ? Number(match[1]) : index + 1;
 }
 
+export function findAllArchitectureEvidence(source: ArchitectureSource, markers: string[], detector: string, lineFilter?: (line: string) => boolean): ArchitectureEvidence[] {
+  return source.content.split("\n").flatMap((line, index) => {
+    const code = line.replace(/^\s*\d+:\s?/, "").trim();
+    const comment = ["//", "#", "*", "--", "/*", "<!--"].some((prefix) => code.startsWith(prefix));
+    const detectorDeclaration = /\b(?:markers|callers)\s*:/.test(code);
+    const matches = markers.length === 0 || markers.some((marker) => line.toLowerCase().includes(marker.toLowerCase()));
+    return !comment && !detectorDeclaration && matches && (lineFilter === undefined || lineFilter(line)) ? [{ path: source.path, line: numberedLine(line, index), detector }] : [];
+  });
+}
+
 export function findArchitectureEvidence(source: ArchitectureSource, markers: string[], detector: string, lineFilter?: (line: string) => boolean): ArchitectureEvidence | undefined {
-  const lines = source.content.split("\n");
-  const matchesMarkers = (line: string) => markers.length === 0 || markers.some((marker) => line.toLowerCase().includes(marker.toLowerCase()));
-  const index = lines.findIndex((line) => matchesMarkers(line) && (lineFilter === undefined || lineFilter(line)));
-  if (index < 0) return undefined;
-  return { path: source.path, line: numberedLine(lines[index], index), detector };
+  return findAllArchitectureEvidence(source, markers, detector, lineFilter)[0];
 }
 
 export function architectureRuntimeSources(node: NodeFact, sources: ArchitectureSource[]) {
@@ -28,6 +41,11 @@ export function architectureRuntimeSources(node: NodeFact, sources: Architecture
 export function signalIdsForPaths(signals: ArchitectureSignal[], paths: Iterable<string>) {
   const accepted = new Set(paths);
   return signals.filter((signal) => accepted.has(signal.evidence.path)).map((signal) => signal.id).sort();
+}
+
+export function signalIdsForEvidence(signals: ArchitectureSignal[], evidence: ArchitectureEvidence[]) {
+  const accepted = new Set(evidence.map((item) => `${item.path}:${item.line}`));
+  return signals.filter((signal) => accepted.has(`${signal.evidence.path}:${signal.evidence.line}`)).map((signal) => signal.id).sort();
 }
 
 export function uniqueEvidence(evidence: ArchitectureEvidence[]) {

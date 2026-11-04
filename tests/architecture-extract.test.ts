@@ -17,8 +17,8 @@ function edge(facts: ReturnType<typeof extract>, from: string, to: string) {
 describe("direct architecture fact extraction", () => {
   it("derives Go API and Worker database flows without inventing a direct API-to-Worker call", () => {
     const facts = extract([
-      { path: "go.mod", content: "module example.com/app\n" },
-      { path: "cmd/server/main.go", content: "1: package main\n2: import \"example.com/app/internal/store\"\n3: func main() {\n4: db := store.Open()\n5: http.ListenAndServe(\":8080\", nil)\n6: }" },
+      { path: "go.mod", content: "1: module example.com/app\n" },
+      { path: "cmd/server/main.go", content: "1: package main\n2: import (\n3: \"example.com/app/internal/store\"\n4: )\n5: func main() {\n6: db := store.Open()\n7: http.ListenAndServe(\":8080\", nil)\n8: }" },
       { path: "cmd/worker/main.go", content: "1: package main\n2: import \"example.com/app/internal/store\"\n3: func main() {\n4: db := store.Open()\n5: worker.NewRunner(db)\n6: }" },
       { path: "internal/store/mysql.go", content: "1: package store\n2: func Open() {\n3: sql.Open(\"mysql\", dsn)\n4: }" },
       { path: "internal/worker/runner.go", content: "1: package worker\n2: func NewRunner(db Store) {}" },
@@ -38,6 +38,7 @@ describe("direct architecture fact extraction", () => {
       { path: "cmd/server/main.go", content: "1: func main() {\n2: store.Open()\n3: http.ListenAndServe(\":8080\", nil)\n4: }" },
       { path: "cmd/worker/main.go", content: "1: func main() {\n2: store.Open()\n3: worker.NewRunner()\n4: }" },
       { path: "internal/store/mysql.go", content: "1: sql.Open(\"mysql\", dsn)" },
+      { path: "internal/store/identity.go", content: "1: import \"database/sql\"" },
     ];
     const facts = extract(sources);
     const coverage = evaluateArchitectureCoverage(collectArchitectureSignals({ revision, scope: "repository" }, sources), facts);
@@ -78,12 +79,13 @@ describe("direct architecture fact extraction", () => {
       { path: "go.mod", content: "module example.com/app\n" },
       { path: "cmd/server/main.go", content: "1: import \"example.com/app/internal/api\"\n2: func main() {\n3: api.NewHandler()\n4: http.ListenAndServe()\n5: }" },
       { path: "cmd/worker/main.go", content: "1: import (\"example.com/app/internal/aiphoto\"; \"example.com/app/internal/cos\"; \"example.com/app/internal/xpay\"; \"example.com/app/internal/wechatmp\"; \"example.com/app/internal/worker\")\n2: func main() {\n3: worker.NewRunner()\n4: }" },
-      { path: "cmd/remoteagent/main.go", content: "1: import \"example.com/app/internal/cos\"\n2: func main() {\n3: for {\n4: doJSON(\"/api/worker/render-tasks/claim\")\n5: doJSON(\"/api/worker/render-tasks/complete\")\n6: doJSON(\"/api/worker/render-tasks/fail\")\n7: doJSON(\"/api/worker/health\")\n8: }\n9: }" },
+      { path: "cmd/remoteagent/main.go", content: "1: import (\n2: \"example.com/app/internal/cos\"\n3: \"example.com/app/internal/catalog\"\n4: )\n5: func main() {\n6: for {\n7: doJSON(\"/api/worker/render-tasks/claim\")\n8: doJSON(\"/api/worker/render-tasks/complete\")\n9: doJSON(\"/api/worker/render-tasks/fail\")\n10: doJSON(\"/api/worker/health\")\n11: }\n12: }" },
       { path: "internal/api/worker_api.go", content: "1: r.Route(\"/api/worker\", func(r chi.Router) {\n2: r.Post(\"/render-tasks/claim\", handler)\n3: r.Post(\"/render-tasks/complete\", handler)\n4: r.Post(\"/render-tasks/fail\", handler)\n5: })\n6: r.Post(\"/health\", handler)" },
       { path: "internal/api/agent_wake.go", content: "1: wakeRenderAgent(AgentWakeURL)" },
       { path: "internal/api/xpay_api.go", content: "1: xpay_goods_deliver_notify" },
       { path: "internal/aiphoto/client.go", content: "1: POST /api/partner/v1/generate" },
       { path: "internal/cos/cos.go", content: "1: NewQCloudClient()" },
+      { path: "internal/catalog/catalog.go", content: "1: // xpay.ProductIDFor is part of the historical contract" },
       { path: "internal/xpay/xpay.go", content: "1: BuildPayment()" },
       { path: "internal/wechatmp/client.go", content: "1: Code2Session()" },
       { path: "internal/worker/runner.go", content: "1: // remote agents call /api/worker/render-tasks/claim\n2: # /api/worker/render-tasks/claim\n3: * /api/worker/render-tasks/claim\n4: // http.Get(\"/api/worker/render-tasks/claim\")" },
@@ -98,6 +100,7 @@ describe("direct architecture fact extraction", () => {
     expect(edge(facts, "go:cmd/server", "go:cmd/remoteagent")?.label).toBe("Agent 唤醒");
     expect(edge(facts, "external:xpay", "go:cmd/server")?.kind).toBe("callback");
     expect(edge(facts, "go:cmd/worker", "go:cmd/server")).toBeUndefined();
+    expect(edge(facts, "go:cmd/remoteagent", "external:xpay")).toBeUndefined();
     for (const node of facts.nodes.filter((node) => node.id.startsWith("go:"))) {
       expect(node.signalIds.every((id) => !id.startsWith("store:") && !id.startsWith("external:"))).toBe(true);
     }
@@ -105,7 +108,7 @@ describe("direct architecture fact extraction", () => {
   });
 
   it("connects mini-program cloud, storage and payment calls with caller evidence", () => {
-    const facts = extract([
+    const sources = [
       { path: "miniprogram/app.json", content: "1: {\"pages\":[\"pages/index/index\"]}" },
       { path: "miniprogram/utils/cloud.js", content: "1: wx.cloud.callContainer()" },
       { path: "miniprogram/utils/upload.js", content: "1: presign()\n2: PUT upload_url" },
@@ -113,12 +116,16 @@ describe("direct architecture fact extraction", () => {
       { path: "cmd/server/main.go", content: "1: func main() {\n2: http.ListenAndServe()\n3: }" },
       { path: "backend/internal/cos/cos.go", content: "1: NewQCloudClient()" },
       { path: "backend/internal/xpay/xpay.go", content: "1: BuildPayment()" },
-    ]);
+    ];
+    const facts = extract(sources);
     expect(edge(facts, "actor:users", "miniprogram:miniprogram")).toBeDefined();
     expect(edge(facts, "miniprogram:miniprogram", "go:cmd/server")?.label).toBe("云托管 API");
     expect(edge(facts, "miniprogram:miniprogram", "store:cos")?.kind).toBe("upload");
     expect(edge(facts, "miniprogram:miniprogram", "external:xpay")).toBeDefined();
     expect(edge(facts, "external:xpay", "go:cmd/server")).toBeUndefined();
+    const coverage = evaluateArchitectureCoverage(collectArchitectureSignals({ revision, scope: "repository" }, sources), facts);
+    expect(coverage.metrics.relationship).toEqual({ total: 1, covered: 1, missingSignalIds: [] });
+    expect(coverage.publishable).toBe(true);
   });
 
   it("resolves Next.js import closures, after workers, OAuth and webhook callbacks", () => {
@@ -139,10 +146,25 @@ describe("direct architecture fact extraction", () => {
     expect(edge(facts, "next:root:async", "external:github")).toBeDefined();
     expect(edge(facts, "next:root:async", "external:llm")).toBeDefined();
     expect(edge(facts, "next:root:async", "external:archify")?.kind).toBe("process");
+    expect(edge(facts, "next:root:api", "external:llm")).toBeUndefined();
+    expect(edge(facts, "next:root:api", "store:mysql")).toBeUndefined();
     expect(edge(facts, "next:root:api", "external:chandler")?.kind).toBe("oauth");
     expect(edge(facts, "external:github", "next:root:api")?.kind).toBe("callback");
     expect(facts.roots).toEqual(expect.arrayContaining(["actor:users", "external:github"]));
     expect(facts.nodes.find((node) => node.id === "next:root:async")?.signalIds.every((id) => id.startsWith("worker:"))).toBe(true);
+    const coverage = evaluateArchitectureCoverage(collectArchitectureSignals({ revision, scope: "repository" }, sources), facts);
+    expect(coverage.metrics.worker).toEqual({ total: 1, covered: 1, missingSignalIds: [] });
+    expect(coverage.publishable).toBe(true);
+  });
+
+  it("ignores static detector declaration tables as runtime evidence", () => {
+    const sources = [
+      { path: "app/api/example/route.ts", content: "1: import \"@/lib/architecture-generic\";\n2: export async function POST() {}" },
+      { path: "lib/architecture-generic.ts", content: "1: llm: { markers: [\"chat/completions\", \"mysql2\", \"deliverArchify\", \"chandlerOAuthClient\", \"api.github.com\", \"seedance.CreateTask\"] }" },
+    ];
+    const facts = extract(sources);
+    expect(facts.nodes.map((node) => node.id)).toEqual(["actor:users", "next:root:api"]);
+    expect(facts.edges.map((edge) => edge.id)).toEqual(["entry:users->next:root:api"]);
     expect(evaluateArchitectureCoverage(collectArchitectureSignals({ revision, scope: "repository" }, sources), facts).publishable).toBe(true);
   });
 
@@ -200,10 +222,12 @@ describe("direct architecture fact extraction", () => {
     expect(facts.nodes.find((node) => node.id === "go:main")?.sourcePaths).toContain("store/mysql.go");
   });
 
-  it("does not invent Go entrypoints or user-to-worker calls", () => {
+  it("distinguishes CLI, server and worker roots without inventing user-to-worker calls", () => {
     const cli = extract([{ path: "main.go", content: "1: func main() {}" }]);
-    expect(cli.nodes.map((node) => node.id)).toEqual(["go:main"]);
-    expect(cli.roots).toEqual([]);
+    expect(cli.nodes.map((node) => node.id)).toEqual(["actor:cli-users", "go:main"]);
+    expect(cli.nodes.find((node) => node.id === "go:main")?.kind).toBe("cli");
+    expect(cli.roots).toEqual(["actor:cli-users"]);
+    expect(edge(cli, "actor:cli-users", "go:main")?.kind).toBe("process");
     const worker = extract([{ path: "cmd/worker/main.go", content: "1: func main() {\n2: http.ListenAndServe()\n3: worker.NewRunner()\n4: }" }]);
     expect(edge(worker, "actor:users", "go:cmd/worker")).toBeUndefined();
     expect(edge(worker, "actor:scheduler", "go:cmd/worker")).toBeDefined();
@@ -221,13 +245,17 @@ describe("direct architecture fact extraction", () => {
     ]);
     expect(root.nodes.some((node) => node.id === "miniprogram:miniprogram")).toBe(true);
     expect(edge(root, "miniprogram:miniprogram", "go:cmd/server")).toBeDefined();
-    const multiple = extract([
+    const ambiguousSources = [
       { path: "app.json", content: "1: {\"pages\":[]}" },
       { path: "cloud.js", content: "1: wx.cloud.callContainer()" },
       { path: "cmd/server-a/main.go", content: "1: func main() {\n2: http.ListenAndServe()\n3: }" },
       { path: "cmd/server-b/main.go", content: "1: func main() {\n2: http.ListenAndServe()\n3: }" },
-    ]);
+    ];
+    const multiple = extract(ambiguousSources);
     expect(multiple.edges.filter((candidate) => candidate.from === "miniprogram:miniprogram" && candidate.kind === "http")).toEqual([]);
+    const ambiguousCoverage = evaluateArchitectureCoverage(collectArchitectureSignals({ revision, scope: "repository" }, ambiguousSources), multiple);
+    expect(ambiguousCoverage.publishable).toBe(false);
+    expect(ambiguousCoverage.unclassifiedCriticalSignals.map((signal) => signal.kind)).toContain("relationship");
     const nonGo = extract([
       { path: "app.json", content: "1: {\"pages\":[]}" },
       { path: "cloud.js", content: "1: wx.cloud.callContainer()" },

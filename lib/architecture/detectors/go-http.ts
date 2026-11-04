@@ -66,7 +66,7 @@ function agentWakeCalls(api: NodeFact, agents: NodeFact[], context: Architecture
 
 export function goInternalHttpRelationships(context: ArchitectureContext, nodes: NodeFact[]) {
   const apis = nodes.filter((node) => node.kind === "api" && node.id.startsWith("go:"));
-  const runtimes = nodes.filter((node) => ["api", "worker", "agent"].includes(node.kind));
+  const runtimes = nodes.filter((node) => ["api", "worker", "agent", "cli"].includes(node.kind));
   const agents = nodes.filter((node) => node.kind === "agent");
   return apis.flatMap((api) => {
     const routes = registeredRoutes(api, context);

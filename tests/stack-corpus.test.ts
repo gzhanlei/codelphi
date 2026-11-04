@@ -2,7 +2,7 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { architectureSummary, parseStackCorpusArgs, runStackCorpus, scopeRoots, selectStackCorpusRepositories, shadowSummary, resolveCorpusSourceBudgets, architectureFactSummary, type StackCorpusManifest } from "../scripts/stack-corpus";
+import { architectureSummary, parseStackCorpusArgs, runStackCorpus, scopeRoots, selectStackCorpusRepositories, shadowSummary, resolveCorpusSourceBudgets, architectureFactSummary, loadCorpusArchitectureSources, type StackCorpusManifest } from "../scripts/stack-corpus";
 import { gitBlobSha, type OpenedRemoteSourceRevision, type RemoteSourceBackend } from "../lib/remote-source-index";
 import type { SlicePlanner } from "../lib/slice-planner";
 import type { ArchitectureDocument } from "../lib/architecture-draft";
@@ -123,11 +123,12 @@ describe("stack corpus runner", () => {
     planSpy.mockRestore();
     expect(report.summary.completed).toBe(1);
     expect(report.summary.profileMatches).toBe(1);
-    const result = (report.results as unknown as Array<{ architectureComponents: string[]; architectureError: string | null; detectedProfile: string; durationMs: number; architectureShadow: { status: string; scope: string; coverage: { publishable: boolean; unsupportedEdges: string[] } | null }; architectureFacts: { status: string; scope: string; coverage: { publishable: boolean } | null } }>)[0];
+    const result = (report.results as unknown as Array<{ architectureComponents: string[]; architectureError: string | null; detectedProfile: string; durationMs: number; architectureSource: unknown; architectureShadow: { status: string; scope: string; coverage: { publishable: boolean; unsupportedEdges: string[] } | null }; architectureFacts: { status: string; scope: string; coverage: { publishable: boolean } | null } }>)[0];
     expect(result.architectureComponents).toEqual(expect.arrayContaining(["users", "frontend", "backend"]));
     expect(result.architectureError).toBeNull();
     expect(result.detectedProfile).toBe("go-api");
     expect(result.durationMs).toBe(50);
+    expect(result.architectureSource).toEqual({ scope: "source-slice", directories: 0, files: 3, bytes: 0 });
     expect(result.architectureShadow.status).toBe("completed");
     expect(result.architectureShadow.scope).toBe("source-slice");
     expect(result.architectureShadow.coverage?.publishable).toBe(false);
@@ -135,6 +136,16 @@ describe("stack corpus runner", () => {
     expect(result.architectureFacts.status).toBe("completed");
     expect(result.architectureFacts.scope).toBe("source-slice");
     expect(result.architectureFacts.coverage?.publishable).toBe(false);
+  });
+
+  it("uses an independent repository-scope source receipt with an injected index", async () => {
+    const repository = { ...manifest.repositories[0], architectureScope: "repository" as const };
+    const index = {
+      listDir: async () => ({ path: "", entries: [], truncated: false, status: "indexed", metrics: { entryCount: 0, prunedCount: 0 } }),
+    } as unknown as OpenedRemoteSourceRevision;
+    const result = await loadCorpusArchitectureSources(repository, { index, sources: [] }, { index });
+    expect(result.receipt).toEqual({ scope: "repository", directories: 1, files: 0, bytes: 0 });
+    expect(result.sources).toEqual([]);
   });
 
   it("summarizes successful and failed architecture generation", () => {

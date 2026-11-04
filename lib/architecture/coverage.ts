@@ -17,7 +17,7 @@ export interface ArchitectureCoverage {
   unreachableRuntimeUnits: string[];
 }
 
-const runtimeNodeKinds = new Set(["frontend", "api", "worker", "agent", "database", "object-store", "queue"]);
+const runtimeNodeKinds = new Set(["frontend", "api", "worker", "agent", "cli", "database", "object-store", "queue"]);
 
 function coveredSignalIds(facts: ArchitectureFactSet) {
   return new Set([...facts.nodes, ...facts.edges].flatMap((fact) => fact.signalIds));

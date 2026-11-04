@@ -32,6 +32,17 @@ describe("architecture signal inventory", () => {
       expect.objectContaining({ kind: "external", evidence: expect.objectContaining({ path: "backend/internal/cos/cos.go", line: 8 }) }),
     ]));
     expect(new Set(first.signals.map((item) => item.id)).size).toBe(first.signals.length);
+    const ignored = collectArchitectureSignals({ revision, scope: "repository" }, [
+      { path: "README.md", content: "1: chat/completions" },
+      { path: "components/analysis-status-refresh.tsx", content: "1: setInterval(refresh, 3000)" },
+      { path: "internal/worker/runner_test.go", content: "1: NewQCloudClient()" },
+      { path: "internal/config/config.go", content: "1: // ImgSecCheck is optional" },
+      { path: "internal/production/service.go", content: "1: // requestVirtualPayment is called by the client" },
+      { path: "internal/seedance/client.go", content: "1: type CreateTaskRequest struct{}" },
+    ]);
+    expect(ignored.signals).toEqual([]);
+    const scheduled = collectArchitectureSignals({ revision, scope: "repository" }, [{ path: "worker.ts", content: "1: setInterval(run, 1000)" }]);
+    expect(scheduled.signals.map((signal) => signal.kind)).toEqual(["worker"]);
     const unnumbered = collectArchitectureSignals({ revision, scope: "repository" }, [{ path: "internal/store/mysql.go", content: "package store\nsql.Open(\"mysql\", dsn)" }]);
     expect(unnumbered.signals.find((item) => item.kind === "store")?.evidence.line).toBe(2);
   });

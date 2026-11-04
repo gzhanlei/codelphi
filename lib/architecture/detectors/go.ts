@@ -47,7 +47,7 @@ function groupSourcesByDirectory(goSources: ArchitectureSource[]) {
 function goSourcePaths(main: ArchitectureSource, sources: ArchitectureSource[]) {
   const goSources = sources.filter((source) => source.path.endsWith(".go"));
   const sourcesByDirectory = groupSourcesByDirectory(goSources);
-  const modules = sources.filter((source) => source.path.endsWith("go.mod")).flatMap((source) => [...source.content.matchAll(/(?:^|\n)\s*module\s+([^\s]+)/g)].map((match) => match[1]));
+  const modules = sources.filter((source) => source.path.endsWith("go.mod")).flatMap((source) => [...source.content.replace(/^\s*\d+:\s?/gm, "").matchAll(/(?:^|\n)\s*module\s+([^\s]+)/g)].map((match) => match[1]));
   const directories = [...new Set(goSources.map((source) => sourceDirectory(source.path)))];
   const pending = [sourceDirectory(main.path)];
   const visited = new Set<string>();
@@ -85,16 +85,24 @@ function detectGo(context: ArchitectureContext): ArchitectureFragment {
     const node = goNode(source, context, mainEvidence);
     fragment.nodes.push(node);
     const serverEvidence = findArchitectureEvidence(source, ["ListenAndServe", "NewHandler", "http.Handle", "chi.NewRouter", "gin.Default", "echo.New"], "go-http-entrypoint");
-    if (serverEvidence && node.kind === "api") {
+    const serverRoot = serverEvidence && node.kind === "api";
+    if (serverRoot) {
       fragment.nodes.push(actorNode("actor:users", "产品用户"));
       fragment.roots.push("actor:users");
       fragment.edges.push(factEdge(`entry:users->${node.id}`, "actor:users", node.id, "http", "HTTP 服务入口", [serverEvidence], node.signalIds));
     }
     const scheduleEvidence = findArchitectureEvidence(source, ["NewRunner", "for {", "time.Tick", "POLL_INTERVAL", "render-tasks"], "go-async-entrypoint");
-    if (scheduleEvidence && (node.kind === "worker" || node.kind === "agent")) {
+    const asyncRoot = scheduleEvidence && (node.kind === "worker" || node.kind === "agent");
+    if (asyncRoot) {
       fragment.nodes.push(actorNode("actor:scheduler", "调度器 / 轮询"));
       fragment.roots.push("actor:scheduler");
       fragment.edges.push(factEdge(`entry:scheduler->${node.id}`, "actor:scheduler", node.id, "schedule", "异步任务入口", [scheduleEvidence], node.signalIds));
+    }
+    if (!serverRoot && !asyncRoot) {
+      node.kind = "cli";
+      fragment.nodes.push(actorNode("actor:cli-users", "命令行用户"));
+      fragment.roots.push("actor:cli-users");
+      fragment.edges.push(factEdge(`entry:cli-users->${node.id}`, "actor:cli-users", node.id, "process", "命令行入口", [mainEvidence], node.signalIds));
     }
   }
   return fragment;
