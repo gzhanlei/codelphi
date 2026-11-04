@@ -27,7 +27,7 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
     <AppShell user={user}>
       <Link href="/" className="back-link">← 所有产品</Link>
       <div className="page-heading product-heading">
-        <div><span className="eyebrow">PRODUCT SPACE</span><h1>{details.product.name}</h1><p>{details.product.description}</p><RepositoryLink repository={details.repository} /></div>
+        <div><span className="eyebrow">PRODUCT SPACE</span><h1>{details.product.name}</h1>{view === "overview" ? null : <p>{details.product.description}</p>}<RepositoryLink repository={details.repository} /></div>
         <div className="page-actions">
           <AnalyzeButton slug={details.product.slug} />
           {organization.role === "viewer" ? null : <RemoveProductButton slug={details.product.slug} name={details.product.name} />}
