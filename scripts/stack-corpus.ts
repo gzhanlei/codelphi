@@ -6,6 +6,8 @@ import { createRemoteSourceIndex } from "../lib/remote-source-index";
 import { createSlicePlanner, type SliceBudgets, type SlicePlanner, type SourceSlice } from "../lib/slice-planner";
 import { analysisSliceBudgets } from "../lib/remote-analysis";
 import { buildArchitectureDocument } from "../lib/architecture-generic";
+import { createLegacyArchitectureShadow, type ArchitectureShadow } from "../lib/architecture/shadow";
+import type { ArchitectureDocument } from "../lib/architecture-draft";
 import { resolveGitHubToken } from "../lib/github-access";
 import type { OpenedRemoteSourceRevision, RemoteSourceBudgets, SourceScopeRoot } from "../lib/remote-source-index";
 import type { SourceFile } from "../lib/github";
@@ -49,7 +51,8 @@ const plannerBudgets: SliceBudgets = {
 };
 
 export function parseStackCorpusArgs(argv: string[]): StackCorpusArgs {
-  const only = argv.find((argument) => argument.startsWith("--only="))?.slice(7).split(",").filter(Boolean) ?? [];
+  const onlyArgument = argv.find((argument) => argument.startsWith("--only="));
+  const only = onlyArgument === undefined ? [] : onlyArgument.slice(7).split(",").filter(Boolean);
   const output = argv.find((argument) => argument.startsWith("--output="))?.slice(9) || "artifacts/stack-corpus/report.json";
   return { only, output };
 }
@@ -65,7 +68,11 @@ const corpusSourceBudgets: Partial<RemoteSourceBudgets> = {
   maxTotalContentBytes: 2_000_000,
 };
 
-function scopeRoots(paths: string[]): SourceScopeRoot[] {
+export function resolveCorpusSourceBudgets(budgets: Partial<RemoteSourceBudgets> | undefined) {
+  return budgets === undefined ? corpusSourceBudgets : budgets;
+}
+
+export function scopeRoots(paths: string[]): SourceScopeRoot[] {
   return paths.map((path) => ({ path, role: path === "" ? "shared" : undefined }));
 }
 
@@ -86,9 +93,18 @@ async function readSliceSources(index: OpenedRemoteSourceRevision, slice: Source
   return sources;
 }
 
-export function architectureSummary(repository: StackCorpusRepository, revision: string, sources: SourceFile[]) {
+export function shadowSummary(revision: string, sources: SourceFile[], document?: ArchitectureDocument): ArchitectureShadow & { error?: string } {
   try {
-    const architecture = buildArchitectureDocument({
+    return createLegacyArchitectureShadow({ revision, scope: "source-slice", sources, document });
+  } catch (error) {
+    return { version: 1, status: "unavailable", scope: "source-slice", signalCount: 0, factCounts: null, coverage: null, error: error instanceof Error ? error.message : "Architecture shadow failed" };
+  }
+}
+
+export function architectureSummary(repository: StackCorpusRepository, revision: string, sources: SourceFile[]) {
+  let architecture: ArchitectureDocument;
+  try {
+    architecture = buildArchitectureDocument({
       productName: repository.repo,
       productSlug: repository.id,
       owner: repository.owner,
@@ -96,17 +112,17 @@ export function architectureSummary(repository: StackCorpusRepository, revision:
       revision,
       sources,
     });
-    return { architectureComponents: architecture.components.map((component) => component.id), architectureError: null };
   } catch (error) {
-    return { architectureComponents: [] as string[], architectureError: error instanceof Error ? error.message : "Architecture generation failed" };
+    return { architectureComponents: [] as string[], architectureError: error instanceof Error ? error.message : "Architecture generation failed", architectureShadow: shadowSummary(revision, sources) };
   }
+  return { architectureComponents: architecture.components.map((component) => component.id), architectureError: null, architectureShadow: shadowSummary(revision, sources, architecture) };
 }
 
 async function planStackCorpusRepository(repository: StackCorpusRepository, planner: SlicePlanner, dependencies: { token?: string; index?: OpenedRemoteSourceRevision; budgets?: Partial<RemoteSourceBudgets> }) {
-  const index = dependencies.index ?? await createRemoteSourceIndex(
+  const index = dependencies.index === undefined ? await createRemoteSourceIndex(
     { owner: repository.owner, repo: repository.repo, revision: repository.revision },
-    { access: { token: dependencies.token }, scopeRoots: scopeRoots(repository.sourceRoots), budgets: dependencies.budgets },
-  );
+    { access: { token: dependencies.token }, scopeRoots: scopeRoots(repository.sourceRoots), budgets: resolveCorpusSourceBudgets(dependencies.budgets) },
+  ) : dependencies.index;
   return {
     index,
     planned: await planner.plan({
@@ -126,19 +142,20 @@ export async function analyzeStackCorpusRepository(
   dependencies: { token?: string; index?: OpenedRemoteSourceRevision; budgets?: Partial<RemoteSourceBudgets> } = {},
 ): Promise<Record<string, unknown>> {
   const startedAt = Date.now();
-  const { index, planned } = await planStackCorpusRepository(repository, planner, { ...dependencies, budgets: dependencies.budgets ?? corpusSourceBudgets });
+  const { index, planned } = await planStackCorpusRepository(repository, planner, dependencies);
   if (!planned.slice) {
     return failedResult(repository, new Error(planned.missing.join("; ") || "Planner did not return a slice"), Date.now() - startedAt);
   }
   const sources = await readSliceSources(index, planned.slice);
   const architecture = architectureSummary(repository, repository.revision, sources);
+  const primaryProfile = planned.slice.metrics.profileMatches[0];
   return {
     id: repository.id,
     repository: `${repository.owner}/${repository.repo}`,
     revision: repository.revision,
     expectedProfile: repository.expectedProfile,
     status: planned.status,
-    detectedProfile: planned.slice.metrics.profileMatches[0]?.profileId ?? "unknown",
+    detectedProfile: primaryProfile === undefined ? "unknown" : primaryProfile.profileId,
     profileMatches: planned.slice.metrics.profileMatches,
     missing: planned.missing,
     diagnostics: planned.diagnostics,
@@ -146,6 +163,7 @@ export async function analyzeStackCorpusRepository(
     metrics: planned.slice.metrics,
     architectureComponents: architecture.architectureComponents,
     architectureError: architecture.architectureError,
+    architectureShadow: architecture.architectureShadow,
     durationMs: Date.now() - startedAt,
   };
 }
@@ -159,6 +177,7 @@ function failedResult(repository: StackCorpusRepository, error: unknown, duratio
     status: "failed",
     detectedProfile: "unknown",
     error: error instanceof Error ? error.message : "Unknown corpus error",
+    architectureShadow: { version: 1, status: "unavailable", scope: "unavailable", signalCount: 0, factCounts: null, coverage: null },
     durationMs,
   };
 }
@@ -192,13 +211,14 @@ export async function runStackCorpus(options: StackCorpusRunOptions) {
   const manifest = manifestSchema.parse(JSON.parse(contents));
   const repositories = selectStackCorpusRepositories(manifest, options.only);
   if (repositories.length === 0) throw new Error("No stack corpus repositories selected");
-  const planner = options.planner ?? createSlicePlanner({ now: Date.now });
-  const report = await collectStackCorpusResults(repositories, planner, options);
-  const root = options.root ?? process.cwd();
+  const planner = options.planner === undefined ? createSlicePlanner({ now: Date.now }) : options.planner;
+  const collected = await collectStackCorpusResults(repositories, planner, options);
+  const report = { ...collected, manifestUpdatedAt: manifest.updatedAt };
+  const root = options.root === undefined ? process.cwd() : options.root;
   const outputPath = path.isAbsolute(options.output) ? options.output : path.join(root, options.output);
   await mkdir(path.dirname(outputPath), { recursive: true });
   await writeFile(outputPath, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
-  return { ...report, manifestUpdatedAt: manifest.updatedAt };
+  return report;
 }
 
 export async function main(argv: string[]) {

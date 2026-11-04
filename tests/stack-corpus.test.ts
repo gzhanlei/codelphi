@@ -1,10 +1,11 @@
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
-import { architectureSummary, parseStackCorpusArgs, runStackCorpus, selectStackCorpusRepositories, type StackCorpusManifest } from "../scripts/stack-corpus";
+import { describe, expect, it, vi } from "vitest";
+import { architectureSummary, parseStackCorpusArgs, runStackCorpus, scopeRoots, selectStackCorpusRepositories, shadowSummary, resolveCorpusSourceBudgets, type StackCorpusManifest } from "../scripts/stack-corpus";
 import { gitBlobSha, type OpenedRemoteSourceRevision, type RemoteSourceBackend } from "../lib/remote-source-index";
 import type { SlicePlanner } from "../lib/slice-planner";
+import type { ArchitectureDocument } from "../lib/architecture-draft";
 
 const manifest: StackCorpusManifest = {
   version: 1,
@@ -42,6 +43,12 @@ describe("stack corpus runner", () => {
     expect(selectStackCorpusRepositories(manifest, []).map((repo) => repo.id)).toEqual(["go-api", "web"]);
     expect(selectStackCorpusRepositories(manifest, ["go-api"]).map((repo) => repo.id)).toEqual(["go-api"]);
     expect(selectStackCorpusRepositories(manifest, ["gzhanlei/web"]).map((repo) => repo.id)).toEqual(["web"]);
+  });
+
+  it("maps shared and scoped source roots", () => {
+    expect(scopeRoots(["", "src"])).toEqual([{ path: "", role: "shared" }, { path: "src", role: undefined }]);
+    expect(resolveCorpusSourceBudgets(undefined)).toEqual(expect.objectContaining({ maxBlobFetches: 400 }));
+    expect(resolveCorpusSourceBudgets({ maxBlobFetches: 7 })).toEqual({ maxBlobFetches: 7 });
   });
 
   it("analyzes a planner slice and writes successful architecture metadata", async () => {
@@ -90,7 +97,10 @@ describe("stack corpus runner", () => {
           confidence: "high",
           unresolved: [],
           metrics: {
-            treeExpansions: 1, blobFetches: 3, selectedFiles: 3, selectedLineRanges: 3, selectedContentBytes: 102, aiReadCalls: 0, prunedPathCount: 0, wallClockMs: 0, profileMatches: [],
+            treeExpansions: 1, blobFetches: 3, selectedFiles: 3, selectedLineRanges: 3, selectedContentBytes: 102, aiReadCalls: 0, prunedPathCount: 0, wallClockMs: 0, profileMatches: [
+              { profileId: "go-api", confidence: 1, matchedSignals: [] },
+              { profileId: "next-web", confidence: 0.5, matchedSignals: [] },
+            ],
             budgetsRemaining: { selectedFiles: 0, selectedLineRanges: 0, plannerContentBytes: 0, aiReadCalls: 0 },
           },
         },
@@ -102,14 +112,26 @@ describe("stack corpus runner", () => {
     const root = await mkdtemp(path.join(tmpdir(), "stack-corpus-success-"));
     const manifestPath = path.join(root, "manifest.json");
     await writeFile(manifestPath, JSON.stringify(manifest));
+    const clock = vi.spyOn(Date, "now").mockReturnValueOnce(100).mockReturnValueOnce(150).mockReturnValue(150);
+    const planSpy = vi.spyOn(planner, "plan");
     const report = await runStackCorpus({
       only: ["go-api"], output: "report.json", manifestPath, planner,
       index, token: "test-token", root,
     });
+    clock.mockRestore();
+    expect(planSpy).toHaveBeenCalledWith(expect.objectContaining({ product: expect.objectContaining({ id: 0 }) }), index);
+    planSpy.mockRestore();
     expect(report.summary.completed).toBe(1);
-    const result = (report.results as unknown as Array<{ architectureComponents: string[]; architectureError: string | null }>)[0];
+    expect(report.summary.profileMatches).toBe(1);
+    const result = (report.results as unknown as Array<{ architectureComponents: string[]; architectureError: string | null; detectedProfile: string; durationMs: number; architectureShadow: { status: string; scope: string; coverage: { publishable: boolean; unsupportedEdges: string[] } | null } }>)[0];
     expect(result.architectureComponents).toEqual(expect.arrayContaining(["users", "frontend", "backend"]));
     expect(result.architectureError).toBeNull();
+    expect(result.detectedProfile).toBe("go-api");
+    expect(result.durationMs).toBe(50);
+    expect(result.architectureShadow.status).toBe("completed");
+    expect(result.architectureShadow.scope).toBe("source-slice");
+    expect(result.architectureShadow.coverage?.publishable).toBe(false);
+    expect(result.architectureShadow.coverage?.unsupportedEdges.length).toBeGreaterThan(0);
   });
 
   it("summarizes successful and failed architecture generation", () => {
@@ -121,9 +143,23 @@ describe("stack corpus runner", () => {
     ]);
     expect(success.architectureError).toBeNull();
     expect(success.architectureComponents).toEqual(expect.arrayContaining(["users", "frontend", "backend"]));
+    expect(success.architectureShadow.status).toBe("completed");
+    expect(success.architectureShadow.coverage?.publishable).toBe(false);
     const failed = architectureSummary(repository, repository.revision, [{ path: "package.json", content: "1: unrelated" }]);
     expect(failed.architectureComponents).toEqual([]);
     expect(failed.architectureError).toBe("No architecture components detected");
+    expect(failed.architectureShadow.status).toBe("unavailable");
+    expect(failed.architectureShadow.coverage).toBeNull();
+  });
+
+  it("isolates shadow diagnostics failures from legacy architecture results", () => {
+    const revision = manifest.repositories[0].revision;
+    expect(shadowSummary(revision, []).status).toBe("unavailable");
+    const failed = shadowSummary(revision, [], {} as ArchitectureDocument);
+    expect(failed.status).toBe("unavailable");
+    expect(failed.version).toBe(1);
+    expect(failed.signalCount).toBe(0);
+    expect(failed.error).toBeTruthy();
   });
 
   it("throws when no repositories are selected", async () => {
@@ -146,6 +182,7 @@ describe("stack corpus runner", () => {
     const root = await mkdtemp(path.join(tmpdir(), "stack-corpus-"));
     const manifestPath = path.join(root, "manifest.json");
     await writeFile(manifestPath, JSON.stringify(manifest));
+    const clock = vi.spyOn(Date, "now").mockReturnValueOnce(100).mockReturnValueOnce(150).mockReturnValue(150);
     const report = await runStackCorpus({
       only: ["go-api"],
       output: "report.json",
@@ -157,9 +194,35 @@ describe("stack corpus runner", () => {
       token: "test-token",
       root,
     });
+    clock.mockRestore();
     expect(report.summary.total).toBe(1);
     expect(report.summary.completed).toBe(0);
     const saved = JSON.parse(await readFile(path.join(root, "report.json"), "utf8"));
     expect(saved.results[0].error).toBe("test planner stopped");
+    expect(saved.results[0].durationMs).toBe(50);
+    expect(saved.version).toBe(1);
+    expect(saved.manifestUpdatedAt).toBe("2026-11-03");
+    expect(saved.results[0].architectureShadow).toEqual({ version: 1, status: "unavailable", scope: "unavailable", signalCount: 0, factCounts: null, coverage: null });
+  });
+
+  it("records planner rejections with zero elapsed time and unavailable shadow data", async () => {
+    const planner: SlicePlanner = {
+      resolveScope: async () => ({ status: "resolved", unresolved: [], scopeRoots: [] }),
+      plan: async () => { throw new Error("planner exploded"); },
+      evaluateTargetedRead: () => { throw new Error("unused"); },
+      applyTargetedRead: (state) => state,
+      finalize: async () => ({ status: "failed", missing: [], diagnostics: [] }),
+    };
+    const root = await mkdtemp(path.join(tmpdir(), "stack-corpus-rejected-"));
+    const manifestPath = path.join(root, "manifest.json");
+    await writeFile(manifestPath, JSON.stringify(manifest));
+    await runStackCorpus({
+      only: ["go-api"], output: "report.json", manifestPath, planner,
+      index: {} as OpenedRemoteSourceRevision, token: "test-token", root,
+    });
+    const saved = JSON.parse(await readFile(path.join(root, "report.json"), "utf8"));
+    expect(saved.results[0].error).toBe("planner exploded");
+    expect(saved.results[0].durationMs).toBe(0);
+    expect(saved.results[0].architectureShadow.status).toBe("unavailable");
   });
 });
