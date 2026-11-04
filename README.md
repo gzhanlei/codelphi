@@ -140,6 +140,30 @@ npm test
 npm run build
 ```
 
+## 部署
+
+生产环境与 Chandler 同一台服务器（`124.156.160.168`，SSH 使用本地 `~/.ssh/chandler.pem`），部署目录 `/data/www/radar`，由 systemd 服务 `radar.service`（以 `nonroot` 用户运行 `npm start -- -H 127.0.0.1 -p 3008`，前端经 Nginx 反代 `radar.chandler.work`）常驻，架构渲染另依赖 `radar.service.d/archify.conf` 注入的 `ARCHIFY_CHROME`。
+
+发布流程：
+
+```bash
+# 本地：验证后推送
+npm run typecheck && npm test && npm run build
+git push origin main
+
+# 服务器：以 nonroot 拉取、构建、root 重启
+ssh 124.156.160.168
+runuser -u nonroot -- bash -lc 'cd /data/www/radar && git pull --ff-only origin main && npm run build'
+systemctl restart radar.service
+systemctl is-active radar.service && curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3008/login
+```
+
+说明：
+
+- 服务器通过 `/home/nonroot/.ssh/radar_deploy_key`（GitHub deploy key，只读仓库 `gzhanlei/radar`）拉取代码；该密钥副本由 root 的 `/root/.ssh/radar_deploy_key` 复制而来，轮换时需同步两处。
+- 依赖变更时在 `git pull` 与 `npm run build` 之间以 nonroot 执行 `npm install`。
+- 数据库迁移未纳入部署流程，schema 变更需在服务器上手动执行 `npm run db:migrate`。
+
 ## 后续计划
 
 1. 用 Radar 的真实提交评估分析准确性，完善证据链接与人工修正界面。
