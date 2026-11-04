@@ -118,6 +118,40 @@ describe("architecture draft", () => {
     expect(document.components[1].sources).toHaveLength(3);
   });
 
+  it("builds a root-level PHP web application with database and file-cache flows", () => {
+    const document = buildArchitectureDocument({
+      productName: "NameDict",
+      productSlug: "namedict",
+      owner: "gzhanlei",
+      name: "namedict",
+      revision: "0aa2ac269c8bbeaa65d00f97d5b0405b39baca64",
+      sources: [
+        { path: "index.php", content: "1: <?php\n2: require_once 'cache_manager.php';\n3: <!DOCTYPE html>\n4: <form method=\"post\">\n5: $_SERVER['REQUEST_METHOD'];\n6: class NameDict {}\n7: $this->cacheManager = new CacheManager();\n8: DB::query($queryString);" },
+        { path: "cache_manager.php", content: "1: class CacheManager {}\n2: file_get_contents($filename);\n3: file_put_contents($filename, $cacheData);" },
+        { path: "scripts.js", content: "1: document.addEventListener('DOMContentLoaded', () => {});" },
+      ],
+    });
+    expect(document.components.map((component) => component.id)).toEqual(["users", "php-ui", "php-app", "db", "file-cache"]);
+    expect(document.connections).toEqual(expect.arrayContaining([
+      expect.objectContaining({ from: "users", to: "php-ui" }),
+      expect.objectContaining({ from: "php-ui", to: "php-app" }),
+      expect.objectContaining({ from: "php-app", to: "db" }),
+      expect.objectContaining({ from: "php-app", to: "file-cache" }),
+    ]));
+    expect(document.components.flatMap((component) => component.sources ?? []).every((source) => source.line && source.line > 0)).toBe(true);
+  });
+
+  it("rejects an isolated storage-only diagram instead of calling it an application architecture", () => {
+    expect(() => buildArchitectureDocument({
+      productName: "NameDict",
+      productSlug: "namedict",
+      owner: "gzhanlei",
+      name: "namedict",
+      revision: "0aa2ac269c8bbeaa65d00f97d5b0405b39baca64",
+      sources: [{ path: "config.php", content: "1: DB::$host = DB_HOST;" }],
+    })).toThrow("Architecture evidence incomplete: no component relationships detected");
+  });
+
   it("builds an Android native application architecture from application evidence", () => {
     const document = buildArchitectureDocument({
       productName: "Android AirPlay Receiver",

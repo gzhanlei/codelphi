@@ -1,7 +1,7 @@
 import { architectureDocumentSchema, architectureDraftInputSchema, markerLine, buildArchitectureDocument as buildRadarArchitectureDocument, type ArchitectureDocument, type ArchitectureDraftInput } from "./architecture-draft";
 import { getCodeHostingAdapter } from "./code-hosting/registry";
 
-type GenericId = "frontend" | "backend" | "auth" | "db" | "github" | "llm" | "webhook" | "analysis" | "android-ui" | "android-data" | "android-local-db" | "android-network" | "android-service" | "native-bridge" | "native-core" | "media-sink";
+type GenericId = "frontend" | "backend" | "php-ui" | "php-app" | "auth" | "db" | "file-cache" | "github" | "llm" | "webhook" | "analysis" | "android-ui" | "android-data" | "android-local-db" | "android-network" | "android-service" | "native-bridge" | "native-core" | "media-sink";
 type Component = ArchitectureDocument["components"][number];
 type Connection = ArchitectureDocument["connections"][number];
 
@@ -13,6 +13,9 @@ interface EvidenceRule {
 const rules: Record<GenericId, EvidenceRule> = {
   frontend: { path: /(?:^|\/)app\/.*page\.tsx$|(?:^|\/)src\/(?:App|main)\.tsx$|(?:^|\/)pages\/(?:index|_app)\.tsx$|(?:^|\/)resources\/js\/.*\.tsx$/, markers: ["export default", "export function", "createRoot", "ReactDOM"] },
   backend: { path: /(?:^|\/)internal\/.*\.go$|(?:^|\/)app\/api\/.*route\.ts$|(?:^|\/)src\/main\/(?:java|kotlin)\/.*\.(?:java|kt)$|(?:^|\/)app\/.*\.py$|(?:^|\/)src\/.*\.rs$|(?:^|\/)app\/.*\.php$|(?:^|\/)src\/.*\.cs$|(?:^|\/)cmd\/.*\.go$/, markers: ["@SpringBootApplication", "@RestController", "class Controller", "APIRouter", "FastAPI", "func ", "Router::new", "Route::", "class Program", "namespace", "POST", "GET"] },
+  "php-ui": { path: /\.php$|\.js$/, markers: ["<!DOCTYPE html", "<form", "document.addEventListener", "document.getElementById"] },
+  "php-app": { path: /\.php$/, markers: ["$_SERVER", "require_once", "class ", "DB::query", "new CacheManager", "public function"] },
+  "file-cache": { path: /cache.*\.php$/i, markers: ["file_get_contents", "file_put_contents", "CACHE_DIR"] },
   auth: { path: /oauth|auth|chandler/i, markers: ["OAuth", "WorkMembership", "PKCE", "Spring Security", "JWT", "passport", "Authorize"] },
   db: { path: /./, markers: ["go-sql-driver/mysql", "mysql2", "sql.Open", "database/sql", "spring.datasource", "JpaRepository", "SQLAlchemy", "SQLModel", "sqlmodel", "EntityFrameworkCore", "gorm.Open", "DB::", "CREATE TABLE", "RoomDatabase"] },
   github: { path: /github/i, markers: ["api.github.com", "Installation"] },
@@ -30,9 +33,12 @@ const rules: Record<GenericId, EvidenceRule> = {
 };
 
 const presentation: Record<GenericId | "users", Omit<Component, "id" | "sources">> = {
-  users: { type: "external", label: "内部用户", sublabel: "产品 / 研发 / 测试", pos: [40, 280], size: [130, 64] },
+  users: { type: "external", label: "产品用户", sublabel: "交互与使用", pos: [40, 280], size: [130, 64] },
   frontend: { type: "frontend", label: "产品 Web UI", sublabel: "Next.js App Router", pos: [340, 280], size: [150, 64] },
   backend: { type: "backend", label: "应用服务", sublabel: "Go / Next.js API", pos: [640, 280], size: [150, 64] },
+  "php-ui": { type: "frontend", label: "浏览器查询页面", sublabel: "HTML / JavaScript 表单", pos: [340, 280], size: [160, 64] },
+  "php-app": { type: "backend", label: "PHP 查询应用", sublabel: "请求路由 / NameDict", pos: [640, 280], size: [160, 64] },
+  "file-cache": { type: "database", label: "文件缓存", sublabel: "查询结果 / CacheManager", pos: [640, 490], size: [160, 64] },
   auth: { type: "security", label: "身份与 OAuth", sublabel: "OAuth 2.0 / PKCE", pos: [340, 70], size: [150, 64] },
   db: { type: "database", label: "MySQL", sublabel: "持久化数据", pos: [940, 280], size: [130, 64] },
   webhook: { type: "backend", label: "GitHub Webhook", sublabel: "HMAC-SHA256 / push", pos: [340, 490], size: [150, 64] },
@@ -52,6 +58,10 @@ const presentation: Record<GenericId | "users", Omit<Component, "id" | "sources"
 const connectionDefinitions: Connection[] = [
   { id: "users-to-frontend", from: "users", to: "frontend", label: "HTTPS", variant: "emphasis" },
   { id: "frontend-to-backend", from: "frontend", to: "backend", label: "页面 / API" },
+  { id: "users-to-php-ui", from: "users", to: "php-ui", label: "HTTPS", variant: "emphasis" },
+  { id: "php-ui-to-php-app", from: "php-ui", to: "php-app", label: "表单 / 查询路径" },
+  { id: "php-app-to-db", from: "php-app", to: "db", label: "DB::query" },
+  { id: "php-app-to-file-cache", from: "php-app", to: "file-cache", label: "CacheManager get / set", fromSide: "bottom", toSide: "top" },
   { id: "frontend-to-auth", from: "frontend", to: "auth", label: "OAuth 2.0 + PKCE", variant: "security", fromSide: "top", toSide: "bottom" },
   { id: "backend-to-db", from: "backend", to: "db", label: "SQL" },
   { id: "backend-to-analysis", from: "backend", to: "analysis", label: "after() 分析", variant: "dashed", fromSide: "bottom", toSide: "top" },
@@ -73,7 +83,7 @@ const connectionDefinitions: Connection[] = [
   { id: "media-sink-to-android-ui", from: "media-sink", to: "android-ui", label: "Surface / AudioTrack", fromSide: "top", toSide: "bottom" },
 ];
 
-const componentOrder: Array<GenericId | "users"> = ["users", "frontend", "backend", "auth", "db", "webhook", "analysis", "github", "llm", "android-ui", "android-data", "android-local-db", "android-network", "android-service", "native-bridge", "native-core", "media-sink"];
+const componentOrder: Array<GenericId | "users"> = ["users", "frontend", "backend", "php-ui", "php-app", "auth", "db", "file-cache", "webhook", "analysis", "github", "llm", "android-ui", "android-data", "android-local-db", "android-network", "android-service", "native-bridge", "native-core", "media-sink"];
 
 function sourcesFor(id: GenericId, sources: ArchitectureDraftInput["sources"]) {
   const rule = rules[id];
@@ -101,6 +111,7 @@ export function buildArchitectureDocument(value: ArchitectureDraftInput): Archit
   const viewBoxHeight = Math.max(240, Math.max(...components.map((component) => component.pos[1])) + 96);
   const viewBoxWidth = Math.min(1200, Math.max(960, Math.max(...components.map((component) => component.pos[0] + component.size[0])) + 180));
   const connections = connectionDefinitions.filter((connection) => ids.has(connection.from as GenericId) && ids.has(connection.to as GenericId));
+  if (connections.length === 0) throw new Error("Architecture evidence incomplete: no component relationships detected");
   return architectureDocumentSchema.parse({
     schema_version: 1,
     diagram_type: "architecture",
