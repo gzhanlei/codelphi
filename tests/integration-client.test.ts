@@ -19,6 +19,8 @@ describe("integration actions", () => {
     });
     expect(response.accountLogin).toBe("radar-user");
     await expect(saveRepositoryConnection(input, async () => Response.json({ error: "令牌无效" }, { status: 400 }))).rejects.toThrow("令牌无效");
+    await expect(saveRepositoryConnection(input, async () => Response.json({ status: "active" }, { status: 200 }))).rejects.toThrow("连接保存失败");
+    await expect(saveRepositoryConnection(input, async () => Response.json({ error: "" }, { status: 200 }))).rejects.toHaveProperty("message", "");
   });
 
   it("routes each connection action through its scoped client", async () => {

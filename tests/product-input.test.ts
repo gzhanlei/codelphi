@@ -8,9 +8,8 @@ describe("product registration input", () => {
     expect(slugifyProductName("听风")).toBe("");
     expect(nextProductSlug("SalesBuddy", "", false)).toBe("salesbuddy");
     expect(nextProductSlug("SalesBuddy", "custom-slug", true)).toBe("custom-slug");
-    expect(defaultConnectionId([{ id: 9 }], false)).toBe(9);
-    expect(defaultConnectionId([{ id: 9 }], true)).toBeNull();
-    expect(defaultConnectionId([], false)).toBeNull();
+    expect(defaultConnectionId([{ id: 9 }])).toBe(9);
+    expect(defaultConnectionId([])).toBeNull();
   });
 
   it("accepts a complete product and rejects invalid repositories", () => {

@@ -1,4 +1,5 @@
 import { ConnectionSelect } from "./connection-select";
+import { GitHubRepositoryPicker } from "./github-repository-picker";
 
 interface ProductInformationProps {
   name: string;
@@ -43,6 +44,7 @@ export function RepositorySection({ repository, defaultBranch, connectionId, con
     <div className="form-section">
       <div className="form-section-heading"><span>02</span><div><h2>GitHub 仓库</h2><p>Radar 会验证当前选择的凭据是否有读取权限。</p></div></div>
       <ConnectionSelect connectionId={connectionId} connections={connections} hasServerToken={hasServerToken} onChange={onConnectionChange} />
+      <GitHubRepositoryPicker connectionId={connectionId} repository={repository} onRepositoryChange={onRepositoryChange} onBranchChange={onBranchChange} />
       <div className="form-grid">
         <label className="field"><span>仓库 <b>*</b></span><input value={repository} onChange={(event) => onRepositoryChange(event.target.value)} placeholder="gzhanlei/salesbuddy" required /><small>使用 owner/repo 格式，当前先接入一个主仓库。</small></label>
         <label className="field"><span>默认分支</span><input value={defaultBranch} onChange={(event) => onBranchChange(event.target.value)} placeholder="留空则读取仓库默认分支" /><small>只有这个分支的 push 会触发自动分析。</small></label>

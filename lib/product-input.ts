@@ -25,6 +25,6 @@ export function nextProductSlug(name: string, current: string, edited: boolean) 
   return edited ? current : slugifyProductName(name);
 }
 
-export function defaultConnectionId(connections: Array<{ id: number }>, hasServerToken: boolean) {
-  return hasServerToken || connections.length === 0 ? null : connections[0].id;
+export function defaultConnectionId(connections: Array<{ id: number }>) {
+  return connections[0]?.id || null;
 }

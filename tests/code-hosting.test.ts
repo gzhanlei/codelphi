@@ -25,6 +25,14 @@ describe("code hosting provider registry", () => {
     resolveAnalysisTarget({ productId: 7, productSlug: "7", productName: "Product 7", connectionId: null });
   }
 
+  it("explains only GitHub 404 registration failures for the selected credential", () => {
+    const explain = githubCodeHostingAdapter.explainRegistrationError!;
+    expect(explain("GitHub API 404", { connectionId: 9, organizationId: 7 })).toBeNull();
+    expect(explain(new Error("GitHub API 500"), { connectionId: 9, organizationId: 7 })).toBeNull();
+    expect(explain(new Error("GitHub API 404: Not Found"), { connectionId: 9, organizationId: 7 })?.message).toContain("尚未授权该仓库");
+    expect(explain(new Error("GitHub API 404: Not Found"), { connectionId: null, organizationId: 7 })?.message).toContain("服务器 Token");
+  });
+
   it("exposes a GitHub source backend through the provider contract", () => {
     const backend = getCodeHostingAdapter("github").createSourceBackend({ token: "test-token" });
     expect(backend.kind).toBe("github_api");

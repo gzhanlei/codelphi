@@ -1,10 +1,19 @@
 type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
 
+type RepositoryPageResult = { repositories: Array<{ id: number; fullName: string; defaultBranch: string; private: boolean }>; hasMore: boolean; error?: string };
+
 type ConnectionResult = { status?: string; error?: string; accountLogin?: string };
 
 async function readConnectionResponse(response: Response): Promise<ConnectionResult> {
   const data = await response.json() as ConnectionResult;
   if (!response.ok && !data.error) throw new Error("操作失败");
+  return data;
+}
+
+export async function fetchGitHubRepositories(connectionId: number, page = 1, signal?: AbortSignal, fetcher: Fetcher = fetch): Promise<RepositoryPageResult> {
+  const response = await fetcher(`/api/repositories?provider=github&connectionId=${connectionId}&page=${page}`, { signal, cache: "no-store" });
+  const data = await response.json() as RepositoryPageResult;
+  if (!response.ok) throw new Error(data.error || "仓库列表读取失败");
   return data;
 }
 
@@ -19,7 +28,7 @@ export function repositoryConnectionAction(id: number, action: "check", fetcher:
 export async function deleteRepositoryConnection(id: number, fetcher: Fetcher = fetch) {
   const response = await fetcher(`/api/integrations/repositories/${id}`, { method: "DELETE" });
   const data = await readConnectionResponse(response);
-  if (!response.ok) throw new Error(data.error ?? "删除连接失败");
+  if (!response.ok) throw new Error(data.error);
   return data;
 }
 

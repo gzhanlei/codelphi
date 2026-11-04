@@ -19,7 +19,7 @@ export function NewProductForm({ connections, hasServerToken }: { connections: A
   const [analyze, setAnalyze] = useState(true);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
-  const [connectionId, setConnectionId] = useState<number | null>(defaultConnectionId(connections, hasServerToken));
+  const [connectionId, setConnectionId] = useState<number | null>(defaultConnectionId(connections));
 
   function updateName(value: string) {
     setName(value);

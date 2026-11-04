@@ -1,5 +1,6 @@
 import { getBranchHead, getChangeContext, getRepository, parseRepository } from "../github";
 import { createGitHubSourceBackend } from "../remote-source-index/github-backend";
+import { listGitHubRepositories } from "../github-repositories";
 import type { CodeHostingAdapter } from "./adapter";
 
 function registrationError(error: unknown, access: Parameters<CodeHostingAdapter["getRepository"]>[1]) {
@@ -15,6 +16,7 @@ export const githubCodeHostingAdapter: CodeHostingAdapter = {
   parseRepository,
   getRepository,
   getBranchHead,
+  listRepositories: (access, page) => listGitHubRepositories(access, page),
   getChangeContext,
   createSourceBackend: (access) => createGitHubSourceBackend({ access }),
   repositoryUrl: (repository) => `https://github.com/${repository.owner}/${repository.name}`,

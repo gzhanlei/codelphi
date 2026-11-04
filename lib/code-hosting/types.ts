@@ -24,6 +24,18 @@ export interface SourceFile {
   content: string;
 }
 
+export interface RepositoryChoice {
+  id: number;
+  fullName: string;
+  defaultBranch: string;
+  private: boolean;
+}
+
+export interface RepositoryPage {
+  repositories: RepositoryChoice[];
+  hasMore: boolean;
+}
+
 export interface ChangeFile {
   path: string;
   status: string;

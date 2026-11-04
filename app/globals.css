@@ -115,6 +115,14 @@ p { line-height: 1.7; }
 .connection-guide .allowlist-note { display: block; margin-top: 6px; color: var(--muted); }
 .connection-capability { margin: -8px 0 20px !important; padding: 10px 12px; border: 1px solid #d8e2dc; border-radius: 7px; font-size: 11px !important; line-height: 1.6; }
 .connection-guide code { font-size: 11px; }
+.repository-picker { margin-bottom: 18px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; background: #f7faf7; }
+.repository-picker .field { margin-bottom: 0; }
+.repository-picker-tools { display: flex; align-items: flex-end; gap: 14px; }
+.repository-picker-tools .field { flex: 1; min-width: 0; }
+.repository-picker-tools .filter-field { flex: 0 0 220px; }
+.repository-picker .error-banner { margin: 12px 0 0; }
+.repository-load-more { display: inline-block; margin-top: 10px; padding: 6px 0; }
+@media (max-width: 620px) { .repository-picker-tools { flex-direction: column; align-items: stretch; }.repository-picker-tools .filter-field { flex-basis: auto; } }
 .token-integration-card form { padding-top: 20px; border-top: 1px solid var(--line); }
 .token-integration-card form .primary-button { margin-top: 4px; }
 .token-integration-card .connection-list { margin-top: 22px; }
