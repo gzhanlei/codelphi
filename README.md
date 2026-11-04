@@ -10,7 +10,7 @@
 
 ## 已实现
 
-- Chandler OAuth 授权码 + PKCE（S256）登录、HttpOnly 会话、生产邮箱白名单。
+- Chandler OAuth 授权码 + PKCE（S256）登录、HttpOnly 会话、个人工作区自动创建；共享工作区按成员与邀请授权。
 - GitHub App Manifest 创建与安装、只读 Installation Token、AES-GCM 凭据加密、连接检查与本地断开。
 - Integrations 页面与添加产品时的 GitHub App/PAT 凭据选择；无凭据时提供配置引导。
 - Gitee、GitLab、Gitea 的工作区级连接配置与服务端验证；目前添加产品和架构分析仍仅支持 GitHub。
@@ -41,7 +41,7 @@ openssl rand -hex 32  # 填入 GITHUB_WEBHOOK_SECRET
 
 - `DATABASE_URL`：腾讯云 MySQL 的 `mysql://` URL，数据库名为 `radar`。
 - `CHANDLER_CLIENT_ID` / `CHANDLER_CLIENT_SECRET`。
-- `AUTH_ALLOWED_EMAILS`：允许登录的 Chandler 邮箱，英文逗号分隔。
+- `AUTH_ALLOWED_EMAILS`（可选）：特殊封闭部署的登录限制，英文逗号分隔；留空允许所有有效 Chandler 用户，不用于工作区成员管理。
 - `GITHUB_TOKEN`：对内部仓库具有只读权限的 Token。
 - `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL`：LLMGateway 配置。
 
@@ -94,7 +94,7 @@ http://localhost:3000/auth/callback
 https://radar.chandler.work/auth/callback
 ```
 
-生产环境如果 `AUTH_ALLOWED_EMAILS` 为空，Radar 默认拒绝所有登录。
+有效 Chandler 用户默认可登录并自动获得个人工作区。共享工作区通过成员与邀请授权；只有特殊封闭部署才需要配置 `AUTH_ALLOWED_EMAILS`，留空不会拒绝用户。
 
 ### 使用 GitHub App（推荐）
 

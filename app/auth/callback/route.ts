@@ -23,10 +23,10 @@ async function authenticate(request: NextRequest) {
     state: request.nextUrl.searchParams.get("state"),
     expectedState: oauthCookie(request, "radar_oauth_state"),
     verifier: oauthCookie(request, "radar_oauth_verifier"),
-    next: oauthCookie(request, "radar_oauth_next") ?? null,
+    next: oauthCookie(request, "radar_oauth_next"),
   });
   const profile = await completeChandlerOAuth({ code: input.code, verifier: input.verifier, redirectUri: `${appUrl()}/auth/callback` });
-  assertChandlerAllowed(profile.email, allowedEmails(), process.env.NODE_ENV === "production");
+  assertChandlerAllowed(profile.email, allowedEmails());
   return { input, profile };
 }
 

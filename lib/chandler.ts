@@ -25,13 +25,13 @@ function unwrap(value: unknown): unknown {
   return value;
 }
 
-export function isChandlerEmailAllowed(email: string | undefined, allowlist: Set<string>, isProduction: boolean) {
-  if (allowlist.size === 0) return !isProduction;
+export function isChandlerEmailAllowed(email: string | undefined, allowlist: Set<string>) {
+  if (allowlist.size === 0) return true;
   return Boolean(email && allowlist.has(email.toLowerCase()));
 }
 
-export function assertChandlerAllowed(email: string | undefined, allowlist: Set<string>, isProduction: boolean) {
-  if (!isChandlerEmailAllowed(email, allowlist, isProduction)) throw new Error("forbidden");
+export function assertChandlerAllowed(email: string | undefined, allowlist: Set<string>) {
+  if (!isChandlerEmailAllowed(email, allowlist)) throw new Error("forbidden");
 }
 
 export async function completeChandlerOAuth(input: OAuthInput, fetcher: Fetcher = fetch): Promise<SessionUser> {

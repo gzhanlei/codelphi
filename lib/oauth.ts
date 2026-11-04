@@ -8,7 +8,7 @@ export function pkceChallenge(verifier: string) {
   return createHash("sha256").update(verifier).digest("base64url");
 }
 
-export function safeNextPath(value: string | null) {
+export function safeNextPath(value: string | null | undefined) {
   if (!value) return "/";
   const invalid = [
     !value.startsWith("/"),

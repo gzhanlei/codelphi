@@ -5,7 +5,7 @@ interface OAuthCallbackValues {
   state: string | null;
   expectedState?: string;
   verifier?: string;
-  next: string | null;
+  next: string | null | undefined;
 }
 
 export function parseOAuthCallback(values: OAuthCallbackValues) {

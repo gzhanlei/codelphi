@@ -7,18 +7,22 @@ describe("Chandler OAuth boundary", () => {
     vi.stubEnv("CHANDLER_CLIENT_SECRET", "test-secret");
     vi.stubEnv("CHANDLER_BASE_URL", "https://api.chandler.work");
   });
-  it("applies the production allowlist and accepts development without one", () => {
+  it("allows Chandler users by default and enforces only an explicit allowlist", () => {
     const allowed = new Set(["person@example.com"]);
-    expect(isChandlerEmailAllowed("PERSON@example.com", allowed, true)).toBe(true);
-    expect(isChandlerEmailAllowed("other@example.com", allowed, true)).toBe(false);
-    expect(isChandlerEmailAllowed(undefined, allowed, true)).toBe(false);
-    expect(isChandlerEmailAllowed("person@example.com", new Set(), true)).toBe(false);
-    expect(isChandlerEmailAllowed(undefined, new Set(), false)).toBe(true);
+    expect(isChandlerEmailAllowed("PERSON@example.com", allowed)).toBe(true);
+    expect(isChandlerEmailAllowed("other@example.com", allowed)).toBe(false);
+    expect(isChandlerEmailAllowed(undefined, allowed)).toBe(false);
+    expect(isChandlerEmailAllowed("person@example.com", new Set())).toBe(true);
+    expect(isChandlerEmailAllowed("other@example.com", new Set())).toBe(true);
+    expect(isChandlerEmailAllowed(undefined, new Set())).toBe(true);
+    expect(isChandlerEmailAllowed(undefined, new Set())).toBe(true);
   });
 
-  it("rejects a profile outside the production allowlist", () => {
-    expect(() => assertChandlerAllowed("person@example.com", new Set(), true)).toThrow("forbidden");
-    expect(() => assertChandlerAllowed("person@example.com", new Set(["person@example.com"]), true)).not.toThrow();
+  it("does not require a user list unless the deployment explicitly enables one", () => {
+    expect(() => assertChandlerAllowed("person@example.com", new Set())).not.toThrow();
+    expect(() => assertChandlerAllowed(undefined, new Set())).not.toThrow();
+    expect(() => assertChandlerAllowed("person@example.com", new Set(["person@example.com"]))).not.toThrow();
+    expect(() => assertChandlerAllowed("other@example.com", new Set(["person@example.com"]))).toThrow("forbidden");
   });
 
   it("exchanges PKCE credentials and normalizes the profile", async () => {
