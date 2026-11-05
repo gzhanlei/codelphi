@@ -22,6 +22,10 @@ const changeSchema = z.object({
 
 type ChangeData = z.infer<typeof changeSchema>;
 
+const MAX_COMMIT_SUBJECT_TOTAL = 2000;
+const MAX_CHANGE_FILES = 120;
+const MAX_CHANGE_PATCH_TOTAL = 56_000;
+
 function latestCommit(data: ChangeData) {
   if (!data.commits || data.commits.length === 0) return data.commit;
   return data.commits[data.commits.length - 1].commit;
@@ -33,7 +37,19 @@ function multiCommitMessage(data: ChangeData) {
     .map((entry) => entry.commit.message.split("\n", 1)[0].trim())
     .filter(Boolean);
   if (subjects.length === 0) return null;
-  return subjects.join("\n").slice(0, 2000);
+  const joined = subjects.join("\n");
+  if (joined.length <= MAX_COMMIT_SUBJECT_TOTAL) return joined;
+  // Keep the newest subjects within budget so the head of the push is always represented.
+  const kept = [subjects[subjects.length - 1].slice(0, MAX_COMMIT_SUBJECT_TOTAL)];
+  let length = kept[0].length;
+  for (let index = subjects.length - 2; index >= 0; index--) {
+    const subject = subjects[index];
+    if (length + subject.length + 1 > MAX_COMMIT_SUBJECT_TOTAL) break;
+    kept.unshift(subject);
+    length += subject.length + 1;
+  }
+  const omitted = subjects.length - kept.length;
+  return `（共 ${subjects.length} 个提交，省略最早的 ${omitted} 条）\n${kept.join("\n")}`;
 }
 
 function commitDetails(data: ChangeData, after: string) {
@@ -44,17 +60,45 @@ function commitDetails(data: ChangeData, after: string) {
   };
 }
 
-export function normalizeChangeContext(value: unknown, after: string, fallbackUrl = "") {
-  const data = changeSchema.parse(value);
-  const files = data.files.slice(0, 80).map((file) => ({
+function interleaveByTopDirectory<T extends { filename: string }>(files: T[]) {
+  const groups = new Map<string, T[]>();
+  for (const file of files) {
+    const group = file.filename.includes("/") ? file.filename.split("/")[0] : "";
+    const items = groups.get(group);
+    if (items) items.push(file);
+    else groups.set(group, [file]);
+  }
+  const balanced: T[] = [];
+  let hasRemaining = true;
+  while (hasRemaining) {
+    hasRemaining = false;
+    for (const items of groups.values()) {
+      const file = items.shift();
+      if (file) {
+        balanced.push(file);
+        hasRemaining = true;
+      }
+    }
+  }
+  return balanced;
+}
+
+function budgetedChangeFiles(files: ChangeData["files"]) {
+  const selected = interleaveByTopDirectory(files).slice(0, MAX_CHANGE_FILES);
+  const perFile = Math.floor(MAX_CHANGE_PATCH_TOTAL / Math.max(selected.length, 1));
+  return selected.map((file) => ({
     path: file.filename,
     status: file.status,
-    patch: (file.patch ?? "(binary or patch unavailable)").slice(0, 8_000),
+    patch: (file.patch ?? "(binary or patch unavailable)").slice(0, perFile),
   }));
+}
+
+export function normalizeChangeContext(value: unknown, after: string, fallbackUrl = "") {
+  const data = changeSchema.parse(value);
   return {
     ...commitDetails(data, after),
     url: data.html_url ?? fallbackUrl,
-    files,
+    files: budgetedChangeFiles(data.files),
   };
 }
 

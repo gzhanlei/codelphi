@@ -39,6 +39,33 @@ describe("GitHub source boundaries", () => {
     expect(normalizeChangeContext({ html_url: "", commit: { message: "empty url" } }, "b", "fallback-url").url).toBe("");
   });
 
+  it("keeps the newest commit subjects and reports omissions when a push exceeds the subject budget", () => {
+    const commits = Array.from({ length: 6 }, (_, index) => ({
+      sha: String(index),
+      commit: { message: `commit ${index}: ${"x".repeat(500)}` },
+    }));
+    const result = normalizeChangeContext({ commits }, "b");
+    expect(result.message.startsWith("（共 6 个提交，省略最早的 3 条）")).toBe(true);
+    expect(result.message).toContain("commit 5:");
+    expect(result.message).toContain("commit 4:");
+    expect(result.message).toContain("commit 3:");
+    expect(result.message).not.toContain("commit 2:");
+    expect(result.message).not.toContain("commit 0:");
+  });
+
+  it("balances change files across top-level directories and splits the patch budget evenly", () => {
+    const files = [
+      ...Array.from({ length: 150 }, (_, index) => ({ filename: `aaa/file-${String(index).padStart(3, "0")}.ts`, status: "modified", patch: "a".repeat(1000) })),
+      ...Array.from({ length: 10 }, (_, index) => ({ filename: `zzz/file-${index}.ts`, status: "modified", patch: "z".repeat(1000) })),
+    ];
+    const result = normalizeChangeContext({ html_url: "u", commit: { message: "m" }, files }, "b");
+    expect(result.files).toHaveLength(120);
+    expect(result.files.filter((file) => file.path.startsWith("zzz/"))).toHaveLength(10);
+    expect(result.files.some((file) => file.path.startsWith("aaa/"))).toBe(true);
+    const perFile = Math.floor(56_000 / 120);
+    expect(result.files.every((file) => file.patch.length <= perFile)).toBe(true);
+  });
+
   it("falls back to the short SHA and supplied commit URL when commit metadata is absent", () => {
     const result = normalizeChangeContext({}, "abcdef123456", "https://github.com/gzhanlei/radar/commit/abcdef123456");
     expect(result.message).toBe("Release abcdef1");
