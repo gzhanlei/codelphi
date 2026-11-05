@@ -206,6 +206,8 @@ export interface RemoteSourceBackend {
   kind: SourceBackendKind;
   resolveRevision(ref: SourceRepositoryRef): Promise<{ rootTreeSha: string }>;
   listTree(ref: SourceRevisionRef, treeSha: string, path: string): Promise<{ entries: SourceTreeApiEntry[]; truncated: boolean }>;
+  /** Optional whole-tree listing (GitHub `recursive=1`). When absent, unavailable, or truncated, the index falls back to per-directory expansion. */
+  listWholeTree?(ref: SourceRevisionRef, treeSha: string): Promise<{ entries: SourceTreeApiEntry[]; truncated: boolean }>;
   fetchBlob(ref: SourceRevisionRef, path: string, blobSha: string): Promise<Uint8Array>;
 }
 

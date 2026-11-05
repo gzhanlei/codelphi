@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createRemoteSourceIndex, type OpenedRemoteSourceRevision, type SourceRevisionRef, type SourceScopeRoot } from "./remote-source-index";
+import { createRemoteSourceIndex, type OpenedRemoteSourceRevision, type RemoteSourceBudgets, type SourceRevisionRef, type SourceScopeRoot } from "./remote-source-index";
 import { createSlicePlanner, type SliceBudgets, type SlicePlanner, type SourceSlice } from "./slice-planner";
 import type { CodeHostingProvider, RepositoryAccess, SourceFile } from "./code-hosting/types";
 import { radarArchitectureEvidencePaths } from "./architecture-draft";
@@ -35,6 +35,14 @@ export const analysisSliceBudgets: SliceBudgets = {
   maxComponents: 12,
   maxConnections: 24,
   maxRepairRounds: 2,
+};
+
+export const analysisSourceIndexBudgets: RemoteSourceBudgets = {
+  maxTreeExpansions: 1000,
+  maxBlobFetches: 1000,
+  maxBlobBytes: 1_000_000,
+  maxLinesPerRead: 600,
+  maxTotalContentBytes: 10_000_000,
 };
 
 const sourceRootsSchema = z.array(z.object({
@@ -100,7 +108,7 @@ export async function getRemoteAnalysisSources(request: RemoteAnalysisRequest, r
     repo: request.repository.repo,
     revision: request.repository.revision,
   };
-  const index = await createRemoteSourceIndex(revision, { scopeRoots: request.scopeRoots, access: request.access, provider: request.provider, backend: request.backend });
+  const index = await createRemoteSourceIndex(revision, { scopeRoots: request.scopeRoots, access: request.access, provider: request.provider, backend: request.backend, budgets: analysisSourceIndexBudgets });
   const planner = runtime.planner;
   const budgets = runtime.budgets;
   const result = await planner.plan({

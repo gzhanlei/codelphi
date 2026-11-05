@@ -196,7 +196,7 @@ class DeterministicSlicePlanner implements SlicePlanner {
       };
 
       for (const scopeRoot of scope.scopeRoots) {
-        await this.selectFromDirectory(index, state, scopeRoot.path, 0);
+        await this.walkScopeDirectories(index, state, scopeRoot.path);
       }
       return this.completePlan(index, state);
     } catch (error) {
@@ -304,14 +304,23 @@ class DeterministicSlicePlanner implements SlicePlanner {
     return { status: "completed", missing: [], diagnostics: state.diagnostics };
   }
 
-  private async selectFromDirectory(index: OpenedRemoteSourceRevision, state: SlicePlanningState, path: string, depth: number) {
-    if (depth > 12 || state.budgetsRemaining.selectedFiles <= 0) return;
-    const listing = await index.listDir(path);
-    await this.selectListedFiles(index, state, listing.entries);
-    if (depth >= 12) return;
-    for (const entry of listing.entries) {
-      if (entry.pruned || entry.type !== "tree") continue;
-      await this.selectFromDirectory(index, state, entry.path, depth + 1);
+  // Iterative preorder walk with no depth cap: on a seeded (recursive) index every directory
+  // listing is local, and on the per-directory fallback path the index tree-expansion budget
+  // still bounds API calls.
+  private async walkScopeDirectories(index: OpenedRemoteSourceRevision, state: SlicePlanningState, rootPath: string) {
+    const pending = [rootPath];
+    const visited = new Set<string>();
+    while (pending.length > 0) {
+      if (state.budgetsRemaining.selectedFiles <= 0) return;
+      const path = pending.pop()!;
+      if (visited.has(path)) continue;
+      visited.add(path);
+      const listing = await index.listDir(path);
+      await this.selectListedFiles(index, state, listing.entries);
+      for (const entry of [...listing.entries].reverse()) {
+        if (entry.pruned || entry.type !== "tree") continue;
+        if (!visited.has(entry.path)) pending.push(entry.path);
+      }
     }
   }
 

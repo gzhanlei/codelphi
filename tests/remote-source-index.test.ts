@@ -303,4 +303,121 @@ describe("Remote Source Index", () => {
     const index = await createRemoteSourceIndex({ owner: "gzhanlei", repo: "commerce", revision }, { access: {}, scopeRoots: [{ path: "apps/checkout" }], backend });
     await expect(index.readLines({ path: "apps/checkout/bad.ts", startLine: 1, endLine: 1, requestedBy: "planner", reason: "verify" })).rejects.toThrow("blob SHA mismatch");
   });
+
+  it("falls back to per-directory expansion when the recursive listing is truncated", async () => {
+    const files = new Map([["apps/checkout/package.json", "{}\n"]]);
+    const sha = gitBlobSha(files.get("apps/checkout/package.json")!);
+    const trees = new Map<string, Array<{ path: string; type: "blob" | "tree"; sha: string; size?: number }>>([
+      ["", [{ path: "apps", type: "tree", sha: "tree-apps" }]],
+      ["apps", [{ path: "apps/checkout", type: "tree", sha: "tree-checkout" }]],
+      ["apps/checkout", [{ path: "apps/checkout/package.json", type: "blob", sha, size: 3 }]],
+    ]);
+    let wholeCalls = 0;
+    let listCalls = 0;
+    const backend: RemoteSourceBackend = {
+      kind: "github_api",
+      async resolveRevision() {
+        return { rootTreeSha: "tree-root" };
+      },
+      async listTree(_source, _treeSha, path) {
+        listCalls += 1;
+        return { entries: trees.get(path) ?? [], truncated: false };
+      },
+      async listWholeTree() {
+        wholeCalls += 1;
+        return { entries: [], truncated: true };
+      },
+      async fetchBlob(_source, path) {
+        return new TextEncoder().encode(files.get(path)!);
+      },
+    };
+    const index = await createRemoteSourceIndex({ owner: "gzhanlei", repo: "commerce", revision }, { access: {}, scopeRoots: [{ path: "apps/checkout" }], backend });
+    expect(wholeCalls).toBe(1);
+    expect(index.metrics.treeExpansions).toBe(0);
+    expect(await index.statPath("apps/checkout/package.json")).not.toBeNull();
+    expect(index.metrics.treeExpansions).toBe(2);
+    expect(listCalls).toBe(3);
+  });
+});
+
+describe("seeded whole-tree indexes", () => {
+  function createSeededBackend(fileSpecs: Array<[string, string]>, truncated = false) {
+    const files = new Map(fileSpecs);
+    const treePaths = new Set<string>();
+    for (const [path] of fileSpecs) {
+      const parts = path.split("/");
+      for (let index = 1; index < parts.length; index += 1) treePaths.add(parts.slice(0, index).join("/"));
+    }
+    const entries: Array<{ path: string; type: "blob" | "tree"; sha: string; size?: number }> = [
+      ...[...treePaths].sort().map((path) => ({ path, type: "tree" as const, sha: `tree-${path}` })),
+      ...fileSpecs.map(([path, content]) => ({ path, type: "blob" as const, sha: gitBlobSha(content), size: content.length })),
+    ];
+    const calls = { whole: 0, trees: 0 };
+    const backend: RemoteSourceBackend = {
+      kind: "github_api",
+      async resolveRevision() {
+        return { rootTreeSha: "tree-root" };
+      },
+      async listTree(_source, _treeSha, path) {
+        calls.trees += 1;
+        throw new Error(`unexpected per-directory tree expansion: ${path}`);
+      },
+      async listWholeTree(_source, _treeSha) {
+        calls.whole += 1;
+        return { entries, truncated };
+      },
+      async fetchBlob(_source, path) {
+        const content = files.get(path);
+        if (!content) throw new Error(`unexpected blob path ${path}`);
+        return new TextEncoder().encode(content);
+      },
+    };
+    return { backend, calls, files };
+  }
+
+  it("seeds the whole tree from one recursive listing and serves deep directories without API expansion", async () => {
+    const deepPath = `deep/${"level/".repeat(19)}leaf.ts`;
+    const { backend, calls } = createSeededBackend([
+      ["README.md", "seeded platform\n"],
+      ["apps/checkout/package.json", JSON.stringify({ dependencies: { next: "16.0.0" } })],
+      ["apps/checkout/src/server.ts", "export const server = 1;\n"],
+      [deepPath, "export const deep = 1;\n"],
+      ["vendor/lib/index.ts", "export const vendor = 1;\n"],
+    ]);
+    const index = await createRemoteSourceIndex(
+      { owner: "gzhanlei", repo: "commerce", revision },
+      { access: {}, scopeRoots: [{ path: "" }], backend },
+    );
+    expect(calls.whole).toBe(1);
+    expect(calls.trees).toBe(0);
+    expect(index.metrics.treeExpansions).toBe(0);
+
+    const root = await index.listRoot();
+    expect(root.status).toBe("indexed");
+    expect(root.entries.map((entry) => entry.path).sort()).toEqual(["README.md", "apps", "deep", "vendor"]);
+    expect(root.entries.find((entry) => entry.path === "vendor")?.pruned).toEqual({ reason: "third_party" });
+
+    expect((await index.statPath(deepPath))?.cacheState).toBe("miss");
+    const read = await index.readLines({ path: deepPath, startLine: 1, endLine: 5, requestedBy: "profile", reason: "deep seeded entrypoint" });
+    expect(read.lines).toEqual(["export const deep = 1;"]);
+    expect(index.metrics.treeExpansions).toBe(0);
+  });
+
+  it("applies product scope pruning to seeded listings", async () => {
+    const { backend, calls } = createSeededBackend([
+      ["apps/checkout/package.json", "{}\n"],
+      ["docs/manual.md", "user manual\n"],
+    ]);
+    const index = await createRemoteSourceIndex(
+      { owner: "gzhanlei", repo: "commerce", revision },
+      { access: {}, scopeRoots: [{ path: "apps/checkout" }], backend },
+    );
+    const pruned = new Map((await index.listRoot()).entries.map((entry) => [entry.path, entry.pruned?.reason]));
+    expect(pruned.get("apps")).toBeUndefined();
+    expect(pruned.get("docs")).toBe("outside_product_scope");
+    await expect(index.listDir("docs")).rejects.toThrow("path is outside product scope");
+    await expect(index.statPath("docs/manual.md")).rejects.toThrow("path is outside product scope");
+    expect(await index.statPath("apps/checkout/package.json")).not.toBeNull();
+    expect(calls.trees).toBe(0);
+  });
 });

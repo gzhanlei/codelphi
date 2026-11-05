@@ -1,5 +1,5 @@
 import { basename, dirname, join, normalize, resolve, sep } from "node:path";
-import { SourceIndexError, defaultRemoteSourceBudgets, defaultRemoteSourceDependencies, defaultSourcePruningPolicy, gitBlobSha, type EvidenceRootRequest, type FileSystemAdapter, type EvidenceRootResult, type OpenedRemoteSourceRevision, type RemoteSourceBackend, type RemoteSourceIndexDependencies, type RemoteSourceIndexOptions, type RemoteSourceBudgets, type ResolvedRemoteSourceIndexDependencies, type SourceBlobMeta, type SourceCacheOptions, type SourceIndexStatus, type SourceLineRequest, type SourceLineSlice, type SourceMetrics, type SourcePruningPolicy, type PruneReason, type SourceRevisionIdentity, type SourceRevisionRef, type SourceScopeRoot, type SourceSignal, type SourceTreeApiEntry, type SourceTreeEntry, type SourceTreeListing } from "./types";
+import { SourceIndexError, defaultRemoteSourceBudgets, defaultRemoteSourceDependencies, defaultSourcePruningPolicy, gitBlobSha, type EvidenceRootRequest, type FileSystemAdapter, type EvidenceRootResult, type OpenedRemoteSourceRevision, type RemoteSourceBackend, type RemoteSourceIndexDependencies, type RemoteSourceIndexOptions, type RemoteSourceBudgets, type ResolvedRemoteSourceIndexDependencies, type SourceBlobMeta, type SourceCacheOptions, type SourceLineRequest, type SourceLineSlice, type SourceMetrics, type SourcePruningPolicy, type PruneReason, type SourceRevisionIdentity, type SourceRevisionRef, type SourceScopeRoot, type SourceSignal, type SourceTreeApiEntry, type SourceTreeEntry, type SourceTreeListing } from "./types";
 import { getCodeHostingAdapter } from "../code-hosting/registry";
 
 interface CachedBlob {
@@ -104,6 +104,38 @@ export function textLineCount(content: string) {
   return lines.at(-1) === "" ? lines.length - 1 : lines.length;
 }
 
+export function groupEntriesByParent(entries: SourceTreeApiEntry[]): Map<string, SourceTreeApiEntry[]> {
+  const groups = new Map<string, SourceTreeApiEntry[]>();
+  for (const entry of entries) {
+    const parent = entry.path.includes("/") ? entry.path.slice(0, entry.path.lastIndexOf("/")) : "";
+    const group = groups.get(parent);
+    if (group) group.push(entry);
+    else groups.set(parent, [entry]);
+  }
+  return groups;
+}
+
+export function buildSourceListing(path: string, rawEntries: SourceTreeApiEntry[], truncated: boolean, policy: SourcePruningPolicy, scopeRoots: SourceScopeRoot[]): SourceTreeListing {
+  const entries = rawEntries.map((entry) => classifyEntry(path, entry, policy, scopeRoots));
+  return {
+    path,
+    entries,
+    truncated,
+    status: truncated ? "partial" : "indexed",
+    metrics: {
+      entryCount: entries.length,
+      prunedCount: entries.filter((entry) => entry.pruned).length,
+    },
+  };
+}
+
+function seedListings(entries: SourceTreeApiEntry[], policy: SourcePruningPolicy, scopeRoots: SourceScopeRoot[]): Map<string, SourceTreeListing> {
+  const listings = new Map<string, SourceTreeListing>();
+  for (const [parent, group] of groupEntriesByParent(entries)) listings.set(parent, buildSourceListing(parent, group, false, policy, scopeRoots));
+  if (!listings.has("")) listings.set("", buildSourceListing("", [], false, policy, scopeRoots));
+  return listings;
+}
+
 function boundedLineRange(lines: string[], startLine: number, endLine: number, maxLines: number) {
   const start = Math.max(1, Math.min(startLine, lines.length || 1));
   const end = Math.max(start, Math.min(lines.length || 1, endLine, start + maxLines - 1));
@@ -124,7 +156,7 @@ class RemoteSourceRevision implements OpenedRemoteSourceRevision {
   private readonly now: () => Date;
   private readonly state: SourceIndexState;
 
-  constructor(ref: SourceRevisionRef, identity: SourceRevisionIdentity, rootListing: SourceTreeListing, options: RemoteSourceIndexOptions, dependencies: ResolvedRemoteSourceIndexDependencies, backend: RemoteSourceBackend) {
+  constructor(ref: SourceRevisionRef, identity: SourceRevisionIdentity, listings: Map<string, SourceTreeListing>, options: RemoteSourceIndexOptions, dependencies: ResolvedRemoteSourceIndexDependencies, backend: RemoteSourceBackend) {
     this.ref = ref;
     this.identity = identity;
     this.scopeRoots = options.scopeRoots;
@@ -134,9 +166,10 @@ class RemoteSourceRevision implements OpenedRemoteSourceRevision {
     this.cache = { maxCachedBlobs: 64, ...options.cache };
     this.filesystem = dependencies.filesystem;
     this.now = dependencies.now;
-    this.state = { entries: new Map(), listings: new Map(), blobs: new Map(), metrics: { treeExpansions: 0, blobFetches: 0, contentBytes: 0 } };
-    this.state.listings.set("", rootListing);
-    for (const entry of rootListing.entries) this.state.entries.set(entry.path, entry);
+    this.state = { entries: new Map(), listings, blobs: new Map(), metrics: { treeExpansions: 0, blobFetches: 0, contentBytes: 0 } };
+    for (const listing of listings.values()) {
+      for (const entry of listing.entries) this.state.entries.set(entry.path, entry);
+    }
     this.metrics = this.state.metrics;
   }
 
@@ -273,18 +306,9 @@ class RemoteSourceRevision implements OpenedRemoteSourceRevision {
   }
 
   private createListing(path: string, rawEntries: SourceTreeApiEntry[], truncated: boolean): SourceTreeListing {
-    const entries = rawEntries.map((entry) => classifyEntry(path, entry, this.policy, this.scopeRoots));
-    for (const entry of entries) this.state.entries.set(entry.path, entry);
-    return {
-      path,
-      entries,
-      truncated,
-      status: truncated ? "partial" : "indexed",
-      metrics: {
-        entryCount: entries.length,
-        prunedCount: entries.filter((entry) => entry.pruned).length,
-      },
-    };
+    const listing = buildSourceListing(path, rawEntries, truncated, this.policy, this.scopeRoots);
+    for (const entry of listing.entries) this.state.entries.set(entry.path, entry);
+    return listing;
   }
 
   private async fetchVerifiedBlob(path: string, entry: SourceTreeEntry) {
@@ -352,30 +376,35 @@ function resolveRemoteSourceBackend(options: RemoteSourceIndexOptions, dependenc
   return getCodeHostingAdapter(options.provider ?? "github").createSourceBackend(options.access);
 }
 
+async function openRootListing(ref: SourceRevisionRef, rootTreeSha: string, backend: RemoteSourceBackend, policy: SourcePruningPolicy, scopeRoots: SourceScopeRoot[]) {
+  const response = await backend.listTree({ ...ref, revision: ref.revision }, rootTreeSha, "");
+  return new Map([["", buildSourceListing("", response.entries, response.truncated, policy, scopeRoots)]]);
+}
+
 export async function createRemoteSourceIndex(ref: SourceRevisionRef, options: RemoteSourceIndexOptions): Promise<OpenedRemoteSourceRevision> {
   const dependencies = resolveRemoteSourceDependencies(options.dependencies);
   const backend = resolveRemoteSourceBackend(options, dependencies);
   const identity = await backend.resolveRevision(ref);
-  const response = await backend.listTree({ ...ref, revision: ref.revision }, identity.rootTreeSha, "");
   const policy: SourcePruningPolicy = { ...defaultSourcePruningPolicy, ...options.pruning };
-  const rootEntries = response.entries.map((entry) => classifyEntry("", entry, policy, options.scopeRoots));
-  const rootListing = {
-    path: "",
-    entries: rootEntries,
-    truncated: response.truncated,
-    status: (response.truncated ? "partial" : "indexed") as SourceIndexStatus,
-    metrics: {
-      entryCount: response.entries.length,
-      prunedCount: rootEntries.filter((entry) => entry.pruned).length,
-    },
-  };
+
+  // Seed the whole tree from one recursive listing when the backend supports it; per-directory
+  // API expansion (and its tree-expansion budget) only remains as the fallback for truncated
+  // listings or backends without listWholeTree.
+  const seeded = typeof backend.listWholeTree === "function"
+    ? await backend.listWholeTree(ref, identity.rootTreeSha).catch(() => undefined)
+    : undefined;
+  const listings = seeded && !seeded.truncated
+    ? seedListings(seeded.entries, policy, options.scopeRoots)
+    : await openRootListing(ref, identity.rootTreeSha, backend, policy, options.scopeRoots);
+  const rootListing = listings.get("")!;
+
   return new RemoteSourceRevision(ref, {
     repository: `${ref.owner}/${ref.repo}`,
     revision: ref.revision,
     rootTreeSha: identity.rootTreeSha,
     backend: backend.kind,
     status: rootListing.status,
-  }, rootListing, options, dependencies, backend);
+  }, listings, options, dependencies, backend);
 }
 
 export { normalizeSourcePath };

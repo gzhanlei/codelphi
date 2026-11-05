@@ -33,6 +33,23 @@ describe("GitHub source backend", () => {
     ]);
   });
 
+  it("lists the whole tree recursively for seeded indexes", async () => {
+    const requests: string[] = [];
+    const backend = createGitHubSourceBackend({
+      access: { token: "test-token" },
+      fetchImpl: async (input) => {
+        const url = String(input);
+        requests.push(url);
+        return Response.json({ sha: "tree-root", truncated: true, tree: [{ path: "app/page.tsx", type: "blob", sha: "blob-sha", size: 3 }] });
+      },
+    });
+    expect(await backend.listWholeTree!(ref, "tree-root")).toEqual({
+      entries: [{ path: "app/page.tsx", type: "blob", sha: "blob-sha", size: 3 }],
+      truncated: true,
+    });
+    expect(requests).toEqual(["https://api.github.com/repos/gzhanlei/commerce/git/trees/tree-root?recursive=1"]);
+  });
+
   it("falls back to GITHUB_TOKEN when access options are omitted", async () => {
     vi.stubEnv("GITHUB_TOKEN", "environment-token");
     const headers: Record<string, string>[] = [];

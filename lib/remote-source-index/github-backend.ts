@@ -68,6 +68,10 @@ export function createGitHubSourceBackend(options: GitHubSourceBackendOptions): 
       const data = treeResponseSchema.parse(await request(`${repositoryPath(ref)}/git/trees/${encodeURIComponent(treeSha)}`, access));
       return { entries: mapTreeEntries(data.tree), truncated: data.truncated };
     },
+    async listWholeTree(ref: SourceRevisionRef, treeSha: string) {
+      const data = treeResponseSchema.parse(await request(`${repositoryPath(ref)}/git/trees/${encodeURIComponent(treeSha)}?recursive=1`, access));
+      return { entries: mapTreeEntries(data.tree), truncated: data.truncated };
+    },
     async fetchBlob(ref: SourceRevisionRef, _path: string, blobSha: string) {
       const data = blobResponseSchema.parse(await request(`${repositoryPath(ref)}/git/blobs/${encodeURIComponent(blobSha)}`, access));
       return decodeBlob(data);

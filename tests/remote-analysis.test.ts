@@ -256,4 +256,76 @@ describe("remote analysis adapter", () => {
     expect(result.slice.confidence).toBe("high");
 
   });
+
+  it("expands whole-repository slices past the legacy 400-tree budget", async () => {
+    const directories = 401;
+    const packageJson = JSON.stringify({ dependencies: { express: "4.0.0" } });
+    const packageSha = gitBlobSha(packageJson);
+    const rootEntries: Array<{ path: string; type: "blob" | "tree"; sha: string; size?: number }> = [
+      { path: "package.json", type: "blob", sha: packageSha, size: packageJson.length },
+    ];
+    for (let index = 0; index < directories; index += 1) rootEntries.push({ path: `module-${index}`, type: "tree", sha: `tree-${index}` });
+    const backend: RemoteSourceBackend = {
+      kind: "github_api",
+      async resolveRevision() {
+        return { rootTreeSha: "tree-root" };
+      },
+      async listTree(_source, _treeSha, path) {
+        if (!path) return { entries: rootEntries, truncated: false };
+        return { entries: [{ path: `${path}/notes.txt`, type: "blob", sha: "blob-notes", size: 12 }], truncated: false };
+      },
+      async fetchBlob(_source, path) {
+        return new TextEncoder().encode(path === "package.json" ? packageJson : "plain text\n");
+      },
+    };
+    const result = await getRemoteAnalysisSources({
+      product: { id: 1, slug: "salesbuddy", name: "SalesBuddy" },
+      repository: { owner: "gzhanlei", repo: "salesbuddy", revision },
+      access: { token: "test-token" },
+      scopeRoots: [{ path: "" }],
+      backend,
+    }, { planner: createSlicePlanner({ now: Date.now }), budgets: analysisSliceBudgets });
+    expect(result.slice.metrics.treeExpansions).toBe(directories);
+    expect(result.sources.map((source) => source.path)).toEqual(["package.json"]);
+  });
+
+  it("plans whole-repository slices from one recursive listing without per-directory expansion", async () => {
+    const directories = 401;
+    const packageJson = JSON.stringify({ dependencies: { express: "4.0.0" } });
+    const deepPath = `app/${"nested/".repeat(15)}page.tsx`;
+    const entries: Array<{ path: string; type: "blob" | "tree"; sha: string; size?: number }> = [
+      { path: "package.json", type: "blob", sha: gitBlobSha(packageJson), size: packageJson.length },
+      { path: deepPath, type: "blob", sha: gitBlobSha("export default {}\n"), size: 17 },
+    ];
+    const parts = deepPath.split("/");
+    for (let index = 1; index < parts.length; index += 1) entries.push({ path: parts.slice(0, index).join("/"), type: "tree", sha: `tree-${index}` });
+    for (let index = 0; index < directories; index += 1) {
+      entries.push({ path: `module-${index}`, type: "tree", sha: `tree-${index}` });
+      entries.push({ path: `module-${index}/notes.txt`, type: "blob", sha: "blob-notes", size: 12 });
+    }
+    const backend: RemoteSourceBackend = {
+      kind: "github_api",
+      async resolveRevision() {
+        return { rootTreeSha: "tree-root" };
+      },
+      async listTree() {
+        throw new Error("unexpected per-directory tree expansion");
+      },
+      async listWholeTree() {
+        return { entries, truncated: false };
+      },
+      async fetchBlob(_source, path) {
+        return new TextEncoder().encode(path === "package.json" ? packageJson : "export default {}\n");
+      },
+    };
+    const result = await getRemoteAnalysisSources({
+      product: { id: 1, slug: "salesbuddy", name: "SalesBuddy" },
+      repository: { owner: "gzhanlei", repo: "salesbuddy", revision },
+      access: { token: "test-token" },
+      scopeRoots: [{ path: "" }],
+      backend,
+    }, { planner: createSlicePlanner({ now: Date.now }), budgets: analysisSliceBudgets });
+    expect(result.slice.metrics.treeExpansions).toBe(0);
+    expect(result.sources.map((source) => source.path)).toEqual(["package.json", deepPath]);
+  });
 });
