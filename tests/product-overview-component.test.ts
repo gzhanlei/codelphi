@@ -41,6 +41,21 @@ describe("product overview rendering", () => {
     expect(html).toContain("<dt>规格版本</dt><dd>未生成</dd>");
   });
 
+  it("renders the latest release title and summary when it has no behavior diff", () => {
+    const data = buildProductOverview({
+      product: { id: 1, slug: "radar", name: "Radar", description: "" },
+      features: [], scenarios: [],
+      releases: [{ id: 9, title: "多提交 push 分析纳入全部提交标题", summary: "一次推送中的全部提交都会进入发布说明。", sha: "809a5b5ffff", url: "", committedAt: new Date("2026-11-06"), specVersionId: 8 }],
+      behaviorChanges: [{ id: 4, releaseId: 8, kind: "changed", entityType: "scenario", featureName: "旧发布", scenarioReference: "HP-1", summary: "挂在旧版本上的变化，不应显示", before: {}, after: {} }],
+      latestRun: { status: "succeeded" },
+    });
+    const html = renderToStaticMarkup(createElement(ProductOverview, { data }));
+    expect(html).toContain("多提交 push 分析纳入全部提交标题");
+    expect(html).toContain("一次推送中的全部提交都会进入发布说明。");
+    expect(html).toContain("本次发布没有规格行为 Diff");
+    expect(html).not.toContain("不应显示");
+  });
+
   it("renders manual capabilities and a zero version defensively", () => {
     const data = completeOverview();
     data.capabilities[0].source = "manual";

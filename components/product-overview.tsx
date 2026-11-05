@@ -33,8 +33,22 @@ function ReleaseChanges({ data }: { data: ProductOverviewData }) {
   return <div className="overview-change-list">{data.changes.map((change) => <div className="overview-change" key={change.id}><span className={`change-kind ${change.kind}`}>{change.kind}</span><strong>{change.featureName}{change.scenarioReference ? ` · ${change.scenarioReference}` : ""}</strong><p>{change.summary}</p></div>)}</div>;
 }
 
+function QuietRelease({ release }: { release: ProductOverviewData["latestRelease"] }) {
+  if (!release) return null;
+  return (
+    <div className="overview-change-list">
+      <div className="overview-change">
+        <strong>{release.title}</strong>
+        <p>{release.summary}</p>
+        <p className="overview-note">本次发布没有规格行为 Diff，详情见发布变化。</p>
+      </div>
+    </div>
+  );
+}
+
 function ChangesContent({ data }: { data: ProductOverviewData }) {
   if (!data.latestRelease) return <p className="overview-note">尚无发布记录。</p>;
+  if (data.changes.length === 0) return <QuietRelease release={data.latestRelease} />;
   return <ReleaseChanges data={data} />;
 }
 
