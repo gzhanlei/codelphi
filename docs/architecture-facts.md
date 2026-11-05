@@ -15,7 +15,7 @@
 
 ## 生产分析边界
 
-`lib/analysis.ts` 先提交 Spec Version，再延迟读取独立 fixed-SHA 架构源码。架构读取不消耗或扩大 AI 切片预算，Spec 不因架构失败回滚。所有仓库使用同一事实提取和覆盖门禁，没有 owner/repository 名称分支。旧的 `generateArchitectureVersion` 仅保留给历史回归，不是生产分析入口；既有 accepted 版本不会因代码升级自动重建。
+`lib/analysis.ts` 先提交 Spec Version，再延迟读取独立 fixed-SHA 架构源码。架构读取使用独立远程索引，不消耗或扩大 AI 切片预算；默认上限为 1000 个目录、1000 个文件和 10 MB 总内容，单个 blob 上限 1 MB，超限仍失败关闭。Spec 不因架构失败回滚；源码加载阶段的异常也会保存为当前 revision 的 `failed` 架构记录并写入服务日志，不会让产品卡片无限等待。所有仓库使用同一事实提取和覆盖门禁，没有 owner/repository 名称分支。旧的 `generateArchitectureVersion` 仅保留给历史回归，不是生产分析入口；既有 accepted 版本不会因代码升级自动重建。
 
 ## Corpus 影子报告
 

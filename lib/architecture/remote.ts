@@ -1,5 +1,5 @@
 import { isArchitectureSourcePath, type ArchitectureSource } from "./source";
-import type { OpenedRemoteSourceRevision, SourceScopeRoot } from "../remote-source-index";
+import type { OpenedRemoteSourceRevision, RemoteSourceBudgets, SourceScopeRoot } from "../remote-source-index";
 
 export interface ArchitectureRepositorySourceBudgets {
   maxFiles: number;
@@ -15,9 +15,17 @@ export interface ArchitectureRepositorySourceReceipt {
 }
 
 const defaultBudgets: ArchitectureRepositorySourceBudgets = {
-  maxFiles: 240,
-  maxDirectories: 500,
-  maxTotalBytes: 2_000_000,
+  maxFiles: 1000,
+  maxDirectories: 1000,
+  maxTotalBytes: 10_000_000,
+};
+
+export const architectureSourceIndexBudgets: RemoteSourceBudgets = {
+  maxTreeExpansions: 1000,
+  maxBlobFetches: 1000,
+  maxBlobBytes: 1_000_000,
+  maxLinesPerRead: 600,
+  maxTotalContentBytes: 10_000_000,
 };
 
 function assertDirectoryBudget(visited: number, maximum: number) {

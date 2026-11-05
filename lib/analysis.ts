@@ -6,7 +6,7 @@ import { analysisSliceBudgets, getRemoteAnalysisSources, parseSourceRoots } from
 import { loadArchitectureRepositorySources, type ArchitectureRepositorySourceReceipt } from "./architecture/remote";
 import { createSlicePlanner } from "./slice-planner";
 import { insertSpecVersion } from "./spec-versions";
-import { generateRepositoryArchitectureVersion } from "./architecture-version";
+import { generateRepositoryArchitectureVersion, recordArchitecturePreparationFailure } from "./architecture-version";
 import { errorMessage } from "./error-message";
 
 export interface RunContext {
@@ -144,6 +144,7 @@ interface AnalysisArchitectureSources {
 interface AnalysisArchitectureDependencies {
   saveResult: (run: RunContext, result: AnalysisResult, change: ChangeContext) => Promise<number>;
   generateArchitecture: (input: { run: RunContext; sources: SourceFile[]; sourceReceipt: ArchitectureRepositorySourceReceipt; specVersionId: number }) => Promise<{ status: "rendered" | "accepted" | "failed"; errorMessage?: string | null }>;
+  recordFailure?: (input: { run: RunContext; specVersionId: number; errorMessage: string }) => Promise<void>;
 }
 
 export async function saveAnalysisAndArchitecture(run: RunContext, result: AnalysisResult, change: ChangeContext, architecture: AnalysisArchitectureSources | (() => Promise<AnalysisArchitectureSources>), dependencies: AnalysisArchitectureDependencies = { saveResult, generateArchitecture: generateRepositoryArchitectureVersion }) {
@@ -154,7 +155,14 @@ export async function saveAnalysisAndArchitecture(run: RunContext, result: Analy
     const architectureError = document.status === "accepted" ? null : document.errorMessage || `Architecture ${document.status}`;
     return { specVersionId, architectureError };
   } catch (error) {
-    return { specVersionId, architectureError: errorMessage(error, "Architecture generation failed") };
+    const architectureError = errorMessage(error, "Architecture generation failed");
+    try {
+      const recordFailure = dependencies.recordFailure === undefined ? recordArchitecturePreparationFailure : dependencies.recordFailure;
+      await recordFailure({ run, specVersionId, errorMessage: architectureError });
+    } catch (recordError) {
+      console.error(`Failed to record architecture failure for analysis run ${run.id}: ${errorMessage(recordError, "Unknown persistence error")}`);
+    }
+    return { specVersionId, architectureError };
   }
 }
 
@@ -217,8 +225,11 @@ async function performAnalysis(run: RunContext) {
     ...remote.slice.files.map((file) => file.path),
     ...change.files.map((file) => file.path),
   ]));
-  const architectureSources = () => loadArchitectureRepositorySources(remote.index, scopeRoots).then((loaded) => ({ sources: loaded.sources, sourceReceipt: loaded.receipt }));
-  await saveAnalysisAndArchitecture(run, result, change, architectureSources);
+  const architectureSources = () => remote.openArchitectureIndex()
+    .then((index) => loadArchitectureRepositorySources(index, scopeRoots))
+    .then((loaded) => ({ sources: loaded.sources, sourceReceipt: loaded.receipt }));
+  const outcome = await saveAnalysisAndArchitecture(run, result, change, architectureSources);
+  if (outcome.architectureError) console.error(`Architecture generation failed for analysis run ${run.id}: ${outcome.architectureError}`);
 }
 
 async function runAnalysisSafely(runId: number) {

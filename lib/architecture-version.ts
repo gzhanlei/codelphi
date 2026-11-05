@@ -200,6 +200,23 @@ async function generateArchitecture(input: GenerateArchitectureInput, services: 
   }
 }
 
+export async function recordArchitecturePreparationFailure(input: { run: ArchitectureRun; specVersionId: number; errorMessage: string }, save: ArchitectureServices["save"] = saveArchitectureDocument) {
+  const result: ArchitectureDocumentInput = {
+    productId: input.run.productId,
+    specVersionId: input.specVersionId,
+    revision: input.run.afterSha,
+    status: "failed",
+    specJson: "",
+    specSha256: sha256(""),
+    artifactPath: null,
+    artifactSha256: null,
+    validationReceipt: null,
+    visualReceipt: null,
+    errorMessage: input.errorMessage.slice(0, 8_000),
+  };
+  await save(result);
+}
+
 export function generateArchitectureVersion(input: GenerateArchitectureInput, services: ArchitectureServices = defaultServices()) {
   return generateArchitecture(input, services);
 }

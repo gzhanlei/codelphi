@@ -30,16 +30,20 @@ describe("analysis architecture pipeline", () => {
     expect(events).toEqual(["spec", "load", "architecture"]);
 
     const failedLoad = vi.fn(async () => { throw new Error("Architecture evidence incomplete: mysql"); });
-    const failed = await saveAnalysisAndArchitecture(run, result, change, failedLoad, { saveResult, generateArchitecture: vi.fn() });
+    const recordFailure = vi.fn(async () => undefined);
+    const failed = await saveAnalysisAndArchitecture(run, result, change, failedLoad, { saveResult, generateArchitecture: vi.fn(), recordFailure });
     expect(failed).toEqual({ specVersionId: 7, architectureError: "Architecture evidence incomplete: mysql" });
+    expect(recordFailure).toHaveBeenCalledWith({ run, specVersionId: 7, errorMessage: "Architecture evidence incomplete: mysql" });
     expect(saveResult).toHaveBeenCalledTimes(2);
   });
 
   it("does not roll back a saved spec when architecture generation fails unexpectedly", async () => {
     const saveResult = vi.fn(async () => 7);
     const generateArchitecture = vi.fn(async () => { throw new Error("CLI unavailable"); });
-    const output = await saveAnalysisAndArchitecture(run, result, change, architecture, { saveResult, generateArchitecture });
+    const recordFailure = vi.fn(async () => undefined);
+    const output = await saveAnalysisAndArchitecture(run, result, change, architecture, { saveResult, generateArchitecture, recordFailure });
     expect(output).toEqual({ specVersionId: 7, architectureError: "CLI unavailable" });
+    expect(recordFailure).toHaveBeenCalledWith({ run, specVersionId: 7, errorMessage: "CLI unavailable" });
   });
 
   it("surfaces a persisted non-accepted architecture without rolling back the spec", async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loadArchitectureRepositorySources } from "../lib/architecture/remote";
+import { architectureSourceIndexBudgets, loadArchitectureRepositorySources } from "../lib/architecture/remote";
 import type { OpenedRemoteSourceRevision, SourceLineRequest, SourceTreeListing } from "../lib/remote-source-index";
 
 function listing(path: string, entries: SourceTreeListing["entries"], truncated = false): SourceTreeListing {
@@ -50,6 +50,10 @@ function fixtureIndex(files: Map<string, string>, truncated = false, inconsisten
 }
 
 describe("architecture repository source loading", () => {
+  it("uses independent bounded budgets for repository-scale architecture reads", () => {
+    expect(architectureSourceIndexBudgets).toEqual({ maxTreeExpansions: 1000, maxBlobFetches: 1000, maxBlobBytes: 1_000_000, maxLinesPerRead: 600, maxTotalContentBytes: 10_000_000 });
+  });
+
   it("reads complete fixed-revision source files in pages and ignores non-runtime assets", async () => {
     const goLines = Array.from({ length: 601 }, (_, index) => `line-${index + 1}`).join("\n");
     const expectedBytes = goLines.length + 1;
