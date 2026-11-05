@@ -7,13 +7,21 @@ export function analysisRefreshDelay(status: string) {
   return status === "queued" || status === "running" ? 3_000 : null;
 }
 
-export function AnalysisStatusRefresh({ status }: { status: string }) {
+function usePendingRefresh(pending: boolean) {
   const router = useRouter();
   useEffect(() => {
-    const delay = analysisRefreshDelay(status);
-    if (delay === null) return;
-    const timer = setInterval(() => router.refresh(), delay);
+    if (!pending) return;
+    const timer = setInterval(() => router.refresh(), 3_000);
     return () => clearInterval(timer);
-  }, [status, router]);
+  }, [pending, router]);
+}
+
+export function AnalysisStatusRefresh({ status }: { status: string }) {
+  usePendingRefresh(analysisRefreshDelay(status) !== null);
+  return null;
+}
+
+export function ProductListRefresh({ pending }: { pending: boolean }) {
+  usePendingRefresh(pending);
   return null;
 }

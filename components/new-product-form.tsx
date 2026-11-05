@@ -8,6 +8,26 @@ import { defaultConnectionId, nextProductSlug } from "@/lib/product-input";
 import { ProductSubmissionSection } from "./product-submission-section";
 import { ProductInformationSection, RepositorySection } from "./product-form-sections";
 
+interface ProductCreationControls {
+  setPending: (pending: boolean) => void;
+  setError: (message: string) => void;
+  onCreated: () => void;
+}
+
+type ProductInput = Parameters<typeof createProduct>[0];
+
+export async function handleProductCreation(input: ProductInput, controls: ProductCreationControls, create: (input: ProductInput) => Promise<string> = createProduct) {
+  controls.setPending(true);
+  controls.setError("");
+  try {
+    await create(input);
+    controls.onCreated();
+  } catch (cause) {
+    controls.setError(errorMessage(cause, "添加产品失败"));
+    controls.setPending(false);
+  }
+}
+
 export function NewProductForm({ connections, hasServerToken }: { connections: Array<{ id: number; accountLogin: string }>; hasServerToken: boolean }) {
   const router = useRouter();
   const [name, setName] = useState("");
@@ -33,16 +53,14 @@ export function NewProductForm({ connections, hasServerToken }: { connections: A
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setPending(true);
-    setError("");
-    try {
-      const productSlug = await createProduct({ name, slug, repository, provider: "github", defaultBranch, description, analyze, connectionId });
-      router.push(`/products/${productSlug}?view=spec`);
-      router.refresh();
-    } catch (cause) {
-      setError(errorMessage(cause, "添加产品失败"));
-      setPending(false);
-    }
+    await handleProductCreation({ name, slug, repository, provider: "github", defaultBranch, description, analyze, connectionId }, {
+      setPending,
+      setError,
+      onCreated: () => {
+        router.push("/");
+        router.refresh();
+      },
+    });
   }
 
   return (

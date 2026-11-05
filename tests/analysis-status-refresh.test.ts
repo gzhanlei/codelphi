@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import { AnalysisStatusRefresh, analysisRefreshDelay } from "../components/analysis-status-refresh";
+import { AnalysisStatusRefresh, ProductListRefresh, analysisRefreshDelay } from "../components/analysis-status-refresh";
 
 const { useEffect, refresh } = vi.hoisted(() => ({ useEffect: vi.fn(), refresh: vi.fn() }));
 vi.mock("react", async (importOriginal) => ({ ...await importOriginal<typeof import("react")>(), useEffect }));
@@ -30,6 +30,25 @@ describe("analysis status refresh", () => {
     cleanup();
     vi.advanceTimersByTime(6_000);
     expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it("polls the product list only while at least one card is pending", () => {
+    ProductListRefresh({ pending: true });
+    const effect = useEffect.mock.calls[0][0] as () => () => void;
+    const cleanup = effect();
+    vi.advanceTimersByTime(3_000);
+    expect(refresh).toHaveBeenCalledOnce();
+    cleanup();
+    vi.advanceTimersByTime(6_000);
+    expect(refresh).toHaveBeenCalledOnce();
+
+    useEffect.mockClear();
+    refresh.mockClear();
+    ProductListRefresh({ pending: false });
+    const terminalEffect = useEffect.mock.calls[0][0] as () => undefined;
+    expect(terminalEffect()).toBeUndefined();
+    vi.advanceTimersByTime(6_000);
+    expect(refresh).not.toHaveBeenCalled();
   });
 
   it("does not schedule work after a terminal state", () => {

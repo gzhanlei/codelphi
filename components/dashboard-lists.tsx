@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ProductListRefresh } from "./analysis-status-refresh";
 
 export interface DashboardProduct {
   id: number;
@@ -8,6 +9,10 @@ export interface DashboardProduct {
   featureCount: number;
   releaseCount: number;
   lastRelease?: Date;
+  analysisStatus?: string | null;
+  analysisRevision?: string | null;
+  architectureStatus?: string | null;
+  architectureRevision?: string | null;
 }
 
 export interface DashboardRelease {
@@ -19,21 +24,43 @@ export interface DashboardRelease {
   productSlug: string;
 }
 
+function hasCurrentArchitecture(product: DashboardProduct, statuses: ReadonlySet<unknown>) {
+  return product.analysisRevision != null && product.architectureRevision === product.analysisRevision && statuses.has(product.architectureStatus);
+}
+
+export function isDashboardProductPending(product: DashboardProduct) {
+  if (product.analysisStatus === "queued" || product.analysisStatus === "running") return true;
+  if (product.analysisStatus !== "succeeded") return false;
+  if (hasCurrentArchitecture(product, new Set(["accepted"]))) return false;
+  return !hasCurrentArchitecture(product, new Set(["failed", "rendered"]));
+}
+
+function ProductCardContent({ product, pending }: { product: DashboardProduct; pending: boolean }) {
+  return <>
+    <div className="product-icon">{product.name.slice(0, 1)}</div>
+    <div className="product-card-title"><h3>{product.name}</h3><span>{pending ? "…" : "↗"}</span></div>
+    <p aria-live={pending ? "polite" : undefined}>{pending ? "分析中，请稍候" : product.description}</p>
+    <div className="product-meta"><span>{Number(product.featureCount)} 个功能</span><span>{Number(product.releaseCount)} 次发布</span></div>
+  </>;
+}
+
 export function ProductGrid({ products }: { products: DashboardProduct[] }) {
   if (products.length === 0) {
     return <div className="empty-state"><strong>还没有接入产品</strong><p>配置 MySQL 后运行 <code>npm run db:seed</code> 注册 Radar 自身。</p></div>;
   }
   return (
-    <div className="product-grid">
-      {products.map((product) => (
-        <Link href={`/products/${product.slug}`} className="product-card" key={product.id}>
-          <div className="product-icon">{product.name.slice(0, 1)}</div>
-          <div className="product-card-title"><h3>{product.name}</h3><span>↗</span></div>
-          <p>{product.description}</p>
-          <div className="product-meta"><span>{Number(product.featureCount)} 个功能</span><span>{Number(product.releaseCount)} 次发布</span></div>
-        </Link>
-      ))}
-    </div>
+    <>
+      <ProductListRefresh pending={products.some(isDashboardProductPending)} />
+      <div className="product-grid">
+        {products.map((product) => {
+          const pending = isDashboardProductPending(product);
+          if (pending) {
+            return <article className="product-card product-card-pending" aria-disabled="true" key={product.id}><ProductCardContent product={product} pending /></article>;
+          }
+          return <Link href={`/products/${product.slug}`} className="product-card" key={product.id}><ProductCardContent product={product} pending={false} /></Link>;
+        })}
+      </div>
+    </>
   );
 }
 
