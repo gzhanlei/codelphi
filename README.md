@@ -109,6 +109,24 @@ https://radar.chandler.work/auth/callback
 
 新 GitHub App 会自动配置 App 级 Webhook；已有 App 在 `/integrations` 点击“设置 Push 通知”，在 GitHub App 设置中一次性填写相同 URL、将 Webhook Secret 设为部署环境的 `GITHUB_WEBHOOK_SECRET`，并订阅 `push`。接收端同时接受 App Webhook Secret 与旧的 `GITHUB_WEBHOOK_SECRET`，因此迁移期间已有的逐仓 Webhook 不会中断，缺少已保存 App Secret 的旧 App 也能使用环境变量 Secret 完成验签。
 
+#### 旧 App 迁移（一次性手工操作）
+
+GitHub 没有更新 App Webhook 的公开 REST API，因此在本功能上线前创建的 App 需要在 GitHub 网页补配一次。注意 URL/Secret 和事件订阅是**两个独立的设置区域**，两处都要完成：
+
+1. **Webhook**（App 设置 → Webhook 标签）：
+   - 勾选 Active，Payload URL 填 `https://<部署域名>/api/webhooks/github`
+   - Webhook secret 填服务器 `.env` 中的 `GITHUB_WEBHOOK_SECRET`（GitHub 不回显已保存的值，核对只能重新粘贴）
+2. **事件订阅**（App 设置 → Permissions & events → 底部 **Subscribe to events**）：勾选 **Push**，点击 Save changes。最容易漏的一步——只填 Webhook 表单不会订阅事件，push 不会有任何投递。
+3. **验证**：App 设置 → Advanced → Recent Deliveries：
+   - 保存 secret 后对 ping 点 Redeliver，应返回 200
+   - 推送一个 commit，应出现一条 202 投递，产品页自动开始分析
+
+排错速查：
+
+- **返回 401 invalid_signature**：GitHub 端保存的 Secret 与服务器不一致。在服务器本地用同一 Secret 对测试 payload 计算 HMAC 后 curl 部署地址的 `/api/webhooks/github`，本地 200 而线上 401 即可确认是 Secret 粘贴问题，重新粘贴即可。
+- **push 后完全没有投递记录**：事件未订阅，回到第 2 步勾选 Push。
+- **修改 Secret 后没有自动 ping**：GitHub 更新 Secret 不重发事件，需在 Advanced → Recent Deliveries 手动 Redeliver。
+
 不使用 App 级通知时，仍可在单个仓库的 Webhook 设置中手工填写：
 
 ```text
