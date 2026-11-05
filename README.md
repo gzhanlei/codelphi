@@ -1,12 +1,23 @@
 # Radar
 
-**Radar 是 Chandler 产品家族的产品知识与变更中心。** 它从 GitHub 代码和发布记录中生成带证据的产品规格与变化摘要。
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Next.js](https://img.shields.io/badge/Next.js-black?logo=next.js)](https://nextjs.org/)
+[![React](https://img.shields.io/badge/React-61DAFB?logo=react&logoColor=black)](https://react.dev/)
+[![MySQL](https://img.shields.io/badge/MySQL-4479A1?logo=mysql&logoColor=white)](https://www.mysql.com/)
 
-- 生产域名（规划）：`https://radar.chandler.work`
-- 统一身份：`https://app.chandler.work` / WorkMembership OAuth 2.0
-- 数据库：现有腾讯云 MySQL 8 中的独立 `radar` 数据库
-- AI：现有 LLMGateway 或其他 OpenAI 兼容的非流式接口
-- 首个试点：Radar 分析自己的 GitHub 仓库
+**Radar 把 GitHub 仓库变成一份可追溯的产品规格。** 连接仓库后，AI 自动提取功能清单与用户场景，每次 push 自动总结行为变化——每一条结论都附带可点击的源码证据，而不是凭空生成的摘要。
+
+> Radar turns a GitHub repository into a traceable product spec: AI-extracted features and scenarios, per-push behavior changes, every claim backed by source-code evidence.
+
+- 🔍 **证据可溯**：AI 只能引用本次实际读取的代码路径，未知路径会让分析直接失败——从机制上杜绝幻觉，而不是靠提示词约定。
+- 🔄 **随代码演进**：GitHub App webhook 驱动，push 即自动分析；发布页优先展示功能与场景的前后行为差异，Commit 与 AI 摘要仅作证据补充。
+- ✍️ **人机协作**：功能树、场景与产品概况支持手动编辑；标记为人工来源的内容永远不会被自动分析覆盖。
+- 🏗️ **真实可用**：Radar 在生产环境持续分析自身仓库等多个真实产品，本项目本身就是它的第一个分析对象。
+
+## 技术栈
+
+Next.js（App Router）· TypeScript · React · MySQL 8 · Vitest · OpenAI 兼容 LLM API
 
 ## 已实现
 
