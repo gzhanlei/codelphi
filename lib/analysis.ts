@@ -1,13 +1,10 @@
 import type { PoolConnection } from "mysql2/promise";
 import { getDb } from "./db";
 import { analyzeWithAI, type AnalysisResult } from "./ai";
-import { resolveAnalysisTarget, type ChangeContext, type CodeHostingProvider, type SourceFile } from "./code-hosting";
+import { resolveAnalysisTarget, type ChangeContext, type CodeHostingProvider } from "./code-hosting";
 import { analysisSliceBudgets, getRemoteAnalysisSources, parseSourceRoots } from "./remote-analysis";
-import { loadArchitectureRepositorySources, type ArchitectureRepositorySourceReceipt } from "./architecture/remote";
 import { createSlicePlanner } from "./slice-planner";
 import { insertSpecVersion } from "./spec-versions";
-import { generateRepositoryArchitectureVersion, recordArchitecturePreparationFailure } from "./architecture-version";
-import { errorMessage } from "./error-message";
 
 export interface RunContext {
   id: number;
@@ -136,36 +133,6 @@ async function saveResult(run: RunContext, result: AnalysisResult, change: Chang
   }
 }
 
-interface AnalysisArchitectureSources {
-  sources: SourceFile[];
-  sourceReceipt: ArchitectureRepositorySourceReceipt;
-}
-
-interface AnalysisArchitectureDependencies {
-  saveResult: (run: RunContext, result: AnalysisResult, change: ChangeContext) => Promise<number>;
-  generateArchitecture: (input: { run: RunContext; sources: SourceFile[]; sourceReceipt: ArchitectureRepositorySourceReceipt; specVersionId: number }) => Promise<{ status: "rendered" | "accepted" | "failed"; errorMessage?: string | null }>;
-  recordFailure?: (input: { run: RunContext; specVersionId: number; errorMessage: string }) => Promise<void>;
-}
-
-export async function saveAnalysisAndArchitecture(run: RunContext, result: AnalysisResult, change: ChangeContext, architecture: AnalysisArchitectureSources | (() => Promise<AnalysisArchitectureSources>), dependencies: AnalysisArchitectureDependencies = { saveResult, generateArchitecture: generateRepositoryArchitectureVersion }) {
-  const specVersionId = await dependencies.saveResult(run, result, change);
-  try {
-    const loaded = typeof architecture === "function" ? await architecture() : architecture;
-    const document = await dependencies.generateArchitecture({ run, sources: loaded.sources, sourceReceipt: loaded.sourceReceipt, specVersionId });
-    const architectureError = document.status === "accepted" ? null : document.errorMessage || `Architecture ${document.status}`;
-    return { specVersionId, architectureError };
-  } catch (error) {
-    const architectureError = errorMessage(error, "Architecture generation failed");
-    try {
-      const recordFailure = dependencies.recordFailure === undefined ? recordArchitecturePreparationFailure : dependencies.recordFailure;
-      await recordFailure({ run, specVersionId, errorMessage: architectureError });
-    } catch (recordError) {
-      console.error(`Failed to record architecture failure for analysis run ${run.id}: ${errorMessage(recordError, "Unknown persistence error")}`);
-    }
-    return { specVersionId, architectureError };
-  }
-}
-
 export async function queueAnalysis(repositoryId: number, beforeSha: string | null, afterSha: string, trigger: "manual" | "push") {
   const db = getDb();
   const [existing] = await db.execute(
@@ -225,11 +192,7 @@ async function performAnalysis(run: RunContext) {
     ...remote.slice.files.map((file) => file.path),
     ...change.files.map((file) => file.path),
   ]));
-  const architectureSources = () => remote.openArchitectureIndex()
-    .then((index) => loadArchitectureRepositorySources(index, scopeRoots))
-    .then((loaded) => ({ sources: loaded.sources, sourceReceipt: loaded.receipt }));
-  const outcome = await saveAnalysisAndArchitecture(run, result, change, architectureSources);
-  if (outcome.architectureError) console.error(`Architecture generation failed for analysis run ${run.id}: ${outcome.architectureError}`);
+  await saveResult(run, result, change);
 }
 
 async function runAnalysisSafely(runId: number) {

@@ -3,7 +3,6 @@ import { getProductDetails } from "../lib/product-details";
 
 const execute = vi.fn();
 vi.mock("../lib/db", () => ({ getDb: () => ({ execute }) }));
-vi.mock("../lib/architecture-store", () => ({ getLatestArchitectureDocument: vi.fn(async () => undefined) }));
 
 const product = { id: 4, slug: "radar", name: "Radar", description: "Product knowledge", descriptionSource: "generated", descriptionEvidence: JSON.stringify([{ path: "lib/analysis.ts", startLine: 185 }]) };
 
@@ -46,6 +45,7 @@ describe("product details", () => {
     expect(details?.scenarios).toHaveLength(1);
     expect(details?.changes).toHaveLength(1);
     expect(details?.behaviorChanges[0]).toMatchObject({ before: { old: true }, after: { new: true } });
+    expect(details).not.toHaveProperty("architecture");
     expect(details?.latestRun?.status).toBe("succeeded");
     expect(details?.product.descriptionEvidence).toEqual([{ path: "lib/analysis.ts", startLine: 185 }]);
     expect(execute.mock.calls[0][1]).toEqual(["radar"]);

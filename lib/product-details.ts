@@ -1,6 +1,5 @@
 import { getDb } from "./db";
 import { parseJsonValue } from "./json";
-import { getLatestArchitectureDocument } from "./architecture-store";
 import type { BehaviorChangeRow, ChangeRow, FeatureRow, ReleaseRow, ScenarioRow } from "./types";
 
 async function queryByIds<T>(ids: number[], query: string) {
@@ -64,7 +63,7 @@ export async function getProductDetails(slug: string, organizationId?: number) {
   const [releaseRows] = await db.execute("SELECT id, title, summary, sha, url, committed_at AS committedAt, spec_version_id AS specVersionId FROM releases WHERE product_id = ? ORDER BY committed_at DESC LIMIT 30", [product.id]);
   const features = featureRows as FeatureRow[];
   const releases = releaseRows as ReleaseRow[];
-  const [scenarios, changes, behaviorChanges, architecture] = await Promise.all([loadScenarios(features), loadChanges(releases), loadBehaviorChanges(releases), getLatestArchitectureDocument(product.id)]);
+  const [scenarios, changes, behaviorChanges] = await Promise.all([loadScenarios(features), loadChanges(releases), loadBehaviorChanges(releases)]);
 
   return {
     product: { ...product, descriptionEvidence: parseJsonValue(product.descriptionEvidence) },
@@ -75,6 +74,5 @@ export async function getProductDetails(slug: string, organizationId?: number) {
     releases,
     changes,
     behaviorChanges,
-    architecture,
   };
 }

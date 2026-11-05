@@ -1,5 +1,7 @@
 # Archify 阶段 1：固定运行时与原型验收
 
+> 当前边界：Radar 已停止生成和展示系统架构图，旧架构页面与 API 已移除。本文仅保留历史验收记录和独立 CLI/Skill 项目的抽取参考；Radar 的 Explainer 导出仍使用 Archify finalize，但不包含架构图。
+
 Radar 只使用 **Archify v3.2.0（MIT）**。官方 ZIP 保存在 `vendor/archify/archify-v3.2.0.zip`，版本、来源与 SHA-256 记录在 `vendor/archify/release.json`。
 
 - Release：`https://github.com/tt-a1i/archify/releases/download/v3.2.0/archify.zip`

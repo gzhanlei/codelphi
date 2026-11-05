@@ -10,9 +10,6 @@ export interface DashboardProduct {
   releaseCount: number;
   lastRelease?: Date;
   analysisStatus?: string | null;
-  analysisRevision?: string | null;
-  architectureStatus?: string | null;
-  architectureRevision?: string | null;
 }
 
 export interface DashboardRelease {
@@ -24,15 +21,8 @@ export interface DashboardRelease {
   productSlug: string;
 }
 
-function hasCurrentArchitecture(product: DashboardProduct, statuses: ReadonlySet<unknown>) {
-  return product.analysisRevision != null && product.architectureRevision === product.analysisRevision && statuses.has(product.architectureStatus);
-}
-
 export function isDashboardProductPending(product: DashboardProduct) {
-  if (product.analysisStatus === "queued" || product.analysisStatus === "running") return true;
-  if (product.analysisStatus !== "succeeded") return false;
-  if (hasCurrentArchitecture(product, new Set(["accepted"]))) return false;
-  return !hasCurrentArchitecture(product, new Set(["failed", "rendered"]));
+  return product.analysisStatus === "queued" || product.analysisStatus === "running";
 }
 
 function ProductCardContent({ product, pending }: { product: DashboardProduct; pending: boolean }) {

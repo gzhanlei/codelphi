@@ -124,42 +124,11 @@ describe("analysis orchestration", () => {
     expect(connection.commit).toHaveBeenCalledOnce();
   });
 
-  it("loads independent fixed-revision architecture evidence after the AI slice", async () => {
+  it("saves the spec without opening an architecture index or generating a diagram", async () => {
     await runAnalysis(8);
-    expect(openArchitectureIndex).toHaveBeenCalledOnce();
-    expect(listDir).toHaveBeenCalledWith("");
-    expect(readLines).toHaveBeenCalledWith(expect.objectContaining({ path: "lib/db.ts", requestedBy: "evidence_verifier", reason: "architecture repository source inventory" }));
-    expect(readLines).toHaveBeenCalledWith(expect.objectContaining({ path: "lib/ai.ts", requestedBy: "evidence_verifier" }));
-    expect(vi.mocked(generateRepositoryArchitectureVersion).mock.calls[0][0].sources).toEqual(expect.arrayContaining([
-      expect.objectContaining({ path: "lib/db.ts", content: "1: lib/db.ts complete evidence" }),
-      expect.objectContaining({ path: "lib/ai.ts", content: "1: lib/ai.ts complete evidence" }),
-    ]));
-    expect(vi.mocked(generateRepositoryArchitectureVersion).mock.calls[0][0].sourceReceipt).toEqual({ scope: "repository", directories: 1, files: 2, bytes: 200 });
+    expect(openArchitectureIndex).not.toHaveBeenCalled();
+    expect(generateRepositoryArchitectureVersion).not.toHaveBeenCalled();
     expect(connection.commit).toHaveBeenCalledOnce();
-  });
-
-  it("persists deferred architecture loader failures without rolling back the spec", async () => {
-    openArchitectureIndex.mockRejectedValueOnce(new Error("architecture budget exhausted"));
-    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    try {
-      await runAnalysis(8);
-      const insert = execute.mock.calls.find(([sql]) => String(sql).includes("INSERT INTO architecture_documents"));
-      expect(insert?.[1]).toEqual(expect.arrayContaining([4, 44, "sha-after", "failed", "architecture budget exhausted"]));
-      expect(log).toHaveBeenCalledWith("Architecture generation failed for analysis run 8: architecture budget exhausted");
-      expect(execute).not.toHaveBeenCalledWith(expect.stringContaining("status = 'failed'"), expect.anything());
-    } finally { log.mockRestore(); }
-  });
-
-  it.each([
-    { owner: "gzhanlei", name: "other" },
-    { owner: "other", name: "radar" },
-  ])("uses the same repository architecture loader for $owner/$name", async (identity) => {
-    runRows = [{ ...run, ...identity }];
-    await runAnalysis(8);
-    expect(listDir).toHaveBeenCalledWith("");
-    expect(readLines).toHaveBeenCalled();
-    expect(vi.mocked(generateRepositoryArchitectureVersion).mock.calls[0][0].sources).toHaveLength(2);
-    expect(vi.mocked(generateRepositoryArchitectureVersion).mock.calls[0][0].sourceReceipt.files).toBe(2);
   });
 
   it("fills only a blank product description with traceable AI output", async () => {

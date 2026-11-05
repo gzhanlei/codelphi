@@ -254,10 +254,6 @@ describe("remote analysis adapter", () => {
     expect(result.sources[1].content).toBe("1: export default function Page() {}");
     expect(result.sources[2].content).toBe("1: const server = 1;\n2: start(server);");
     expect(result.slice.confidence).toBe("high");
-    expect(result.index.metrics.blobFetches).toBeGreaterThan(0);
-    const architectureIndex = await result.openArchitectureIndex();
-    expect(architectureIndex).not.toBe(result.index);
-    expect(architectureIndex.identity.revision).toBe(ref.revision);
-    expect(architectureIndex.metrics).toEqual({ treeExpansions: 0, blobFetches: 0, contentBytes: 0 });
+
   });
 });

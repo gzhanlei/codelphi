@@ -57,6 +57,27 @@ function SavedConnections({ connections, canEdit }: { connections: RepositoryCon
   );
 }
 
+function IntegrationHeading({ kind }: { kind: TokenIntegrationCardProps["kind"] }) {
+  const isGitee = kind === "gitee";
+  return <div className="integration-card-heading"><div className="integration-icon" aria-hidden="true">{isGitee ? "G" : "⌂"}</div><div><h2>{isGitee ? "Gitee" : "自有 Git 服务"}</h2><p>{isGitee ? "使用私人令牌连接 Gitee 账号" : "连接 GitLab、Gitea 或内网部署的 Git 服务"}</p></div></div>;
+}
+
+function ProviderFields({ kind, provider, baseUrl, onProviderChange, onBaseUrlChange }: { kind: TokenIntegrationCardProps["kind"]; provider: RepositoryProvider; baseUrl: string; onProviderChange: (provider: RepositoryProvider) => void; onBaseUrlChange: (value: string) => void }) {
+  if (kind === "gitee") return null;
+  return <>
+    <label className="field"><span>平台类型 <b>*</b></span><select value={provider} onChange={(event) => onProviderChange(event.target.value as RepositoryProvider)}><option value="gitlab">GitLab（云端或自托管）</option><option value="gitea">Gitea</option></select></label>
+    <label className="field"><span>服务地址 <b>*</b></span><input type="url" value={baseUrl} onChange={(event) => onBaseUrlChange(event.target.value)} placeholder="https://git.example.com" required /><small>填写服务根地址，不要包含 /api/v4、/api/v1 或仓库路径。</small></label>
+  </>;
+}
+
+function TokenField({ kind, provider, token, onTokenChange }: { kind: TokenIntegrationCardProps["kind"]; provider: RepositoryProvider; token: string; onTokenChange: (value: string) => void }) {
+  return <label className="field"><span>访问令牌 <b>*</b></span><input type="password" value={token} onChange={(event) => onTokenChange(event.target.value)} placeholder={kind === "gitee" ? "粘贴 Gitee 私人令牌" : `粘贴 ${providerNames[provider]} 访问令牌`} autoComplete="off" spellCheck={false} required /><small>仅用于服务端连接验证，保存后不会再次显示；删除连接会清除令牌。</small></label>;
+}
+
+function ConnectionFormStatus({ pending, error, success }: { pending: boolean; error: string; success: string }) {
+  return <><FormError message={error} />{success && <p className="form-success" role="status">{success}</p>}<button className="primary-button" type="submit" disabled={pending}>{pending ? "正在验证连接…" : "验证并保存连接"}</button></>;
+}
+
 export function TokenIntegrationCard({ kind, connections, canEdit, allowlistConfigured = false }: TokenIntegrationCardProps) {
   const router = useRouter();
   const [provider, setProvider] = useState<RepositoryProvider>(kind === "gitee" ? "gitee" : "gitlab");
@@ -86,24 +107,14 @@ export function TokenIntegrationCard({ kind, connections, canEdit, allowlistConf
 
   return (
     <section className="integration-card token-integration-card">
-      <div className="integration-card-heading">
-        <div className="integration-icon" aria-hidden="true">{isGitee ? "G" : "⌂"}</div>
-        <div><h2>{isGitee ? "Gitee" : "自有 Git 服务"}</h2><p>{isGitee ? "使用私人令牌连接 Gitee 账号" : "连接 GitLab、Gitea 或内网部署的 Git 服务"}</p></div>
-      </div>
-      <p className="connection-capability">当前开放连接配置与验证；添加产品和架构分析仍仅支持 GitHub。</p>
+      <IntegrationHeading kind={kind} />
+      <p className="connection-capability">当前开放连接配置与验证；添加产品和代码分析仍仅支持 GitHub。</p>
       <ConnectionGuide kind={kind} allowlistConfigured={allowlistConfigured} />
       {canEdit ? (
         <form onSubmit={submit}>
-          {!isGitee && (
-            <label className="field"><span>平台类型 <b>*</b></span><select value={provider} onChange={(event) => { setProvider(event.target.value as RepositoryProvider); setToken(""); setSuccess(""); }}><option value="gitlab">GitLab（云端或自托管）</option><option value="gitea">Gitea</option></select></label>
-          )}
-          {!isGitee && (
-            <label className="field"><span>服务地址 <b>*</b></span><input type="url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://git.example.com" required /><small>填写服务根地址，不要包含 /api/v4、/api/v1 或仓库路径。</small></label>
-          )}
-          <label className="field"><span>访问令牌 <b>*</b></span><input type="password" value={token} onChange={(event) => setToken(event.target.value)} placeholder={isGitee ? "粘贴 Gitee 私人令牌" : `粘贴 ${providerNames[provider]} 访问令牌`} autoComplete="off" spellCheck={false} required /><small>仅用于服务端连接验证，保存后不会再次显示；删除连接会清除令牌。</small></label>
-          <FormError message={error} />
-          {success && <p className="form-success" role="status">{success}</p>}
-          <button className="primary-button" type="submit" disabled={pending}>{pending ? "正在验证连接…" : "验证并保存连接"}</button>
+          <ProviderFields kind={kind} provider={provider} baseUrl={baseUrl} onProviderChange={(nextProvider) => { setProvider(nextProvider); setToken(""); setSuccess(""); }} onBaseUrlChange={setBaseUrl} />
+          <TokenField kind={kind} provider={provider} token={token} onTokenChange={setToken} />
+          <ConnectionFormStatus pending={pending} error={error} success={success} />
         </form>
       ) : <p className="permission-note">工作区查看者只能查看连接状态，请联系编辑者或所有者配置。</p>}
       <SavedConnections connections={connections} canEdit={canEdit} />

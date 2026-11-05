@@ -16,25 +16,18 @@ const product: DashboardProduct = {
   featureCount: 0,
   releaseCount: 0,
   analysisStatus: "running",
-  analysisRevision: "sha-1",
-  architectureStatus: null,
-  architectureRevision: null,
 };
 
 describe("dashboard product readiness", () => {
-  it("waits for active analysis and the accepted architecture of the same revision", () => {
+  it("waits only for active analysis, never for architecture generation", () => {
     expect(isDashboardProductPending(product)).toBe(true);
     expect(isDashboardProductPending({ ...product, analysisStatus: "queued" })).toBe(true);
-    expect(isDashboardProductPending({ ...product, analysisStatus: "succeeded" })).toBe(true);
-    expect(isDashboardProductPending({ ...product, analysisStatus: "succeeded", architectureStatus: "accepted", architectureRevision: "older-sha" })).toBe(true);
-    expect(isDashboardProductPending({ ...product, analysisStatus: "succeeded", architectureStatus: "accepted", architectureRevision: "sha-1" })).toBe(false);
+    expect(isDashboardProductPending({ ...product, analysisStatus: "succeeded" })).toBe(false);
   });
 
   it("does not leave failed or intentionally unstarted products polling forever", () => {
     expect(isDashboardProductPending({ ...product, analysisStatus: "failed" })).toBe(false);
-    expect(isDashboardProductPending({ ...product, analysisStatus: "succeeded", architectureStatus: "failed", architectureRevision: "sha-1" })).toBe(false);
-    expect(isDashboardProductPending({ ...product, analysisStatus: "succeeded", architectureStatus: "rendered", architectureRevision: "sha-1" })).toBe(false);
-    expect(isDashboardProductPending({ ...product, analysisStatus: null, analysisRevision: null })).toBe(false);
+    expect(isDashboardProductPending({ ...product, analysisStatus: null })).toBe(false);
   });
 
   it("renders a non-link pending card with explicit waiting text", () => {
@@ -46,8 +39,8 @@ describe("dashboard product readiness", () => {
     expect(html).not.toContain("Evidence-backed product");
   });
 
-  it("turns the card back into a link only after the current architecture is accepted", () => {
-    const ready = { ...product, analysisStatus: "succeeded", architectureStatus: "accepted", architectureRevision: "sha-1" };
+  it("turns the card into a link as soon as analysis succeeds", () => {
+    const ready = { ...product, analysisStatus: "succeeded" };
     const html = renderToStaticMarkup(createElement(ProductGrid, { products: [ready] }));
     expect(html).toContain("href=\"/products/new-product\"");
     expect(html).toContain("Evidence-backed product");

@@ -4,12 +4,6 @@ function prose(value: string) {
   return value.replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/</g, "\\<").replace(/>/g, "\\>").replace(/\*/g, "\\*").replace(/"/g, "\\\"");
 }
 
-function architecturePanel(data: ProductOverviewData, includeArchitecture: boolean) {
-  if (includeArchitecture && data.architecture?.status === "accepted") return "@diagram architecture source=architecture.json";
-  if (!data.architecture) return "尚未生成架构文档。";
-  return `架构状态：${data.architecture.status}。${data.architecture.errorMessage ? `\n${prose(data.architecture.errorMessage)}` : ""}`;
-}
-
 function capabilityRows(data: ProductOverviewData) {
   return data.capabilities.map((feature) => `| ${prose(feature.name)} | ${feature.scenarioCount} | ${feature.source === "manual" ? "人工维护" : "代码生成"} |`).join("\n");
 }
@@ -18,9 +12,7 @@ function changeRows(data: ProductOverviewData) {
   return data.changes.map((change) => `| ${change.kind} {#change-${change.id}} | ${prose(change.featureName)}${change.scenarioReference ? ` · ${prose(change.scenarioReference)}` : ""} | ${prose(change.summary)} |`).join("\n");
 }
 
-export function buildExplainerMarkdown(data: ProductOverviewData, options: { includeArchitecture: boolean; repositoryUrl?: string }) {
-  const revision = data.architecture?.revision || data.latestRelease?.sha;
-  const repository = options.repositoryUrl && revision ? ` repo_url=${options.repositoryUrl} repo_revision=${revision}` : "";
+export function buildExplainerMarkdown(data: ProductOverviewData) {
   return `# ${prose(data.headline)} {#summary}
 
 当前规格包含 ${data.trust.featureCount} 个功能和 ${data.trust.scenarioCount} 个场景，${data.freshness}。
@@ -29,11 +21,7 @@ export function buildExplainerMarkdown(data: ProductOverviewData, options: { inc
 - 人工维护 ${data.trust.manualFeatureCount} 个功能和 ${data.trust.manualScenarioCount} 个场景，自动分析不会覆盖人工内容。
 
 @answer scope="${prose(data.freshness)} · ${prose(data.analysisLabel)}"
-@meta locale=zh-CN${repository}
-
-## 产品如何工作 {#architecture}
-
-${architecturePanel(data, options.includeArchitecture)}
+@meta locale=zh-CN
 
 ## 当前核心能力 {#capabilities}
 

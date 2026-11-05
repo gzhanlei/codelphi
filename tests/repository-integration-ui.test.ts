@@ -31,7 +31,7 @@ describe("repository connection setup UI", () => {
     expect(html).toContain("····cret");
     expect(html).toContain("重新检查");
     expect(html).toContain("删除连接");
-    expect(html).toContain("添加产品和架构分析仍仅支持 GitHub");
+    expect(html).toContain("添加产品和代码分析仍仅支持 GitHub");
     expect(html).not.toContain("gitee-secret");
   });
 

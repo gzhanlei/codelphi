@@ -13,8 +13,7 @@ export default async function DashboardPage() {
   const db = getDb();
   const [productRows] = await db.execute(
     `SELECT p.id, p.slug, p.name, p.description,
-            latest_run.status AS analysisStatus, latest_run.after_sha AS analysisRevision,
-            latest_architecture.status AS architectureStatus, latest_architecture.revision AS architectureRevision,
+            latest_run.status AS analysisStatus,
             (SELECT COUNT(*) FROM features f WHERE f.product_id = p.id AND f.active = 1) AS featureCount,
             (SELECT COUNT(*) FROM releases r WHERE r.product_id = p.id) AS releaseCount,
             (SELECT MAX(r.committed_at) FROM releases r WHERE r.product_id = p.id) AS lastRelease
@@ -22,9 +21,6 @@ export default async function DashboardPage() {
      LEFT JOIN analysis_runs latest_run ON latest_run.id = (
        SELECT r.id FROM analysis_runs r JOIN repositories repo ON repo.id = r.repository_id
        WHERE repo.product_id = p.id ORDER BY r.created_at DESC, r.id DESC LIMIT 1
-     )
-     LEFT JOIN architecture_documents latest_architecture ON latest_architecture.id = (
-       SELECT d.id FROM architecture_documents d WHERE d.product_id = p.id ORDER BY d.id DESC LIMIT 1
      )
      WHERE p.organization_id = ? ORDER BY p.name`,
     [organization.id],

@@ -1,5 +1,4 @@
 import { evidenceItems } from "./evidence";
-import { productArchitecturePath } from "./architecture-store";
 import type { BehaviorChangeRow, FeatureRow, ReleaseRow, ScenarioRow } from "./types";
 
 interface ProductOverviewInput {
@@ -9,7 +8,6 @@ interface ProductOverviewInput {
   releases: ReleaseRow[];
   behaviorChanges: BehaviorChangeRow[];
   latestRun?: { status: string; errorMessage?: string };
-  architecture?: { id: number; specVersionId: number; revision: string; status: string; errorMessage: string | null };
 }
 
 function analysisLabel(status?: string) {
@@ -23,15 +21,6 @@ function specLabel(specVersionId: number | null, sha?: string) {
   return `Spec v${specVersionId}${sha ? ` · ${sha.slice(0, 7)}` : ""}`;
 }
 
-function overviewSpecVersion(input: ProductOverviewInput, latestRelease?: ReleaseRow) {
-  if (input.architecture) return input.architecture.specVersionId;
-  return latestRelease ? latestRelease.specVersionId : null;
-}
-
-function overviewRevision(input: ProductOverviewInput, latestRelease?: ReleaseRow) {
-  return input.architecture ? input.architecture.revision : latestRelease?.sha;
-}
-
 function compareCapabilities(a: { scenarioCount: number; name: string }, b: { scenarioCount: number; name: string }) {
   if (a.scenarioCount !== b.scenarioCount) return Math.sign(b.scenarioCount - a.scenarioCount);
   return a.name.localeCompare(b.name);
@@ -39,8 +28,8 @@ function compareCapabilities(a: { scenarioCount: number; name: string }, b: { sc
 
 export function buildProductOverview(input: ProductOverviewInput) {
   const latestRelease = input.releases[0];
-  const specVersionId = overviewSpecVersion(input, latestRelease);
-  const revision = overviewRevision(input, latestRelease);
+  const specVersionId = latestRelease ? latestRelease.specVersionId : null;
+  const revision = latestRelease?.sha;
   const evidencePaths = new Set(input.scenarios.flatMap((scenario) => evidenceItems(scenario.evidence).map((item) => item.path)));
   return {
     slug: input.product.slug,
@@ -67,10 +56,6 @@ export function buildProductOverview(input: ProductOverviewInput) {
       evidencePathCount: evidencePaths.size,
       specVersionId,
     },
-    architecture: input.architecture ? {
-      ...input.architecture,
-      href: input.architecture.status === "accepted" ? productArchitecturePath(input.product.slug, input.architecture.id) : undefined,
-    } : undefined,
   };
 }
 

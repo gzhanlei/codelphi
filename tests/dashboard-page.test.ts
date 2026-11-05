@@ -23,9 +23,6 @@ const productRow = {
   releaseCount: 0,
   lastRelease: null,
   analysisStatus: "running",
-  analysisRevision: "sha-1",
-  architectureStatus: null,
-  architectureRevision: null,
 };
 
 describe("dashboard page", () => {
@@ -37,22 +34,22 @@ describe("dashboard page", () => {
   it("queries readiness fields and renders a pending product without a detail link", async () => {
     execute.mockImplementationOnce(async () => [[productRow]]).mockImplementationOnce(async () => [[]]);
     const html = renderToStaticMarkup(await DashboardPage());
-    expect(execute.mock.calls[0][0]).toContain("latest_run.after_sha AS analysisRevision");
-    expect(execute.mock.calls[0][0]).toContain("latest_architecture.revision AS architectureRevision");
+    expect(execute.mock.calls[0][0]).toContain("latest_run.status AS analysisStatus");
+    expect(execute.mock.calls[0][0]).not.toContain("latest_architecture");
     expect(execute.mock.calls[0][1]).toEqual([7]);
     expect(html).toContain("分析中，请稍候");
     expect(html).not.toContain("href=\"/products/new-product\"");
   });
 
-  it("renders a detail link after the same revision has an accepted architecture", async () => {
-    execute.mockImplementationOnce(async () => [[{ ...productRow, analysisStatus: "succeeded", architectureStatus: "accepted", architectureRevision: "sha-1" }]]).mockImplementationOnce(async () => [[]]);
+  it("renders a detail link after analysis succeeds without an architecture", async () => {
+    execute.mockImplementationOnce(async () => [[{ ...productRow, analysisStatus: "succeeded" }]]).mockImplementationOnce(async () => [[]]);
     const html = renderToStaticMarkup(await DashboardPage());
     expect(html).toContain("href=\"/products/new-product\"");
     expect(html).not.toContain("分析中，请稍候");
   });
 
   it("totals feature and release counts across products", async () => {
-    const ready = { ...productRow, analysisStatus: "succeeded", architectureStatus: "accepted", architectureRevision: "sha-1" };
+    const ready = { ...productRow, analysisStatus: "succeeded" };
     execute.mockImplementationOnce(async () => [[
       { ...ready, featureCount: 2, releaseCount: 4 },
       { ...ready, id: 2, slug: "second", featureCount: 3, releaseCount: 5 },

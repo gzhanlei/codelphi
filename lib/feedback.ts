@@ -26,12 +26,11 @@ function mapReport(row: FeedbackReport & { organizationName: string; productName
 }
 
 function failureMessage(details: NonNullable<Awaited<ReturnType<typeof getProductDetails>>>) {
-  if (details.latestRun?.status === "failed") return details.latestRun.errorMessage;
-  return details.architecture?.errorMessage;
+  return details.latestRun?.status === "failed" ? details.latestRun.errorMessage : undefined;
 }
 
 function revisionFor(details: NonNullable<Awaited<ReturnType<typeof getProductDetails>>>) {
-  return details.architecture?.revision ?? details.releases[0]?.sha ?? "unknown";
+  return details.releases[0]?.sha ?? "unknown";
 }
 
 function repositoryNameFor(details: NonNullable<Awaited<ReturnType<typeof getProductDetails>>>) {
@@ -63,7 +62,7 @@ async function insertFeedbackReport(input: { user: SessionUser; organization: Or
     `INSERT INTO feedback_reports
       (organization_id, product_id, reporter_user_id, repository_full_name, revision, error_message, architecture_error, status)
      SELECT ?, ?, u.id, ?, ?, ?, ?, 'new' FROM users u WHERE u.chandler_sub = ?`,
-    [organization.id, details.product.id, repositoryFullName, revision, errorMessage, details.architecture?.errorMessage ?? null, user.sub],
+    [organization.id, details.product.id, repositoryFullName, revision, errorMessage, null, user.sub],
   );
   return Number((result as { insertId: number }).insertId);
 }
@@ -151,7 +150,8 @@ export async function submitFeedbackToGitHub(id: number, options: { token?: stri
   if (!report) throw new Error("feedback_not_found");
   if (report.githubIssueUrl) return report.githubIssueUrl;
   try {
-    const issueUrl = await createGithubIssue(report, await issueToken(options.token), options.fetcher ?? fetch);
+    const fetcher = options.fetcher === undefined ? fetch : options.fetcher;
+    const issueUrl = await createGithubIssue(report, await issueToken(options.token), fetcher);
     await getDb().execute("UPDATE feedback_reports SET status = 'submitted', github_issue_url = ?, submission_error = NULL WHERE id = ?", [issueUrl, id]);
     return issueUrl;
   } catch (error) {

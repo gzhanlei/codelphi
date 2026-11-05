@@ -5,7 +5,6 @@ import type { CodeHostingProvider, RepositoryAccess, SourceFile } from "./code-h
 import { radarArchitectureEvidencePaths } from "./architecture-draft";
 import { aivlogArchitectureEvidencePaths } from "./architecture-aivlog";
 import type { RemoteSourceBackend } from "./remote-source-index";
-import { architectureSourceIndexBudgets } from "./architecture/remote";
 
 export interface RemoteAnalysisRequest {
   product: { id: number; slug: string; name: string };
@@ -25,7 +24,6 @@ export interface RemoteAnalysisResult {
   slice: SourceSlice;
   sources: SourceFile[];
   index: OpenedRemoteSourceRevision;
-  openArchitectureIndex: () => Promise<OpenedRemoteSourceRevision>;
 }
 
 export const analysisSliceBudgets: SliceBudgets = {
@@ -118,12 +116,5 @@ export async function getRemoteAnalysisSources(request: RemoteAnalysisRequest, r
   }
   const sources = await sliceToSourceFiles(result.slice, index);
   if (sources.length === 0) throw new Error("No supported source files found");
-  const openArchitectureIndex = () => createRemoteSourceIndex(revision, {
-    scopeRoots: request.scopeRoots,
-    access: request.access,
-    provider: request.provider,
-    backend: request.backend,
-    budgets: architectureSourceIndexBudgets,
-  });
-  return { slice: result.slice, sources, index, openArchitectureIndex };
+  return { slice: result.slice, sources, index };
 }

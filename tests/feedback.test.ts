@@ -99,6 +99,40 @@ describe("feedback submission handlers", () => {
 describe("analysis failure feedback", () => {
   beforeEach(() => execute.mockReset());
 
+  function input(nextDetails = details) {
+    return {
+      user: { sub: "reporter", email: "reporter@example.com" },
+      organization: { id: 1, slug: "default", name: "Default Workspace", role: "owner" as const },
+      details: nextDetails,
+    };
+  }
+
+  it("rejects feedback when no failed analysis exists", async () => {
+    await expect(createFeedbackReport(input({ ...details, latestRun: undefined as never }))).rejects.toThrow("no_failed_analysis");
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("reuses an existing report for the same failure", async () => {
+    execute.mockImplementation(async () => [[{ id: 17 }]]);
+    await expect(createFeedbackReport(input())).resolves.toBe(17);
+    expect(execute).not.toHaveBeenCalledWith(expect.stringContaining("INSERT INTO feedback_reports"), expect.anything());
+  });
+
+  it("uses explicit revision fallbacks without treating an empty SHA as missing", async () => {
+    execute.mockImplementation(async (sql = "") => {
+      if (sql.includes("SELECT id FROM feedback_reports")) return [[]];
+      if (sql.includes("INSERT INTO feedback_reports")) return [{ insertId: 42 }];
+      return [{}];
+    });
+    await createFeedbackReport(input({ ...details, releases: [] }));
+    let insert = execute.mock.calls.find((call) => String(call[0]).includes("INSERT INTO feedback_reports"));
+    expect(insert?.[1][3]).toBe("unknown");
+    execute.mockClear();
+    await createFeedbackReport(input({ ...details, releases: [{ ...details.releases[0], sha: "" }] }));
+    insert = execute.mock.calls.find((call) => String(call[0]).includes("INSERT INTO feedback_reports"));
+    expect(insert?.[1][3]).toBe("");
+  });
+
   it("collects failure context without asking the user for more information", async () => {
     execute.mockImplementation(async (sql = "") => {
       if (sql.includes("SELECT id FROM feedback_reports") || sql.includes("FROM feedback_reports f")) return [[]];

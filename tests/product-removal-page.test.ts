@@ -22,12 +22,12 @@ describe("product page removal action", () => {
     vi.mocked(getProductDetails).mockResolvedValue({
       product: { id: 2, slug: "namedict", name: "NameDict", description: "词典", descriptionSource: "manual", descriptionEvidence: null },
       repository: { owner: "gzhanlei", name: "namedict", defaultBranch: "main" },
-      features: [], scenarios: [], releases: [], changes: [], behaviorChanges: [], latestRun: undefined, architecture: undefined,
+      features: [], scenarios: [], releases: [], changes: [], behaviorChanges: [], latestRun: undefined,
     } as never);
   });
 
-  async function renderPage() {
-    return renderToStaticMarkup(await ProductPage({ params: Promise.resolve({ slug: "namedict" }), searchParams: Promise.resolve({}) }));
+  async function renderPage(view?: string) {
+    return renderToStaticMarkup(await ProductPage({ params: Promise.resolve({ slug: "namedict" }), searchParams: Promise.resolve(view ? { view } : {}) }));
   }
 
   it("shows removal to owners and editors", async () => {
@@ -47,14 +47,17 @@ describe("product page removal action", () => {
     expect(notFound).toHaveBeenCalledOnce();
   });
 
-  it("shows diagnostics for either a failed analysis or failed architecture", async () => {
+  it("shows the product description only outside the overview", async () => {
+    expect(await renderPage()).not.toContain("词典");
+    expect(await renderPage("spec")).toContain("词典");
+  });
+
+  it("shows diagnostics only for a failed analysis, not legacy architecture state", async () => {
     const details = await getProductDetails("namedict", 7);
     if (!details) throw new Error("fixture missing");
     vi.mocked(getProductDetails).mockResolvedValue({ ...details, latestRun: { status: "failed" } } as never);
     expect(await renderPage()).toContain("data-analysis-feedback");
     vi.mocked(getProductDetails).mockResolvedValue({ ...details, latestRun: { status: "succeeded" }, architecture: { id: 6, specVersionId: 3, revision: "abc", status: "failed", errorMessage: "failed" } } as never);
-    expect(await renderPage()).toContain("data-analysis-feedback");
-    vi.mocked(getProductDetails).mockResolvedValue({ ...details, latestRun: { status: "succeeded" }, architecture: { id: 6, specVersionId: 3, revision: "abc", status: "accepted", errorMessage: null } } as never);
     expect(await renderPage()).not.toContain("data-analysis-feedback");
   });
 });

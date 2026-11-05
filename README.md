@@ -13,13 +13,14 @@
 - Chandler OAuth 授权码 + PKCE（S256）登录、HttpOnly 会话、个人工作区自动创建；共享工作区按成员与邀请授权。
 - GitHub App Manifest 创建与安装、只读 Installation Token、AES-GCM 凭据加密、连接检查与本地断开。
 - Integrations 页面与添加产品时的 GitHub App/PAT 凭据选择；无凭据时提供配置引导。
-- Gitee、GitLab、Gitea 的工作区级连接配置与服务端验证；目前添加产品和架构分析仍仅支持 GitHub。
+- Gitee、GitLab、Gitea 的工作区级连接配置与服务端验证；目前添加产品和代码分析仍仅支持 GitHub。
 - 代码平台 Provider 抽象：注册、分支与变更读取、源码后端及仓库链接统一通过 adapter；当前仅注册 GitHub 分析实现。
 - 自有 Git 服务使用 HTTPS 与 `REPOSITORY_HOST_ALLOWLIST` 精确主机/端口白名单；删除令牌连接会清除保存的凭据。
 - 两级功能树、功能与场景 CRUD、人工来源保护、软删除 tombstone 和父子层级事务保护。
 - 场景分类/全文筛选、列表与表格视图，以及基于场景推导的 SVG 用户流程图。
 - GitHub push Webhook HMAC-SHA256 验签及默认分支过滤。
 - 手动分析与 push 自动分析；每次分析记录运行状态和错误。
+- 当前版本不生成或展示系统架构图，也不外接架构服务；产品卡片只等待 `queued/running` 分析结束。
 - 不可变 Spec Version 快照，合并人工功能与场景，并计算确定性的功能/场景行为 Diff。
 - 发布页优先展示行为变化及前后差异，Commit 与 AI 摘要仅作为证据和补充。
 - LLM 结构化输出校验、代码证据路径校验。
@@ -144,7 +145,7 @@ npm run build
 
 ## 部署
 
-生产环境与 Chandler 同一台服务器（`124.156.160.168`，SSH 使用本地 `~/.ssh/chandler.pem`），部署目录 `/data/www/radar`，由 systemd 服务 `radar.service`（以 `nonroot` 用户运行 `npm start -- -H 127.0.0.1 -p 3008`，前端经 Nginx 反代 `radar.chandler.work`）常驻，架构渲染另依赖 `radar.service.d/archify.conf` 注入的 `ARCHIFY_CHROME`。
+生产环境与 Chandler 同一台服务器（`124.156.160.168`，SSH 使用本地 `~/.ssh/chandler.pem`），部署目录 `/data/www/radar`，由 systemd 服务 `radar.service`（以 `nonroot` 用户运行 `npm start -- -H 127.0.0.1 -p 3008`，前端经 Nginx 反代 `radar.chandler.work`）常驻。Explainer 导出另依赖 `radar.service.d/archify.conf` 注入的 `ARCHIFY_CHROME`；常规产品分析不再调用 Archify。
 
 发布流程：
 
