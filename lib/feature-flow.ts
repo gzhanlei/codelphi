@@ -74,6 +74,11 @@ function contextGroups(scenarios: SpecScenario[]) {
   return [...groups.values()];
 }
 
+function appendScenarioNode(nodes: FlowNode[], edges: FlowEdge[], startId: string, scenario: SpecScenario, kind: FlowNode["kind"], x: number, y: number) {
+  nodes.push({ id: scenario.reference, kind, reference: scenario.reference, title: scenario.action, outcome: scenario.outcome, category: scenario.category, x, y });
+  edges.push({ id: `${startId}-${scenario.reference}`, from: startId, to: scenario.reference });
+}
+
 export function buildFeatureFlow(scenarios: SpecScenario[]): FeatureFlow {
   const groups = contextGroups(scenarios);
   if (groups.length === 0) {
@@ -91,14 +96,11 @@ export function buildFeatureFlow(scenarios: SpecScenario[]): FeatureFlow {
     const happy = group.filter((scenario) => scenario.category === "happy");
     const branches = group.filter((scenario) => scenario.category !== "happy");
     happy.forEach((scenario, index) => {
-      const x = 200 + index * 190;
-      nodes.push({ id: scenario.reference, kind: "scenario", reference: scenario.reference, title: scenario.action, outcome: scenario.outcome, category: scenario.category, x, y });
-      edges.push({ id: `${startId}-${scenario.reference}`, from: startId, to: scenario.reference });
+      appendScenarioNode(nodes, edges, startId, scenario, "scenario", 200 + index * 190, y);
     });
 
     branches.forEach((scenario, index) => {
-      nodes.push({ id: scenario.reference, kind: "branch", reference: scenario.reference, title: scenario.action, outcome: scenario.outcome, category: scenario.category, x: 200 + index * 190, y: y + 90 });
-      edges.push({ id: `${startId}-${scenario.reference}`, from: startId, to: scenario.reference });
+      appendScenarioNode(nodes, edges, startId, scenario, "branch", 200 + index * 190, y + 90);
     });
   });
 

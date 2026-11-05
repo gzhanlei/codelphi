@@ -9,7 +9,7 @@ const pushSchema = z.object({
   ref: z.string(),
   before: z.string(),
   after: z.string(),
-  repository: z.object({ full_name: z.string() }),
+  repository: z.object({ full_name: z.string().regex(/^[^/]+\/[^/]+$/, "full_name must be owner/name") }),
 });
 
 interface WebhookInput {

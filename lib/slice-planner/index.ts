@@ -5,27 +5,31 @@ import { SourceIndexError, type SourceLineSlice, type SourceSignal, type SourceT
 import type { EvidenceClaim, PlannerDiagnostic, ProductSliceInput, ScopeResolution, SelectedSourceFile, SelectedSourceReason, SliceConfidence, SlicePlanResult, SlicePlanningState, SlicePlanner, StackProfileId, StackProfileMatch, TargetedReadApproval, TargetedReadDecision, TargetedReadRequest } from "./types";
 import type { OpenedRemoteSourceRevision } from "../remote-source-index/types";
 
-const sourceDirectoryNames = new Set(["app", "apps", "src", "lib", "internal", "routes", "services", "cmd", "pages", "java", "cpp"]);
 const interestingSignals = new Set<SourceSignal>(["manifest", "entrypoint", "route", "service", "database", "migration", "queue", "worker", "auth", "deployment", "frontend", "native"]);
+
+// The planner never needs more than the index default read window for profile matching.
+const maxPlannerLinesPerFile = 600;
 
 function contentSha(lines: string[]) {
   return createHash("sha256").update(lines.join("\n"), "utf8").digest("hex");
 }
 
+const reasonPriority: Array<[SourceSignal, SelectedSourceReason]> = [
+  ["manifest", "manifest"],
+  ["entrypoint", "entrypoint"],
+  ["route", "route"],
+  ["database", "database"],
+  ["queue", "queue"],
+  ["auth", "auth"],
+  ["deployment", "deployment"],
+  ["frontend", "service"],
+  ["native", "service"],
+];
+
 export function reasonFor(signals: SourceSignal[]): SelectedSourceReason {
-  const reasons: Array<[SourceSignal, SelectedSourceReason]> = [
-    ["manifest", "manifest"],
-    ["entrypoint", "entrypoint"],
-    ["route", "route"],
-    ["database", "database"],
-    ["queue", "queue"],
-    ["auth", "auth"],
-    ["deployment", "deployment"],
-    ["frontend", "service"],
-    ["native", "service"],
-  ];
-  const matched = reasons.find(([signal]) => signals.includes(signal));
-  if (matched) return matched[1];
+  for (const [signal, reason] of reasonPriority) {
+    if (signals.includes(signal)) return reason;
+  }
   return "service";
 }
 
@@ -145,6 +149,43 @@ const priorityPatterns = [
 export function candidatePriority(entry: SourceTreeEntry) {
   const priority = priorityPatterns.findIndex((pattern) => pattern.test(entry.path));
   return priority === -1 ? priorityPatterns.length : priority;
+}
+
+interface SliceSelection {
+  path: string;
+  blobSha: string;
+  treeEntrySha: string;
+  byteSize: number;
+  startLine: number;
+  endLine: number;
+  lines: string[];
+  reason: SelectedSourceReason;
+  purpose: string;
+  signals: SourceSignal[];
+  claim: string;
+  confidence: SliceConfidence;
+}
+
+// One place records a selected file together with the evidence claim that pins it.
+function recordSelection(state: SlicePlanningState, selection: SliceSelection) {
+  state.selected.set(selection.path, {
+    path: selection.path,
+    blobSha: selection.blobSha,
+    treeEntrySha: selection.treeEntrySha,
+    reason: selection.reason,
+    byteSize: selection.byteSize,
+    lineRanges: [{ startLine: selection.startLine, endLine: selection.endLine, purpose: selection.purpose }],
+    signals: selection.signals,
+  });
+  state.evidenceClaims.push({
+    kind: "component",
+    claim: selection.claim,
+    path: selection.path,
+    startLine: selection.startLine,
+    endLine: selection.endLine,
+    quoteSha256: contentSha(selection.lines),
+    confidence: selection.confidence,
+  });
 }
 
 class DeterministicSlicePlanner implements SlicePlanner {
@@ -277,23 +318,19 @@ class DeterministicSlicePlanner implements SlicePlanner {
 
   applyTargetedRead(state: SlicePlanningState, approval: TargetedReadApproval, slice: SourceLineSlice): SlicePlanningState {
     state.budgetsRemaining.aiReadCalls = approval.remainingReadCalls;
-    state.evidenceClaims.push({
-      kind: "component",
-      claim: approval.reason,
-      path: slice.path,
-      startLine: slice.startLine,
-      endLine: slice.endLine,
-      quoteSha256: contentSha(slice.lines),
-      confidence: "medium",
-    });
-    state.selected.set(slice.path, {
+    recordSelection(state, {
       path: slice.path,
       blobSha: slice.blobSha,
       treeEntrySha: slice.treeEntrySha,
-      reason: "ai_targeted",
       byteSize: slice.byteSize,
-      lineRanges: [{ startLine: slice.startLine, endLine: slice.endLine, purpose: approval.reason }],
+      startLine: slice.startLine,
+      endLine: slice.endLine,
+      lines: slice.lines,
+      reason: "ai_targeted",
+      purpose: approval.reason,
       signals: [],
+      claim: approval.reason,
+      confidence: "medium",
     });
     return state;
   }
@@ -340,7 +377,7 @@ class DeterministicSlicePlanner implements SlicePlanner {
 
   private async selectFile(index: OpenedRemoteSourceRevision, state: SlicePlanningState, path: string, signals: SourceSignal[], reason: SelectedSourceReason) {
     if (state.selected.has(path) || state.budgetsRemaining.selectedFiles <= 0 || state.budgetsRemaining.selectedLineRanges <= 0 || state.budgetsRemaining.plannerContentBytes <= 0) return;
-    const lineEnd = Math.min(600, state.budgetsRemaining.selectedLineRanges);
+    const lineEnd = Math.min(maxPlannerLinesPerFile, state.budgetsRemaining.selectedLineRanges);
     const read = await index.readLines({
       path,
       startLine: 1,
@@ -348,27 +385,23 @@ class DeterministicSlicePlanner implements SlicePlanner {
       requestedBy: "profile",
       reason: `deterministic slice: ${reason}`,
     });
-    const selected: SelectedSourceFile = {
-      path,
-      blobSha: read.blobSha,
-      treeEntrySha: read.treeEntrySha,
-      reason,
-      byteSize: read.byteSize,
-      lineRanges: [{ startLine: read.startLine, endLine: read.endLine, purpose: reason }],
-      signals,
-    };
     state.fileContents.set(path, read.lines.join("\n"));
-    state.selected.set(path, selected);
     state.budgetsRemaining.selectedFiles -= 1;
     state.budgetsRemaining.selectedLineRanges -= 1;
     state.budgetsRemaining.plannerContentBytes -= read.byteSize;
-    state.evidenceClaims.push({
-      kind: "component",
-      claim: `${reason} source is available at the pinned revision`,
+    recordSelection(state, {
       path,
+      blobSha: read.blobSha,
+      treeEntrySha: read.treeEntrySha,
+      byteSize: read.byteSize,
       startLine: read.startLine,
       endLine: read.endLine,
-      quoteSha256: contentSha(read.lines),
+      lines: read.lines,
+      reason,
+      purpose: reason,
+      signals,
+      claim: `${reason} source is available at the pinned revision`,
+      // Profile-driven reads are backed by SHA-verified slices, so the claim confidence is high.
       confidence: confidenceLabel(0.8),
     });
   }

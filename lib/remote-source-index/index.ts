@@ -99,9 +99,13 @@ export function classifyEntry(parentPath: string, raw: SourceTreeApiEntry, polic
   };
 }
 
-export function textLineCount(content: string) {
+function splitSourceLines(content: string) {
   const lines = content.split("\n");
-  return lines.at(-1) === "" ? lines.length - 1 : lines.length;
+  return lines.at(-1) === "" ? lines.slice(0, -1) : lines;
+}
+
+export function textLineCount(content: string) {
+  return splitSourceLines(content).length;
 }
 
 export function groupEntriesByParent(entries: SourceTreeApiEntry[]): Map<string, SourceTreeApiEntry[]> {
@@ -215,29 +219,22 @@ class RemoteSourceRevision implements OpenedRemoteSourceRevision {
     if (entry.pruned) throw new SourceIndexError("path_pruned", `source file is pruned (${entry.pruned.reason}): ${path}`);
 
     const wasCached = this.state.blobs.has(path);
-    const bytes = await this.fetchVerifiedBlob(path, entry);
-    const cacheState = wasCached ? "cached" : "fetched";
-    const content = decodeUtf8(bytes);
-    const rawLines = content.split("\n");
-    const lines = rawLines.at(-1) === "" ? rawLines.slice(0, -1) : rawLines;
+    const lines = splitSourceLines(decodeUtf8(await this.fetchVerifiedBlob(path, entry)));
     const range = boundedLineRange(lines, request.startLine, request.endLine, this.budgets.maxLinesPerRead);
-    const startLine = range.startLine;
-    const endLine = range.endLine;
-    const selected = range.lines;
-    const byteSize = Buffer.byteLength(selected.join("\n"), "utf8");
+    const byteSize = Buffer.byteLength(range.lines.join("\n"), "utf8");
     this.consumeContentBytes(byteSize);
 
     return {
       path,
       blobSha: entry.sha,
       treeEntrySha: entry.sha,
-      startLine,
-      endLine,
-      lines: selected,
+      startLine: range.startLine,
+      endLine: range.endLine,
+      lines: range.lines,
       byteSize,
       lineCount: lines.length,
       verified: true,
-      cacheState,
+      cacheState: wasCached ? "cached" : "fetched",
       readReceipt: {
         requestedBy: request.requestedBy,
         reason: request.reason,

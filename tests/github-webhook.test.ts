@@ -53,4 +53,11 @@ describe("GitHub webhook processing", () => {
     expect(result).toEqual({ status: 202, body: { accepted: true, runId: 42 }, runId: 42 });
     expect(deps.queue).toHaveBeenCalledWith(9, "before", "after");
   });
+
+  it("rejects a push payload whose repository full_name is not owner/name at the entry schema", async () => {
+    const deps = dependencies();
+    const malformed = JSON.stringify({ ref: "refs/heads/main", before: "b", after: "a", repository: { full_name: "just-a-name" } });
+    await expect(processGitHubWebhook({ rawBody: malformed, event: "push", signature: "sig", secret: "secret" }, deps)).rejects.toThrow("full_name must be owner/name");
+    expect(deps.findRepository).not.toHaveBeenCalled();
+  });
 });

@@ -64,14 +64,10 @@ async function loadScenarioRows(connection: PoolConnection, features: FeatureRow
   return rows as ScenarioRow[];
 }
 
-async function withScenarioRows(connection: PoolConnection, features: FeatureRow[], kind: "manual" | "version") {
-  const scenarioRows = await loadScenarioRows(connection, features, kind);
-  return featuresFromRows(features, scenarioRows);
-}
-
 async function loadFeatureSpec(connection: PoolConnection, kind: "manual" | "version", query: string, parameters: number[]) {
   const [featureRows] = await connection.execute(query, parameters);
-  return withScenarioRows(connection, featureRows as FeatureRow[], kind);
+  const features = featureRows as FeatureRow[];
+  return featuresFromRows(features, await loadScenarioRows(connection, features, kind));
 }
 
 async function loadManualSpec(connection: PoolConnection, productId: number) {

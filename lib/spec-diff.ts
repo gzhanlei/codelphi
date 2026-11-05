@@ -44,18 +44,25 @@ function scenarioMap(feature: SpecFeature) {
   return new Map(feature.scenarios.map((scenario) => [scenario.reference, scenario]));
 }
 
+function mergedSortedKeys(left: Map<string, unknown>, right: Map<string, unknown>) {
+  return [...new Set([...left.keys(), ...right.keys()])].sort();
+}
+
 function changeSummary(kind: SpecChange["kind"], entityType: SpecChange["entityType"], featureName: string, reference: string | null) {
   const action = { added: "新增", changed: "更新", removed: "移除" }[kind];
   return entityType === "feature" ? `${action}功能「${featureName}」` : `「${featureName}」${action}场景 ${reference}`;
 }
 
+function featureChange(kind: "added" | "removed" | "changed", feature: SpecFeature, before: SpecFeature | null, after: SpecFeature | null): SpecChange {
+  return { kind, entityType: "feature", featureName: feature.name, scenarioReference: null, summary: changeSummary(kind, "feature", feature.name, null), before, after };
+}
+
 function scenarioChanges(before: SpecFeature, after: SpecFeature): SpecChange[] {
   const beforeScenarios = scenarioMap(before);
   const afterScenarios = scenarioMap(after);
-  const references = [...new Set([...beforeScenarios.keys(), ...afterScenarios.keys()])].sort();
   const changes: SpecChange[] = [];
 
-  for (const reference of references) {
+  for (const reference of mergedSortedKeys(beforeScenarios, afterScenarios)) {
     const previous = beforeScenarios.get(reference);
     const current = afterScenarios.get(reference);
     const kind = previous ? current ? "changed" : "removed" : "added";
@@ -74,11 +81,9 @@ function scenarioChanges(before: SpecFeature, after: SpecFeature): SpecChange[] 
 }
 
 function diffFeature(previous: SpecFeature | undefined, current: SpecFeature | undefined): SpecChange[] {
-  if (!previous || !current) {
-    const feature = current === undefined ? previous! : current;
-    const kind = current ? "added" : "removed";
-    return [{ kind, entityType: "feature", featureName: feature.name, scenarioReference: null, summary: changeSummary(kind, "feature", feature.name, null), before: previous === undefined ? null : previous, after: current === undefined ? null : current }];
-  }
+  if (!previous && current) return [featureChange("added", current, null, current)];
+  if (previous && !current) return [featureChange("removed", previous, previous, null)];
+  if (!previous || !current) return [];
 
   const changes: SpecChange[] = [];
   if (featureBehaviorChanged(previous, current)) {
@@ -92,10 +97,9 @@ export function diffSpec(before: SpecFeature[] | null, after: SpecFeature[]): Sp
   if (!before) return [];
   const beforeFeatures = new Map(before.map((feature) => [specFeatureKey(feature.name), feature]));
   const afterFeatures = new Map(after.map((feature) => [specFeatureKey(feature.name), feature]));
-  const keys = [...new Set([...beforeFeatures.keys(), ...afterFeatures.keys()])].sort();
   const changes: SpecChange[] = [];
 
-  for (const key of keys) changes.push(...diffFeature(beforeFeatures.get(key), afterFeatures.get(key)));
+  for (const key of mergedSortedKeys(beforeFeatures, afterFeatures)) changes.push(...diffFeature(beforeFeatures.get(key), afterFeatures.get(key)));
   return changes;
 }
 

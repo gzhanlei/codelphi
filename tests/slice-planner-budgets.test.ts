@@ -60,8 +60,6 @@ describe("slice planner budget and traversal behavior", () => {
       plannerVersion: "v1",
       profileVersion: "v1",
     }, index);
-    console.log(JSON.stringify({priorityStatus:result.status,priorityMissing:result.missing,priorityDiagnostics:result.diagnostics,priorityFiles:result.slice?.files.map(f=>f.path)},null,2));
-    console.log(JSON.stringify({status:result.status,missing:result.missing,diagnostics:result.diagnostics,files:result.slice?.files},null,2));
     expect(result.status).toBe("completed");
     expect(result.diagnostics).toEqual([]);
     expect(result.slice?.files.map((file) => file.path)).toEqual([

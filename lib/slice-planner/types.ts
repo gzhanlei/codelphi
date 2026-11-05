@@ -1,4 +1,4 @@
-import type { OpenedRemoteSourceRevision, SourceLineSlice, SourceRevisionSha, SourceScopeRoot, SourceSignal, SourceTreeEntry } from "../remote-source-index/types";
+import type { OpenedRemoteSourceRevision, SourceLineSlice, SourceRevisionSha, SourceScopeRoot, SourceSignal } from "../remote-source-index/types";
 
 export type SlicePlannerVersion = string;
 export type SliceProfileVersion = string;
@@ -256,5 +256,3 @@ export interface SlicePlanner {
   applyTargetedRead(state: SlicePlanningState, approval: TargetedReadApproval, slice: SourceLineSlice): SlicePlanningState;
   finalize(state: SlicePlanningState): Promise<SlicePlanResult>;
 }
-
-export interface SourceTreeCandidate extends SourceTreeEntry {}
