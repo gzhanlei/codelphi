@@ -7,13 +7,13 @@ import { scenarioMatches } from "@/lib/feature-tree";
 import { deleteConfirmedScenario } from "@/lib/spec-editor-client";
 import { errorMessage } from "@/lib/error-message";
 import { FormError } from "./form-feedback";
-import { useDemoMode } from "./demo-mode";
+import { useDemoGuard } from "./demo-mode";
 import { ScenarioTools } from "./scenario-tools";
 import { ScenarioContent } from "./scenario-content";
 
 export function ScenarioWorkspace({ featureId, scenarios }: { featureId: number; scenarios: ScenarioRow[] }) {
   const router = useRouter();
-  const { demo, showNotice } = useDemoMode();
+  const guard = useDemoGuard();
   const [category, setCategory] = useState("all");
   const [query, setQuery] = useState("");
   const [view, setView] = useState<"list" | "table">("list");
@@ -22,10 +22,7 @@ export function ScenarioWorkspace({ featureId, scenarios }: { featureId: number;
   const filtered = scenarios.filter((scenario) => scenarioMatches(scenario, query, category));
 
   async function remove(scenario: ScenarioRow) {
-    if (demo) {
-      showNotice();
-      return;
-    }
+    if (guard()) return;
     const deleted = await deleteConfirmedScenario(scenario).catch((cause) => {
       setError(errorMessage(cause, "删除场景失败"));
       return false;

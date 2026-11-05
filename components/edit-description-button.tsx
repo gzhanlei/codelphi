@@ -4,11 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { errorMessage } from "@/lib/error-message";
 import { updateDescription } from "@/lib/product-client";
-import { useDemoMode } from "./demo-mode";
+import { useDemoGuard } from "./demo-mode";
 
 export function EditDescriptionButton({ slug, description }: { slug: string; description: string }) {
   const router = useRouter();
-  const { demo, showNotice } = useDemoMode();
+  const guard = useDemoGuard();
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const [value, setValue] = useState(description);
   const [pending, setPending] = useState(false);
@@ -23,9 +23,8 @@ export function EditDescriptionButton({ slug, description }: { slug: string; des
   };
   const close = () => dialogRef.current?.close();
   const save = () => {
-    if (demo) {
+    if (guard()) {
       close();
-      showNotice();
       return;
     }
     setPending(true);

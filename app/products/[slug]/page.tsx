@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import type { ReactNode } from "react";
 import { AnalyzeButton } from "@/components/analyze-button";
 import { AnalysisFeedbackButton } from "@/components/analysis-feedback-button";
 import { AppShell } from "@/components/app-shell";
@@ -9,11 +10,39 @@ import { RemoveProductButton } from "@/components/remove-product-button";
 import { publicDemoSlugs } from "@/lib/env";
 import { getProductDetails } from "@/lib/product-details";
 import { featureIdFromParam } from "@/lib/spec-editor-client";
-import { buildProductOverview } from "@/lib/product-overview";
+import { buildProductOverview, type ProductOverviewData } from "@/lib/product-overview";
 import { getSessionUser } from "@/lib/session";
 import { requireProductAccess } from "@/lib/product-access";
 
 export const dynamic = "force-dynamic";
+
+type ProductDetails = NonNullable<Awaited<ReturnType<typeof getProductDetails>>>;
+
+/** 产品页主体：标题区、运行状态、视图 Tab 与视图内容；demo 与登录分支共用。 */
+function ProductPageBody({ slug, view, mode, featureId, details, overview, actions, canEdit, showFeedback }: {
+  slug: string;
+  view: string;
+  mode: string;
+  featureId?: number;
+  details: ProductDetails;
+  overview: ProductOverviewData;
+  actions: ReactNode;
+  canEdit: boolean;
+  showFeedback: boolean;
+}) {
+  return (
+    <>
+      <div className="page-heading product-heading">
+        <div><span className="eyebrow">PRODUCT SPACE</span><h1>{details.product.name}</h1>{view === "overview" ? null : <p>{details.product.description}</p>}<RepositoryLink repository={details.repository} /></div>
+        <div className="page-actions">{actions}</div>
+      </div>
+      <RunStatus run={details.latestRun} />
+      {showFeedback && details.latestRun?.status === "failed" ? <AnalysisFeedbackButton slug={details.product.slug} /> : null}
+      <ProductTabs slug={slug} view={view} featureCount={details.features.length} releaseCount={details.releases.length} />
+      <ProductView view={view} productSlug={slug} features={details.features} scenarios={details.scenarios} releases={details.releases} changes={details.changes} behaviorChanges={details.behaviorChanges} mode={mode} featureId={featureId} overview={overview} canEdit={canEdit} />
+    </>
+  );
+}
 
 export default async function ProductPage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<{ view?: string; mode?: string; feature?: string }> }) {
   const { slug } = await params;
@@ -32,15 +61,7 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
     const demoOverview = buildProductOverview(demoDetails);
     return (
       <DemoShell>
-        <div className="page-heading product-heading">
-          <div><span className="eyebrow">PRODUCT SPACE</span><h1>{demoDetails.product.name}</h1>{view === "overview" ? null : <p>{demoDetails.product.description}</p>}<RepositoryLink repository={demoDetails.repository} /></div>
-          <div className="page-actions">
-            <AnalyzeButton slug={demoDetails.product.slug} />
-          </div>
-        </div>
-        <RunStatus run={demoDetails.latestRun} />
-        <ProductTabs slug={slug} view={view} featureCount={demoDetails.features.length} releaseCount={demoDetails.releases.length} />
-        <ProductView view={view} productSlug={slug} features={demoDetails.features} scenarios={demoDetails.scenarios} releases={demoDetails.releases} changes={demoDetails.changes} behaviorChanges={demoDetails.behaviorChanges} mode={mode} featureId={featureId} overview={demoOverview} canEdit={true} />
+        <ProductPageBody slug={slug} view={view} mode={mode} featureId={featureId} details={demoDetails} overview={demoOverview} canEdit={true} showFeedback={false} actions={<AnalyzeButton slug={demoDetails.product.slug} />} />
       </DemoShell>
     );
   }
@@ -52,17 +73,22 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
   return (
     <AppShell user={user}>
       <Link href="/" className="back-link">← 所有产品</Link>
-      <div className="page-heading product-heading">
-        <div><span className="eyebrow">PRODUCT SPACE</span><h1>{details.product.name}</h1>{view === "overview" ? null : <p>{details.product.description}</p>}<RepositoryLink repository={details.repository} /></div>
-        <div className="page-actions">
-          <AnalyzeButton slug={details.product.slug} />
-          {access.via === "organization" && access.role !== "viewer" ? <RemoveProductButton slug={details.product.slug} name={details.product.name} /> : null}
-        </div>
-      </div>
-      <RunStatus run={details.latestRun} />
-      {details.latestRun?.status === "failed" ? <AnalysisFeedbackButton slug={details.product.slug} /> : null}
-      <ProductTabs slug={slug} view={view} featureCount={details.features.length} releaseCount={details.releases.length} />
-      <ProductView view={view} productSlug={slug} features={details.features} scenarios={details.scenarios} releases={details.releases} changes={details.changes} behaviorChanges={details.behaviorChanges} mode={mode} featureId={featureId} overview={overview} canEdit={access.role !== "viewer"} />
+      <ProductPageBody
+        slug={slug}
+        view={view}
+        mode={mode}
+        featureId={featureId}
+        details={details}
+        overview={overview}
+        canEdit={access.role !== "viewer"}
+        showFeedback={true}
+        actions={
+          <>
+            <AnalyzeButton slug={details.product.slug} />
+            {access.via === "organization" && access.role !== "viewer" ? <RemoveProductButton slug={details.product.slug} name={details.product.name} /> : null}
+          </>
+        }
+      />
     </AppShell>
   );
 }

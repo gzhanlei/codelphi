@@ -26,3 +26,14 @@ export function DemoModeProvider({ children }: { children: ReactNode }) {
 export function useDemoMode() {
   return useContext(DemoModeContext);
 }
+
+/** Demo 模式统一拦截：展示只读提示并返回 true，调用方据此跳过写操作。 */
+export function demoIntercepted(demo: boolean, showNotice: () => void) {
+  if (demo) showNotice();
+  return demo;
+}
+
+export function useDemoGuard() {
+  const { demo, showNotice } = useDemoMode();
+  return () => demoIntercepted(demo, showNotice);
+}

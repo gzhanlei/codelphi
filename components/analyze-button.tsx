@@ -4,20 +4,17 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { requestAnalysis } from "@/lib/product-client";
 import { errorMessage } from "@/lib/error-message";
-import { useDemoMode } from "./demo-mode";
+import { useDemoGuard } from "./demo-mode";
 import { InlineMessage, analysisButtonLabel } from "./form-feedback";
 
 export function AnalyzeButton({ slug }: { slug: string }) {
   const router = useRouter();
-  const { demo, showNotice } = useDemoMode();
+  const guard = useDemoGuard();
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
 
   async function analyze() {
-    if (demo) {
-      showNotice();
-      return;
-    }
+    if (guard()) return;
     setPending(true);
     setMessage("");
     try {

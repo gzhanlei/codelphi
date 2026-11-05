@@ -5,6 +5,7 @@ import { ProductOverview } from "./product-overview";
 import { buildProductOverview, type ProductOverviewData } from "@/lib/product-overview";
 import { SpecWorkspace } from "./spec-workspace";
 import { buildFeatureTree, selectFeature } from "@/lib/feature-tree";
+import { selectedClass } from "@/lib/spec-editor-ui";
 import { scenariosForFeature } from "@/lib/spec-editor-ui";
 import type { BehaviorChangeRow, ChangeRow, FeatureRow, ReleaseRow, ScenarioRow } from "@/lib/types";
 import { getCodeHostingAdapter } from "@/lib/code-hosting";
@@ -32,16 +33,12 @@ export function RunStatus({ run }: { run?: { status: string; errorMessage?: stri
   return <div className={`run-status ${run.status}`} role="status" aria-live="polite"><span>最近一次分析：{run.status}</span><RunError message={run.errorMessage} /><AnalysisStatusRefresh status={run.status} /></div>;
 }
 
-function tabClass(selected: boolean) {
-  return selected ? "selected" : "";
-}
-
 export function ProductTabs({ slug, view, featureCount, releaseCount }: { slug: string; view: string; featureCount: number; releaseCount: number }) {
   return (
     <nav className="view-tabs" aria-label="产品视图">
-      <Link className={tabClass(view === "overview")} href={`/products/${slug}`}>概览</Link>
-      <Link className={tabClass(view === "spec")} href={`/products/${slug}?view=spec`}>产品规格 <span>{featureCount}</span></Link>
-      <Link className={tabClass(view === "changes")} href={`/products/${slug}?view=changes`}>发布变化 <span>{releaseCount}</span></Link>
+      <Link className={selectedClass(view === "overview")} href={`/products/${slug}`}>概览</Link>
+      <Link className={selectedClass(view === "spec")} href={`/products/${slug}?view=spec`}>产品规格 <span>{featureCount}</span></Link>
+      <Link className={selectedClass(view === "changes")} href={`/products/${slug}?view=changes`}>发布变化 <span>{releaseCount}</span></Link>
     </nav>
   );
 }

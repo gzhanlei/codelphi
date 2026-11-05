@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canCreateChild, editorSubmitLabel, entityId, featureEditorKey, featureEditorProps, featureFormState, featureFormTitle, featureMatches, featureNameLocked, featureSourceLabel, featureTabClass, scenarioBeingEdited, scenarioEditorKey, scenarioFilterCount, scenarioFilterLabel, scenarioFormState, scenarioFormTitle, scenariosForFeature } from "../lib/spec-editor-ui";
+import { canCreateChild, editorSubmitLabel, entityId, featureEditorKey, featureEditorProps, featureFormState, featureFormTitle, featureHref, featureMatches, featureNameLocked, featureSourceLabel, featureTabClass, scenarioBeingEdited, scenarioCategoryLabel, scenarioEditorKey, scenarioFilterCount, scenarioFilterLabel, scenarioFormState, scenarioFormTitle, scenariosForFeature, selectedClass } from "../lib/spec-editor-ui";
 
 const feature = { id: 1, name: "Authentication", summary: "OAuth", parentId: null, source: "generated" as const, children: [] };
 const scenario = { id: 1, featureId: 1, reference: "HP-1", context: "Visitor", action: "Signs in", outcome: "Dashboard", category: "happy" as const, source: "generated" as const, evidence: [] };
@@ -54,5 +54,19 @@ describe("spec editor presentation", () => {
     expect(scenarioFilterCount([scenario], undefined)).toBe(1);
     expect(scenarioFilterCount([scenario], "happy")).toBe(1);
     expect(scenarioFilterCount([scenario], "edge")).toBe(0);
+  });
+
+  it("builds spec editor URLs and shared tab classes", () => {
+    expect(featureHref(7)).toBe("?view=spec&feature=7");
+    expect(featureHref(7, "flow")).toBe("?view=spec&feature=7&mode=flow");
+    expect(selectedClass(true)).toBe("selected");
+    expect(selectedClass(false)).toBe("");
+    expect(featureTabClass("flow", "flow")).toBe(selectedClass(true));
+    expect(featureTabClass("spec", "flow")).toBe(selectedClass(false));
+    expect(scenarioCategoryLabel("happy")).toBe("正常路径");
+    expect(scenarioCategoryLabel("edge")).toBe("边界情况");
+    expect(scenarioCategoryLabel("error")).toBe("错误路径");
+    expect(scenarioCategoryLabel("other")).toBeUndefined();
+    expect(scenarioFilterLabel("edge")).toBe(scenarioCategoryLabel("edge"));
   });
 });

@@ -40,8 +40,23 @@ export function scenariosForFeature(scenarios: ScenarioRow[], feature?: FeatureR
   return feature ? scenarios.filter((scenario) => scenario.featureId === feature.id) : [];
 }
 
+export function selectedClass(selected: boolean) {
+  return selected ? "selected" : "";
+}
+
 export function featureTabClass(mode: string, target: string) {
-  return mode === target ? "selected" : "";
+  return selectedClass(mode === target);
+}
+
+/** 规格工作台内指向某个功能的查询串，供功能树、详情页与保存后的跳转共用。 */
+export function featureHref(featureId: number, mode?: string) {
+  return mode ? `?view=spec&feature=${featureId}&mode=${mode}` : `?view=spec&feature=${featureId}`;
+}
+
+const scenarioCategoryLabels: Record<string, string> = { happy: "正常路径", edge: "边界情况", error: "错误路径" };
+
+export function scenarioCategoryLabel(category: string) {
+  return scenarioCategoryLabels[category];
 }
 
 function editorParentId(editor: "root" | "child" | "edit" | null, feature?: FeatureRow) {
@@ -80,7 +95,7 @@ export function scenarioBeingEdited(editing: ScenarioRow | "new" | null | undefi
 }
 
 export function scenarioFilterLabel(category?: ScenarioRow["category"]) {
-  return category ? { happy: "正常路径", edge: "边界情况", error: "错误路径" }[category] : "全部";
+  return category ? scenarioCategoryLabel(category) : "全部";
 }
 
 export function scenarioFilterCount(scenarios: ScenarioRow[], category?: ScenarioRow["category"]) {

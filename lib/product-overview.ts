@@ -1,4 +1,5 @@
 import { evidenceItems } from "./evidence";
+import { featureHref } from "./spec-editor-ui";
 import type { BehaviorChangeRow, FeatureRow, ReleaseRow, ScenarioRow } from "./types";
 
 interface ProductOverviewInput {
@@ -45,7 +46,7 @@ export function buildProductOverview(input: ProductOverviewInput) {
       summary: feature.summary,
       source: feature.source,
       scenarioCount: input.scenarios.filter((scenario) => scenario.featureId === feature.id).length,
-      href: `/products/${input.product.slug}?view=spec&feature=${feature.id}`,
+      href: `/products/${input.product.slug}${featureHref(feature.id)}`,
     })).sort(compareCapabilities).slice(0, 6),
     changes: latestRelease ? input.behaviorChanges.filter((change) => change.releaseId === latestRelease.id).slice(0, 3) : [],
     latestRelease,

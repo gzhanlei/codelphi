@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { FeatureRow, ScenarioRow } from "@/lib/types";
 import { FeatureFlow } from "./feature-flow";
-import { canCreateChild, featureSourceLabel, featureTabClass } from "@/lib/spec-editor-ui";
+import { canCreateChild, featureHref, featureSourceLabel, featureTabClass } from "@/lib/spec-editor-ui";
 import { ScenarioWorkspace } from "./scenario-workspace";
 import { FormError } from "./form-feedback";
 
@@ -24,7 +24,7 @@ export function FeatureDetail({ feature, scenarios, mode, onEdit, onDelete, onCr
     <>
       <FeatureDetailHeader feature={feature} onEdit={onEdit} onDelete={onDelete} />
       <ChildFeatureAction feature={feature} onCreateChild={onCreateChild} />
-      <nav className="feature-view-tabs" aria-label="功能视图"><Link className={featureTabClass(mode, "spec")} href={`?view=spec&feature=${feature.id}`}>场景 <span>{scenarios.length}</span></Link><Link className={featureTabClass(mode, "flow")} href={`?view=spec&feature=${feature.id}&mode=flow`}>流程图</Link></nav>
+      <nav className="feature-view-tabs" aria-label="功能视图"><Link className={featureTabClass(mode, "spec")} href={featureHref(feature.id)}>场景 <span>{scenarios.length}</span></Link><Link className={featureTabClass(mode, "flow")} href={featureHref(feature.id, "flow")}>流程图</Link></nav>
       <FormError message={error} />
       {mode === "flow" ? <FeatureFlow featureName={feature.name} scenarios={scenarios} /> : <ScenarioWorkspace key={feature.id} featureId={feature.id} scenarios={scenarios} />}
     </>
