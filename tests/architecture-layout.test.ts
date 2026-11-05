@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { architectureLayoutInternals as layout } from "../lib/architecture/layout";
+import { architectureLayoutInternals as layout, layoutArchitecture } from "../lib/architecture/layout";
 
 const component = { id: "api", label: "api", type: "backend" as const, pos: [10, 20] as [number, number], size: [100, 40] as [number, number] };
 const rect = { left: 0, right: 100, top: 0, bottom: 100 };
@@ -130,5 +130,53 @@ describe("architecture layout geometry", () => {
     expect(layout.segmentLabel(horizontal, 20, midpointBlocked, [])?.point).toEqual([25, 68]);
     const vertical = { point: { x: 0, y: 0 }, next: { x: 0, y: 100 }, index: 0 };
     expect(layout.segmentLabel(vertical, 20, [], [])?.point).toEqual([18, 50]);
+  });
+});
+
+describe("architecture layout end to end", () => {
+  const node = (id: string, label: string, type: "external" | "backend" | "database", size: [number, number]) =>
+    ({ id, label, type, pos: [0, 0] as [number, number], size });
+
+  it("assigns swimlanes and pins straight routes, labels and viewBox", () => {
+    const roles = new Map([["users", "user" as const], ["api", "api" as const], ["db", "database" as const]]);
+    const components = [node("users", "产品用户", "external", [130, 64]), node("api", "应用服务", "backend", [180, 64]), node("db", "MySQL", "database", [150, 64])];
+    const connections = [
+      { id: "users-to-api", from: "users", to: "api", label: "HTTPS" },
+      { id: "api-to-db", from: "api", to: "db", label: "SQL" },
+    ];
+    const result = layoutArchitecture(components, connections, roles, new Set(["users"]));
+    expect(result.components.map((component) => [component.id, component.pos])).toEqual([
+      ["users", [60, 80]], ["api", [540, 80]], ["db", [1080, 80]],
+    ]);
+    expect(result.connections.map((connection) => [connection.id, connection.fromSide, connection.toSide, connection.via, connection.labelAt])).toEqual([
+      ["users-to-api", "right", "left", [], [377.5, 130]],
+      ["api-to-db", "right", "left", [], [892.5, 130]],
+    ]);
+    expect(result.viewBox).toEqual([1330, 244]);
+  });
+
+  it("pins orthogonal bends for cross-row routes", () => {
+    const roles = new Map([["users", "user" as const], ["api", "api" as const], ["worker", "worker" as const], ["db", "database" as const]]);
+    const components = [node("users", "产品用户", "external", [130, 64]), node("api", "API", "backend", [180, 64]), node("worker", "Worker", "backend", [180, 64]), node("db", "MySQL", "database", [150, 64])];
+    const connections = [{ id: "users-to-worker", from: "users", to: "worker", label: "认领任务" }];
+    const result = layoutArchitecture(components, connections, roles, new Set(["users"]));
+    expect(result.components.map((component) => [component.id, component.pos])).toEqual([
+      ["users", [60, 80]], ["api", [540, 80]], ["worker", [540, 260]], ["db", [1080, 80]],
+    ]);
+    expect(result.connections.map((connection) => [connection.id, connection.fromSide, connection.toSide, connection.via, connection.labelAt])).toEqual([
+      ["users-to-worker", "right", "left", [[210, 112], [210, 292]], [420, 310]],
+    ]);
+    expect(result.viewBox).toEqual([1330, 424]);
+  });
+
+  it("ranks runtime kinds deterministically inside a lane", () => {
+    const roles = new Map([["a", "worker" as const], ["b", "api" as const], ["c", "agent" as const], ["d", "cli" as const]]);
+    const components = [node("a", "worker", "backend", [150, 64]), node("b", "api", "backend", [150, 64]), node("c", "agent", "backend", [150, 64]), node("d", "cli", "backend", [150, 64])];
+    const result = layoutArchitecture(components, [], roles, new Set());
+    expect(result.components.map((component) => [component.id, component.pos])).toEqual([
+      ["a", [540, 440]], ["b", [540, 80]], ["c", [540, 260]], ["d", [540, 620]],
+    ]);
+    expect(result.connections).toEqual([]);
+    expect(result.viewBox).toEqual([790, 784]);
   });
 });

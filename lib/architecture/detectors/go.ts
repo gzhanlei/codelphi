@@ -1,5 +1,5 @@
 import { posix } from "node:path";
-import { findArchitectureEvidence, type ArchitectureSource } from "../source";
+import { findArchitectureEvidence, signalIdsForKindsAndPaths, type ArchitectureSource } from "../source";
 import type { NodeFact } from "../facts";
 import { actorNode, emptyArchitectureFragment, factEdge, type ArchitectureContext, type ArchitectureDetector, type ArchitectureFragment } from "./types";
 
@@ -71,8 +71,7 @@ function goKind(source: ArchitectureSource): NodeFact["kind"] {
 function goNode(source: ArchitectureSource, context: ArchitectureContext, evidence: NonNullable<ReturnType<typeof findArchitectureEvidence>>): NodeFact {
   const unit = goUnit(source);
   const sourcePaths = goSourcePaths(source, context.sources);
-  const paths = new Set(sourcePaths);
-  const signalIds = context.signals.filter((signal) => ["entrypoint", "deployable", "worker"].includes(signal.kind) && paths.has(signal.evidence.path)).map((signal) => signal.id).sort();
+  const signalIds = signalIdsForKindsAndPaths(context.signals, ["entrypoint", "deployable", "worker"], sourcePaths);
   return { id: `go:${unit}`, kind: goKind(source), label: `Go ${unit}`, runtimeUnit: unit, sourcePaths, signalIds, evidence: [evidence] };
 }
 

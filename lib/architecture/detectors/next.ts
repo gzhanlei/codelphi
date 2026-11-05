@@ -1,5 +1,5 @@
 import { posix } from "node:path";
-import { findArchitectureEvidence, signalIdsForPaths, type ArchitectureSource } from "../source";
+import { findArchitectureEvidence, signalIdsForKindsAndPaths, signalIdsForPaths, type ArchitectureSource } from "../source";
 import type { NodeFact } from "../facts";
 import { actorNode, emptyArchitectureFragment, factEdge, type ArchitectureContext, type ArchitectureDetector, type ArchitectureFragment } from "./types";
 
@@ -61,8 +61,7 @@ function nextNode(id: string, kind: "frontend" | "api", root: string, source: Ar
   const deferred = /(?:^|\/)app\/api\/.*route\.ts$/.test(source.path) && findArchitectureEvidence(source, ["after("], "next-after-worker") !== undefined;
   const sourcePaths = deferred ? [source.path] : tsSourcePaths(source, context.sources);
   const paths = [...sourcePaths, ...packagePath(context.sources, root)];
-  const accepted = new Set(paths);
-  const signalIds = context.signals.filter((signal) => ["entrypoint", "deployable"].includes(signal.kind) && accepted.has(signal.evidence.path)).map((signal) => signal.id).sort();
+  const signalIds = signalIdsForKindsAndPaths(context.signals, ["entrypoint", "deployable"], paths);
   return {
     id,
     kind,
@@ -83,8 +82,7 @@ function asyncFragment(context: ArchitectureContext): ArchitectureFragment {
     const apiId = `next:${root || "root"}:api`;
     const id = `next:${root || "root"}:async`;
     const sourcePaths = tsSourcePaths(source, context.sources);
-    const paths = new Set(sourcePaths);
-    const signalIds = context.signals.filter((signal) => signal.kind === "worker" && paths.has(signal.evidence.path)).map((signal) => signal.id).sort();
+    const signalIds = signalIdsForKindsAndPaths(context.signals, ["worker"], sourcePaths);
     fragment.nodes.push({ id, kind: "worker", label: "Next.js 后台任务", runtimeUnit: root || "next-root", sourcePaths, signalIds, evidence: [evidence] });
     fragment.edges.push(factEdge(`schedule:${apiId}->${id}`, apiId, id, "schedule", "after() 后台执行", [evidence], signalIds));
   }

@@ -3,6 +3,7 @@ import { architectureFactSetSchema, type ArchitectureEvidence, type Architecture
 import { collectArchitectureSignals, type ArchitectureSignal, type ArchitectureSignalInventory } from "./signals";
 import { evaluateArchitectureCoverage, type ArchitectureCoverage } from "./coverage";
 import { analyzeArchitectureFacts } from "./extract";
+import { signalIdsForPaths } from "./source";
 
 type Component = ArchitectureDocument["components"][number];
 type Connection = ArchitectureDocument["connections"][number];
@@ -56,9 +57,7 @@ function legacyEvidence(component: Component): ArchitectureEvidence[] {
 }
 
 function matchingSignalIds(signals: ArchitectureSignal[], component: Component) {
-  const sources = component.sources === undefined ? [] : component.sources;
-  const paths = new Set(sources.map((source) => source.path));
-  return signals.filter((signal) => paths.has(signal.evidence.path)).map((signal) => signal.id).sort();
+  return signalIdsForPaths(signals, (component.sources ?? []).map((source) => source.path));
 }
 
 const legacyEdgeKinds = [

@@ -49,6 +49,11 @@ export function signalIdsForPaths(signals: ArchitectureSignal[], paths: Iterable
   return signals.filter((signal) => accepted.has(signal.evidence.path)).map((signal) => signal.id).sort();
 }
 
+export function signalIdsForKindsAndPaths(signals: ArchitectureSignal[], kinds: readonly ArchitectureSignal["kind"][], paths: Iterable<string>) {
+  const accepted = new Set(paths);
+  return signals.filter((signal) => kinds.includes(signal.kind) && accepted.has(signal.evidence.path)).map((signal) => signal.id).sort();
+}
+
 export function signalIdsForEvidence(signals: ArchitectureSignal[], evidence: ArchitectureEvidence[]) {
   const accepted = new Set(evidence.map((item) => `${item.path}:${item.line}`));
   return signals.filter((signal) => accepted.has(`${signal.evidence.path}:${signal.evidence.line}`)).map((signal) => signal.id).sort();

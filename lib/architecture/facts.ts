@@ -47,7 +47,7 @@ const baseFactSetSchema = z.object({
 
 type FactSetInput = z.infer<typeof baseFactSetSchema>;
 
-function duplicateIds(ids: string[]) {
+export function duplicateIds(ids: string[]) {
   return [...new Set(ids.filter((id, index) => ids.indexOf(id) !== index))];
 }
 

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { architectureEvidenceSchema } from "./facts";
+import { architectureEvidenceSchema, duplicateIds } from "./facts";
 import { architectureLineNumber, architectureCallContext, findArchitectureEvidence, isArchitectureSourcePath, type ArchitectureSource } from "./source";
 
 export const architectureSignalKindSchema = z.enum(["entrypoint", "deployable", "worker", "store", "external", "relationship"]);
@@ -18,8 +18,7 @@ const baseInventorySchema = z.object({
 }).strict();
 
 export const architectureSignalInventorySchema = baseInventorySchema.superRefine((value, context) => {
-  const ids = value.signals.map((signal) => signal.id);
-  for (const id of new Set(ids.filter((id, index) => ids.indexOf(id) !== index))) {
+  for (const id of duplicateIds(value.signals.map((signal) => signal.id))) {
     context.addIssue({ code: "custom", message: `Duplicate architecture signal: ${id}` });
   }
 });
