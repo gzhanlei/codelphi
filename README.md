@@ -186,9 +186,4 @@ curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3008/login
 - 数据库迁移未纳入部署流程，schema 变更需在服务器上手动执行 `npm run db:migrate`。
 - Explainer 导出需要 Chrome/Chromium，通过环境变量 `ARCHIFY_CHROME` 指定可执行文件路径；常规产品分析不依赖它。
 
-## 后续计划
 
-1. 用 Radar 的真实提交评估分析准确性，完善证据链接与人工修正界面。
-2. 增加跨产品问答和每周摘要。
-3. 接入 SalesBuddy、Chandler、EasyMakePPT、听风等其他产品。
-4. 按实际需要再增加 GitHub App、增量检索、飞书通知和 MCP。
