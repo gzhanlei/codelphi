@@ -17,6 +17,7 @@ export interface ArchitectureDocumentInput {
   artifactSha256: string | null;
   validationReceipt: unknown;
   visualReceipt: unknown;
+  analysisReceipt?: unknown;
   errorMessage: string | null;
 }
 
@@ -28,6 +29,14 @@ export interface ArchitectureDocumentRecord extends ArchitectureDocumentInput {
 
 export function architectureSpecPath(productSlug: string, specVersionId: number) {
   return `artifacts/products/${slugSchema.parse(productSlug)}/${specVersionId}/architecture.json`;
+}
+
+export function architectureAnalysisPath(productSlug: string, specVersionId: number) {
+  return `artifacts/products/${slugSchema.parse(productSlug)}/${specVersionId}/architecture.analysis.json`;
+}
+
+export function architectureFactsPath(productSlug: string, specVersionId: number) {
+  return `artifacts/products/${slugSchema.parse(productSlug)}/${specVersionId}/architecture.facts.json`;
 }
 
 export function architectureArtifactPath(productSlug: string, specVersionId: number) {
@@ -66,13 +75,13 @@ function jsonParam(value: unknown) {
 export async function saveArchitectureDocument(input: ArchitectureDocumentInput) {
   await getDb().execute(
     `INSERT INTO architecture_documents
-      (product_id, spec_version_id, revision, status, spec_json, spec_sha256, artifact_path, artifact_sha256, validation_receipt, visual_receipt, error_message)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (product_id, spec_version_id, revision, status, spec_json, spec_sha256, artifact_path, artifact_sha256, validation_receipt, visual_receipt, analysis_receipt, error_message)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE
        revision = VALUES(revision), status = VALUES(status), spec_json = VALUES(spec_json), spec_sha256 = VALUES(spec_sha256),
        artifact_path = VALUES(artifact_path), artifact_sha256 = VALUES(artifact_sha256),
-       validation_receipt = VALUES(validation_receipt), visual_receipt = VALUES(visual_receipt), error_message = VALUES(error_message)`,
-    [input.productId, input.specVersionId, input.revision, input.status, input.specJson, input.specSha256, input.artifactPath, input.artifactSha256, jsonParam(input.validationReceipt), jsonParam(input.visualReceipt), input.errorMessage],
+       validation_receipt = VALUES(validation_receipt), visual_receipt = VALUES(visual_receipt), analysis_receipt = VALUES(analysis_receipt), error_message = VALUES(error_message)`,
+    [input.productId, input.specVersionId, input.revision, input.status, input.specJson, input.specSha256, input.artifactPath, input.artifactSha256, jsonParam(input.validationReceipt), jsonParam(input.visualReceipt), jsonParam(input.analysisReceipt), input.errorMessage],
   );
 }
 
@@ -82,7 +91,7 @@ export async function getProductIdentity(productId: number) {
 }
 
 function mapArchitectureRow(row: ArchitectureDocumentRecord & { id: number }) {
-  return { ...row, validationReceipt: parseJsonValue(row.validationReceipt), visualReceipt: parseJsonValue(row.visualReceipt) };
+  return { ...row, validationReceipt: parseJsonValue(row.validationReceipt), visualReceipt: parseJsonValue(row.visualReceipt), analysisReceipt: parseJsonValue(row.analysisReceipt) };
 }
 
 export async function getLatestArchitectureDocument(productId: number) {
@@ -90,7 +99,7 @@ export async function getLatestArchitectureDocument(productId: number) {
     `SELECT d.id, d.product_id AS productId, d.spec_version_id AS specVersionId, d.revision, d.status,
             d.spec_json AS specJson, d.spec_sha256 AS specSha256, d.artifact_path AS artifactPath,
             d.artifact_sha256 AS artifactSha256, d.validation_receipt AS validationReceipt,
-            d.visual_receipt AS visualReceipt, d.error_message AS errorMessage,
+            d.visual_receipt AS visualReceipt, d.analysis_receipt AS analysisReceipt, d.error_message AS errorMessage,
             p.slug AS productSlug, p.name AS productName
      FROM architecture_documents d JOIN products p ON p.id = d.product_id WHERE d.product_id = ? ORDER BY d.id DESC LIMIT 1`,
     [productId],
@@ -104,7 +113,7 @@ export async function getArchitectureDocument(id: number, organizationId?: numbe
     `SELECT d.id, d.product_id AS productId, d.spec_version_id AS specVersionId, d.revision, d.status,
             d.spec_json AS specJson, d.spec_sha256 AS specSha256, d.artifact_path AS artifactPath,
             d.artifact_sha256 AS artifactSha256, d.validation_receipt AS validationReceipt,
-            d.visual_receipt AS visualReceipt, d.error_message AS errorMessage,
+            d.visual_receipt AS visualReceipt, d.analysis_receipt AS analysisReceipt, d.error_message AS errorMessage,
             p.slug AS productSlug, p.name AS productName
      FROM architecture_documents d JOIN products p ON p.id = d.product_id
      WHERE d.id = ? AND (p.organization_id = ? OR ? IS NULL)`,

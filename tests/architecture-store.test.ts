@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { architectureArtifactPath, architectureSpecPath, artifactAbsolutePathForRecord, getArchitectureDocument, getLatestArchitectureDocument, productArchitecturePath, safeArtifactAbsolutePath, saveArchitectureDocument } from "../lib/architecture-store";
+import { architectureAnalysisPath, architectureArtifactPath, architectureFactsPath, architectureSpecPath, artifactAbsolutePathForRecord, getArchitectureDocument, getLatestArchitectureDocument, getProductIdentity, productArchitecturePath, safeArtifactAbsolutePath, saveArchitectureDocument } from "../lib/architecture-store";
 import { getDb } from "../lib/db";
 
 vi.mock("../lib/db", () => ({ getDb: vi.fn() }));
@@ -25,6 +25,8 @@ describe("architecture store", () => {
     expect(architectureSpecPath("radar", 7)).toBe("artifacts/products/radar/7/architecture.json");
     expect(productArchitecturePath("radar", 7)).toBe("/products/radar/architecture/7");
     expect(architectureArtifactPath("radar", 7)).toBe("artifacts/products/radar/7/architecture.html");
+    expect(architectureFactsPath("radar", 7)).toBe("artifacts/products/radar/7/architecture.facts.json");
+    expect(architectureAnalysisPath("radar", 7)).toBe("artifacts/products/radar/7/architecture.analysis.json");
     expect(() => architectureArtifactPath("../etc", 7)).toThrow();
     expect(safeArtifactAbsolutePath(record.artifactPath, "/tmp/radar")).toBe("/tmp/radar/artifacts/products/radar/7/architecture.html");
     expect(() => safeArtifactAbsolutePath("artifacts/products/../../etc/passwd", "/tmp/radar")).toThrow("outside managed artifact directory");
@@ -45,6 +47,24 @@ describe("architecture store", () => {
     const parameters = execute.mock.calls[0][1] as unknown[];
     expect(parameters[8]).toBeNull();
     expect(parameters[9]).toBeNull();
+    expect(parameters[10]).toBeNull();
+  });
+
+  it("serializes analysis diagnostics independently from render receipts", async () => {
+    const execute = vi.fn(async (_sql: string, _parameters: unknown[]) => [{}]);
+    vi.mocked(getDb).mockReturnValue({ execute } as never);
+    const analysisReceipt = { engine: "repository-facts-v1", coverage: { publishable: true } };
+    await saveArchitectureDocument({ ...record, analysisReceipt });
+    expect(execute.mock.calls[0][0]).toContain("analysis_receipt = VALUES(analysis_receipt)");
+    expect(execute.mock.calls[0][1][10]).toBe(JSON.stringify(analysisReceipt));
+    expect(execute.mock.calls[0][1][11]).toBeNull();
+  });
+
+  it("loads the product identity for architecture generation", async () => {
+    const execute = vi.fn(async () => [[{ id: 4, slug: "radar", name: "Radar" }]]);
+    vi.mocked(getDb).mockReturnValue({ execute } as never);
+    expect(await getProductIdentity(4)).toEqual({ id: 4, slug: "radar", name: "Radar" });
+    expect(execute).toHaveBeenCalledWith("SELECT id, slug, name FROM products WHERE id = ?", [4]);
   });
 
   it("loads the latest architecture document for a product", async () => {
@@ -58,9 +78,9 @@ describe("architecture store", () => {
   });
 
   it("loads a document with its product identity and decoded receipts", async () => {
-    const execute = vi.fn(async () => [[{ ...record, validation_receipt: JSON.stringify({ ok: true }), visual_receipt: JSON.stringify({ ok: true }) }]]);
+    const execute = vi.fn(async () => [[{ ...record, validationReceipt: JSON.stringify({ ok: true }), visualReceipt: JSON.stringify({ ok: true }), analysisReceipt: JSON.stringify({ coverage: { publishable: true } }) }]]);
     vi.mocked(getDb).mockReturnValue({ execute } as never);
     const result = await getArchitectureDocument(7);
-    expect(result).toMatchObject({ productSlug: "radar", specVersionId: 7, status: "accepted", validationReceipt: { ok: true }, visualReceipt: { ok: true } });
+    expect(result).toMatchObject({ productSlug: "radar", specVersionId: 7, status: "accepted", validationReceipt: { ok: true }, visualReceipt: { ok: true }, analysisReceipt: { coverage: { publishable: true } } });
   });
 });

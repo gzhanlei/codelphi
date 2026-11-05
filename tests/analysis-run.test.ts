@@ -2,10 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { queueAnalysis, runAnalysis } from "../lib/analysis";
 import { analyzeWithAI } from "../lib/ai";
 import { getRemoteAnalysisSources } from "../lib/remote-analysis";
-import { generateArchitectureVersion } from "../lib/architecture-version";
+import { generateRepositoryArchitectureVersion } from "../lib/architecture-version";
 
 const execute = vi.fn();
 const readLines = vi.fn();
+const listDir = vi.fn();
 const connection = {
   execute: vi.fn(),
   beginTransaction: vi.fn(async () => undefined),
@@ -31,7 +32,7 @@ vi.mock("../lib/code-hosting", async (importOriginal) => ({
 vi.mock("../lib/ai", () => ({ analyzeWithAI: vi.fn() }));
 vi.mock("../lib/remote-analysis", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/remote-analysis")>(), getRemoteAnalysisSources: vi.fn() }));
 vi.mock("../lib/spec-versions", () => ({ insertSpecVersion: vi.fn(async () => 44) }));
-vi.mock("../lib/architecture-version", () => ({ generateArchitectureVersion: vi.fn(async () => ({})) }));
+vi.mock("../lib/architecture-version", () => ({ generateRepositoryArchitectureVersion: vi.fn(async () => ({ status: "accepted", errorMessage: null })) }));
 
 const run = {
   id: 8,
@@ -78,8 +79,9 @@ describe("analysis orchestration", () => {
     });
     adapter.getRepository.mockResolvedValue({ owner: "gzhanlei", name: "radar", defaultBranch: "main" });
     adapter.getChangeContext.mockResolvedValue({ message: "change", committedAt: "2026-11-01T00:00:00Z", url: "https://github.com/commit/sha", files: [] });
-    vi.mocked(getRemoteAnalysisSources).mockResolvedValue({ sources: [], slice: { files: [{ path: "lib/db.ts" }] }, index: { readLines } } as never);
-    readLines.mockImplementation(async (request) => ({ startLine: 1, lines: [`${request.path} complete evidence`] }));
+    vi.mocked(getRemoteAnalysisSources).mockResolvedValue({ sources: [], slice: { files: [{ path: "lib/db.ts" }] }, index: { readLines, listDir } } as never);
+    listDir.mockResolvedValue({ status: "indexed", truncated: false, entries: [{ path: "lib/db.ts", type: "blob" }, { path: "lib/ai.ts", type: "blob" }] });
+    readLines.mockImplementation(async (request) => ({ startLine: 1, endLine: 1, lineCount: 1, byteSize: 100, lines: [`${request.path} complete evidence`] }));
     vi.mocked(analyzeWithAI).mockResolvedValue({ product: { description: "代码驱动的产品知识与变更中心。", evidence: [{ path: "lib/db.ts", startLine: 1 }] }, release: { title: "v1", summary: "summary" }, features: [], changes: [] });
   });
 
@@ -120,25 +122,29 @@ describe("analysis orchestration", () => {
     expect(connection.commit).toHaveBeenCalledOnce();
   });
 
-  it("supplements complete Radar architecture evidence after the AI slice", async () => {
+  it("loads independent fixed-revision architecture evidence after the AI slice", async () => {
     await runAnalysis(8);
-    expect(readLines).toHaveBeenCalledWith(expect.objectContaining({ path: "lib/db.ts", requestedBy: "evidence_verifier" }));
+    expect(listDir).toHaveBeenCalledWith("");
+    expect(readLines).toHaveBeenCalledWith(expect.objectContaining({ path: "lib/db.ts", requestedBy: "evidence_verifier", reason: "architecture repository source inventory" }));
     expect(readLines).toHaveBeenCalledWith(expect.objectContaining({ path: "lib/ai.ts", requestedBy: "evidence_verifier" }));
-    expect(vi.mocked(generateArchitectureVersion).mock.calls[0][0].sources).toEqual(expect.arrayContaining([
+    expect(vi.mocked(generateRepositoryArchitectureVersion).mock.calls[0][0].sources).toEqual(expect.arrayContaining([
       expect.objectContaining({ path: "lib/db.ts", content: "1: lib/db.ts complete evidence" }),
-      expect.objectContaining({ path: "lib/analysis.ts", content: "1: lib/analysis.ts complete evidence" }),
+      expect.objectContaining({ path: "lib/ai.ts", content: "1: lib/ai.ts complete evidence" }),
     ]));
+    expect(vi.mocked(generateRepositoryArchitectureVersion).mock.calls[0][0].sourceReceipt).toEqual({ scope: "repository", directories: 1, files: 2, bytes: 200 });
     expect(connection.commit).toHaveBeenCalledOnce();
   });
 
   it.each([
     { owner: "gzhanlei", name: "other" },
     { owner: "other", name: "radar" },
-  ])("does not use the Radar evidence loader for $owner/$name", async (identity) => {
+  ])("uses the same repository architecture loader for $owner/$name", async (identity) => {
     runRows = [{ ...run, ...identity }];
     await runAnalysis(8);
-    expect(readLines).not.toHaveBeenCalled();
-    expect(vi.mocked(generateArchitectureVersion).mock.calls[0][0].sources).toEqual([]);
+    expect(listDir).toHaveBeenCalledWith("");
+    expect(readLines).toHaveBeenCalled();
+    expect(vi.mocked(generateRepositoryArchitectureVersion).mock.calls[0][0].sources).toHaveLength(2);
+    expect(vi.mocked(generateRepositoryArchitectureVersion).mock.calls[0][0].sourceReceipt.files).toBe(2);
   });
 
   it("fills only a blank product description with traceable AI output", async () => {

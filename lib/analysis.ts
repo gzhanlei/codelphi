@@ -2,11 +2,11 @@ import type { PoolConnection } from "mysql2/promise";
 import { getDb } from "./db";
 import { analyzeWithAI, type AnalysisResult } from "./ai";
 import { resolveAnalysisTarget, type ChangeContext, type CodeHostingProvider, type SourceFile } from "./code-hosting";
-import { analysisSliceBudgets, getRemoteAnalysisSources, loadAIVlogArchitectureSources, loadRadarArchitectureSources, parseSourceRoots } from "./remote-analysis";
-import { isAIVlogRepository } from "./architecture-aivlog";
+import { analysisSliceBudgets, getRemoteAnalysisSources, parseSourceRoots } from "./remote-analysis";
+import { loadArchitectureRepositorySources, type ArchitectureRepositorySourceReceipt } from "./architecture/remote";
 import { createSlicePlanner } from "./slice-planner";
 import { insertSpecVersion } from "./spec-versions";
-import { generateArchitectureVersion } from "./architecture-version";
+import { generateRepositoryArchitectureVersion } from "./architecture-version";
 import { errorMessage } from "./error-message";
 
 export interface RunContext {
@@ -136,17 +136,23 @@ async function saveResult(run: RunContext, result: AnalysisResult, change: Chang
   }
 }
 
-interface AnalysisArchitectureDependencies {
-  saveResult: (run: RunContext, result: AnalysisResult, change: ChangeContext) => Promise<number>;
-  generateArchitecture: (input: { run: RunContext; sources: SourceFile[]; specVersionId: number }) => Promise<unknown>;
+interface AnalysisArchitectureSources {
+  sources: SourceFile[];
+  sourceReceipt: ArchitectureRepositorySourceReceipt;
 }
 
-export async function saveAnalysisAndArchitecture(run: RunContext, result: AnalysisResult, change: ChangeContext, sources: SourceFile[] | (() => Promise<SourceFile[]>), dependencies: AnalysisArchitectureDependencies = { saveResult, generateArchitecture: generateArchitectureVersion }) {
+interface AnalysisArchitectureDependencies {
+  saveResult: (run: RunContext, result: AnalysisResult, change: ChangeContext) => Promise<number>;
+  generateArchitecture: (input: { run: RunContext; sources: SourceFile[]; sourceReceipt: ArchitectureRepositorySourceReceipt; specVersionId: number }) => Promise<{ status: "rendered" | "accepted" | "failed"; errorMessage?: string | null }>;
+}
+
+export async function saveAnalysisAndArchitecture(run: RunContext, result: AnalysisResult, change: ChangeContext, architecture: AnalysisArchitectureSources | (() => Promise<AnalysisArchitectureSources>), dependencies: AnalysisArchitectureDependencies = { saveResult, generateArchitecture: generateRepositoryArchitectureVersion }) {
   const specVersionId = await dependencies.saveResult(run, result, change);
   try {
-    const architectureSources = typeof sources === "function" ? await sources() : sources;
-    await dependencies.generateArchitecture({ run, sources: architectureSources, specVersionId });
-    return { specVersionId, architectureError: null };
+    const loaded = typeof architecture === "function" ? await architecture() : architecture;
+    const document = await dependencies.generateArchitecture({ run, sources: loaded.sources, sourceReceipt: loaded.sourceReceipt, specVersionId });
+    const architectureError = document.status === "accepted" ? null : document.errorMessage || `Architecture ${document.status}`;
+    return { specVersionId, architectureError };
   } catch (error) {
     return { specVersionId, architectureError: errorMessage(error, "Architecture generation failed") };
   }
@@ -197,12 +203,13 @@ async function performAnalysis(run: RunContext) {
     loadSourceRoots(run.productId),
   ]);
   const planner = createSlicePlanner({ now: Date.now });
+  const scopeRoots = sourceRoots.length > 0 ? sourceRoots : [{ path: "", role: "shared" as const }];
   const remote = await getRemoteAnalysisSources({
     product: target.product,
     repository: { owner: repo.owner, repo: repo.name, revision: run.afterSha },
     access: target.access,
     provider: target.adapter.provider,
-    scopeRoots: sourceRoots.length > 0 ? sourceRoots : [{ path: "", role: "shared" }],
+    scopeRoots,
   }, { planner, budgets: analysisSliceBudgets });
   const sources = remote.sources;
   const result = await analyzeWithAI(sources, change);
@@ -210,11 +217,7 @@ async function performAnalysis(run: RunContext) {
     ...remote.slice.files.map((file) => file.path),
     ...change.files.map((file) => file.path),
   ]));
-  const architectureSources = remote.index && isAIVlogRepository(run)
-    ? () => loadAIVlogArchitectureSources(remote.index, sources)
-    : run.owner === "gzhanlei" && run.name === "radar" && remote.index
-      ? () => loadRadarArchitectureSources(remote.index, sources)
-      : sources;
+  const architectureSources = () => loadArchitectureRepositorySources(remote.index, scopeRoots).then((loaded) => ({ sources: loaded.sources, sourceReceipt: loaded.receipt }));
   await saveAnalysisAndArchitecture(run, result, change, architectureSources);
 }
 

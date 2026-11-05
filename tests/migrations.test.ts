@@ -18,4 +18,10 @@ describe("database migrations", () => {
     expect(sql).toContain("description_evidence");
     expect(sql).toContain("DEFAULT 'manual'");
   });
+
+  it("stores architecture analysis receipts separately from rendering evidence", () => {
+    const sql = readFileSync(new URL("../migrations/015_architecture_analysis_receipts.sql", import.meta.url), "utf8");
+    expect(sql).toContain("ALTER TABLE architecture_documents");
+    expect(sql).toContain("analysis_receipt JSON NULL");
+  });
 });

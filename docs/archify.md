@@ -41,7 +41,7 @@ npm run archify:prototype
 - `rendered`：HTML 已生成，但 visual-check 未通过，不开放 accepted 访问。
 - `failed`：delivery 未成功，没有可发布的 artifact。
 
-每次尝试都回写同一版本，保留 `spec_json`、规格/产物 SHA-256、delivery/visual 回执和错误信息。架构异常不会回滚已提交的产品规格。
+每次尝试都回写同一版本，保留 `spec_json`、规格/产物 SHA-256、delivery/visual 回执和错误信息。`migrations/015_architecture_analysis_receipts.sql` 增加独立的 `analysis_receipt`，记录 fixed-SHA 源码范围、语义覆盖和 `architecture.facts.json` / `architecture.analysis.json` 哈希。架构异常不会回滚已提交的产品规格。
 
 生成文件位于 `artifacts/products/<slug>/<specVersionId>/`，该目录不进入 Git。访问路径为 `/api/architecture/<id>`，需要有效 Radar 会话；响应使用无 `allow-same-origin` 的 sandbox CSP，并验证产品与 Spec Version 对应的受管路径。
 
@@ -53,7 +53,7 @@ RADAR_REPOSITORY_ROOTS='{"owner/repo":"/absolute/local/checkout"}'
 
 没有本地 checkout 的远程仓库仍然通过固定 revision 的 Tree/Blob 内容生成并验收架构，组件和关系不变；仅省略 `meta.repository`、组件 `sources` 和 Archify 的本地 Git 证据回执，不伪造 Viewer 源码链接。产品简介、功能与场景的证据不受此影响。
 
-Radar 与 AIVlog 使用专用模板，其他仓库使用基于源码内容和行号的通用架构生成器，均要求实现标记匹配；不会仅凭同名文件虚构组件。AIVlog 专用模板声明的每个证据文件与标记都必须存在。专用模板的证据文件按固定 revision 独立补充，不占用 AI 切片预算。所有组件还必须从用户入口沿关系连通；只有局部数据库边、但存在孤立用户或外部依赖的图会以 `disconnected components` 明确失败，不能进入 `accepted`。WorkMembership（Chandler）已通过真实分析和 accepted 验收。架构查看使用 `/products/<slug>/architecture/<id>` 原生页面并提供“返回产品概览”按钮，`prepare` 阶段的无组件、spec 写入失败等也会保存 `failed` 文档与错误信息。
+生产分析统一使用固定 revision 的事实提取、独立信号清单和语义覆盖门禁，不再按 Radar、AIVlog 或其他仓库名称选择模板。完整架构源码读取独立于 AI 切片，截断或预算耗尽会失败；缺失关键信号、无证据事实或不可达运行时单元会保存诊断并阻止 Archify 交付。只有覆盖通过后，通用投影才以 `standard` 质量进入 delivery 和 visual-check。旧专用模板只保留作历史/corpus 回归基线，既有 accepted 架构不会因引擎升级自动重建。架构查看使用 `/products/<slug>/architecture/<id>` 原生页面并提供“返回产品概览”按钮，`prepare` 阶段的无组件、覆盖失败、spec 写入失败等也会保存 `failed` 文档与错误信息。
 
 ## 阶段 3：原生产品概览
 
