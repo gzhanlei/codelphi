@@ -33,6 +33,9 @@ const connectionSchema = z.object({
   variant: z.enum(["default", "emphasis", "security", "dashed"]).optional(),
   fromSide: z.enum(["left", "right", "top", "bottom"]).optional(),
   toSide: z.enum(["left", "right", "top", "bottom"]).optional(),
+  route: z.enum(["auto", "straight", "orthogonal-h", "orthogonal-v"]).optional(),
+  via: z.array(z.tuple([z.number(), z.number()])).optional(),
+  labelAt: z.tuple([z.number(), z.number()]).optional(),
   labelDy: z.number().optional(),
 });
 
@@ -43,7 +46,7 @@ export const architectureDocumentSchema = z.object({
     title: z.string(),
     output: z.string(),
     locale: z.literal("zh-CN"),
-    quality_profile: z.literal("showcase"),
+    quality_profile: z.enum(["standard", "showcase"]),
     repository: z.object({ url: z.string().url(), provider: codeHostingProviderSchema, revision: z.string() }).optional(),
     viewBox: z.tuple([z.number(), z.number()]),
   }),

@@ -9,8 +9,8 @@
 - `coverage.ts`：比较信号与事实，检查关键信号遗漏、无证据节点/关系，以及从用户、Webhook、Scheduler 等多个根节点出发的有向可达性。
 - `remote.ts`：corpus 专用的固定 revision 仓库源码读取器。它遍历完整源码树、分页读取完整文件，并在树截断、目录/文件/字节预算耗尽时失败，不能把部分结果标记为 `repository`。
 - `shadow.ts`：旧架构文档与直接事实提取结果的两类临时诊断适配器，包含节点/关系事实和覆盖报告，不是生产验收路径。
-- `extract.ts` / `detectors/`：按 Go、Next.js、PHP、小程序、存储和外部 SDK 能力直接提取事实；不包含仓库名分支。Go 和 TypeScript 关系只沿可解析的 import 闭包、注册路由或调用证据产生。Go CLI、HTTP 服务与 Worker 使用不同入口类型，小程序等内部调用使用 `relationship` 信号参与覆盖门禁。
-- `project.ts`：把已经校验的事实投影为 Archify 文档，不再从固定组件词表反推系统。
+- `extract.ts` / `detectors/`：按 Go、Next.js、PHP、小程序、存储和外部 SDK 能力直接提取事实；不包含仓库名分支。Go 和 TypeScript 关系只沿可解析的 import 闭包、注册路由或调用证据产生，支持 `{id}` 动态路由和多行调用。Go CLI、HTTP 服务与 Worker 使用不同入口类型，Worker 数据库轮询使用 `poll`，COS 上传/下载分别使用 `upload`/`download`；构造器本身不证明数据传输方向。小程序等内部调用使用 `relationship` 信号参与覆盖门禁。
+- `project.ts` / `layout.ts`：把已经校验的事实投影为 Archify 文档，不再从固定组件词表反推系统。事实 ID 只在投影边界映射为稳定合法 ID；入口、运行时和资源使用确定性分栏，正交路径从节点外部端口绕行，标签同时避开节点和已放置标签。通用图使用 `standard` 质量，不为满足 showcase 而删除节点或关系。
 
 ## Corpus 影子报告
 

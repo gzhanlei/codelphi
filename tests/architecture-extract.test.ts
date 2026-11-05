@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import { extractArchitectureFacts } from "../lib/architecture/extract";
 import { evaluateArchitectureCoverage } from "../lib/architecture/coverage";
 import { collectArchitectureSignals } from "../lib/architecture/signals";
-import { projectArchitectureDocument } from "../lib/architecture/project";
+import { projectArchitectureDocument, architectureProjectionId } from "../lib/architecture/project";
+import { goHttpInternals } from "../lib/architecture/detectors/go-http";
+import { architectureCallContext } from "../lib/architecture/source";
 
 const revision = "13157624fb0d8b63e5072049c94824d4b6d2e609";
 
@@ -19,13 +21,14 @@ describe("direct architecture fact extraction", () => {
     const facts = extract([
       { path: "go.mod", content: "1: module example.com/app\n" },
       { path: "cmd/server/main.go", content: "1: package main\n2: import (\n3: \"example.com/app/internal/store\"\n4: )\n5: func main() {\n6: db := store.Open()\n7: http.ListenAndServe(\":8080\", nil)\n8: }" },
-      { path: "cmd/worker/main.go", content: "1: package main\n2: import \"example.com/app/internal/store\"\n3: func main() {\n4: db := store.Open()\n5: worker.NewRunner(db)\n6: }" },
+      { path: "cmd/worker/main.go", content: "1: package main\n2: import (\n3: \"example.com/app/internal/store\"\n4: \"example.com/app/internal/worker\"\n5: )\n6: func main() {\n7: db := store.Open()\n8: worker.NewRunner(db)\n9: }" },
       { path: "internal/store/mysql.go", content: "1: package store\n2: func Open() {\n3: sql.Open(\"mysql\", dsn)\n4: }" },
-      { path: "internal/worker/runner.go", content: "1: package worker\n2: func NewRunner(db Store) {}" },
+      { path: "internal/worker/runner.go", content: "1: package worker\n2: func NewRunner(db Store) {\n3: time.NewTicker(time.Second)\n4: }" },
     ]);
     expect(facts.nodes.map((node) => node.id)).toEqual(expect.arrayContaining(["actor:users", "actor:scheduler", "go:cmd/server", "go:cmd/worker", "store:mysql"]));
     expect(edge(facts, "go:cmd/server", "store:mysql")?.kind).toBe("sql");
-    expect(edge(facts, "go:cmd/worker", "store:mysql")?.kind).toBe("sql");
+    expect(edge(facts, "go:cmd/worker", "store:mysql")?.kind).toBe("poll");
+    expect(edge(facts, "go:cmd/worker", "store:mysql")?.label).toBe("轮询 / 更新任务");
     expect(edge(facts, "go:cmd/server", "go:cmd/worker")).toBeUndefined();
     expect(edge(facts, "actor:scheduler", "go:cmd/worker")?.kind).toBe("schedule");
     expect(facts.nodes.find((node) => node.id === "go:cmd/server")?.sourcePaths).toContain("internal/store/mysql.go");
@@ -84,14 +87,15 @@ describe("direct architecture fact extraction", () => {
       { path: "internal/api/agent_wake.go", content: "1: wakeRenderAgent(AgentWakeURL)" },
       { path: "internal/api/xpay_api.go", content: "1: xpay_goods_deliver_notify" },
       { path: "internal/aiphoto/client.go", content: "1: POST /api/partner/v1/generate" },
-      { path: "internal/cos/cos.go", content: "1: NewQCloudClient()" },
+      { path: "internal/cos/cos.go", content: "1: NewQCloudClient()\n2: PutObject()\n3: PresignGet()" },
       { path: "internal/catalog/catalog.go", content: "1: // xpay.ProductIDFor is part of the historical contract" },
       { path: "internal/xpay/xpay.go", content: "1: BuildPayment()" },
       { path: "internal/wechatmp/client.go", content: "1: Code2Session()" },
       { path: "internal/worker/runner.go", content: "1: // remote agents call /api/worker/render-tasks/claim\n2: # /api/worker/render-tasks/claim\n3: * /api/worker/render-tasks/claim\n4: // http.Get(\"/api/worker/render-tasks/claim\")" },
     ]);
     expect(edge(facts, "go:cmd/worker", "external:aiphoto")).toBeDefined();
-    expect(edge(facts, "go:cmd/worker", "store:cos")).toBeDefined();
+    expect(facts.edges.some((candidate) => candidate.from === "go:cmd/worker" && candidate.to === "store:cos" && candidate.kind === "upload")).toBe(true);
+    expect(facts.edges.some((candidate) => candidate.from === "go:cmd/worker" && candidate.to === "store:cos" && candidate.kind === "download")).toBe(true);
     expect(edge(facts, "go:cmd/worker", "external:xpay")).toBeDefined();
     expect(edge(facts, "go:cmd/worker", "external:wechat")).toBeDefined();
     expect(edge(facts, "go:cmd/remoteagent", "go:cmd/server")?.label).toBe("/api/worker/render-tasks/claim");
@@ -105,6 +109,44 @@ describe("direct architecture fact extraction", () => {
       expect(node.signalIds.every((id) => !id.startsWith("store:") && !id.startsWith("external:"))).toBe(true);
     }
     expect(facts.edges.filter((candidate) => candidate.kind === "callback")).toHaveLength(1);
+  });
+
+  it("matches dynamic Go routes and reports unregistered internal calls", () => {
+    const sources = [
+      { path: "go.mod", content: "1: module example.com/app\n" },
+      { path: "cmd/server/main.go", content: "1: import \"example.com/app/internal/api\"\n2: func main() {\n3: http.ListenAndServe()\n4: }" },
+      { path: "cmd/remoteagent/main.go", content: "1: func main() {\n2: for {\n3: doJSON(\"/api/worker/render-tasks/claim\")\n4: doJSON(\n5: \"/api/worker/render-tasks/\"+id+\"/complete\")\n6: doJSON(\n7: \"/api/worker/render-tasks/\"+id+\"/fail\")\n8: doJSON(\"/api/worker/health\")\n9: }\n10: }" },
+      { path: "internal/api/worker.go", content: "1: r.Route(\"/api/worker\", func(r chi.Router) {\n2: r.Post(\"/render-tasks/claim\", handler)\n3: r.Post(\"/render-tasks/{id}/complete\", handler)\n4: r.Post(\"/render-tasks/{id}/fail\", handler)\n5: })" },
+    ];
+    const facts = extract(sources);
+    const labels = facts.edges.filter((candidate) => candidate.from === "go:cmd/remoteagent" && candidate.to === "go:cmd/server").map((candidate) => candidate.label);
+    expect(labels).toEqual(expect.arrayContaining(["/api/worker/render-tasks/claim", "/api/worker/render-tasks/{id}/complete", "/api/worker/render-tasks/{id}/fail"]));
+    expect(labels).not.toContain("/api/worker/health");
+    const coverage = evaluateArchitectureCoverage(collectArchitectureSignals({ revision, scope: "repository" }, sources), facts);
+    expect(coverage.metrics.relationship.total).toBe(4);
+    expect(coverage.metrics.relationship.covered).toBe(3);
+    expect(coverage.unclassifiedCriticalSignals.map((signal) => signal.id)).toEqual(["relationship:cmd/remoteagent/main.go:8:go-internal-http-call"]);
+    expect(coverage.publishable).toBe(false);
+  });
+
+  it("scans dynamic route fragments in order and retains multiline call context", () => {
+    expect(goHttpInternals.routeFragments("/api/worker/{id}/complete")).toEqual(["/api/worker/", "/complete"]);
+    expect(goHttpInternals.routeFragments("{id}/complete")).toEqual(["", "/complete"]);
+    expect(goHttpInternals.containsRouteFragments("abxba", ["a", "b", "a"])).toBe(true);
+    expect(goHttpInternals.containsRouteFragments("a", ["a"])).toBe(true);
+    expect(goHttpInternals.containsRouteFragments("ba", ["a", "b"])).toBe(false);
+    expect(architectureCallContext(["http.NewRequest(", "\"/api/worker\""], 1)).toBe("http.NewRequest(\n\"/api/worker\"");
+    expect(architectureCallContext(["http.NewRequest("], 0)).toBe("\nhttp.NewRequest(");
+  });
+
+  it("does not treat a COS constructor as an upload without a directional operation", () => {
+    const facts = extract([
+      { path: "go.mod", content: "1: module example.com/app\n" },
+      { path: "cmd/worker/main.go", content: "1: import \"example.com/app/internal/cos\"\n2: func main() {}" },
+      { path: "internal/cos/cos.go", content: "1: NewQCloudClient()" },
+    ]);
+    expect(facts.nodes.some((node) => node.id === "store:cos")).toBe(true);
+    expect(edge(facts, "go:cmd/worker", "store:cos")).toBeUndefined();
   });
 
   it("connects mini-program cloud, storage and payment calls with caller evidence", () => {
@@ -316,7 +358,7 @@ describe("direct architecture fact extraction", () => {
     ];
     const facts = extract(sources);
     const document = projectArchitectureDocument({ productName: "Any product", productSlug: "any-product", owner: "any-owner", name: "any-repo", revision }, facts);
-    expect(document.components.map((component) => component.id)).toEqual(["actor:users", "next:root:ui"]);
+    expect(document.components.map((component) => component.id)).toEqual([architectureProjectionId("actor:users"), architectureProjectionId("next:root:ui")]);
     expect(document.meta.repository?.revision).toBe(revision);
     expect(document.components[1].sources?.[0]).toEqual(expect.objectContaining({ path: "app/page.tsx", line: 1 }));
   });

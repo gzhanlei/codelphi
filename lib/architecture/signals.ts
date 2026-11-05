@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { architectureEvidenceSchema } from "./facts";
-import { findArchitectureEvidence, isArchitectureSourcePath, type ArchitectureSource } from "./source";
+import { architectureLineNumber, architectureCallContext, findArchitectureEvidence, isArchitectureSourcePath, type ArchitectureSource } from "./source";
 
 export const architectureSignalKindSchema = z.enum(["entrypoint", "deployable", "worker", "store", "external", "relationship"]);
 export const architectureSignalSchema = z.object({
@@ -51,11 +51,27 @@ function matchingLine(source: ArchitectureSource, rule: SignalRule) {
   return findArchitectureEvidence(source, rule.markers, rule.detector);
 }
 
+function goInternalHttpSignals(source: ArchitectureSource): ArchitectureSignal[] {
+  if (!source.path.endsWith(".go")) return [];
+  const lines = source.content.split("\n");
+  const code = lines.map((line) => line.replace(/^\s*\d+:\s?/, "").trim());
+  return code.flatMap((line, index) => {
+    const comment = ["//", "#", "*", "--", "/*"].some((prefix) => line.startsWith(prefix));
+    const context = architectureCallContext(code, index);
+    const call = /doJSON|http\.(?:NewRequest|Get|Post)|fetch\(|request\(/.test(context);
+    if (comment || !line.includes("/api/") || !call) return [];
+    const evidence = { path: source.path, line: architectureLineNumber(lines[index], index), detector: "go-internal-http-call" };
+    return [{ id: `relationship:${source.path}:${evidence.line}:go-internal-http-call`, kind: "relationship" as const, critical: true, evidence }];
+  });
+}
+
 export function collectArchitectureSignals(input: Pick<ArchitectureSignalInventory, "revision" | "scope">, sources: ArchitectureSource[]): ArchitectureSignalInventory {
-  const signals = [...sources].filter((source) => isArchitectureSourcePath(source.path)).sort((a, b) => a.path.localeCompare(b.path)).flatMap((source) => signalRules.flatMap((rule) => {
+  const runtimeSources = sources.filter((source) => isArchitectureSourcePath(source.path));
+  const signals = [...runtimeSources].sort((a, b) => a.path.localeCompare(b.path)).flatMap((source) => signalRules.flatMap((rule) => {
     const evidence = matchingLine(source, rule);
     if (!evidence) return [];
     return [{ id: `${rule.kind}:${source.path}:${evidence.line}:${rule.detector}`, kind: rule.kind, critical: true, evidence }];
   }));
-  return architectureSignalInventorySchema.parse({ version: 1, ...input, signals: signals.sort((a, b) => a.id.localeCompare(b.id)) });
+  const relationshipSignals = runtimeSources.flatMap((source) => goInternalHttpSignals(source));
+  return architectureSignalInventorySchema.parse({ version: 1, ...input, signals: [...signals, ...relationshipSignals].sort((a, b) => a.id.localeCompare(b.id)) });
 }

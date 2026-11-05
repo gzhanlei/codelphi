@@ -1,5 +1,5 @@
 import type { ArchitectureEvidence, NodeFact } from "../facts";
-import { architectureRuntimeSources, findArchitectureEvidence } from "../source";
+import { architectureRuntimeSources, architectureCallContext, findArchitectureEvidence, signalIdsForEvidence } from "../source";
 import { factEdge, type ArchitectureContext } from "./types";
 
 interface RouteGroup {
@@ -40,18 +40,33 @@ function registeredRoutes(node: NodeFact, context: ArchitectureContext) {
   return routes;
 }
 
+function routeFragments(route: string) {
+  return route.split(/\{[^}]+\}/);
+}
+
+function containsRouteFragments(code: string, fragments: string[]) {
+  let remaining = code;
+  for (const fragment of fragments) {
+    const index = remaining.indexOf(fragment);
+    if (index < 0) return false;
+    remaining = remaining.slice(index + fragment.length);
+  }
+  return true;
+}
+
 function httpCallEvidence(source: Parameters<typeof findArchitectureEvidence>[0], route: string) {
-  return findArchitectureEvidence(source, [route], "go-internal-http-caller", (line) => {
+  const fragments = routeFragments(route);
+  return findArchitectureEvidence(source, fragments, "go-internal-http-caller", (line, index, lines) => {
     const code = line.replace(/^\s*\d+:\s?/, "").trim();
-    const comment = ["//", "#", "*"].some((prefix) => code.startsWith(prefix));
-    return !comment && /doJSON|http\.|NewRequest|fetch\(|\.Post\(|\.Get\(|request\(/.test(code);
+    const context = architectureCallContext(lines, index);
+    return containsRouteFragments(code, fragments) && /doJSON|http\.|NewRequest|fetch\(|\.Post\(|\.Get\(|request\(/.test(context);
   });
 }
 
 function internalHttpCalls(runtime: NodeFact, api: NodeFact, routes: Map<string, ArchitectureEvidence>, context: ArchitectureContext) {
   return architectureRuntimeSources(runtime, context.sources).flatMap((source) => [...routes.keys()].flatMap((route) => {
     const evidence = httpCallEvidence(source, route);
-    return evidence ? [factEdge(`http:${runtime.id}->${api.id}:${route}`, runtime.id, api.id, "http", route, [evidence])] : [];
+    return evidence ? [factEdge(`http:${runtime.id}->${api.id}:${route}`, runtime.id, api.id, "http", route, [evidence], signalIdsForEvidence(context.signals, [evidence]))] : [];
   }));
 }
 
@@ -63,6 +78,8 @@ function agentWakeCalls(api: NodeFact, agents: NodeFact[], context: Architecture
   if (evidence.length === 0) return [];
   return agents.map((agent) => factEdge(`http:${api.id}->${agent.id}:wake`, api.id, agent.id, "http", "Agent 唤醒", evidence));
 }
+
+export const goHttpInternals = { routeFragments, containsRouteFragments };
 
 export function goInternalHttpRelationships(context: ArchitectureContext, nodes: NodeFact[]) {
   const apis = nodes.filter((node) => node.kind === "api" && node.id.startsWith("go:"));

@@ -41,7 +41,11 @@ export function linkStorageRelationships(context: ArchitectureContext, nodes: No
     const edges = [];
     if (storeIds.has("store:mysql")) {
       const evidence = storageCalls(node, context, ["store.Open", "sql.Open", "mysql2", "new PDO", "getDb(", "DB::"], "mysql-caller");
-      if (evidence.length > 0) edges.push(factEdge(`sql:${node.id}->store:mysql`, node.id, "store:mysql", "sql", "SQL 读写", evidence));
+      if (evidence.length > 0) {
+        const polling = node.kind === "worker" ? storageCalls(node, context, ["time.NewTicker", "for {", "POLL_INTERVAL", "ClaimRendering", "render-tasks"], "worker-database-poll") : [];
+        const kind = polling.length > 0 ? "poll" : "sql";
+        edges.push(factEdge(`${kind}:${node.id}->store:mysql`, node.id, "store:mysql", kind, kind === "poll" ? "轮询 / 更新任务" : "SQL 读写", uniqueEvidence([...evidence, ...polling])));
+      }
     }
     if (storeIds.has("store:file-cache")) {
       const evidence = storageCalls(node, context, ["CacheManager", "file_get_contents", "file_put_contents"], "file-cache-caller");

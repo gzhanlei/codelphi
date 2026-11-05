@@ -1,0 +1,530 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`architecture fact projection > keeps deterministic geometry for a minimal request and storage flow 1`] = `
+{
+  "components": [
+    {
+      "id": "users",
+      "label": "users",
+      "pos": [
+        60,
+        80,
+      ],
+      "size": [
+        180,
+        64,
+      ],
+      "sources": [],
+      "sublabel": "user",
+      "type": "external",
+    },
+    {
+      "id": "api",
+      "label": "api",
+      "pos": [
+        540,
+        80,
+      ],
+      "size": [
+        180,
+        64,
+      ],
+      "sources": [
+        {
+          "line": 1,
+          "path": "api.ts",
+        },
+        {
+          "line": 2,
+          "path": "api.ts",
+        },
+        {
+          "line": 3,
+          "path": "api.ts",
+        },
+      ],
+      "sublabel": "api",
+      "type": "backend",
+    },
+    {
+      "id": "db",
+      "label": "db",
+      "pos": [
+        1080,
+        80,
+      ],
+      "size": [
+        180,
+        64,
+      ],
+      "sources": [
+        {
+          "line": 1,
+          "path": "db.ts",
+        },
+        {
+          "line": 2,
+          "path": "db.ts",
+        },
+        {
+          "line": 3,
+          "path": "db.ts",
+        },
+      ],
+      "sublabel": "database",
+      "type": "database",
+    },
+  ],
+  "connections": [
+    {
+      "from": "users",
+      "fromSide": "right",
+      "id": "request",
+      "label": "HTTPS",
+      "labelAt": [
+        390,
+        130,
+      ],
+      "to": "api",
+      "toSide": "left",
+      "variant": undefined,
+      "via": [],
+    },
+    {
+      "from": "api",
+      "fromSide": "right",
+      "id": "sql",
+      "label": "SQL 读写",
+      "labelAt": [
+        900,
+        130,
+      ],
+      "to": "db",
+      "toSide": "left",
+      "variant": undefined,
+      "via": [],
+    },
+  ],
+  "diagram_type": "architecture",
+  "meta": {
+    "locale": "zh-CN",
+    "output": "product-architecture.html",
+    "quality_profile": "standard",
+    "repository": {
+      "provider": "github",
+      "revision": "13157624fb0d8b63e5072049c94824d4b6d2e609",
+      "url": "https://github.com/owner/repo",
+    },
+    "title": "Product 系统架构",
+    "viewBox": [
+      1360,
+      244,
+    ],
+  },
+  "schema_version": 1,
+}
+`;
+
+exports[`architecture fact projection > maps every node role and external event root without repository templates 1`] = `
+{
+  "components": [
+    {
+      "id": "users",
+      "label": "users",
+      "pos": [
+        60,
+        80,
+      ],
+      "size": [
+        180,
+        64,
+      ],
+      "sources": [],
+      "sublabel": "user",
+      "type": "external",
+    },
+    {
+      "id": "ui",
+      "label": "ui",
+      "pos": [
+        540,
+        80,
+      ],
+      "size": [
+        180,
+        64,
+      ],
+      "sources": [
+        {
+          "line": 1,
+          "path": "ui.ts",
+        },
+        {
+          "line": 2,
+          "path": "ui.ts",
+        },
+        {
+          "line": 3,
+          "path": "ui.ts",
+        },
+      ],
+      "sublabel": "frontend",
+      "type": "frontend",
+    },
+    {
+      "id": "api",
+      "label": "api",
+      "pos": [
+        540,
+        260,
+      ],
+      "size": [
+        180,
+        64,
+      ],
+      "sources": [
+        {
+          "line": 1,
+          "path": "api.ts",
+        },
+        {
+          "line": 2,
+          "path": "api.ts",
+        },
+        {
+          "line": 3,
+          "path": "api.ts",
+        },
+      ],
+      "sublabel": "cmd/api",
+      "type": "backend",
+    },
+    {
+      "id": "worker",
+      "label": "worker",
+      "pos": [
+        540,
+        620,
+      ],
+      "size": [
+        180,
+        64,
+      ],
+      "sources": [
+        {
+          "line": 1,
+          "path": "worker.ts",
+        },
+        {
+          "line": 2,
+          "path": "worker.ts",
+        },
+        {
+          "line": 3,
+          "path": "worker.ts",
+        },
+      ],
+      "sublabel": "worker",
+      "type": "backend",
+    },
+    {
+      "id": "agent",
+      "label": "agent",
+      "pos": [
+        540,
+        440,
+      ],
+      "size": [
+        180,
+        64,
+      ],
+      "sources": [
+        {
+          "line": 1,
+          "path": "agent.ts",
+        },
+        {
+          "line": 2,
+          "path": "agent.ts",
+        },
+        {
+          "line": 3,
+          "path": "agent.ts",
+        },
+      ],
+      "sublabel": "agent",
+      "type": "backend",
+    },
+    {
+      "id": "db",
+      "label": "db",
+      "pos": [
+        1080,
+        80,
+      ],
+      "size": [
+        180,
+        64,
+      ],
+      "sources": [
+        {
+          "line": 1,
+          "path": "db.ts",
+        },
+        {
+          "line": 2,
+          "path": "db.ts",
+        },
+        {
+          "line": 3,
+          "path": "db.ts",
+        },
+      ],
+      "sublabel": "database",
+      "type": "database",
+    },
+    {
+      "id": "cos",
+      "label": "cos",
+      "pos": [
+        1080,
+        260,
+      ],
+      "size": [
+        180,
+        64,
+      ],
+      "sources": [
+        {
+          "line": 1,
+          "path": "cos.ts",
+        },
+        {
+          "line": 2,
+          "path": "cos.ts",
+        },
+        {
+          "line": 3,
+          "path": "cos.ts",
+        },
+      ],
+      "sublabel": "object-store",
+      "type": "cloud",
+    },
+    {
+      "id": "queue",
+      "label": "queue",
+      "pos": [
+        1080,
+        440,
+      ],
+      "size": [
+        180,
+        64,
+      ],
+      "sources": [
+        {
+          "line": 1,
+          "path": "queue.ts",
+        },
+        {
+          "line": 2,
+          "path": "queue.ts",
+        },
+        {
+          "line": 3,
+          "path": "queue.ts",
+        },
+      ],
+      "sublabel": "queue",
+      "type": "messagebus",
+    },
+    {
+      "id": "github",
+      "label": "github",
+      "pos": [
+        60,
+        260,
+      ],
+      "size": [
+        180,
+        64,
+      ],
+      "sources": [
+        {
+          "line": 1,
+          "path": "github.ts",
+        },
+        {
+          "line": 2,
+          "path": "github.ts",
+        },
+        {
+          "line": 3,
+          "path": "github.ts",
+        },
+      ],
+      "sublabel": "external",
+      "type": "external",
+    },
+    {
+      "id": "llm",
+      "label": "llm",
+      "pos": [
+        1080,
+        620,
+      ],
+      "size": [
+        180,
+        64,
+      ],
+      "sources": [
+        {
+          "line": 1,
+          "path": "llm.ts",
+        },
+        {
+          "line": 2,
+          "path": "llm.ts",
+        },
+        {
+          "line": 3,
+          "path": "llm.ts",
+        },
+      ],
+      "sublabel": "external",
+      "type": "external",
+    },
+  ],
+  "connections": [
+    {
+      "from": "api",
+      "fromSide": "left",
+      "id": "schedule",
+      "label": "after",
+      "labelAt": [
+        502,
+        472,
+      ],
+      "to": "worker",
+      "toSide": "left",
+      "variant": "dashed",
+      "via": [
+        [
+          520,
+          292,
+        ],
+        [
+          520,
+          652,
+        ],
+      ],
+    },
+    {
+      "from": "api",
+      "fromSide": "left",
+      "id": "oauth",
+      "label": "OAuth",
+      "labelAt": [
+        390,
+        310,
+      ],
+      "to": "github",
+      "toSide": "right",
+      "variant": "security",
+      "via": [],
+    },
+    {
+      "from": "ui",
+      "fromSide": "bottom",
+      "id": "http",
+      "label": "HTTPS",
+      "labelAt": [
+        648,
+        202,
+      ],
+      "to": "api",
+      "toSide": "top",
+      "variant": undefined,
+      "via": [],
+    },
+    {
+      "from": "worker",
+      "fromSide": "right",
+      "id": "poll",
+      "label": "poll",
+      "labelAt": [
+        758,
+        382,
+      ],
+      "to": "db",
+      "toSide": "left",
+      "variant": "dashed",
+      "via": [
+        [
+          740,
+          652,
+        ],
+        [
+          740,
+          112,
+        ],
+      ],
+    },
+    {
+      "from": "github",
+      "fromSide": "right",
+      "id": "callback",
+      "label": "push",
+      "labelAt": [
+        390,
+        274,
+      ],
+      "to": "api",
+      "toSide": "left",
+      "variant": "dashed",
+      "via": [],
+    },
+    {
+      "from": "agent",
+      "fromSide": "right",
+      "id": "process",
+      "label": "CLI",
+      "labelAt": [
+        955,
+        670,
+      ],
+      "to": "llm",
+      "toSide": "left",
+      "variant": undefined,
+      "via": [
+        [
+          740,
+          472,
+        ],
+        [
+          740,
+          652,
+        ],
+      ],
+    },
+  ],
+  "diagram_type": "architecture",
+  "meta": {
+    "locale": "zh-CN",
+    "output": "product-architecture.html",
+    "quality_profile": "standard",
+    "repository": {
+      "provider": "github",
+      "revision": "13157624fb0d8b63e5072049c94824d4b6d2e609",
+      "url": "https://github.com/owner/repo",
+    },
+    "title": "Product 系统架构",
+    "viewBox": [
+      1360,
+      784,
+    ],
+  },
+  "schema_version": 1,
+}
+`;

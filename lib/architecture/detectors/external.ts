@@ -43,11 +43,25 @@ function detectExternal(context: ArchitectureContext) {
   return fragment;
 }
 
+function objectStorageRelationships(runtime: NodeFact, context: ArchitectureContext) {
+  const sources = architectureRuntimeSources(runtime, context.sources);
+  const evidence = (markers: string[], detector: string) => uniqueEvidence(sources.flatMap((source) => findAllArchitectureEvidence(source, markers, detector)));
+  const uploads = evidence(["PresignPut", "PutObject", "UploadURL", "upload_url", "SetImageStorer"], "cos-upload-caller");
+  const clients = evidence(["NewQCloudClient"], "cos-client-constructor");
+  const uploadEvidence = uploads.length > 0 ? uniqueEvidence([...uploads, ...clients]) : [];
+  const downloads = evidence(["PresignGet", "GetObject", "DownloadURL", "download_url", "fetchImage"], "cos-download-caller");
+  return [
+    ...(uploadEvidence.length > 0 ? [factEdge(`upload:${runtime.id}->store:cos`, runtime.id, "store:cos", "upload", "对象上传 / 预签名写入", uploadEvidence, signalIdsForEvidence(context.signals, uploadEvidence))] : []),
+    ...(downloads.length > 0 ? [factEdge(`download:${runtime.id}->store:cos`, runtime.id, "store:cos", "download", "对象下载 / 预签名读取", downloads, signalIdsForEvidence(context.signals, downloads))] : []),
+  ];
+}
+
 export function linkExternalRelationships(context: ArchitectureContext, nodes: NodeFact[]) {
   const externalNodes = new Map(nodes.map((node) => [node.id, node]));
   const runtimes = nodes.filter((node) => ["frontend", "api", "worker", "agent", "cli"].includes(node.kind));
   return rules.filter((rule) => externalNodes.has(rule.id)).flatMap((rule) => runtimes.flatMap((runtime) => {
     if (runtime.id === rule.id) return [];
+    if (rule.id === "store:cos") return objectStorageRelationships(runtime, context);
     const evidence = uniqueEvidence(architectureRuntimeSources(runtime, context.sources).flatMap((source) => {
       const match = findAllArchitectureEvidence(source, rule.callers, `${rule.id}-caller`);
       return match;

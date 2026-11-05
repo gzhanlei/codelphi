@@ -60,6 +60,7 @@ export interface DeliverArchifyInput extends ArchifyCall {
   input: string;
   output: string;
   repoRoot?: string;
+  quality?: "standard" | "showcase";
 }
 
 async function archifyBin(bin?: string) {
@@ -70,7 +71,8 @@ export async function deliverArchify(input: DeliverArchifyInput, runner: Command
   const bin = await archifyBin(input.bin);
   const args = [bin, "deliver", input.type, input.input, input.output];
   if (input.repoRoot) args.push("--repo-root", input.repoRoot);
-  args.push("--quality", "showcase", "--json");
+  const quality = input.quality === undefined ? "showcase" : input.quality;
+  args.push("--quality", quality, "--json");
   return runArchify(args, runner, input.timeoutMs ?? 180_000);
 }
 
