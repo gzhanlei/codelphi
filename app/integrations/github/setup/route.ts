@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { appUrl } from "@/lib/env";
 import { completeInstallationSetup } from "@/lib/github-onboarding";
-import { requireSessionUser } from "@/lib/session";
+import { requireSessionUser, secureCookieOptions } from "@/lib/session";
 import { requireOrganization } from "@/lib/organizations";
 import { requiredEnv } from "@/lib/env";
 
@@ -19,6 +19,6 @@ export async function GET(request: NextRequest) {
     },
   );
   const response = NextResponse.redirect(new URL(error ? `/integrations?error=${error}` : "/integrations?success=connected", appUrl()));
-  response.cookies.set({ name: "github_installation_state", value: "", path: "/integrations/github/setup", maxAge: 0, httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax" });
+  response.cookies.set({ name: "github_installation_state", value: "", ...secureCookieOptions(0, "/integrations/github/setup") });
   return response;
 }

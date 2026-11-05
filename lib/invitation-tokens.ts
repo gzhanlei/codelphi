@@ -1,12 +1,11 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { randomToken } from "./oauth";
-import { getDb } from "./db";
+import { defaultExecute, type Execute } from "./db";
 import { appUrl } from "./env";
 import type { SessionUser } from "./types";
 import type { OrganizationRole } from "./organizations";
 
-type Execute = (statement: string, parameters: Array<string | number | null>) => Promise<unknown>;
 type InviteRole = Exclude<OrganizationRole, "owner">;
 
 export const tokenSchema = z.string().min(40).max(128).regex(/^[A-Za-z0-9_-]+$/);
@@ -23,7 +22,7 @@ export function invitationUrl(token: string) {
   return `${appUrl()}/invitations/accept?token=${encodeURIComponent(token)}`;
 }
 
-export async function issueInvitationToken(organizationId: number, email: string, execute: Execute = (sql, parameters) => getDb().execute(sql, parameters)) {
+export async function issueInvitationToken(organizationId: number, email: string, execute: Execute = defaultExecute) {
   const token = randomToken(32);
   await execute(
     `UPDATE organization_invitations
@@ -56,7 +55,7 @@ function mapInvitation(row: { id: number; organization_id: number; name: string;
   };
 }
 
-export async function getInvitationByToken(token: string, execute: Execute = (sql, parameters) => getDb().execute(sql, parameters)) {
+export async function getInvitationByToken(token: string, execute: Execute = defaultExecute) {
   const value = tokenSchema.parse(token);
   const [rows] = await execute(
     `SELECT i.id, i.organization_id, i.email, i.role, i.status, i.expires_at, o.name
@@ -69,7 +68,7 @@ export async function getInvitationByToken(token: string, execute: Execute = (sq
   return row ? mapInvitation(row) : null;
 }
 
-export async function acceptOrganizationInvitation(profile: SessionUser, token: string, execute: Execute = (sql, parameters) => getDb().execute(sql, parameters)) {
+export async function acceptOrganizationInvitation(profile: SessionUser, token: string, execute: Execute = defaultExecute) {
   const invitation = await getInvitationByToken(token, execute);
   if (!invitation) throw new Error("invitation_invalid");
   if (!profile.email || profile.email.toLowerCase() !== invitation.email) throw new Error("invitation_email_mismatch");

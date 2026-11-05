@@ -1,9 +1,7 @@
-import { getDb } from "./db";
+import { defaultExecute, type Execute } from "./db";
 import { currentOrganization, type Organization, type OrganizationRole } from "./organizations";
 import type { ProductRole } from "./product-members";
 import type { SessionUser } from "./types";
-
-type Execute = (statement: string, parameters: Array<string | number | null>) => Promise<unknown>;
 
 const roleRank: Record<string, number> = { viewer: 0, editor: 1, owner: 2 };
 
@@ -20,7 +18,7 @@ export interface ProductAccess {
  * 返回产品的真实 organizationId，下游 org-scoped 查询无需改动；
  * 无访问权限（产品不存在、跨工作区、角色不足）一律返回 null，由调用方按 404 处理。
  */
-export async function requireProductAccess(profile: SessionUser, slug: string, minimumRole: OrganizationRole = "viewer", execute: Execute = (sql, parameters) => getDb().execute(sql, parameters), cookieSlug?: string): Promise<ProductAccess | null> {
+export async function requireProductAccess(profile: SessionUser, slug: string, minimumRole: OrganizationRole = "viewer", execute: Execute = defaultExecute, cookieSlug?: string): Promise<ProductAccess | null> {
   const organization = await currentOrganization(profile, cookieSlug, execute);
   if (roleRank[organization.role] >= roleRank[minimumRole]) {
     const [rows] = await execute(
@@ -56,24 +54,26 @@ export async function requireProductAccess(profile: SessionUser, slug: string, m
   return null;
 }
 
-/** 由 feature id 反查所属产品后鉴权；feature 不存在或无访问权限返回 null。 */
-export async function requireFeatureProductAccess(profile: SessionUser, featureId: number, minimumRole: OrganizationRole = "editor", execute: Execute = (sql, parameters) => getDb().execute(sql, parameters), cookieSlug?: string): Promise<ProductAccess | null> {
-  const [rows] = await execute(
-    "SELECT p.slug FROM features f JOIN products p ON p.id = f.product_id WHERE f.id = ? LIMIT 1",
-    [featureId],
-  ) as [Array<{ slug: string }>, unknown];
-  const slug = rows[0]?.slug;
+/** 由反查 slug 得到的产品再鉴权；slug 不存在视为资源不存在，返回 null。 */
+async function requireProductAccessBySlug(profile: SessionUser, slug: string | undefined, minimumRole: OrganizationRole, execute: Execute, cookieSlug?: string): Promise<ProductAccess | null> {
   if (!slug) return null;
   return requireProductAccess(profile, slug, minimumRole, execute, cookieSlug);
 }
 
+/** 由 feature id 反查所属产品后鉴权；feature 不存在或无访问权限返回 null。 */
+export async function requireFeatureProductAccess(profile: SessionUser, featureId: number, minimumRole: OrganizationRole = "editor", execute: Execute = defaultExecute, cookieSlug?: string): Promise<ProductAccess | null> {
+  const [rows] = await execute(
+    "SELECT p.slug FROM features f JOIN products p ON p.id = f.product_id WHERE f.id = ? LIMIT 1",
+    [featureId],
+  ) as [Array<{ slug: string }>, unknown];
+  return requireProductAccessBySlug(profile, rows[0]?.slug, minimumRole, execute, cookieSlug);
+}
+
 /** 由 scenario id 反查所属产品后鉴权；scenario 不存在或无访问权限返回 null。 */
-export async function requireScenarioProductAccess(profile: SessionUser, scenarioId: number, minimumRole: OrganizationRole = "editor", execute: Execute = (sql, parameters) => getDb().execute(sql, parameters), cookieSlug?: string): Promise<ProductAccess | null> {
+export async function requireScenarioProductAccess(profile: SessionUser, scenarioId: number, minimumRole: OrganizationRole = "editor", execute: Execute = defaultExecute, cookieSlug?: string): Promise<ProductAccess | null> {
   const [rows] = await execute(
     `SELECT p.slug FROM scenarios s JOIN features f ON f.id = s.feature_id JOIN products p ON p.id = f.product_id WHERE s.id = ? LIMIT 1`,
     [scenarioId],
   ) as [Array<{ slug: string }>, unknown];
-  const slug = rows[0]?.slug;
-  if (!slug) return null;
-  return requireProductAccess(profile, slug, minimumRole, execute, cookieSlug);
+  return requireProductAccessBySlug(profile, rows[0]?.slug, minimumRole, execute, cookieSlug);
 }

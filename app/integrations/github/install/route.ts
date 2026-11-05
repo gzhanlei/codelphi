@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { appUrl, requiredEnv } from "@/lib/env";
 import { getLatestGitHubApp } from "@/lib/github-integrations";
 import { createGitHubInstallationState } from "@/lib/github-installation-state";
-import { requireSessionUser } from "@/lib/session";
+import { requireSessionUser, secureCookieOptions } from "@/lib/session";
 import { requireOrganization } from "@/lib/organizations";
 
 export async function GET() {
@@ -14,12 +14,6 @@ export async function GET() {
   const installationUrl = new URL(`https://github.com/apps/${app.slug}/installations/new`);
   installationUrl.searchParams.set("state", state);
   const response = NextResponse.redirect(installationUrl);
-  response.cookies.set("github_installation_state", state, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/integrations/github/setup",
-    maxAge: 600,
-  });
+  response.cookies.set("github_installation_state", state, secureCookieOptions(600, "/integrations/github/setup"));
   return response;
 }

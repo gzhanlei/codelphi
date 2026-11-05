@@ -61,6 +61,7 @@ export default async function AcceptInvitationPage({ searchParams }: { searchPar
     const message = error instanceof Error && error.message === "invitation_email_mismatch"
       ? `此邀请仅接受 ${invitation.email} 对应的账号。请退出当前账号后重新登录。`
       : "无法接受邀请，请重新打开链接或联系工作区所有者。";
-    return <InviteNotice title="无法接受邀请"><p>{message}</p><Link className="primary-button" href={`/auth/login?next=${encodeURIComponent(`/invitations/accept?token=${token}`)}`}>重新登录</Link></InviteNotice>;
+    const next = `/invitations/accept?token=${encodeURIComponent(token)}`;
+    return <InviteNotice title="无法接受邀请"><p>{message}</p><Link className="primary-button" href={`/auth/login?next=${encodeURIComponent(next)}`}>重新登录</Link></InviteNotice>;
   }
 }

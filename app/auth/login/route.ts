@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { appUrl, chandlerBaseUrl, requiredEnv } from "@/lib/env";
 import { pkceChallenge, randomToken, safeNextPath } from "@/lib/oauth";
+import { secureCookieOptions } from "@/lib/session";
 
 export async function GET(request: NextRequest) {
   const state = randomToken();
@@ -16,13 +17,7 @@ export async function GET(request: NextRequest) {
   authorizationUrl.searchParams.set("code_challenge_method", "S256");
 
   const response = NextResponse.redirect(authorizationUrl);
-  const cookieOptions = {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax" as const,
-    path: "/",
-    maxAge: 600,
-  };
+  const cookieOptions = secureCookieOptions(600);
   response.cookies.set("radar_oauth_state", state, cookieOptions);
   response.cookies.set("radar_oauth_verifier", verifier, cookieOptions);
   response.cookies.set("radar_oauth_next", safeNextPath(request.nextUrl.searchParams.get("next")), cookieOptions);

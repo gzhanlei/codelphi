@@ -13,10 +13,6 @@ function key(secret: string) {
   return new TextEncoder().encode(secret);
 }
 
-export function hasSessionCredentials(token: string | undefined, secret: string | undefined) {
-  return Boolean(token && secret);
-}
-
 export async function createSessionToken(user: SessionUser, secret: string, maxAge = 60 * 60 * 24 * 7) {
   return new SignJWT({ email: user.email, name: user.name, picture: user.picture })
     .setProtectedHeader({ alg: "HS256" })

@@ -1,22 +1,27 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { requiredEnv } from "./env";
-import { createSessionToken, hasSessionCredentials, verifySessionToken } from "./session-token";
+import { createSessionToken, verifySessionToken } from "./session-token";
 import type { SessionUser } from "./types";
 
 export const SESSION_COOKIE = "radar_session";
 const SESSION_MAX_AGE = 60 * 60 * 24 * 7;
 
+/** Radar 下发的浏览器 cookie 统一属性：HttpOnly + 生产环境 Secure + Lax。 */
+export function secureCookieOptions(maxAge: number, path = "/") {
+  return {
+    httpOnly: true as const,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax" as const,
+    path,
+    maxAge,
+  };
+}
+
 export async function createSession(user: SessionUser) {
   const token = await createSessionToken(user, requiredEnv("SESSION_SECRET"), SESSION_MAX_AGE);
   const jar = await cookies();
-  jar.set(SESSION_COOKIE, token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
-    maxAge: SESSION_MAX_AGE,
-  });
+  jar.set(SESSION_COOKIE, token, secureCookieOptions(SESSION_MAX_AGE));
 }
 
 function sessionCookieValue(jar: { get(name: string): { value: string } | undefined }) {
@@ -26,8 +31,9 @@ function sessionCookieValue(jar: { get(name: string): { value: string } | undefi
 export async function getSessionUser(): Promise<SessionUser | null> {
   const jar = await cookies();
   const token = sessionCookieValue(jar);
-  if (!hasSessionCredentials(token, process.env.SESSION_SECRET)) return null;
-  return verifySessionToken(token!, process.env.SESSION_SECRET!);
+  const secret = process.env.SESSION_SECRET;
+  if (!token || !secret) return null;
+  return verifySessionToken(token, secret);
 }
 
 export async function requireSessionUser() {

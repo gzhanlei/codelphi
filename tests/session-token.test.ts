@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createSessionToken, hasSessionCredentials, verifySessionToken } from "../lib/session-token";
+import { createSessionToken, verifySessionToken } from "../lib/session-token";
 
 describe("session tokens", () => {
   it("round-trips a signed user session", async () => {
@@ -8,9 +8,6 @@ describe("session tokens", () => {
   });
 
   it("returns null for invalid credentials and tokens", async () => {
-    expect(hasSessionCredentials(undefined, "secret")).toBe(false);
-    expect(hasSessionCredentials("token", undefined)).toBe(false);
-    expect(hasSessionCredentials("token", "secret")).toBe(true);
     await expect(verifySessionToken("not-a-jwt", "test-secret")).resolves.toBeNull();
     const token = await createSessionToken({ sub: "usr_1" }, "test-secret");
     await expect(verifySessionToken(token, "wrong-secret")).resolves.toBeNull();

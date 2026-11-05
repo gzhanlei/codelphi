@@ -9,3 +9,8 @@ export function getDb() {
   globalThis.radarDb ??= mysql.createPool(databaseConfig());
   return globalThis.radarDb;
 }
+
+/** 数据访问函数的可注入执行入口：生产走连接池，测试注入 stub。 */
+export type Execute = (statement: string, parameters: Array<string | number | null>) => Promise<unknown>;
+
+export const defaultExecute: Execute = (statement, parameters) => getDb().execute(statement, parameters);
