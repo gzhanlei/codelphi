@@ -27,10 +27,19 @@ function latestCommit(data: ChangeData) {
   return data.commits[data.commits.length - 1].commit;
 }
 
+function multiCommitMessage(data: ChangeData) {
+  if (!data.commits || data.commits.length <= 1) return null;
+  const subjects = data.commits
+    .map((entry) => entry.commit.message.split("\n", 1)[0].trim())
+    .filter(Boolean);
+  if (subjects.length === 0) return null;
+  return subjects.join("\n").slice(0, 2000);
+}
+
 function commitDetails(data: ChangeData, after: string) {
   const commit = latestCommit(data);
   return {
-    message: commit?.message ?? `Release ${after.slice(0, 7)}`,
+    message: multiCommitMessage(data) ?? commit?.message ?? `Release ${after.slice(0, 7)}`,
     committedAt: commit?.committer?.date ?? new Date().toISOString(),
   };
 }

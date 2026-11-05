@@ -23,14 +23,14 @@ describe("GitHub source boundaries", () => {
     expect(result.files[0].patch).toBe("(binary or patch unavailable)");
   });
 
-  it("uses the newest commit, falls back from an empty commit list, and tolerates missing dates", () => {
+  it("joins all commit subject lines for multi-commit pushes, keeps the newest commit date, and falls back from an empty commit list", () => {
     const result = normalizeChangeContext({
       commits: [
-        { sha: "a", commit: { message: "older" } },
-        { sha: "b", commit: { message: "newest" } },
+        { sha: "a", commit: { message: "feat: add demo mode\n\nbody text about the change", committer: { date: "2026-11-06T00:55:58Z" } } },
+        { sha: "b", commit: { message: "chore: ignore files\n\nbody too" } },
       ],
     }, "b");
-    expect(result.message).toBe("newest");
+    expect(result.message).toBe("feat: add demo mode\nchore: ignore files");
     expect(result.committedAt).toEqual(expect.any(String));
     expect(normalizeChangeContext({ commit: { message: "" } }, "b").message).toBe("");
     expect(normalizeChangeContext({ commit: { message: "empty date", committer: { date: "" } } }, "b").committedAt).toBe("");
