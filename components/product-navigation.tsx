@@ -57,6 +57,7 @@ interface ProductViewProps {
   mode?: string;
   featureId?: number;
   overview: ProductOverviewData;
+  canEdit?: boolean;
 }
 
 function ProductWorkspace({ view, productSlug, features, scenarios, releases, changes, behaviorChanges, mode = "spec", featureId }: Omit<ProductViewProps, "overview">) {
@@ -67,5 +68,5 @@ function ProductWorkspace({ view, productSlug, features, scenarios, releases, ch
 }
 
 export function ProductView(props: ProductViewProps) {
-  return props.view === "overview" ? <ProductOverview data={props.overview} /> : <ProductWorkspace {...props} />;
+  return props.view === "overview" ? <ProductOverview data={props.overview} canEdit={props.canEdit} /> : <ProductWorkspace {...props} />;
 }

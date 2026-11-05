@@ -1,0 +1,39 @@
+import { NextRequest } from "next/server";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { PATCH } from "../app/api/products/[slug]/route";
+import { updateProductDescription } from "../lib/product-description";
+import { requireOrganization } from "../lib/organizations";
+
+vi.mock("../lib/product-description", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/product-description")>();
+  return { ...actual, updateProductDescription: vi.fn() };
+});
+vi.mock("@/lib/session", () => ({ requireSessionUser: vi.fn(async () => ({ sub: "user" })) }));
+vi.mock("@/lib/organizations", () => ({ requireOrganization: vi.fn(async () => ({ id: 7, role: "owner" })) }));
+
+function patchRequest(slug: string, body: unknown) {
+  return PATCH(new NextRequest(`http://localhost/api/products/${slug}`, { method: "PATCH", body: JSON.stringify(body) }), { params: Promise.resolve({ slug }) });
+}
+
+describe("product description route", () => {
+  beforeEach(() => vi.mocked(updateProductDescription).mockReset());
+
+  it("saves a trimmed manual overview with editor authorization", async () => {
+    vi.mocked(updateProductDescription).mockResolvedValue({ id: 3, description: "销售助手" });
+    const response = await patchRequest("salesbuddy", { description: "  销售助手  " });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "updated", description: "销售助手" });
+    expect(updateProductDescription).toHaveBeenCalledWith("salesbuddy", 7, "销售助手");
+    expect(requireOrganization).toHaveBeenCalledWith(expect.objectContaining({ sub: "user" }), "editor");
+  });
+
+  it("rejects invalid payloads and missing products", async () => {
+    expect((await patchRequest("salesbuddy", { description: "x".repeat(1001) })).status).toBe(400);
+    expect((await patchRequest("salesbuddy", { description: 42 })).status).toBe(400);
+    expect((await patchRequest("salesbuddy", null)).status).toBe(400);
+    vi.mocked(updateProductDescription).mockResolvedValue(null);
+    const missing = await patchRequest("missing", { description: "概况" });
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toEqual({ error: "产品不存在或不属于当前工作区" });
+  });
+});

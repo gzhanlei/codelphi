@@ -12,6 +12,10 @@ export const productInputSchema = z.object({
   connectionId: z.number().int().positive().nullable().default(null),
 });
 
+export const descriptionUpdateSchema = z.object({
+  description: z.string().max(1_000, "产品简介不能超过 1000 字"),
+});
+
 export function slugifyProductName(value: string) {
   return value
     .toLowerCase()

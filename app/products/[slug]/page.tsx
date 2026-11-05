@@ -36,7 +36,7 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
       <RunStatus run={details.latestRun} />
       {details.latestRun?.status === "failed" ? <AnalysisFeedbackButton slug={details.product.slug} /> : null}
       <ProductTabs slug={slug} view={view} featureCount={details.features.length} releaseCount={details.releases.length} />
-      <ProductView view={view} productSlug={slug} features={details.features} scenarios={details.scenarios} releases={details.releases} changes={details.changes} behaviorChanges={details.behaviorChanges} mode={mode} featureId={featureId} overview={overview} />
+      <ProductView view={view} productSlug={slug} features={details.features} scenarios={details.scenarios} releases={details.releases} changes={details.changes} behaviorChanges={details.behaviorChanges} mode={mode} featureId={featureId} overview={overview} canEdit={organization.role !== "viewer"} />
     </AppShell>
   );
 }

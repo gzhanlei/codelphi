@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createProduct, requestAnalysis } from "../lib/product-client";
+import { createProduct, requestAnalysis, updateDescription } from "../lib/product-client";
 import { productInputSchema } from "../lib/product-input";
 
 const input = productInputSchema.parse({ name: "SalesBuddy", slug: "salesbuddy", description: "", repository: "gzhanlei/salesbuddy", defaultBranch: "", analyze: false });
@@ -24,5 +24,19 @@ describe("analysis client", () => {
     await expect(requestAnalysis("radar", async () => new Response(JSON.stringify({ runId: 7 }), { status: 202 }))).resolves.toBe(7);
     await expect(requestAnalysis("radar", async () => new Response(JSON.stringify({ error: "无权限" }), { status: 403 }))).rejects.toThrow("无权限");
     await expect(requestAnalysis("radar", async () => new Response(JSON.stringify({ error: "" }), { status: 403 }))).rejects.toThrow("");
+  });
+});
+
+describe("description client", () => {
+  it("patches the overview and surfaces failures", async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ status: "updated" }), { status: 200 }));
+    await expect(updateDescription("radar", "新概况", fetcher)).resolves.toBe("updated");
+    expect(fetcher).toHaveBeenCalledWith("/api/products/radar", expect.objectContaining({
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ description: "新概况" }),
+    }));
+    await expect(updateDescription("radar", "新概况", async () => new Response(JSON.stringify({ error: "无权限" }), { status: 403 }))).rejects.toThrow("无权限");
+    await expect(updateDescription("radar", "新概况", async () => new Response(JSON.stringify({}), { status: 200 }))).rejects.toThrow("保存产品概况失败");
   });
 });

@@ -3,6 +3,7 @@ import { buildExplainerMarkdown } from "../lib/product-explainer";
 
 const overview = {
   slug: "radar",
+  description: "产品知识中心",
   headline: "产品知识中心",
   headlineSource: "generated",
   headlineEvidence: [{ path: "lib/analysis.ts", startLine: 185 }],

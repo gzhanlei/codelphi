@@ -1,8 +1,10 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ProductOverview } from "../components/product-overview";
 import { buildProductOverview } from "../lib/product-overview";
+
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 
 function completeOverview() {
   return buildProductOverview({
@@ -46,5 +48,13 @@ describe("product overview rendering", () => {
     const html = renderToStaticMarkup(createElement(ProductOverview, { data }));
     expect(html).toContain("人工维护");
     expect(html).toContain("<dd>0</dd>");
+  });
+
+  it("renders the overview edit pencil only for editors", () => {
+    const data = completeOverview();
+    expect(renderToStaticMarkup(createElement(ProductOverview, { data, canEdit: false }))).not.toContain("编辑产品概况");
+    const editable = renderToStaticMarkup(createElement(ProductOverview, { data, canEdit: true }));
+    expect(editable).toContain("编辑产品概况");
+    expect(editable).toContain("description-dialog");
   });
 });

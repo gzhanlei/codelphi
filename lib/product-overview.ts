@@ -33,6 +33,7 @@ export function buildProductOverview(input: ProductOverviewInput) {
   const evidencePaths = new Set(input.scenarios.flatMap((scenario) => evidenceItems(scenario.evidence).map((item) => item.path)));
   return {
     slug: input.product.slug,
+    description: input.product.description,
     headline: input.product.description.trim() || "产品概览",
     headlineSource: input.product.descriptionSource === undefined ? "manual" : input.product.descriptionSource,
     headlineEvidence: evidenceItems(input.product.descriptionEvidence),

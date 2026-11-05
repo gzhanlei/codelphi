@@ -1,11 +1,12 @@
 import Link from "next/link";
+import { EditDescriptionButton } from "./edit-description-button";
 import type { ProductOverviewData } from "@/lib/product-overview";
 
-function OverviewHero({ data }: { data: ProductOverviewData }) {
+function OverviewHero({ data, canEdit }: { data: ProductOverviewData; canEdit: boolean }) {
   return (
     <section className="overview-hero">
       <span className="eyebrow">PRODUCT OVERVIEW</span>
-      <h2>{data.headline}</h2>
+      <h2>{data.headline}{canEdit ? <EditDescriptionButton slug={data.slug} description={data.description} /> : null}</h2>
       <div className="overview-meta"><span>{data.freshness}</span><span>{data.analysisLabel}</span>{data.headlineSource === "generated" ? <span>代码生成 · {data.headlineEvidence.length} 个证据文件</span> : null}</div>
       <div className="overview-actions"><Link className="primary-button" href="?view=spec">查看产品规格</Link><Link className="secondary-button" href="?view=changes">查看最近变化</Link><a className="explainer-link" href={`/api/products/${data.slug}/explainer`} target="_blank" rel="noreferrer">导出 Explainer ↗</a></div>
     </section>
@@ -59,10 +60,10 @@ function TrustPanel({ data }: { data: ProductOverviewData }) {
   );
 }
 
-export function ProductOverview({ data }: { data: ProductOverviewData }) {
+export function ProductOverview({ data, canEdit = false }: { data: ProductOverviewData; canEdit?: boolean }) {
   return (
     <div className="product-overview">
-      <OverviewHero data={data} />
+      <OverviewHero data={data} canEdit={canEdit} />
       <div className="overview-grid"><CapabilitiesPanel data={data} /><ChangesPanel data={data} /><TrustPanel data={data} /></div>
     </div>
   );
