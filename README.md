@@ -1,6 +1,6 @@
 # Radar
 
-**Radar 是 Chandler 产品家族的内部产品知识与变更中心。** 它从 GitHub 代码和发布记录中生成带证据的产品规格与变化摘要。
+**Radar 是 Chandler 产品家族的产品知识与变更中心。** 它从 GitHub 代码和发布记录中生成带证据的产品规格与变化摘要。
 
 - 生产域名（规划）：`https://radar.chandler.work`
 - 统一身份：`https://app.chandler.work` / WorkMembership OAuth 2.0
