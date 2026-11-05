@@ -30,6 +30,7 @@ function createDb() {
       return [[...organizations.values()].filter((org) => memberships.has(`${org.slug}:${sub}`)).map((org) => ({ ...org, role: "owner" }))];
     }
     if (sql.includes("SELECT organization_id, role FROM organization_invitations")) return [[]];
+    if (sql.includes("SELECT product_id, role FROM product_invitations")) return [[]];
     return [{}];
   });
   return { execute, users, organizations, memberships };

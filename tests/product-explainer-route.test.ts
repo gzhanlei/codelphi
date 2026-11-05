@@ -9,7 +9,14 @@ import { readFile } from "node:fs/promises";
 
 vi.mock("node:fs/promises", () => ({ readFile: vi.fn() }));
 vi.mock("../lib/session", () => ({ requireSessionUser: vi.fn(async () => ({ sub: "user" })) }));
-vi.mock("../lib/organizations", () => ({ requireOrganization: vi.fn(async () => ({ id: 7 })) }));
+vi.mock("../lib/product-access", () => ({
+  requireProductAccess: vi.fn(async () => ({
+    product: { id: 1, slug: "radar", name: "Radar", description: "", organizationId: 7 },
+    organization: { id: 7, slug: "team", name: "Team", role: "owner" },
+    role: "owner",
+    via: "organization",
+  })),
+}));
 vi.mock("../lib/product-details", () => ({ getProductDetails: vi.fn() }));
 vi.mock("../lib/product-overview", () => ({ buildProductOverview: vi.fn() }));
 vi.mock("../lib/explainer-export", () => ({ exportProductExplainer: vi.fn() }));

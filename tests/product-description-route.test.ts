@@ -2,14 +2,21 @@ import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PATCH } from "../app/api/products/[slug]/route";
 import { updateProductDescription } from "../lib/product-description";
-import { requireOrganization } from "../lib/organizations";
+import { requireProductAccess } from "../lib/product-access";
 
 vi.mock("../lib/product-description", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/product-description")>();
   return { ...actual, updateProductDescription: vi.fn() };
 });
 vi.mock("@/lib/session", () => ({ requireSessionUser: vi.fn(async () => ({ sub: "user" })) }));
-vi.mock("@/lib/organizations", () => ({ requireOrganization: vi.fn(async () => ({ id: 7, role: "owner" })) }));
+vi.mock("@/lib/product-access", () => ({
+  requireProductAccess: vi.fn(async () => ({
+    product: { id: 2, slug: "salesbuddy", name: "SalesBuddy", description: "", organizationId: 7 },
+    organization: { id: 7, slug: "team", name: "Team", role: "owner" },
+    role: "owner",
+    via: "organization",
+  })),
+}));
 
 function patchRequest(slug: string, body: unknown) {
   return PATCH(new NextRequest(`http://localhost/api/products/${slug}`, { method: "PATCH", body: JSON.stringify(body) }), { params: Promise.resolve({ slug }) });
@@ -24,7 +31,7 @@ describe("product description route", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ status: "updated", description: "销售助手" });
     expect(updateProductDescription).toHaveBeenCalledWith("salesbuddy", 7, "销售助手");
-    expect(requireOrganization).toHaveBeenCalledWith(expect.objectContaining({ sub: "user" }), "editor");
+    expect(requireProductAccess).toHaveBeenCalledWith(expect.objectContaining({ sub: "user" }), "salesbuddy", "editor");
   });
 
   it("rejects invalid payloads and missing products", async () => {

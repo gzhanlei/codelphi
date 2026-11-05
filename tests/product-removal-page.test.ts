@@ -4,11 +4,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import ProductPage from "../app/products/[slug]/page";
 import { notFound } from "next/navigation";
 import { getProductDetails } from "@/lib/product-details";
-import { requireOrganization } from "@/lib/organizations";
+import { requireProductAccess, type ProductAccess } from "@/lib/product-access";
 
 vi.mock("next/navigation", () => ({ notFound: vi.fn(() => { throw new Error("NOT_FOUND"); }) }));
 vi.mock("@/lib/session", () => ({ requireSessionUser: vi.fn(async () => ({ sub: "user" })) }));
-vi.mock("@/lib/organizations", () => ({ requireOrganization: vi.fn() }));
+vi.mock("@/lib/product-access", () => ({ requireProductAccess: vi.fn() }));
 vi.mock("@/lib/product-details", () => ({ getProductDetails: vi.fn() }));
 vi.mock("@/components/app-shell", () => ({ AppShell: ({ children }: { children: ReactNode }) => createElement("main", null, children) }));
 vi.mock("@/components/analyze-button", () => ({ AnalyzeButton: () => null }));
@@ -16,9 +16,19 @@ vi.mock("@/components/analysis-feedback-button", () => ({ AnalysisFeedbackButton
 vi.mock("@/components/product-navigation", () => ({ ProductTabs: () => null, ProductView: () => null, RepositoryLink: () => null, RunStatus: () => null }));
 vi.mock("@/components/remove-product-button", () => ({ RemoveProductButton: ({ slug }: { slug: string }) => createElement("button", { "data-remove-product": slug }, "移除产品") }));
 
+function access(overrides: Partial<ProductAccess>): ProductAccess {
+  return {
+    product: { id: 2, slug: "namedict", name: "NameDict", description: "词典", organizationId: 7 },
+    organization: { id: 7, slug: "workspace", name: "Workspace", role: "owner" },
+    role: "owner",
+    via: "organization",
+    ...overrides,
+  };
+}
+
 describe("product page removal action", () => {
   beforeEach(() => {
-    vi.mocked(requireOrganization).mockResolvedValue({ id: 7, slug: "workspace", name: "Workspace", role: "owner" });
+    vi.mocked(requireProductAccess).mockResolvedValue(access({}));
     vi.mocked(getProductDetails).mockResolvedValue({
       product: { id: 2, slug: "namedict", name: "NameDict", description: "词典", descriptionSource: "manual", descriptionEvidence: null },
       repository: { owner: "gzhanlei", name: "namedict", defaultBranch: "main" },
@@ -30,21 +40,30 @@ describe("product page removal action", () => {
     return renderToStaticMarkup(await ProductPage({ params: Promise.resolve({ slug: "namedict" }), searchParams: Promise.resolve(view ? { view } : {}) }));
   }
 
-  it("shows removal to owners and editors", async () => {
+  it("shows removal to workspace owners and editors", async () => {
     expect(await renderPage()).toContain('data-remove-product="namedict"');
-    vi.mocked(requireOrganization).mockResolvedValue({ id: 7, slug: "workspace", name: "Workspace", role: "editor" });
+    vi.mocked(requireProductAccess).mockResolvedValue(access({ role: "editor", organization: { id: 7, slug: "workspace", name: "Workspace", role: "editor" } }));
     expect(await renderPage()).toContain('data-remove-product="namedict"');
   });
 
   it("does not show removal to viewers", async () => {
-    vi.mocked(requireOrganization).mockResolvedValue({ id: 7, slug: "workspace", name: "Workspace", role: "viewer" });
+    vi.mocked(requireProductAccess).mockResolvedValue(access({ role: "viewer", organization: { id: 7, slug: "workspace", name: "Workspace", role: "viewer" } }));
     expect(await renderPage()).not.toContain("data-remove-product");
   });
 
-  it("calls notFound for a missing or cross-workspace product", async () => {
-    vi.mocked(getProductDetails).mockResolvedValue(null);
+  it("does not show removal to product-scoped editors", async () => {
+    vi.mocked(requireProductAccess).mockResolvedValue(access({ role: "editor", via: "product", organization: { id: 7, slug: "workspace", name: "Workspace", role: "editor" } }));
+    expect(await renderPage()).not.toContain("data-remove-product");
+  });
+
+  it("calls notFound when access is denied or the product is missing", async () => {
+    vi.mocked(requireProductAccess).mockResolvedValue(null);
     await expect(renderPage()).rejects.toThrow("NOT_FOUND");
     expect(notFound).toHaveBeenCalledOnce();
+    vi.mocked(requireProductAccess).mockResolvedValue(access({}));
+    vi.mocked(getProductDetails).mockResolvedValue(null);
+    await expect(renderPage()).rejects.toThrow("NOT_FOUND");
+    expect(notFound).toHaveBeenCalledTimes(2);
   });
 
   it("shows the product description only outside the overview", async () => {

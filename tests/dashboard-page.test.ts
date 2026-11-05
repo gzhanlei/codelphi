@@ -36,7 +36,7 @@ describe("dashboard page", () => {
     const html = renderToStaticMarkup(await DashboardPage());
     expect(execute.mock.calls[0][0]).toContain("latest_run.status AS analysisStatus");
     expect(execute.mock.calls[0][0]).not.toContain("latest_architecture");
-    expect(execute.mock.calls[0][1]).toEqual([7]);
+    expect(execute.mock.calls[0][1]).toEqual([7, "user"]);
     expect(html).toContain("分析中，请稍候");
     expect(html).not.toContain("href=\"/products/new-product\"");
   });

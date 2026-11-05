@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { NextRequest, NextResponse } from "next/server";
 import { requireSessionUser } from "@/lib/session";
-import { requireOrganization } from "@/lib/organizations";
+import { requireProductAccess } from "@/lib/product-access";
 import { getProductDetails } from "@/lib/product-details";
 import { buildProductOverview } from "@/lib/product-overview";
 import { exportProductExplainer } from "@/lib/explainer-export";
@@ -12,9 +12,10 @@ import { errorMessage } from "@/lib/error-message";
 
 export async function GET(_request: NextRequest, context: { params: Promise<{ slug: string }> }) {
   const user = await requireSessionUser();
-  const organization = await requireOrganization(user);
   const { slug } = await context.params;
-  const details = await getProductDetails(slug, organization.id);
+  const access = await requireProductAccess(user, slug);
+  if (!access) return NextResponse.json({ error: "产品不存在" }, { status: 404 });
+  const details = await getProductDetails(slug, access.product.organizationId);
   if (!details) return NextResponse.json({ error: "产品不存在" }, { status: 404 });
   const overview = buildProductOverview(details);
   try {

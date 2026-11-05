@@ -8,7 +8,14 @@ vi.mock("next/server", async (importOriginal) => ({ ...await importOriginal<type
 vi.mock("@/lib/analysis", () => ({ queueAnalysis: vi.fn(), runAnalysis: vi.fn() }));
 vi.mock("@/lib/manual-analysis", () => ({ resolveManualAnalysis: vi.fn() }));
 vi.mock("@/lib/session", () => ({ requireSessionUser: vi.fn(async () => ({ sub: "user" })) }));
-vi.mock("@/lib/organizations", () => ({ requireOrganization: vi.fn(async () => ({ id: 7, role: "owner" })) }));
+vi.mock("@/lib/product-access", () => ({
+  requireProductAccess: vi.fn(async () => ({
+    product: { id: 2, slug: "radar", name: "Radar", description: "", organizationId: 7 },
+    organization: { id: 7, slug: "team", name: "Team", role: "owner" },
+    role: "owner",
+    via: "organization",
+  })),
+}));
 
 function request(slug: string) {
   return POST(new NextRequest(`http://localhost/api/products/${slug}/analyze`, { method: "POST" }), { params: Promise.resolve({ slug }) });

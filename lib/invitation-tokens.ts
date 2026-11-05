@@ -9,7 +9,7 @@ import type { OrganizationRole } from "./organizations";
 type Execute = (statement: string, parameters: Array<string | number | null>) => Promise<unknown>;
 type InviteRole = Exclude<OrganizationRole, "owner">;
 
-const tokenSchema = z.string().min(40).max(128).regex(/^[A-Za-z0-9_-]+$/);
+export const tokenSchema = z.string().min(40).max(128).regex(/^[A-Za-z0-9_-]+$/);
 
 export function hashInvitationToken(token: string) {
   return createHash("sha256").update(token).digest("hex");

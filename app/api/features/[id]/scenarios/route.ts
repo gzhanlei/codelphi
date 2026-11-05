@@ -1,12 +1,13 @@
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createScenario } from "@/lib/spec-editor-service";
 import { editorAction, routeEntityId } from "@/lib/editor-route";
 import { requireSessionUser } from "@/lib/session";
-import { requireOrganization } from "@/lib/organizations";
+import { requireFeatureProductAccess } from "@/lib/product-access";
 
 export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   const user = await requireSessionUser();
-  const organization = await requireOrganization(user, "editor");
   const { id } = await context.params;
-  return editorAction(async () => createScenario(routeEntityId(id), await request.json(), organization.id), 201);
+  const access = await requireFeatureProductAccess(user, routeEntityId(id), "editor");
+  if (!access) return NextResponse.json({ error: "产品不存在或不属于当前工作区" }, { status: 404 });
+  return editorAction(async () => createScenario(routeEntityId(id), await request.json(), access.product.organizationId), 201);
 }

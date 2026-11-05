@@ -3,6 +3,7 @@ import { getDb } from "./db";
 import { upsertRadarUser } from "./users";
 import { requiredEnv } from "./env";
 import { claimOrganizationInvitations } from "./organization-invitations";
+import { claimProductInvitations } from "./product-members";
 import type { SessionUser } from "./types";
 
 export type OrganizationRole = "owner" | "editor" | "viewer";
@@ -34,6 +35,7 @@ export async function ensureUserWorkspace(profile: SessionUser, execute: Execute
   const query = dbQuery(execute);
   await upsertRadarUser(profile, execute);
   await claimOrganizationInvitations(profile, execute);
+  await claimProductInvitations(profile, execute);
   const defaultOrg = defaultOrganization(profile);
   const existing = await query<Organization>(
     `SELECT o.id, o.slug, o.name, m.role FROM organizations o JOIN organization_members m ON m.organization_id = o.id
