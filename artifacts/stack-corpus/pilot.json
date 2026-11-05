@@ -1,0 +1,669 @@
+{
+  "version": 1,
+  "manifestUpdatedAt": "2026-11-03",
+  "generatedAt": "2026-11-03T10:04:54.631Z",
+  "summary": {
+    "total": 3,
+    "completed": 3,
+    "profileMatches": 3
+  },
+  "results": [
+    {
+      "id": "next-fullstack",
+      "repository": "dubinc/dub",
+      "revision": "6b463b4bdd9ed2fd9aa416f67b5b77d317b1471e",
+      "expectedProfile": "next-web",
+      "status": "completed",
+      "detectedProfile": "next-web",
+      "profileMatches": [
+        {
+          "profileId": "next-web",
+          "confidence": 0.9,
+          "matchedSignals": [
+            {
+              "path": "package.json",
+              "signal": "manifest"
+            },
+            {
+              "path": "apps/web/package.json",
+              "signal": "manifest"
+            }
+          ]
+        }
+      ],
+      "missing": [],
+      "diagnostics": [],
+      "selectedFiles": [
+        "package.json",
+        "README.md",
+        "apps/web/package.json",
+        "apps/web/docker-compose.yml",
+        "apps/web/app/layout.tsx",
+        "apps/web/app/not-found-hint.tsx",
+        "apps/web/app/not-found.tsx",
+        "apps/web/app/providers.tsx",
+        "apps/web/app/(ee)/README.md",
+        "apps/web/app/[domain]/page.tsx",
+        "apps/web/app/[domain]/browser-graphic.tsx",
+        "apps/web/app/[domain]/layout.tsx",
+        "apps/web/app/api/route.ts",
+        "apps/web/app/app.dub.co/layout.tsx",
+        "apps/web/guides/auth0.md",
+        "apps/web/guides/better-auth.md",
+        "apps/web/guides/next-auth.md",
+        "apps/web/lib/next-auth.d.ts",
+        "apps/web/lib/actions/create-oauth-url.ts",
+        "apps/web/lib/actions/submit-oauth-app-for-review.ts",
+        "apps/web/lib/auth/index.ts",
+        "apps/web/lib/auth/admin.ts",
+        "apps/web/lib/auth/confirm-email-change.ts",
+        "apps/web/lib/auth/constants.ts",
+        "apps/web/lib/auth/hash-token.ts",
+        "apps/web/lib/auth/lock-account.ts",
+        "apps/web/lib/auth/options.ts",
+        "apps/web/lib/auth/password.ts",
+        "apps/web/lib/auth/publishable-key.ts",
+        "apps/web/lib/auth/rate-limit-request.ts",
+        "apps/web/lib/auth/request-email-change.ts",
+        "apps/web/lib/auth/session.ts",
+        "apps/web/lib/auth/token-cache.ts",
+        "apps/web/lib/auth/track-dub-lead.ts",
+        "apps/web/lib/auth/utils.ts",
+        "apps/web/lib/auth/workspace.ts",
+        "apps/web/lib/axiom/server.ts",
+        "apps/web/lib/cron/index.ts",
+        "apps/web/lib/cron/enqueue-batch-jobs.ts",
+        "apps/web/lib/edge-config/index.ts",
+        "apps/web/lib/email/render-trial-email.tsx",
+        "apps/web/lib/fetchers/index.ts",
+        "apps/web/lib/integrations/oauth-provider.ts",
+        "apps/web/lib/jobs/index.ts",
+        "apps/web/lib/jobs/send-jobs.ts",
+        "apps/web/lib/middleware/app.ts",
+        "apps/web/lib/openapi/index.ts",
+        "apps/web/lib/planetscale/index.ts",
+        "apps/web/lib/prisma/index.ts",
+        "apps/web/lib/qr/api.tsx",
+        "apps/web/lib/qr/index.tsx",
+        "apps/web/lib/qr/utils.tsx",
+        "apps/web/lib/stripe/index.ts",
+        "apps/web/lib/stripe/cancellation-feedback.ts",
+        "apps/web/lib/tinybird/index.ts",
+        "apps/web/lib/upstash/index.ts",
+        "apps/web/playwright/assert-local-database.ts",
+        "apps/web/playwright/README.md",
+        "apps/web/playwright/workspaces/auth.setup.ts",
+        "apps/web/prisma/schema/job.prisma",
+        "apps/web/prisma/schema/oauth.prisma",
+        "apps/web/ui/token-avatar.tsx",
+        "apps/web/ui/account/delete-account.tsx",
+        "apps/web/ui/account/update-default-workspace.tsx",
+        "apps/web/ui/account/update-subscription.tsx",
+        "apps/web/ui/account/upload-avatar.tsx",
+        "apps/web/ui/account/user-id.tsx",
+        "apps/web/ui/analytics/analytics-area-chart.tsx",
+        "apps/web/ui/analytics/analytics-card.tsx",
+        "apps/web/ui/analytics/analytics-export-button.tsx",
+        "apps/web/ui/analytics/analytics-funnel-chart.tsx",
+        "apps/web/ui/analytics/analytics-loading-spinner.tsx",
+        "apps/web/ui/analytics/analytics-options.tsx",
+        "apps/web/ui/analytics/analytics-provider.tsx",
+        "apps/web/ui/analytics/analytics-tabs.tsx",
+        "apps/web/ui/analytics/bar-list.tsx",
+        "apps/web/ui/analytics/chart-section.tsx",
+        "apps/web/ui/analytics/chart-view-switcher.tsx",
+        "apps/web/ui/analytics/continent-icon.tsx",
+        "apps/web/ui/analytics/device-icon.tsx",
+        "apps/web/ui/analytics/device-section.tsx",
+        "apps/web/ui/analytics/index.tsx",
+        "apps/web/ui/analytics/link-preview.tsx",
+        "apps/web/ui/analytics/location-section.tsx"
+      ],
+      "metrics": {
+        "treeExpansions": 146,
+        "blobFetches": 84,
+        "selectedFiles": 84,
+        "selectedLineRanges": 84,
+        "selectedContentBytes": 242621,
+        "aiReadCalls": 0,
+        "prunedPathCount": 0,
+        "wallClockMs": 194720,
+        "profileMatches": [
+          {
+            "profileId": "next-web",
+            "confidence": 0.9,
+            "matchedSignals": [
+              {
+                "path": "package.json",
+                "signal": "manifest"
+              },
+              {
+                "path": "apps/web/package.json",
+                "signal": "manifest"
+              }
+            ]
+          }
+        ],
+        "budgetsRemaining": {
+          "selectedFiles": 36,
+          "selectedLineRanges": 516,
+          "plannerContentBytes": -2621,
+          "aiReadCalls": 20
+        }
+      },
+      "architectureComponents": [
+        "users",
+        "frontend",
+        "backend",
+        "auth"
+      ],
+      "architectureError": null,
+      "durationMs": 198054
+    },
+    {
+      "id": "spring-java",
+      "repository": "spring-projects/spring-petclinic",
+      "revision": "500158f732419217507c7656904b8e6aa1bcc0d6",
+      "expectedProfile": "spring-java",
+      "status": "completed",
+      "detectedProfile": "spring-java",
+      "profileMatches": [
+        {
+          "profileId": "spring-java",
+          "confidence": 0.92,
+          "matchedSignals": [
+            {
+              "path": "pom.xml",
+              "signal": "manifest"
+            }
+          ]
+        }
+      ],
+      "missing": [],
+      "diagnostics": [],
+      "selectedFiles": [
+        "build.gradle",
+        "pom.xml",
+        "docker-compose.yml",
+        "README.md",
+        ".devcontainer/Dockerfile",
+        ".github/workflows/deploy-and-test-cluster.yml",
+        "k8s/db.yml",
+        "src/main/resources/application-mysql.properties",
+        "src/main/resources/application-postgres.properties"
+      ],
+      "metrics": {
+        "treeExpansions": 23,
+        "blobFetches": 9,
+        "selectedFiles": 9,
+        "selectedLineRanges": 9,
+        "selectedContentBytes": 33757,
+        "aiReadCalls": 0,
+        "prunedPathCount": 0,
+        "wallClockMs": 14897,
+        "profileMatches": [
+          {
+            "profileId": "spring-java",
+            "confidence": 0.92,
+            "matchedSignals": [
+              {
+                "path": "pom.xml",
+                "signal": "manifest"
+              }
+            ]
+          }
+        ],
+        "budgetsRemaining": {
+          "selectedFiles": 111,
+          "selectedLineRanges": 591,
+          "plannerContentBytes": 206243,
+          "aiReadCalls": 20
+        }
+      },
+      "architectureComponents": [
+        "users",
+        "db"
+      ],
+      "architectureError": null,
+      "durationMs": 15717
+    },
+    {
+      "id": "android-kotlin",
+      "repository": "android/nowinandroid",
+      "revision": "2982e63cb691ad49cd009aab43dc206fee6699c2",
+      "expectedProfile": "android-kotlin",
+      "status": "completed",
+      "detectedProfile": "android-kotlin",
+      "profileMatches": [
+        {
+          "profileId": "android-kotlin",
+          "confidence": 0.9,
+          "matchedSignals": [
+            {
+              "path": "app-nia-catalog/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "app/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "app/src/prod/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "benchmarks/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "core/analytics/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "core/data-test/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "core/data/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "core/database/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "core/datastore-test/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "core/datastore/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "core/designsystem/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "core/domain/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "core/network/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "core/notifications/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "core/screenshot-testing/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "core/testing/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "core/ui/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "sync/sync-test/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "sync/work/src/prod/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "ui-test-hilt-manifest/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            }
+          ]
+        },
+        {
+          "profileId": "android-native",
+          "confidence": 0.88,
+          "matchedSignals": [
+            {
+              "path": "app-nia-catalog/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "app/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "app/src/prod/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "benchmarks/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "core/analytics/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "core/data-test/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "core/data/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "core/database/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "core/datastore-test/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "core/datastore/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "core/designsystem/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "core/domain/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "core/network/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "core/notifications/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "core/screenshot-testing/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "core/testing/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "core/ui/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "sync/sync-test/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "sync/work/src/prod/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "ui-test-hilt-manifest/src/main/AndroidManifest.xml",
+              "signal": "manifest"
+            }
+          ]
+        }
+      ],
+      "missing": [],
+      "diagnostics": [],
+      "selectedFiles": [
+        "AGENTS.md",
+        "README.md",
+        "app-nia-catalog/README.md",
+        "app-nia-catalog/src/main/AndroidManifest.xml",
+        "app/README.md",
+        "app/src/main/AndroidManifest.xml",
+        "app/src/prod/AndroidManifest.xml",
+        "benchmarks/README.md",
+        "benchmarks/src/main/AndroidManifest.xml",
+        "build-logic/README.md",
+        "core/analytics/README.md",
+        "core/analytics/src/main/AndroidManifest.xml",
+        "core/common/README.md",
+        "core/data-test/README.md",
+        "core/data-test/src/main/AndroidManifest.xml",
+        "core/data/README.md",
+        "core/data/src/main/AndroidManifest.xml",
+        "core/database/README.md",
+        "core/database/src/main/AndroidManifest.xml",
+        "core/datastore-proto/README.md",
+        "core/datastore-test/README.md",
+        "core/datastore-test/src/main/AndroidManifest.xml",
+        "core/datastore/README.md",
+        "core/datastore/src/main/AndroidManifest.xml",
+        "core/designsystem/README.md",
+        "core/designsystem/src/main/AndroidManifest.xml",
+        "core/domain/README.md",
+        "core/domain/src/main/AndroidManifest.xml",
+        "core/model/README.md",
+        "core/navigation/README.md",
+        "core/network/README.md",
+        "core/network/src/main/AndroidManifest.xml",
+        "core/notifications/README.md",
+        "core/notifications/src/main/AndroidManifest.xml",
+        "core/screenshot-testing/README.md",
+        "core/screenshot-testing/src/main/AndroidManifest.xml",
+        "core/testing/README.md",
+        "core/testing/src/main/AndroidManifest.xml",
+        "core/ui/README.md",
+        "core/ui/src/main/AndroidManifest.xml",
+        "feature/bookmarks/api/README.md",
+        "feature/bookmarks/impl/README.md",
+        "feature/foryou/api/README.md",
+        "feature/foryou/impl/README.md",
+        "feature/interests/api/README.md",
+        "feature/interests/impl/README.md",
+        "feature/search/api/README.md",
+        "feature/search/impl/README.md",
+        "feature/settings/impl/README.md",
+        "feature/topic/api/README.md",
+        "feature/topic/impl/README.md",
+        "lint/README.md",
+        "spotless/copyright.kt",
+        "sync/sync-test/README.md",
+        "sync/sync-test/src/main/AndroidManifest.xml",
+        "sync/work/README.md",
+        "sync/work/src/prod/AndroidManifest.xml",
+        "ui-test-hilt-manifest/README.md",
+        "ui-test-hilt-manifest/src/main/AndroidManifest.xml"
+      ],
+      "metrics": {
+        "treeExpansions": 167,
+        "blobFetches": 59,
+        "selectedFiles": 59,
+        "selectedLineRanges": 59,
+        "selectedContentBytes": 117614,
+        "aiReadCalls": 0,
+        "prunedPathCount": 0,
+        "wallClockMs": 103159,
+        "profileMatches": [
+          {
+            "profileId": "android-kotlin",
+            "confidence": 0.9,
+            "matchedSignals": [
+              {
+                "path": "app-nia-catalog/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "app/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "app/src/prod/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "benchmarks/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "core/analytics/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "core/data-test/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "core/data/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "core/database/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "core/datastore-test/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "core/datastore/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "core/designsystem/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "core/domain/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "core/network/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "core/notifications/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "core/screenshot-testing/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "core/testing/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "core/ui/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "sync/sync-test/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "sync/work/src/prod/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "ui-test-hilt-manifest/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              }
+            ]
+          },
+          {
+            "profileId": "android-native",
+            "confidence": 0.88,
+            "matchedSignals": [
+              {
+                "path": "app-nia-catalog/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "app/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "app/src/prod/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "benchmarks/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "core/analytics/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "core/data-test/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "core/data/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "core/database/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "core/datastore-test/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "core/datastore/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "core/designsystem/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "core/domain/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "core/network/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "core/notifications/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "core/screenshot-testing/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "core/testing/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "core/ui/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "sync/sync-test/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "sync/work/src/prod/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "ui-test-hilt-manifest/src/main/AndroidManifest.xml",
+                "signal": "manifest"
+              }
+            ]
+          }
+        ],
+        "budgetsRemaining": {
+          "selectedFiles": 61,
+          "selectedLineRanges": 541,
+          "plannerContentBytes": 122386,
+          "aiReadCalls": 20
+        }
+      },
+      "architectureComponents": [],
+      "architectureError": "No architecture components detected",
+      "durationMs": 104052
+    }
+  ]
+}

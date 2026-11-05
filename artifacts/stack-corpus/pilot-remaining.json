@@ -1,0 +1,590 @@
+{
+  "version": 1,
+  "manifestUpdatedAt": "2026-11-03",
+  "generatedAt": "2026-11-03T10:13:30.322Z",
+  "summary": {
+    "total": 5,
+    "completed": 3,
+    "profileMatches": 1
+  },
+  "results": [
+    {
+      "id": "fastapi-react",
+      "repository": "fastapi/full-stack-fastapi-template",
+      "revision": "f4bcfaba7c85be3c6332cc74a20819f586dcdbc6",
+      "expectedProfile": "fastapi-python",
+      "status": "completed",
+      "detectedProfile": "fastapi-python",
+      "profileMatches": [
+        {
+          "profileId": "fastapi-python",
+          "confidence": 0.88,
+          "matchedSignals": []
+        }
+      ],
+      "missing": [],
+      "diagnostics": [],
+      "selectedFiles": [
+        "package.json",
+        "compose.deploy.yml",
+        "deployment-docker-compose.md",
+        "deployment.md",
+        "README.md",
+        ".github/workflows/deploy-docker-compose.yml",
+        ".github/workflows/deploy.yml",
+        ".github/workflows/test-docker-compose.yml",
+        "backend/Dockerfile",
+        "backend/README.md",
+        "backend/app/core/db.py",
+        "frontend/package.json",
+        "frontend/Dockerfile.playwright",
+        "frontend/README.md",
+        "frontend/src/main.tsx",
+        "frontend/src/routeTree.gen.ts",
+        "frontend/src/client/index.ts",
+        "frontend/src/client/client/index.ts",
+        "frontend/src/client/core/auth.gen.ts",
+        "frontend/src/components/theme-provider.tsx",
+        "frontend/src/components/Admin/AddUser.tsx",
+        "frontend/src/components/Admin/columns.tsx",
+        "frontend/src/components/Admin/DeleteUser.tsx",
+        "frontend/src/components/Admin/EditUser.tsx",
+        "frontend/src/components/Admin/UserActionsMenu.tsx",
+        "frontend/src/components/Common/Appearance.tsx",
+        "frontend/src/components/Common/AuthLayout.tsx",
+        "frontend/src/components/Common/DataTable.tsx",
+        "frontend/src/components/Common/ErrorComponent.tsx",
+        "frontend/src/components/Common/Footer.tsx",
+        "frontend/src/components/Common/Logo.tsx",
+        "frontend/src/components/Common/NotFound.tsx",
+        "frontend/src/components/Items/AddItem.tsx",
+        "frontend/src/components/Items/columns.tsx",
+        "frontend/src/components/Items/DeleteItem.tsx",
+        "frontend/src/components/Items/EditItem.tsx",
+        "frontend/src/components/Items/ItemActionsMenu.tsx",
+        "frontend/src/components/Pending/PendingItems.tsx",
+        "frontend/src/components/Pending/PendingUsers.tsx",
+        "frontend/src/components/Sidebar/AppSidebar.tsx",
+        "frontend/src/components/Sidebar/Main.tsx",
+        "frontend/src/components/Sidebar/User.tsx",
+        "frontend/src/components/UserSettings/ChangePassword.tsx",
+        "frontend/src/components/UserSettings/DeleteAccount.tsx",
+        "frontend/src/components/UserSettings/DeleteConfirmation.tsx",
+        "frontend/src/components/UserSettings/UserInformation.tsx",
+        "frontend/src/components/ui/alert.tsx",
+        "frontend/src/components/ui/avatar.tsx",
+        "frontend/src/components/ui/badge.tsx",
+        "frontend/src/components/ui/button-group.tsx",
+        "frontend/src/components/ui/button.tsx",
+        "frontend/src/components/ui/card.tsx",
+        "frontend/src/components/ui/checkbox.tsx",
+        "frontend/src/components/ui/dialog.tsx",
+        "frontend/src/components/ui/dropdown-menu.tsx",
+        "frontend/src/components/ui/form.tsx",
+        "frontend/src/components/ui/input.tsx",
+        "frontend/src/components/ui/label.tsx",
+        "frontend/src/components/ui/loading-button.tsx",
+        "frontend/src/components/ui/pagination.tsx",
+        "frontend/src/components/ui/password-input.tsx",
+        "frontend/src/components/ui/select.tsx",
+        "frontend/src/components/ui/separator.tsx",
+        "frontend/src/components/ui/sheet.tsx",
+        "frontend/src/components/ui/sidebar.tsx",
+        "frontend/src/components/ui/skeleton.tsx",
+        "frontend/src/components/ui/sonner.tsx",
+        "frontend/src/components/ui/table.tsx",
+        "frontend/src/components/ui/tabs.tsx",
+        "frontend/src/components/ui/tooltip.tsx",
+        "frontend/src/hooks/useAuth.ts",
+        "frontend/src/routes/__root.tsx",
+        "frontend/src/routes/_layout.tsx",
+        "frontend/src/routes/login.tsx",
+        "frontend/src/routes/recover-password.tsx",
+        "frontend/src/routes/reset-password.tsx",
+        "frontend/src/routes/signup.tsx",
+        "frontend/src/routes/_layout/admin.tsx",
+        "frontend/src/routes/_layout/index.tsx",
+        "frontend/src/routes/_layout/items.tsx",
+        "frontend/src/routes/_layout/settings.tsx",
+        "frontend/tests/auth.setup.ts",
+        "packages/react-email/package.json",
+        "packages/react-email/emails/new_account.tsx",
+        "packages/react-email/emails/reset_password.tsx",
+        "packages/react-email/emails/test_email.tsx",
+        "packages/react-email/ui/Button.tsx",
+        "packages/react-email/ui/Callout.tsx",
+        "packages/react-email/ui/Heading.tsx",
+        "packages/react-email/ui/Layout.tsx",
+        "packages/react-email/ui/Link.tsx"
+      ],
+      "metrics": {
+        "treeExpansions": 53,
+        "blobFetches": 91,
+        "selectedFiles": 91,
+        "selectedLineRanges": 91,
+        "selectedContentBytes": 228148,
+        "aiReadCalls": 0,
+        "prunedPathCount": 0,
+        "wallClockMs": 60666,
+        "profileMatches": [
+          {
+            "profileId": "fastapi-python",
+            "confidence": 0.88,
+            "matchedSignals": []
+          }
+        ],
+        "budgetsRemaining": {
+          "selectedFiles": 29,
+          "selectedLineRanges": 509,
+          "plannerContentBytes": 11852,
+          "aiReadCalls": 20
+        }
+      },
+      "architectureComponents": [
+        "users",
+        "frontend",
+        "backend"
+      ],
+      "architectureError": null,
+      "durationMs": 62701
+    },
+    {
+      "id": "go-web-service",
+      "repository": "gogs/gogs",
+      "revision": "35ff5d98e3ed84697807ffdeaaca744223e85344",
+      "expectedProfile": "go-service",
+      "status": "completed",
+      "detectedProfile": "go-api",
+      "profileMatches": [
+        {
+          "profileId": "go-api",
+          "confidence": 0.85,
+          "matchedSignals": [
+            {
+              "path": "go.mod",
+              "signal": "manifest"
+            }
+          ]
+        },
+        {
+          "profileId": "node-api",
+          "confidence": 0.82,
+          "matchedSignals": [
+            {
+              "path": "package.json",
+              "signal": "manifest"
+            }
+          ]
+        }
+      ],
+      "missing": [],
+      "diagnostics": [],
+      "selectedFiles": [
+        "go.mod",
+        "package.json",
+        "AGENTS.md",
+        "Dockerfile",
+        "Dockerfile.next",
+        "README.md",
+        "cmd/gogs/main.go",
+        "conf/auth.d/github.conf.example",
+        "conf/auth.d/ldap_bind_dn.conf.example",
+        "conf/auth.d/ldap_simple_auth.conf.example",
+        "conf/auth.d/pam.conf.example",
+        "conf/auth.d/smtp.conf.example",
+        "docker-next/README.md",
+        "docker/README.md",
+        "docker/runtime/backup-job.sh",
+        "docs/README.md",
+        "docs/advancing/authentication.mdx",
+        "docs/api-reference/collaborators-and-deploy-keys/add-a-deploy-key.mdx",
+        "docs/api-reference/collaborators-and-deploy-keys/get-a-deploy-key.mdx",
+        "docs/api-reference/collaborators-and-deploy-keys/list-deploy-keys.mdx",
+        "docs/api-reference/collaborators-and-deploy-keys/remove-a-deploy-key.mdx",
+        "docs/api-reference/users/get-the-authenticated-user.mdx",
+        "docs/dev/database_schema.md",
+        "internal/auth/auth.go",
+        "internal/auth/github/config.go",
+        "internal/auth/github/provider.go",
+        "internal/auth/ldap/config.go",
+        "internal/auth/ldap/provider.go",
+        "internal/auth/ldap/README.md",
+        "internal/auth/pam/config.go",
+        "internal/auth/pam/pam_stub.go",
+        "internal/auth/pam/pam.go",
+        "internal/auth/pam/provider.go",
+        "internal/auth/smtp/config.go",
+        "internal/auth/smtp/provider.go",
+        "internal/context/auth_test.go",
+        "internal/context/auth.go",
+        "internal/database/database.go",
+        "internal/database/schemadoc/main.go",
+        "internal/dbtest/dbtest.go",
+        "internal/form/auth.go",
+        "internal/route/admin/auths.go",
+        "internal/route/lfs/route_test.go",
+        "internal/route/lfs/route.go",
+        "internal/sync/unique_queue.go",
+        "public/plugins/pdfjs-5.2.133/build/pdf.sandbox.mjs"
+      ],
+      "metrics": {
+        "treeExpansions": 203,
+        "blobFetches": 46,
+        "selectedFiles": 46,
+        "selectedLineRanges": 46,
+        "selectedContentBytes": 866529,
+        "aiReadCalls": 0,
+        "prunedPathCount": 0,
+        "wallClockMs": 112438,
+        "profileMatches": [
+          {
+            "profileId": "go-api",
+            "confidence": 0.85,
+            "matchedSignals": [
+              {
+                "path": "go.mod",
+                "signal": "manifest"
+              }
+            ]
+          },
+          {
+            "profileId": "node-api",
+            "confidence": 0.82,
+            "matchedSignals": [
+              {
+                "path": "package.json",
+                "signal": "manifest"
+              }
+            ]
+          }
+        ],
+        "budgetsRemaining": {
+          "selectedFiles": 74,
+          "selectedLineRanges": 554,
+          "plannerContentBytes": -626529,
+          "aiReadCalls": 20
+        }
+      },
+      "architectureComponents": [
+        "users",
+        "backend",
+        "auth",
+        "db",
+        "github"
+      ],
+      "architectureError": null,
+      "durationMs": 113334
+    },
+    {
+      "id": "rust-service",
+      "repository": "meilisearch/meilisearch",
+      "revision": "fccb3537c728d30cb52ef0fb4e00ce239713ec30",
+      "expectedProfile": "rust-service",
+      "status": "failed",
+      "detectedProfile": "unknown",
+      "profileMatches": [],
+      "missing": [
+        "source blob is not valid UTF-8"
+      ],
+      "diagnostics": [
+        {
+          "code": "binary_source",
+          "message": "source blob is not valid UTF-8"
+        }
+      ],
+      "selectedFiles": [],
+      "metrics": null,
+      "architectureComponents": [],
+      "architectureError": null,
+      "durationMs": 42696
+    },
+    {
+      "id": "laravel-php",
+      "repository": "monicahq/monica",
+      "revision": "dab74273acc5c9e0ba713a9f7c2c71c24ab16993",
+      "expectedProfile": "laravel-app",
+      "status": "underdetermined",
+      "detectedProfile": "unknown",
+      "profileMatches": [],
+      "missing": [
+        "supported stack profile was not identified"
+      ],
+      "diagnostics": [
+        {
+          "code": "profile_confidence_low",
+          "message": "selected source slice does not identify a supported stack profile"
+        }
+      ],
+      "selectedFiles": [
+        "package.json",
+        "docker-compose.yml",
+        "README.md",
+        ".github/workflows/deploy.yml",
+        "app/Actions/AttemptToAuthenticateSocialite.php",
+        "app/Actions/AttemptToAuthenticateWebauthn.php",
+        "app/Actions/Fortify/RedirectIfTwoFactorAuthenticatable.php",
+        "app/Console/Commands/WaitForDb.php",
+        "app/Exceptions/Handler.php",
+        "app/Http/Controllers/ApiController.php",
+        "app/Http/Controllers/Controller.php",
+        "app/Http/Controllers/Auth/AcceptInvitationController.php",
+        "app/Http/Controllers/Auth/LoginController.php",
+        "app/Http/Controllers/Auth/RegisterController.php",
+        "app/Http/Controllers/Auth/SocialiteCallbackController.php",
+        "app/Http/Controllers/Profile/UserTokenController.php",
+        "app/Http/Controllers/Profile/WebauthnDestroyResponse.php",
+        "app/Http/Controllers/Profile/WebauthnUpdateResponse.php",
+        "app/Http/Middleware/Authenticate.php",
+        "app/Http/Middleware/AuthenticateWithTokenOnBasicAuth.php",
+        "app/Listeners/WebauthnAuthenticateListener.php",
+        "app/Logging/LoggingHandler.php",
+        "app/Models/WebauthnKey.php",
+        "app/Providers/AuthServiceProvider.php",
+        "app/Traits/JsonRespondController.php",
+        "config/auth.php",
+        "config/database.php",
+        "config/queue.php",
+        "config/webauthn.php",
+        "database/migrations/2019_03_29_163611_create_webauthn_keys.php",
+        "database/migrations/2019_08_19_000000_create_failed_jobs_table.php",
+        "database/migrations/2022_01_22_183321_create_jobs_table.php",
+        "database/migrations/2022_11_16_221702_create_job_batches_table.php",
+        "database/migrations/2025_05_05_101750_webauthn_used_at.php",
+        "database/seeders/DatabaseSeeder.php",
+        "lang/ar/auth.php",
+        "lang/bn/auth.php",
+        "lang/ca/auth.php",
+        "lang/da/auth.php",
+        "lang/de/auth.php",
+        "lang/el/auth.php",
+        "lang/en/auth.php",
+        "lang/es/auth.php",
+        "lang/fr/auth.php",
+        "lang/he/auth.php",
+        "lang/hi/auth.php",
+        "lang/it/auth.php",
+        "lang/ja/auth.php",
+        "lang/ml/auth.php",
+        "lang/nl/auth.php",
+        "lang/nn/auth.php",
+        "lang/pa/auth.php",
+        "lang/pl/auth.php",
+        "lang/pt/auth.php",
+        "lang/pt_BR/auth.php",
+        "lang/ro/auth.php",
+        "lang/ru/auth.php",
+        "lang/sv/auth.php",
+        "lang/te/auth.php",
+        "lang/tr/auth.php",
+        "lang/ur/auth.php",
+        "lang/vi/auth.php",
+        "lang/zh_CN/auth.php",
+        "lang/zh_TW/auth.php",
+        "public/img/auth/azure.svg",
+        "public/img/auth/github.svg",
+        "public/img/auth/google.svg",
+        "public/img/auth/kanidm.svg",
+        "public/img/auth/keycloak.svg",
+        "public/img/auth/linkedin.svg",
+        "public/img/auth/saml2.svg",
+        "resources/js/Components/AuthenticationCardLogo.vue",
+        "resources/js/Layouts/AuthenticationCard.vue",
+        "resources/js/Pages/Webauthn/WebauthnKeys.vue",
+        "resources/js/Pages/Webauthn/WebauthnLogin.vue",
+        "resources/js/Pages/Webauthn/WebauthnTest.vue",
+        "resources/js/Shared/Icons/DatabaseIcon.vue",
+        "resources/js/Shared/Modules/JobInformation.vue",
+        "scripts/docker/Dockerfile",
+        "scripts/docker/Dockerfile-fpm",
+        "scripts/docker/queue.sh",
+        "tests/.env.ci.mysql",
+        "tests/.env.ci.sqlite",
+        "tests/Feature/Auth/AuthenticationTest.php",
+        "tests/Feature/Auth/TwoFactorAuthenticationSettingsTest.php",
+        "tests/Feature/Controllers/Auth/LoginControllerTest.php",
+        "tests/Feature/Controllers/Auth/SocialiteCallbackControllerTest.php",
+        "tests/Feature/Controllers/Profile/UserTokenControllerTest.php",
+        "tests/Unit/Actions/AttemptToAuthenticateWebauthnTest.php",
+        "tests/Unit/Commands/WaitForDbTest.php",
+        "tests/Unit/Controllers/ApiControllerTest.php"
+      ],
+      "metrics": {
+        "treeExpansions": 217,
+        "blobFetches": 91,
+        "selectedFiles": 91,
+        "selectedLineRanges": 91,
+        "selectedContentBytes": 165275,
+        "aiReadCalls": 0,
+        "prunedPathCount": 0,
+        "wallClockMs": 137741,
+        "profileMatches": [],
+        "budgetsRemaining": {
+          "selectedFiles": 29,
+          "selectedLineRanges": 509,
+          "plannerContentBytes": 74725,
+          "aiReadCalls": 20
+        }
+      },
+      "architectureComponents": [
+        "users",
+        "backend",
+        "auth"
+      ],
+      "architectureError": null,
+      "durationMs": 139635
+    },
+    {
+      "id": "dotnet-services",
+      "repository": "dotnet/eShop",
+      "revision": "913acea66708a59595351174cee9b29f37179d29",
+      "expectedProfile": "dotnet-services",
+      "status": "completed",
+      "detectedProfile": "android-native",
+      "profileMatches": [
+        {
+          "profileId": "android-native",
+          "confidence": 0.88,
+          "matchedSignals": [
+            {
+              "path": "src/ClientApp/Platforms/Android/AndroidManifest.xml",
+              "signal": "manifest"
+            },
+            {
+              "path": "src/HybridApp/Platforms/Android/AndroidManifest.xml",
+              "signal": "manifest"
+            }
+          ]
+        },
+        {
+          "profileId": "node-api",
+          "confidence": 0.82,
+          "matchedSignals": [
+            {
+              "path": "package.json",
+              "signal": "manifest"
+            }
+          ]
+        }
+      ],
+      "missing": [],
+      "diagnostics": [],
+      "selectedFiles": [
+        "package.json",
+        "README.md",
+        ".github/skills/aspire-deployment/references/docker-compose.md",
+        ".github/skills/aspire-deployment/references/kubernetes.md",
+        ".github/skills/aspireify/references/csharp-authoring.md",
+        ".github/skills/aspireify/references/docker-compose.md",
+        ".github/skills/aspireify/references/typescript-authoring.md",
+        "src/Basket.API/IntegrationEvents/EventHandling/OrderStartedIntegrationEventHandler.cs",
+        "src/Catalog.API/IntegrationEvents/EventHandling/AnyFutureIntegrationEventHandler.cs.txt",
+        "src/Catalog.API/IntegrationEvents/EventHandling/OrderStatusChangedToAwaitingValidationIntegrationEventHandler.cs",
+        "src/Catalog.API/IntegrationEvents/EventHandling/OrderStatusChangedToPaidIntegrationEventHandler.cs",
+        "src/ClientApp/Controls/AddBasketButton.xaml",
+        "src/ClientApp/Controls/AddBasketButton.xaml.cs",
+        "src/ClientApp/Exceptions/ServiceAuthenticationException.cs",
+        "src/ClientApp/Platforms/Android/AndroidManifest.xml",
+        "src/ClientApp/Platforms/Android/WebAuthenticationCallbackActivity.cs",
+        "src/ClientApp/Services/Identity/AuthorizeRequest.cs",
+        "src/ClientApp/Views/MauiAuthenticationBrowser.cs",
+        "src/EventBus/Abstractions/IIntegrationEventHandler.cs",
+        "src/HybridApp/Components/Routes.razor",
+        "src/HybridApp/Platforms/Android/AndroidManifest.xml",
+        "src/Identity.API/Data/ApplicationDbContext.cs",
+        "src/Identity.API/Data/Migrations/ApplicationDbContextModelSnapshot.cs",
+        "src/Identity.API/Quickstart/Account/AccountController.cs",
+        "src/Identity.API/Quickstart/Account/ExternalController.cs",
+        "src/Identity.API/Quickstart/Consent/ConsentController.cs",
+        "src/Identity.API/Quickstart/Device/DeviceAuthorizationInputModel.cs",
+        "src/Identity.API/Quickstart/Device/DeviceAuthorizationViewModel.cs",
+        "src/Identity.API/Quickstart/Device/DeviceController.cs",
+        "src/Identity.API/Quickstart/Diagnostics/DiagnosticsController.cs",
+        "src/Identity.API/Quickstart/Grants/GrantsController.cs",
+        "src/Identity.API/Quickstart/Home/HomeController.cs",
+        "src/Ordering.API/Application/Commands/CancelOrderCommandHandler.cs",
+        "src/Ordering.API/Application/Commands/CreateOrderCommandHandler.cs",
+        "src/Ordering.API/Application/Commands/CreateOrderDraftCommandHandler.cs",
+        "src/Ordering.API/Application/Commands/IdentifiedCommandHandler.cs",
+        "src/Ordering.API/Application/Commands/SetAwaitingValidationOrderStatusCommandHandler.cs",
+        "src/Ordering.API/Application/Commands/SetPaidOrderStatusCommandHandler.cs",
+        "src/Ordering.API/Application/Commands/SetStockConfirmedOrderStatusCommandHandler.cs",
+        "src/Ordering.API/Application/Commands/SetStockRejectedOrderStatusCommandHandler.cs",
+        "src/Ordering.API/Application/Commands/ShipOrderCommandHandler.cs",
+        "src/Ordering.API/Application/DomainEventHandlers/OrderCancelledDomainEventHandler.cs",
+        "src/Ordering.API/Application/DomainEventHandlers/OrderShippedDomainEventHandler.cs",
+        "src/Ordering.API/Application/DomainEventHandlers/OrderStatusChangedToAwaitingValidationDomainEventHandler.cs",
+        "src/Ordering.API/Application/DomainEventHandlers/OrderStatusChangedToPaidDomainEventHandler.cs",
+        "src/Ordering.API/Application/DomainEventHandlers/OrderStatusChangedToStockConfirmedDomainEventHandler.cs",
+        "src/Ordering.API/Application/DomainEventHandlers/UpdateOrderWhenBuyerAndPaymentMethodVerifiedDomainEventHandler.cs",
+        "src/Ordering.API/Application/DomainEventHandlers/ValidateOrAddBuyerAggregateWhenOrderStartedDomainEventHandler.cs",
+        "src/PaymentProcessor/IntegrationEvents/EventHandling/OrderStatusChangedToStockConfirmedIntegrationEventHandler.cs",
+        "src/Shared/MigrateDbContextExtensions.cs",
+        "src/WebApp/Components/Routes.razor",
+        "src/WebhookClient/Components/Routes.razor",
+        "src/WebhookClient/Endpoints/AuthenticationEndpoints.cs",
+        "src/WebhookClient/Endpoints/WebhookEndpoints.cs",
+        "src/Webhooks.API/Extensions/RouteHandlerBuilderExtensions.cs",
+        "src/Webhooks.API/IntegrationEvents/OrderStatusChangedToPaidIntegrationEventHandler.cs",
+        "src/Webhooks.API/IntegrationEvents/OrderStatusChangedToShippedIntegrationEventHandler.cs",
+        "src/Webhooks.API/IntegrationEvents/ProductPriceChangedIntegrationEventHandler.cs",
+        "src/eShop.ServiceDefaults/AuthenticationExtensions.cs",
+        "tests/README.md",
+        "tests/Ordering.FunctionalTests/AutoAuthorizeMiddleware.cs",
+        "tests/Ordering.UnitTests/Application/IdentifiedCommandHandlerTest.cs",
+        "tests/Ordering.UnitTests/Application/NewOrderCommandHandlerTest.cs",
+        "tests/Webhooks.FunctionalTests/TestAuthenticationMiddleware.cs"
+      ],
+      "metrics": {
+        "treeExpansions": 262,
+        "blobFetches": 64,
+        "selectedFiles": 64,
+        "selectedLineRanges": 64,
+        "selectedContentBytes": 175091,
+        "aiReadCalls": 0,
+        "prunedPathCount": 0,
+        "wallClockMs": 147388,
+        "profileMatches": [
+          {
+            "profileId": "android-native",
+            "confidence": 0.88,
+            "matchedSignals": [
+              {
+                "path": "src/ClientApp/Platforms/Android/AndroidManifest.xml",
+                "signal": "manifest"
+              },
+              {
+                "path": "src/HybridApp/Platforms/Android/AndroidManifest.xml",
+                "signal": "manifest"
+              }
+            ]
+          },
+          {
+            "profileId": "node-api",
+            "confidence": 0.82,
+            "matchedSignals": [
+              {
+                "path": "package.json",
+                "signal": "manifest"
+              }
+            ]
+          }
+        ],
+        "budgetsRemaining": {
+          "selectedFiles": 56,
+          "selectedLineRanges": 536,
+          "plannerContentBytes": 64909,
+          "aiReadCalls": 20
+        }
+      },
+      "architectureComponents": [
+        "users",
+        "backend",
+        "auth",
+        "db",
+        "webhook"
+      ],
+      "architectureError": null,
+      "durationMs": 148233
+    }
+  ]
+}
