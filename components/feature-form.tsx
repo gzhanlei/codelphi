@@ -5,11 +5,13 @@ import type { FeatureRow } from "@/lib/types";
 import { errorMessage } from "@/lib/error-message";
 import { saveFeature } from "@/lib/spec-editor-client";
 import { FormError } from "./form-feedback";
+import { useDemoMode } from "./demo-mode";
 import { entityId, featureFormState, featureFormTitle, featureNameLocked } from "@/lib/spec-editor-ui";
 import { FeatureFields } from "./feature-fields";
 import { EditorActions } from "./editor-actions";
 
 export function FeatureForm({ slug, feature, parentId, onSaved, onClose }: { slug: string; feature?: FeatureRow; parentId: number | null; onSaved: (id: number) => void; onClose: () => void }) {
+  const { demo, showNotice } = useDemoMode();
   const initial = featureFormState(feature);
   const [name, setName] = useState(initial.name);
   const [summary, setSummary] = useState(initial.summary);
@@ -18,6 +20,10 @@ export function FeatureForm({ slug, feature, parentId, onSaved, onClose }: { slu
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    if (demo) {
+      showNotice();
+      return;
+    }
     setPending(true);
     setError("");
     try {

@@ -5,11 +5,13 @@ import type { ScenarioRow } from "@/lib/types";
 import { errorMessage } from "@/lib/error-message";
 import { saveScenario } from "@/lib/spec-editor-client";
 import { FormError } from "./form-feedback";
+import { useDemoMode } from "./demo-mode";
 import { entityId, scenarioFormState, scenarioFormTitle } from "@/lib/spec-editor-ui";
 import { ScenarioFields } from "./scenario-fields";
 import { EditorActions } from "./editor-actions";
 
 export function ScenarioForm({ featureId, scenario, onSaved, onClose }: { featureId: number; scenario?: ScenarioRow; onSaved: () => void; onClose: () => void }) {
+  const { demo, showNotice } = useDemoMode();
   const initial = scenarioFormState(scenario);
   const [context, setContext] = useState(initial.context);
   const [action, setAction] = useState(initial.action);
@@ -20,6 +22,10 @@ export function ScenarioForm({ featureId, scenario, onSaved, onClose }: { featur
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    if (demo) {
+      showNotice();
+      return;
+    }
     setPending(true);
     setError("");
     try {

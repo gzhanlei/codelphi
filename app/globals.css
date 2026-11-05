@@ -168,6 +168,7 @@ p { line-height: 1.7; }
 .description-dialog textarea { width: 100%; min-height: 130px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; font: inherit; font-size: 14px; resize: vertical; }
 .description-dialog .description-dialog-hint { margin: 10px 0 0; color: var(--muted); font-size: 12px; }
 .description-dialog .description-dialog-error { margin: 10px 0 0; color: #9b4237; font-size: 13px; }
+.demo-mode-dialog p { margin: 0 0 10px; }
 .description-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
 .overview-meta { display: flex; flex-wrap: wrap; gap: 8px; color: #b7cac2; font-size: 12px; }.overview-meta span { padding: 5px 10px; border: 1px solid #3c5a50; border-radius: 20px; }
 .overview-actions { display: flex; flex-wrap: wrap; gap: 10px; }.overview-actions .secondary-button { background: #e4f2eb; color: var(--green); }.overview-actions .explainer-link { display: inline-flex; align-items: center; color: #b7cac2; font-size: 12px; padding: 8px 4px; }

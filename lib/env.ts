@@ -20,3 +20,12 @@ export function allowedEmails() {
       .filter(Boolean),
   );
 }
+
+export function publicDemoSlugs() {
+  return new Set(
+    (process.env.PUBLIC_DEMO_SLUGS ?? "")
+      .split(",")
+      .map((slug) => slug.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}

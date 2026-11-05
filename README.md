@@ -54,6 +54,7 @@ openssl rand -hex 32  # 填入 GITHUB_WEBHOOK_SECRET
 - `DATABASE_URL`：腾讯云 MySQL 的 `mysql://` URL，数据库名为 `radar`。
 - `CHANDLER_CLIENT_ID` / `CHANDLER_CLIENT_SECRET`。
 - `AUTH_ALLOWED_EMAILS`（可选）：特殊封闭部署的登录限制，英文逗号分隔；留空允许所有有效 Chandler 用户，不用于工作区成员管理。
+- `PUBLIC_DEMO_SLUGS`（可选）：公开只读 Demo 的产品 slug，英文逗号分隔（如 `reporadar`）。匿名访客可浏览该产品页面，所有保存/分析操作会弹出 Demo 提示而不发请求；留空关闭。
 - `GITHUB_TOKEN`：对内部仓库具有只读权限的 Token。
 - `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL`：LLMGateway 配置。
 

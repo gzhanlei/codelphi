@@ -6,11 +6,15 @@ import { notFound } from "next/navigation";
 import { getProductDetails } from "@/lib/product-details";
 import { requireProductAccess, type ProductAccess } from "@/lib/product-access";
 
-vi.mock("next/navigation", () => ({ notFound: vi.fn(() => { throw new Error("NOT_FOUND"); }) }));
-vi.mock("@/lib/session", () => ({ requireSessionUser: vi.fn(async () => ({ sub: "user" })) }));
+vi.mock("next/navigation", () => ({
+  notFound: vi.fn(() => { throw new Error("NOT_FOUND"); }),
+  redirect: vi.fn((url: string) => { throw new Error(`NEXT_REDIRECT:${url}`); }),
+}));
+vi.mock("@/lib/session", () => ({ getSessionUser: vi.fn(async () => ({ sub: "user" })) }));
 vi.mock("@/lib/product-access", () => ({ requireProductAccess: vi.fn() }));
 vi.mock("@/lib/product-details", () => ({ getProductDetails: vi.fn() }));
 vi.mock("@/components/app-shell", () => ({ AppShell: ({ children }: { children: ReactNode }) => createElement("main", null, children) }));
+vi.mock("@/components/demo-shell", () => ({ DemoShell: ({ children }: { children: ReactNode }) => createElement("main", null, children) }));
 vi.mock("@/components/analyze-button", () => ({ AnalyzeButton: () => null }));
 vi.mock("@/components/analysis-feedback-button", () => ({ AnalysisFeedbackButton: ({ slug }: { slug: string }) => createElement("span", { "data-analysis-feedback": slug }, "提交反馈") }));
 vi.mock("@/components/product-navigation", () => ({ ProductTabs: () => null, ProductView: () => null, RepositoryLink: () => null, RunStatus: () => null }));

@@ -8,14 +8,20 @@ import { deleteConfirmedFeature } from "@/lib/spec-editor-client";
 import { errorMessage } from "@/lib/error-message";
 import { entityId } from "@/lib/spec-editor-ui";
 import { FeatureTree } from "./feature-tree";
+import { useDemoMode } from "./demo-mode";
 import { FeatureEditor, SpecDetail, type FeatureEditorMode } from "./spec-workspace-content";
 
 export function SpecWorkspace({ slug, tree, feature, scenarios, mode }: { slug: string; tree: FeatureTreeItem[]; feature?: FeatureRow; scenarios: ScenarioRow[]; mode: string }) {
   const router = useRouter();
+  const { demo, showNotice } = useDemoMode();
   const [editor, setEditor] = useState<FeatureEditorMode>(null);
   const [error, setError] = useState("");
 
   async function removeFeature() {
+    if (demo) {
+      showNotice();
+      return;
+    }
     const deleted = await deleteConfirmedFeature(feature).catch((cause) => {
       setError(errorMessage(cause, "删除功能失败"));
       return false;
