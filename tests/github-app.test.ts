@@ -16,6 +16,9 @@ describe("GitHub App boundaries", () => {
     expect(manifest.redirect_url).toBe("http://localhost:3008/integrations/github/callback");
     expect(manifest.setup_url).toBe("http://localhost:3008/integrations/github/setup");
     expect(manifest.public).toBe(false);
+    expect(manifest.hook_attributes).toEqual({ url: "http://localhost:3008/api/webhooks/github", active: true });
+    expect(manifest.default_events).toEqual(["push"]);
+    expect(radarManifest("http://localhost:3008/").hook_attributes.url).toBe("http://localhost:3008/api/webhooks/github");
   });
 
   it("converts a manifest code into validated app credentials", async () => {

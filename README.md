@@ -98,15 +98,17 @@ https://radar.chandler.work/auth/callback
 
 ### 使用 GitHub App（推荐）
 
-打开 `/integrations`，点击“创建 Radar GitHub App”，在 GitHub 官方页面完成创建，然后点击“添加安装”。App 仅申请 `contents:read` 和 `metadata:read`。
+打开 `/integrations`，点击“创建 Radar GitHub App”，在 GitHub 官方页面完成创建，然后点击“添加安装”。App 仅申请 `contents:read` 和 `metadata:read`；新 App 的 Manifest 同时声明 App 级 Webhook URL 与 `push` 事件，安装后所选仓库的默认分支更新会自动通知 Radar。已有 App 可点击“设置 Push 通知”跳转 GitHub 设置，一次性补设相同 URL、Webhook Secret 和事件；GitHub 没有更新 App Webhook 的公开 REST API，因此旧 App 需要这一次手工操作。
 
-安装时可选择全部仓库或指定仓库。Radar 将 App 私钥与 Client Secret 使用 AES-256-GCM 加密后存入 MySQL，仅在服务端内存中解密换取 Installation Token。页面支持重新检查连接和本地断开；断开不会卸载 GitHub App，也不会删除已有规格。
+安装时可选择全部仓库或指定仓库。Radar 将 App 私钥、Client Secret 和 Webhook Secret 使用 AES-256-GCM 加密后存入 MySQL，仅在服务端内存中解密换取 Installation Token 或验证 Webhook。页面支持重新检查连接和本地断开；断开不会卸载 GitHub App，也不会删除已有规格。
 
 添加产品时选择对应的 GitHub App 安装即可；现有 `GITHUB_TOKEN` 仅作为兼容回退。
 
 ### 5. 配置 GitHub Webhook
 
-在 `gzhanlei/radar` 的 Webhook 设置中填写：
+新 GitHub App 会自动配置 App 级 Webhook；已有 App 在 `/integrations` 点击“设置 Push 通知”，在 GitHub App 设置中一次性填写相同 URL、将 Webhook Secret 设为部署环境的 `GITHUB_WEBHOOK_SECRET`，并订阅 `push`。接收端同时接受 App Webhook Secret 与旧的 `GITHUB_WEBHOOK_SECRET`，因此迁移期间已有的逐仓 Webhook 不会中断，缺少已保存 App Secret 的旧 App 也能使用环境变量 Secret 完成验签。
+
+不使用 App 级通知时，仍可在单个仓库的 Webhook 设置中手工填写：
 
 ```text
 Payload URL: https://radar.chandler.work/api/webhooks/github

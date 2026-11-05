@@ -46,14 +46,25 @@ describe("repository connection setup UI", () => {
 
   it("keeps GitHub setup available to editors and read-only for viewers", () => {
     expect(renderToStaticMarkup(createElement(GitHubAppCard, { app: null, connections: [], canEdit: true }))).toContain("连接 GitHub");
+    expect(renderToStaticMarkup(createElement(GitHubAppCard, { app: null, connections: [] }))).toContain("连接 GitHub");
     const html = renderToStaticMarkup(createElement(GitHubAppCard, {
       app: { slug: "radar-app" },
       connections: [{ id: 1, accountLogin: "radar-user", accountType: "User", status: "active", installationId: 42 }],
       canEdit: false,
     }));
     expect(html).toContain("radar-app");
+    expect(html).toContain("radar-user");
+    expect(html).toContain("1 个可用安装");
+    expect(html).not.toContain("尚未安装到任何");
     expect(html).not.toContain("添加账号或组织");
     expect(html).not.toContain("重新检查");
+  });
+
+  it("links existing apps to their one-time push notification settings", () => {
+    const html = renderToStaticMarkup(createElement(GitHubAppCard, { app: { slug: "radar-app" }, connections: [], canEdit: true }));
+    expect(html).toContain("设置 Push 通知");
+    expect(html).toContain("https://github.com/settings/apps/radar-app");
+    expect(html).toContain("尚未安装到任何 GitHub 账号或组织");
   });
 
   it("keeps viewer workspaces read-only", () => {

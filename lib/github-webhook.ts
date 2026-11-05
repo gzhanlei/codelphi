@@ -2,6 +2,8 @@ import { z } from "zod";
 import { queueAnalysis } from "./analysis";
 import { getDb } from "./db";
 import { verifyGitHubSignature } from "./github";
+import { getLatestGitHubApp } from "./github-integrations";
+import { requiredEnv } from "./env";
 
 const pushSchema = z.object({
   ref: z.string(),
@@ -14,7 +16,7 @@ interface WebhookInput {
   rawBody: string;
   event: string | null;
   signature: string | null;
-  secret: string;
+  secret: string | string[];
 }
 
 interface RepositoryTarget {
@@ -39,8 +41,17 @@ const defaultDependencies: WebhookDependencies = {
   queue: (repositoryId, before, after) => queueAnalysis(repositoryId, before, after, "push"),
 };
 
+export async function resolveGitHubWebhookSecrets(getApp: () => Promise<{ webhookSecret?: string } | null> = getLatestGitHubApp, env: Record<string, string | undefined> = process.env) {
+  const app = await getApp();
+  const candidates = [app?.webhookSecret, env.GITHUB_WEBHOOK_SECRET].filter((value): value is string => Boolean(value?.trim())).map((value) => value.trim());
+  const secrets = [...new Set(candidates)];
+  return secrets.length > 0 ? secrets : [requiredEnv("GITHUB_WEBHOOK_SECRET")];
+}
+
 export async function processGitHubWebhook(input: WebhookInput, dependencies: WebhookDependencies = defaultDependencies) {
-  if (!dependencies.verify(input.rawBody, input.signature, input.secret)) {
+  const secrets = Array.isArray(input.secret) ? input.secret : [input.secret];
+  const verified = secrets.some((secret) => dependencies.verify(input.rawBody, input.signature, secret));
+  if (!verified) {
     return { status: 401, body: { error: "invalid_signature" } };
   }
   if (input.event === "ping") return { status: 200, body: { ok: true } };
