@@ -33,8 +33,7 @@ function ReleaseChanges({ data }: { data: ProductOverviewData }) {
   return <div className="overview-change-list">{data.changes.map((change) => <div className="overview-change" key={change.id}><span className={`change-kind ${change.kind}`}>{change.kind}</span><strong>{change.featureName}{change.scenarioReference ? ` · ${change.scenarioReference}` : ""}</strong><p>{change.summary}</p></div>)}</div>;
 }
 
-function QuietRelease({ release }: { release: ProductOverviewData["latestRelease"] }) {
-  if (!release) return null;
+function QuietRelease({ release }: { release: NonNullable<ProductOverviewData["latestRelease"]> }) {
   return (
     <div className="overview-change-list">
       <div className="overview-change">

@@ -60,37 +60,56 @@ function commitDetails(data: ChangeData, after: string) {
   };
 }
 
-function interleaveByTopDirectory<T extends { filename: string }>(files: T[]) {
+function groupByTopSegment<T>(items: T[], getPath: (item: T) => string) {
   const groups = new Map<string, T[]>();
-  for (const file of files) {
-    const group = file.filename.includes("/") ? file.filename.split("/")[0] : "";
-    const items = groups.get(group);
-    if (items) items.push(file);
-    else groups.set(group, [file]);
+  for (const item of items) {
+    const group = sourceGroup(getPath(item));
+    const bucket = groups.get(group);
+    if (bucket) bucket.push(item);
+    else groups.set(group, [item]);
   }
-  const balanced: T[] = [];
+  return [...groups.values()];
+}
+
+function roundRobin<T>(groups: T[][]) {
+  const queue = groups.map((group) => [...group]);
+  const selected: T[] = [];
   let hasRemaining = true;
   while (hasRemaining) {
     hasRemaining = false;
-    for (const items of groups.values()) {
-      const file = items.shift();
-      if (file) {
-        balanced.push(file);
+    for (const group of queue) {
+      const item = group.shift();
+      if (item) {
+        selected.push(item);
         hasRemaining = true;
       }
     }
   }
-  return balanced;
+  return selected;
+}
+
+function truncateToSerializedLength(text: string, budget: number) {
+  if (JSON.stringify(text).length <= budget) return text;
+  let low = 0;
+  let high = text.length;
+  while (low < high) {
+    const mid = Math.ceil((low + high + 1) / 2);
+    if (JSON.stringify(text.slice(0, mid)).length <= budget) low = mid;
+    else high = mid - 1;
+  }
+  return text.slice(0, low);
 }
 
 function budgetedChangeFiles(files: ChangeData["files"]) {
-  const selected = interleaveByTopDirectory(files).slice(0, MAX_CHANGE_FILES);
-  const perFile = Math.floor(MAX_CHANGE_PATCH_TOTAL / Math.max(selected.length, 1));
-  return selected.map((file) => ({
-    path: file.filename,
-    status: file.status,
-    patch: (file.patch ?? "(binary or patch unavailable)").slice(0, perFile),
-  }));
+  const selected = roundRobin(groupByTopSegment(files, (file) => file.filename)).slice(0, MAX_CHANGE_FILES);
+  let remaining = MAX_CHANGE_PATCH_TOTAL;
+  return selected.map((file, index) => {
+    const share = Math.floor(remaining / Math.max(selected.length - index, 1));
+    const base = JSON.stringify({ path: file.filename, status: file.status, patch: "" }).length - 2;
+    const patch = truncateToSerializedLength(file.patch ?? "(binary or patch unavailable)", Math.max(share - base, 0));
+    remaining -= base + JSON.stringify(patch).length;
+    return { path: file.filename, status: file.status, patch };
+  });
 }
 
 export function normalizeChangeContext(value: unknown, after: string, fallbackUrl = "") {
@@ -154,38 +173,11 @@ function eligibleSourceEntries(value: unknown) {
     .sort((a, b) => pathScore(a.path).localeCompare(pathScore(b.path)) || a.path.localeCompare(b.path));
 }
 
-function groupSourceEntries(entries: TreeEntry[]) {
-  const grouped = new Map<string, TreeEntry[]>();
-  for (const entry of entries) {
-    const group = sourceGroup(entry.path);
-    const items = grouped.get(group);
-    if (items) {
-      items.push(entry);
-    } else {
-      grouped.set(group, [entry]);
-    }
-  }
-  return [...grouped.values()];
-}
-
 function orderedSourceGroups(entries: TreeEntry[]) {
-  return groupSourceEntries(entries).map(interleaveEdges).sort((a, b) => {
+  return groupByTopSegment(entries, (entry) => entry.path).map(interleaveEdges).sort((a, b) => {
     const key = (group: TreeEntry[]) => `${sourceGroupRank(group[0].path)}:${group[0].path}`;
     return key(a).localeCompare(key(b));
   });
-}
-
-function selectRoundRobin(groups: TreeEntry[][]) {
-  const selected: TreeEntry[] = [];
-  const queue = groups.map((group) => [...group]);
-  while (queue.some((group) => group.length > 0)) {
-    for (const group of queue) {
-      const entry = group.shift();
-      if (!entry) continue;
-      selected.push(entry);
-    }
-  }
-  return selected;
 }
 
 function isEntryPointPath(path: string) {
@@ -208,7 +200,7 @@ export function selectSourceCandidates(value: unknown) {
   const prioritized = entries.filter((entry) => isEntryPointPath(entry.path)).sort((a, b) => entryPointRank(a.path).localeCompare(entryPointRank(b.path)) || a.path.localeCompare(b.path));
   const documentation = entries.filter((entry) => !isEntryPointPath(entry.path) && pathScore(entry.path) === "0");
   const remaining = entries.filter((entry) => !isEntryPointPath(entry.path) && pathScore(entry.path) !== "0");
-  return [...documentation, ...prioritized, ...selectRoundRobin(orderedSourceGroups(remaining))].slice(0, 48);
+  return [...documentation, ...prioritized, ...roundRobin(orderedSourceGroups(remaining))].slice(0, 48);
 }
 
 const contentSchema = z.object({
