@@ -145,27 +145,28 @@ npm run build
 
 ## 部署
 
-生产环境与 Chandler 同一台服务器（`124.156.160.168`，SSH 使用本地 `~/.ssh/chandler.pem`），部署目录 `/data/www/radar`，由 systemd 服务 `radar.service`（以 `nonroot` 用户运行 `npm start -- -H 127.0.0.1 -p 3008`，前端经 Nginx 反代 `radar.chandler.work`）常驻。Explainer 导出另依赖 `radar.service.d/archify.conf` 注入的 `ARCHIFY_CHROME`；常规产品分析不再调用 Archify。
+生产部署应使用持久运行的 Node.js 服务（例如 systemd 管理的 `next start`，前端经 Nginx 反代），而不是请求结束即冻结的 Serverless 平台——Webhook 和页面上的“立即分析”都依赖 Next.js `after()` 在响应后继续执行任务。
 
-发布流程：
+发布流程参考：
 
 ```bash
 # 本地：验证后推送
 npm run typecheck && npm test && npm run build
 git push origin main
 
-# 服务器：以 nonroot 拉取、构建、root 重启
-ssh 124.156.160.168
-runuser -u nonroot -- bash -lc 'cd /data/www/radar && git pull --ff-only origin main && npm run build'
+# 服务器：拉取、构建、重启
+git pull --ff-only origin main
+npm install   # 依赖变更时
+npm run build
 systemctl restart radar.service
-systemctl is-active radar.service && curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3008/login
+curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3008/login
 ```
 
 说明：
 
-- 服务器通过 `/home/nonroot/.ssh/radar_deploy_key`（GitHub deploy key，只读仓库 `gzhanlei/radar`）拉取代码；该密钥副本由 root 的 `/root/.ssh/radar_deploy_key` 复制而来，轮换时需同步两处。
-- 依赖变更时在 `git pull` 与 `npm run build` 之间以 nonroot 执行 `npm install`。
+- 服务器建议通过只读的 GitHub deploy key 拉取代码。
 - 数据库迁移未纳入部署流程，schema 变更需在服务器上手动执行 `npm run db:migrate`。
+- Explainer 导出需要 Chrome/Chromium，通过环境变量 `ARCHIFY_CHROME` 指定可执行文件路径；常规产品分析不依赖它。
 
 ## 后续计划
 
