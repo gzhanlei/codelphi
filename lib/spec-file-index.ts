@@ -40,18 +40,3 @@ export async function rebuildSpecFileIndex(connection: PoolConnection, repositor
     );
   }
 }
-
-export async function loadAffectedSpecFeatureIds(connection: PoolConnection | { execute: PoolConnection["execute"] }, repositoryId: number, paths: string[]) {
-  if (paths.length === 0) return new Map<string, number>();
-  const placeholders = paths.map(() => "?").join(",");
-  const [rows] = await connection.execute(
-    `SELECT path, spec_feature_id AS specFeatureId FROM spec_file_index
-     WHERE repository_id = ? AND path IN (${placeholders}) AND spec_feature_id IS NOT NULL`,
-    [repositoryId, ...paths],
-  );
-  const affected = new Map<string, number>();
-  for (const row of rows as Array<{ path: string; specFeatureId: number }>) {
-    if (!affected.has(row.path)) affected.set(row.path, row.specFeatureId);
-  }
-  return affected;
-}
