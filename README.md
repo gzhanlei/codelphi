@@ -15,6 +15,12 @@
 - ✍️ **人机协作**：功能树、场景与产品概况支持手动编辑；标记为人工来源的内容永远不会被自动分析覆盖。
 - 🏗️ **真实可用**：Radar 在生产环境持续分析自身仓库等多个真实产品，本项目本身就是它的第一个分析对象。
 
+## 与本仓库实时同步的Demo
+https://radar.chandler.work/products/reporadar  无需注册登录也可只读查看。
+
+## 懒得自托管，用我搭好的免费云服务
+https://radar.chandler.work
+
 ## 技术栈
 
 Next.js（App Router）· TypeScript · React · MySQL 8 · Vitest · OpenAI 兼容 LLM API
