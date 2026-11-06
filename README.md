@@ -154,6 +154,17 @@ Secret: 与 GITHUB_WEBHOOK_SECRET 相同
 Events: Push events
 ```
 
+#### PR 预演权限升级（M5 上线时的一次性操作）
+
+PR 预演（`pull_request` 事件触发、在 PR 中评论受影响的规格）需要 App 具备写评论权限。新装的 App 已在 Manifest 中声明 `pull_requests: write` 与 `pull_request` 事件；**已有 App** 需要在 GitHub 网页补配：
+
+1. **权限**（App 设置 → Permissions & events → Pull requests）：从 Repository permissions 里把 Pull requests 提升为 **Read and write**，Save changes。安装了该 App 的组织/账号需要在通知里重新批准权限。
+2. **事件订阅**（同页面 Subscribe to events）：勾选 **Pull request**，Save changes。与 push 迁移一样，只提权限不订阅事件不会有任何投递。
+3. **服务器开关**：在部署环境 `.env` 设置 `PR_PREVIEW_ENABLED=true` 并重启服务（`systemctl restart radar.service`）。开关默认关闭，权限升级期间预演静默失败不影响 push 分析主链路。
+4. **验证**：在一个已注册产品的仓库开测试 PR 改动某功能的证据文件，PR 应出现「Radar 规格预演」评论；追加 commit 后同一评论被更新而非新建。若未出现：检查 Recent Deliveries 是否有 `pull_request` 投递（无 → 第 2 步遗漏）、服务器日志 `[pr-preview] failed`（有 → 通常是 installation token 权限尚未被重新批准）。
+
+回滚：把 `PR_PREVIEW_ENABLED` 设为 `false` 重启即可，权限可以保留。
+
 本地不需要 Webhook 即可验证分析：
 
 ```bash

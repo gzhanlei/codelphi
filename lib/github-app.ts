@@ -18,7 +18,7 @@ type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
 
 function webhookConfiguration(appUrl: string) {
   const baseUrl = appUrl.replace(/\/$/, "");
-  return { hook_attributes: { url: `${baseUrl}/api/webhooks/github`, active: true }, default_events: ["push"] };
+  return { hook_attributes: { url: `${baseUrl}/api/webhooks/github`, active: true }, default_events: ["push", "pull_request"] };
 }
 
 export function radarManifest(appUrl: string) {
@@ -32,7 +32,7 @@ export function radarManifest(appUrl: string) {
     callback_urls: [redirectUrl],
     setup_url: `${appUrl}/integrations/github/setup`,
     ...webhookConfiguration(appUrl),
-    default_permissions: { contents: "read", metadata: "read" },
+    default_permissions: { contents: "read", metadata: "read", pull_requests: "write" },
   };
 }
 

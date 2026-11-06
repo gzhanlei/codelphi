@@ -12,6 +12,23 @@ const pushSchema = z.object({
   repository: z.object({ full_name: z.string().regex(/^[^/]+\/[^/]+$/, "full_name must be owner/name") }),
 });
 
+const pullRequestSchema = z.object({
+  action: z.string(),
+  pull_request: z.object({
+    number: z.number(),
+    head: z.object({ sha: z.string() }),
+  }),
+  repository: z.object({ full_name: z.string().regex(/^[^/]+\/[^/]+$/, "full_name must be owner/name") }),
+});
+
+export interface PrPreviewJob {
+  repositoryId: number;
+  number: number;
+  sha: string;
+  owner: string;
+  name: string;
+}
+
 interface WebhookInput {
   rawBody: string;
   event: string | null;
@@ -55,6 +72,18 @@ export async function processGitHubWebhook(input: WebhookInput, dependencies: We
     return { status: 401, body: { error: "invalid_signature" } };
   }
   if (input.event === "ping") return { status: 200, body: { ok: true } };
+  if (input.event === "pull_request") {
+    const payload = pullRequestSchema.parse(JSON.parse(input.rawBody));
+    if (payload.action !== "opened" && payload.action !== "synchronize") return { status: 202, body: { ignored: true } };
+    const [owner, name] = payload.repository.full_name.split("/");
+    const repository = await dependencies.findRepository(owner, name);
+    if (!repository) return { status: 202, body: { ignored: true } };
+    return {
+      status: 202,
+      body: { accepted: true },
+      preview: { repositoryId: repository.id, number: payload.pull_request.number, sha: payload.pull_request.head.sha, owner, name },
+    };
+  }
   if (input.event !== "push") return { status: 202, body: { ignored: true } };
 
   const payload = pushSchema.parse(JSON.parse(input.rawBody));

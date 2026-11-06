@@ -29,3 +29,7 @@ export function publicDemoSlugs() {
       .filter(Boolean),
   );
 }
+
+export function prPreviewEnabled() {
+  return process.env.PR_PREVIEW_ENABLED === "true";
+}

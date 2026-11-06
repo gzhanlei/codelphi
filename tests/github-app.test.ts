@@ -9,15 +9,15 @@ const publicPem = publicKey.export({ type: "spki", format: "pem" }).toString();
 const app = { clientId: "Iv1.test", pem };
 
 describe("GitHub App boundaries", () => {
-  it("requests only read permissions and uses local callback routes", () => {
+  it("requests read permissions plus PR comment write and uses local callback routes", () => {
     const manifest = radarManifest("http://localhost:3008");
-    expect(manifest.default_permissions).toEqual({ contents: "read", metadata: "read" });
+    expect(manifest.default_permissions).toEqual({ contents: "read", metadata: "read", pull_requests: "write" });
     expect(manifest).not.toHaveProperty("default_permissions.administration");
     expect(manifest.redirect_url).toBe("http://localhost:3008/integrations/github/callback");
     expect(manifest.setup_url).toBe("http://localhost:3008/integrations/github/setup");
     expect(manifest.public).toBe(false);
     expect(manifest.hook_attributes).toEqual({ url: "http://localhost:3008/api/webhooks/github", active: true });
-    expect(manifest.default_events).toEqual(["push"]);
+    expect(manifest.default_events).toEqual(["push", "pull_request"]);
     expect(radarManifest("http://localhost:3008/").hook_attributes.url).toBe("http://localhost:3008/api/webhooks/github");
   });
 

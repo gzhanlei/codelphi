@@ -60,4 +60,28 @@ describe("GitHub webhook processing", () => {
     await expect(processGitHubWebhook({ rawBody: malformed, event: "push", signature: "sig", secret: "secret" }, deps)).rejects.toThrow("full_name must be owner/name");
     expect(deps.findRepository).not.toHaveBeenCalled();
   });
+
+  it("dispatches opened and synchronized pull requests to preview", async () => {
+    const deps = dependencies();
+    const prPayload = (action: string, number = 7) => JSON.stringify({ action, pull_request: { number, head: { sha: "pr-sha" }, base: { ref: "main" } }, repository: { full_name: "gzhanlei/radar" } });
+    for (const action of ["opened", "synchronize"]) {
+      const result = await processGitHubWebhook({ rawBody: prPayload(action), event: "pull_request", signature: "sig", secret: "secret" }, deps);
+      expect(result.status).toBe(202);
+      expect(result.preview).toEqual({ repositoryId: 9, number: 7, sha: "pr-sha", owner: "gzhanlei", name: "radar" });
+      expect(deps.queue).not.toHaveBeenCalled();
+    }
+  });
+
+  it("ignores pull request actions and unregistered repositories without queuing analysis", async () => {
+    const deps = dependencies();
+    const closed = JSON.stringify({ action: "closed", pull_request: { number: 7, head: { sha: "pr-sha" }, base: { ref: "main" } }, repository: { full_name: "gzhanlei/radar" } });
+    expect((await processGitHubWebhook({ rawBody: closed, event: "pull_request", signature: "sig", secret: "secret" }, deps)).body).toEqual({ ignored: true });
+    const unknown = dependencies();
+    unknown.findRepository.mockResolvedValue(undefined);
+    const opened = JSON.stringify({ action: "opened", pull_request: { number: 7, head: { sha: "pr-sha" }, base: { ref: "main" } }, repository: { full_name: "gzhanlei/radar" } });
+    const result = await processGitHubWebhook({ rawBody: opened, event: "pull_request", signature: "sig", secret: "secret" }, unknown);
+    expect(result.body).toEqual({ ignored: true });
+    expect(result.preview).toBeUndefined();
+    expect(deps.queue).not.toHaveBeenCalled();
+  });
 });

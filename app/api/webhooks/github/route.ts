@@ -1,5 +1,6 @@
 import { after, NextRequest, NextResponse } from "next/server";
 import { runAnalysis } from "@/lib/analysis";
+import { runPrPreview } from "@/lib/pr-preview";
 import { processGitHubWebhook, resolveGitHubWebhookSecrets } from "@/lib/github-webhook";
 
 export const runtime = "nodejs";
@@ -12,7 +13,11 @@ export async function POST(request: NextRequest) {
     signature: request.headers.get("x-hub-signature-256"),
     secret: await resolveGitHubWebhookSecrets(),
   });
-  const { runId } = result;
-  if (runId) after(() => runAnalysis(runId));
+  if (result.preview) {
+    const preview = result.preview;
+    after(() => runPrPreview(preview));
+  } else if (result.runId) {
+    after(() => runAnalysis(result.runId));
+  }
   return NextResponse.json(result.body, { status: result.status });
 }
