@@ -72,6 +72,8 @@ export interface BehaviorChangeRow {
   summary: string;
   before: unknown;
   after: unknown;
+  /** C-lite 展示信号：与本条构成疑似改名的对侧功能名（不改数据）。 */
+  suspectedRenameWith?: string;
 }
 
 export interface ChangeRow {

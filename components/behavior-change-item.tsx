@@ -28,7 +28,7 @@ export function BehaviorChangeItem({ change }: { change: BehaviorChangeRow }) {
     <article className="change-item behavior-change-item">
       <span className={`change-kind ${change.kind}`}>{kindLabels[change.kind]}</span>
       <div>
-        <span className="change-feature">{change.featureName}{change.scenarioReference && ` · ${change.scenarioReference}`}</span>
+        <span className="change-feature">{change.featureName}{change.scenarioReference && ` · ${change.scenarioReference}`}{change.suspectedRenameWith && <span className="drift-badge">疑似改名 · {change.suspectedRenameWith}</span>}</span>
         <p>{change.summary}</p>
         <EvidenceLinks value={changeEvidence(change)} />
         <details className="behavior-details"><summary>查看前后差异</summary><div className="diff-grid"><ChangeSubject title="变更前" value={change.before} /><ChangeSubject title="变更后" value={change.after} /></div></details>

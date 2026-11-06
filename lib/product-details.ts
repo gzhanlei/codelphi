@@ -2,6 +2,7 @@ import { getDb } from "./db";
 import { evidenceItems } from "./evidence";
 import { evidenceUrl } from "./evidence-url";
 import { parseJsonValue } from "./json";
+import { annotateSuspectedRenames } from "./spec-rename";
 import type { BehaviorChangeRow, ChangeRow, FeatureRow, ReleaseRow, ScenarioRow } from "./types";
 
 interface EvidenceSource {
@@ -103,7 +104,7 @@ export async function getProductDetails(slug: string, organizationId?: number) {
     scenarios: scenarios.map((scenario) => ({ ...scenario, evidence: decorateEvidence(scenario.evidence, source) })),
     releases,
     changes: changes.map((change) => ({ ...change, evidence: decorateEvidence(change.evidence, source) })),
-    behaviorChanges: behaviorChanges.map((change) => ({ ...change, before: decorateSubject(change.before, source), after: decorateSubject(change.after, source) })),
+    behaviorChanges: annotateSuspectedRenames(behaviorChanges.map((change) => ({ ...change, before: decorateSubject(change.before, source), after: decorateSubject(change.after, source) }))),
     driftCount: features.filter((feature) => feature.staleSince).length + scenarios.filter((scenario) => scenario.staleSince).length,
   };
 }
