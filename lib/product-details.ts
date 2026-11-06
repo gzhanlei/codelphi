@@ -1,6 +1,32 @@
 import { getDb } from "./db";
+import { evidenceItems } from "./evidence";
+import { evidenceUrl } from "./evidence-url";
 import { parseJsonValue } from "./json";
 import type { BehaviorChangeRow, ChangeRow, FeatureRow, ReleaseRow, ScenarioRow } from "./types";
+
+interface EvidenceSource {
+  owner: string;
+  name: string;
+  revision: string;
+}
+
+/** 给证据条目补上可点击的 blob 链接（AI 已给 url 的不覆盖；无 revision 时原样返回）。 */
+function decorateEvidence(value: unknown, source?: EvidenceSource): unknown {
+  if (!source) return value;
+  const items = evidenceItems(value);
+  if (items.length === 0) return value;
+  return items.map((item) => {
+    const url = item.url ?? evidenceUrl(source, source.revision, item);
+    return url ? { ...item, url } : item;
+  });
+}
+
+/** 行为变化的 before/after 主体内嵌 evidence 字段，一并装饰。 */
+function decorateSubject(value: unknown, source?: EvidenceSource): unknown {
+  if (!source || typeof value !== "object" || value === null || !("evidence" in value)) return value;
+  const subject = value as Record<string, unknown>;
+  return { ...subject, evidence: decorateEvidence(subject.evidence, source) };
+}
 
 async function queryByIds<T>(ids: number[], query: string) {
   if (ids.length === 0) return [] as T[];
@@ -55,7 +81,7 @@ export async function getProductDetails(slug: string, organizationId?: number) {
 
   const [repositories] = await db.execute("SELECT provider, owner, name, default_branch AS defaultBranch FROM repositories WHERE product_id = ?", [product.id]);
   const [runs] = await db.execute(
-    `SELECT r.status, r.error_message AS errorMessage FROM analysis_runs r
+    `SELECT r.status, r.error_message AS errorMessage, r.after_sha AS afterSha FROM analysis_runs r
      JOIN repositories repo ON repo.id = r.repository_id WHERE repo.product_id = ? ORDER BY r.created_at DESC LIMIT 1`,
     [product.id],
   );
@@ -65,14 +91,18 @@ export async function getProductDetails(slug: string, organizationId?: number) {
   const releases = releaseRows as ReleaseRow[];
   const [scenarios, changes, behaviorChanges] = await Promise.all([loadScenarios(features), loadChanges(releases), loadBehaviorChanges(releases)]);
 
+  const repository = (repositories as Array<{ provider?: string; owner: string; name: string; defaultBranch: string }>)[0];
+  const afterSha = (runs as Array<{ status: string; errorMessage?: string; afterSha?: string | null }>)[0]?.afterSha;
+  const source: EvidenceSource | undefined = repository && afterSha ? { owner: repository.owner, name: repository.name, revision: afterSha } : undefined;
+
   return {
-    product: { ...product, descriptionEvidence: parseJsonValue(product.descriptionEvidence) },
-    repository: (repositories as Array<{ provider?: string; owner: string; name: string; defaultBranch: string }>)[0],
+    product: { ...product, descriptionEvidence: decorateEvidence(parseJsonValue(product.descriptionEvidence), source) },
+    repository,
     latestRun: (runs as Array<{ status: string; errorMessage?: string }>)[0],
     features,
-    scenarios,
+    scenarios: scenarios.map((scenario) => ({ ...scenario, evidence: decorateEvidence(scenario.evidence, source) })),
     releases,
-    changes,
-    behaviorChanges,
+    changes: changes.map((change) => ({ ...change, evidence: decorateEvidence(change.evidence, source) })),
+    behaviorChanges: behaviorChanges.map((change) => ({ ...change, before: decorateSubject(change.before, source), after: decorateSubject(change.after, source) })),
   };
 }

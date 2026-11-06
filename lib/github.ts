@@ -2,7 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { resolveGitHubToken, type GitHubAccess } from "./github-access";
 import { normalizeChangeContext, numberedSourceContent, selectSourceCandidates } from "./github-source";
-import type { RepositoryRef, SourceFile } from "./code-hosting/types";
+import type { ChangeFile, RepositoryRef, SourceFile } from "./code-hosting/types";
 
 export type GitHubRepository = RepositoryRef;
 export type { SourceFile } from "./code-hosting/types";
@@ -19,11 +19,12 @@ async function githubHeaders(access: GitHubAccess) {
   };
 }
 
-async function githubFetch(path: string, access: GitHubAccess = {}) {
+export async function githubFetch(path: string, access: GitHubAccess = {}, init: { method?: string; body?: string } = {}) {
   const response = await fetch(`https://api.github.com${path}`, {
     headers: await githubHeaders(access),
     cache: "no-store",
     signal: AbortSignal.timeout(30_000),
+    ...init,
   });
   if (!response.ok) throw new Error(`GitHub API ${response.status}: ${await response.text()}`);
   return response.json() as Promise<unknown>;
@@ -75,6 +76,41 @@ export async function getSourceSnapshot(repo: GitHubRepository, sha: string, acc
 export async function getBranchHead(repo: GitHubRepository, access: GitHubAccess = {}) {
   const data = branchSchema.parse(await githubFetch(`/repos/${repo.owner}/${repo.name}/branches/${encodeURIComponent(repo.defaultBranch)}`, access));
   return data.commit.sha;
+}
+
+const pullRequestFileSchema = z.object({
+  filename: z.string().min(1),
+  status: z.string(),
+  patch: z.string().optional(),
+});
+
+const issueCommentSchema = z.object({ id: z.number(), body: z.string().optional() });
+
+export async function getPullRequestFiles(repo: GitHubRepository, number: number, access: GitHubAccess = {}): Promise<ChangeFile[]> {
+  const files: ChangeFile[] = [];
+  for (let page = 1; ; page += 1) {
+    const data = z.array(pullRequestFileSchema).parse(await githubFetch(`/repos/${repo.owner}/${repo.name}/pulls/${number}/files?page=${page}&per_page=100`, access));
+    files.push(...data.map((file) => ({ path: file.filename, status: file.status, patch: file.patch ?? "" })));
+    if (data.length < 100) return files;
+  }
+}
+
+export async function listIssueComments(repo: GitHubRepository, number: number, access: GitHubAccess = {}) {
+  const data = z.array(issueCommentSchema).parse(await githubFetch(`/repos/${repo.owner}/${repo.name}/issues/${number}/comments?per_page=100`, access));
+  return data.map((comment) => ({ id: comment.id, body: comment.body ?? "" }));
+}
+
+export async function upsertIssueComment(repo: GitHubRepository, number: number, body: string, commentId: number | null, access: GitHubAccess = {}) {
+  const data = issueCommentSchema.parse(commentId
+    ? await githubFetch(`/repos/${repo.owner}/${repo.name}/issues/comments/${commentId}`, access, {
+      method: "PATCH",
+      body: JSON.stringify({ body }),
+    })
+    : await githubFetch(`/repos/${repo.owner}/${repo.name}/issues/${number}/comments`, access, {
+      method: "POST",
+      body: JSON.stringify({ body }),
+    }));
+  return data.id;
 }
 
 export function verifyGitHubSignature(rawBody: string, signature: string | null, secret: string) {
