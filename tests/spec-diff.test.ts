@@ -105,3 +105,30 @@ describe("spec source merging", () => {
     expect(merged[0].scenarios).toEqual([]);
   });
 });
+
+describe("mergeSpecSources with carried features (M9)", () => {
+  const carried: SpecFeature[] = [
+    { name: "Legacy", summary: "Carried", parentKey: null, source: "generated", scenarios: [{ reference: "HP-1", context: "C", action: "A", outcome: "O", category: "happy", evidence: [], source: "generated" }] },
+  ];
+
+  it("seeds carried features, then lets generated override the same key", () => {
+    const merged = mergeSpecSources([{ name: "Legacy", summary: "Fresh", scenarios: [] }], [], undefined, carried);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].summary).toBe("Fresh");
+    expect(merged[0].scenarios).toEqual([]);
+  });
+
+  it("carries features absent from generated output", () => {
+    const merged = mergeSpecSources([], [], undefined, carried);
+    expect(merged.map((feature) => feature.name)).toEqual(["Legacy"]);
+    expect(merged[0].scenarios[0].reference).toBe("HP-1");
+  });
+
+  it("lets manual content win over carried and skips tombstoned carried keys", () => {
+    const merged = mergeSpecSources([], [{ name: "Legacy", summary: "Manual", source: "manual", scenarios: [] }], undefined, carried);
+    expect(merged[0].summary).toBe("Manual");
+    expect(merged[0].source).toBe("manual");
+    const tombstoned = mergeSpecSources([], [], { featureKeys: new Set(["legacy"]), scenarioKeys: new Set() }, carried);
+    expect(tombstoned).toEqual([]);
+  });
+});

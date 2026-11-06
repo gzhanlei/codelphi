@@ -158,9 +158,14 @@ async function insertChanges(connection: PoolConnection, versionId: number, base
   }
 }
 
-export async function insertSpecVersion(connection: PoolConnection, run: RunContext, result: AnalysisResult) {
+export async function insertSpecVersion(connection: PoolConnection, run: RunContext, result: AnalysisResult, options: { affectedKeys?: ReadonlySet<string> } = {}) {
   const [previous, manual, tombstones] = await Promise.all([loadPreviousSpec(connection, run), loadManualSpec(connection, run.productId), loadManualTombstones(connection, run.productId)]);
-  const features = mergeSpecSources(result.features, manual, tombstones);
+  // M9 增量模式：受影响集之外的 generated 条目原样沿用上一版（三分合并：carried 种子 < AI < manual）。
+  const affectedKeys = options.affectedKeys;
+  const carried = affectedKeys && previous
+    ? previous.features.filter((feature) => !affectedKeys.has(specFeatureKey(feature.name)))
+    : [];
+  const features = mergeSpecSources(result.features, manual, tombstones, carried);
   const changes = diffSpec(previous === null ? null : previous.features, features);
   const [versionResult] = await connection.execute(
     "INSERT INTO spec_versions (product_id, repository_id, analysis_run_id, sha) VALUES (?, ?, ?, ?)",

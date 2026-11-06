@@ -5,7 +5,8 @@ import { resolveAnalysisTarget, type ChangeContext, type CodeHostingProvider } f
 import { analysisSliceBudgets, getRemoteAnalysisSources, parseSourceRoots } from "./remote-analysis";
 import { createSlicePlanner } from "./slice-planner";
 import { insertSpecVersion, loadPreviousFeatureNames } from "./spec-versions";
-import { rebuildSpecFileIndex } from "./spec-file-index";
+import { loadAffectedFeatureKeys, rebuildSpecFileIndex } from "./spec-file-index";
+import { resolveAnalysisMode } from "./incremental";
 import { markSpecDrift } from "./spec-drift";
 
 export interface RunContext {
@@ -21,6 +22,7 @@ export interface RunContext {
   organizationId: number;
   productSlug: string;
   productName: string;
+  analyzeMode?: "full" | "incremental";
 }
 
 export function assertEvidence(result: AnalysisResult, sources: Set<string>) {
@@ -112,7 +114,7 @@ export async function upsertRelease(connection: PoolConnection, run: RunContext,
   }
 }
 
-async function saveResult(run: RunContext, result: AnalysisResult, change: ChangeContext) {
+async function saveResult(run: RunContext, result: AnalysisResult, change: ChangeContext, affectedKeys: ReadonlySet<string> | null = null) {
   const connection = await getDb().getConnection();
   try {
     await connection.beginTransaction();
@@ -121,7 +123,7 @@ async function saveResult(run: RunContext, result: AnalysisResult, change: Chang
       "UPDATE products SET description = ?, description_source = 'generated', description_evidence = ? WHERE id = ? AND description = ''",
       [result.product.description, JSON.stringify(result.product.evidence), run.productId],
     );
-    const specVersionId = await insertSpecVersion(connection, run, result);
+    const specVersionId = await insertSpecVersion(connection, run, result, affectedKeys ? { affectedKeys } : {});
     await rebuildSpecFileIndex(connection, run.repositoryId, specVersionId);
     await markSpecDrift(connection, run.productId, specVersionId);
     await upsertGeneratedSpec(connection, run, result);
@@ -157,7 +159,7 @@ async function loadRun(runId: number) {
   const [rows] = await getDb().execute(
     `SELECT r.id, r.repository_id AS repositoryId, p.id AS productId, p.slug AS productSlug, p.name AS productName,
             repo.owner, repo.name, r.before_sha AS beforeSha, r.after_sha AS afterSha, repo.connection_id AS connectionId,
-            repo.provider, p.organization_id AS organizationId
+            repo.provider, p.organization_id AS organizationId, p.analyze_mode AS analyzeMode
      FROM analysis_runs r
      JOIN repositories repo ON repo.id = r.repository_id
      JOIN products p ON p.id = repo.product_id
@@ -191,13 +193,31 @@ async function performAnalysis(run: RunContext) {
     scopeRoots,
   }, { planner, budgets: analysisSliceBudgets });
   const sources = remote.sources;
-  const previousFeatureNames = await loadPreviousFeatureNames(run.repositoryId, (statement, parameters) => getDb().execute(statement, parameters));
-  const result = await analyzeWithAI(sources, change, { previousFeatureNames });
+  const executeWrapper = (statement: string, parameters: Array<string | number | null>) => getDb().execute(statement, parameters);
+  const previousFeatureNames = await loadPreviousFeatureNames(run.repositoryId, executeWrapper);
+  // M9：增量模式下计算受影响集并做保守放行判定；任一条件不满足即回退全量。
+  let affectedKeys: ReadonlySet<string> | null = null;
+  let affectedFeatureNames: string[] | undefined;
+  if (run.analyzeMode === "incremental") {
+    const affected = await loadAffectedFeatureKeys(run.repositoryId, change.files.map((file) => file.path), executeWrapper);
+    const resolved = resolveAnalysisMode({
+      mode: "incremental",
+      hasPreviousSpec: previousFeatureNames.length > 0,
+      affectedCount: affected.names.length,
+      previousFeatureCount: previousFeatureNames.length,
+      diffFileCount: change.files.length,
+    });
+    if (resolved === "incremental") {
+      affectedKeys = affected.keys;
+      affectedFeatureNames = affected.names;
+    }
+  }
+  const result = await analyzeWithAI(sources, change, { previousFeatureNames, affectedFeatureNames });
   assertEvidence(result, new Set([
     ...remote.slice.files.map((file) => file.path),
     ...change.files.map((file) => file.path),
   ]));
-  await saveResult(run, result, change);
+  await saveResult(run, result, change, affectedKeys);
 }
 
 async function runAnalysisSafely(runId: number) {

@@ -112,8 +112,14 @@ export function specScenarioKey(featureName: string, reference: string) {
   return `${specFeatureKey(featureName)}:${reference}`;
 }
 
-export function mergeSpecSources(generated: SpecFeature[], manual: SpecFeature[], tombstones: SpecTombstones = { featureKeys: new Set<string>(), scenarioKeys: new Set<string>() }) {
+export function mergeSpecSources(generated: SpecFeature[], manual: SpecFeature[], tombstones: SpecTombstones = { featureKeys: new Set<string>(), scenarioKeys: new Set<string>() }, carried: SpecFeature[] = []) {
   const merged = new Map<string, SpecFeature>();
+  for (const feature of carried) {
+    const key = specFeatureKey(feature.name);
+    if (tombstones.featureKeys.has(key)) continue;
+    const scenarios = feature.scenarios.filter((scenario) => !tombstones.scenarioKeys.has(specScenarioKey(feature.name, scenario.reference)));
+    merged.set(key, { ...feature, scenarios });
+  }
   for (const feature of generated) {
     const key = specFeatureKey(feature.name);
     if (tombstones.featureKeys.has(key)) continue;

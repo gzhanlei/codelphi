@@ -110,8 +110,21 @@ export function featureContinuitySection(previousFeatureNames?: string[]) {
   ].join("\n");
 }
 
-export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext, context: { previousFeatureNames?: string[] } = {}): Promise<AnalysisResult> {
+/** M9 增量模式：约束 AI 只输出被触及的功能，其余由系统沿用上一版。 */
+export function incrementalScopeSection(affectedFeatureNames?: string[]) {
+  if (!affectedFeatureNames || affectedFeatureNames.length === 0) return null;
+  return [
+    "【增量分析模式】",
+    "本次只深入分析以下功能（这些功能的代码被本次提交触及）：",
+    ...affectedFeatureNames.map((name) => `- ${name}`),
+    "features 数组必须且只能包含上述功能；其余功能由系统沿用上一版规格，请勿输出。",
+    "product 简介与 release 变化仍需覆盖整个提交的内容。",
+  ].join("\n");
+}
+
+export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext, context: { previousFeatureNames?: string[]; affectedFeatureNames?: string[] } = {}): Promise<AnalysisResult> {
   const continuity = featureContinuitySection(context.previousFeatureNames);
+  const scope = incrementalScopeSection(context.affectedFeatureNames);
   const prompt = [
     "你在维护一个内部产品知识库。仅根据给定代码和 diff 输出事实，不要补充猜测。",
     "用简体中文生成：1) 产品简介；2) 当前产品功能规格；3) 本次发布的用户可感知变化。",
@@ -123,6 +136,7 @@ export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext
     "只返回 JSON，不要 Markdown。结构：",
     '{"product":{"description":"","evidence":[{"path":"","startLine":1}]},"release":{"title":"","summary":""},"changes":[{"featureName":"","kind":"added|changed|removed|fixed|reviewed","description":"","userImpact":"","evidence":[{"path":"","startLine":1}]}],"features":[{"name":"","summary":"","scenarios":[{"reference":"HP-1","context":"","action":"","outcome":"","category":"happy","evidence":[{"path":"","startLine":1}]}]}]}',
     ...(continuity ? [continuity] : []),
+    ...(scope ? [scope] : []),
     `\n【本次提交】\n${change.message}\n\n【文件变化】\n${JSON.stringify(change.files)}`,
     `\n【当前代码，带行号】\n${sources.map((file) => `\n--- ${file.path} ---\n${file.content}`).join("\n")}`,
   ].join("\n");

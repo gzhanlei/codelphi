@@ -84,6 +84,20 @@ describe("spec version persistence", () => {
     expect(featureParentKey({}, names)).toBeNull();
   });
 
+  it("carries forward unaffected previous features without recording their changes", async () => {
+    const db = connection([{ id: 11 }]);
+    await insertSpecVersion(db, run, { ...result, features: [result.features[0]] }, { affectedKeys: new Set(["authentication"]) });
+    expect(db.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO spec_features"), expect.arrayContaining(["Legacy"]));
+    const featureChanges = db.changes.filter((change) => change[2] === "feature");
+    expect(featureChanges.some((change) => change[5] === "Legacy")).toBe(false);
+  });
+
+  it("keeps full-mode semantics when no affected keys are given", async () => {
+    const db = connection([{ id: 11 }]);
+    await insertSpecVersion(db, run, { ...result, features: [result.features[0]] });
+    expect(db.execute).not.toHaveBeenCalledWith(expect.stringContaining("INSERT INTO spec_features"), expect.arrayContaining(["Legacy"]));
+  });
+
   it("does not resurrect manually deleted generated content", async () => {
     const db = connection([], false, { feature: "New feature", scenario: "HP-1" });
     await insertSpecVersion(db, run, result);

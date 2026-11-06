@@ -1,4 +1,5 @@
 import type { PoolConnection } from "mysql2/promise";
+import { defaultExecute, type Execute } from "./db";
 import { evidenceItems } from "./evidence";
 
 interface SpecEvidenceRow {
@@ -39,4 +40,26 @@ export async function rebuildSpecFileIndex(connection: PoolConnection, repositor
       entry,
     );
   }
+}
+
+export interface AffectedFeatureKeys {
+  keys: Set<string>;
+  names: string[];
+}
+
+/** M9：diff 触碰的文件 ∩ 反向索引 → 受影响的规格功能（stable_key 集合 + 名称清单）。 */
+export async function loadAffectedFeatureKeys(repositoryId: number, paths: string[], execute: Execute = defaultExecute): Promise<AffectedFeatureKeys> {
+  if (paths.length === 0) return { keys: new Set(), names: [] };
+  const placeholders = paths.map(() => "?").join(",");
+  const result = await execute(
+    `SELECT DISTINCT sf.stable_key AS stableKey, sf.name
+     FROM spec_file_index i
+     JOIN spec_features sf ON sf.id = i.spec_feature_id
+     WHERE i.repository_id = ? AND i.path IN (${placeholders})
+     ORDER BY sf.name`,
+    [repositoryId, ...paths],
+  );
+  const payload = Array.isArray(result) ? result[0] : [];
+  const rows = (Array.isArray(payload) ? payload : []) as Array<{ stableKey: string; name: string }>;
+  return { keys: new Set(rows.map((row) => row.stableKey)), names: [...new Set(rows.map((row) => row.name))] };
 }
