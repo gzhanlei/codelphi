@@ -208,7 +208,10 @@ async function runAnalysisSafely(runId: number) {
 
 export async function runAnalysis(runId: number) {
   await runAnalysisSafely(runId).catch(async (error: unknown) => {
-    const message = error instanceof Error ? error.message.slice(0, 8_000) : "Unknown analysis error";
+    // message 之外附上堆栈头部：生产排障时 error_message 是唯一现场。
+    const message = error instanceof Error
+      ? [error.message, ...(error.stack?.split("\n").slice(1, 6) ?? [])].join("\n").slice(0, 8_000)
+      : "Unknown analysis error";
     await getDb().execute(
       "UPDATE analysis_runs SET status = 'failed', error_message = ?, finished_at = CURRENT_TIMESTAMP(3) WHERE id = ?",
       [message, runId],
