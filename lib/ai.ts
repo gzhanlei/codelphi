@@ -98,7 +98,20 @@ async function requireSuccessfulAIResponse(response: Response) {
   if (!response.ok) throw new Error(`AI gateway ${response.status}: ${await response.text()}`);
 }
 
-export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext): Promise<AnalysisResult> {
+/** B：把上一版功能名清单注入 prompt，约束命名与粒度连续，消除逐次重提取的改名风暴。 */
+export function featureContinuitySection(previousFeatureNames?: string[]) {
+  const names = (previousFeatureNames ?? []).map((name) => name.trim()).filter(Boolean).slice(0, 60);
+  if (names.length === 0) return null;
+  return [
+    "【上一版规格的功能清单——保持命名连续】",
+    ...names.map((name) => `- ${name}`),
+    ...(names.length >= 60 ? ["-（清单超长已截断）"] : []),
+    "沿用上述既有功能的名称与粒度；行为未变的功能不得重命名、不得合并重组；仅当确属新能力时才新增功能。",
+  ].join("\n");
+}
+
+export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext, context: { previousFeatureNames?: string[] } = {}): Promise<AnalysisResult> {
+  const continuity = featureContinuitySection(context.previousFeatureNames);
   const prompt = [
     "你在维护一个内部产品知识库。仅根据给定代码和 diff 输出事实，不要补充猜测。",
     "用简体中文生成：1) 产品简介；2) 当前产品功能规格；3) 本次发布的用户可感知变化。",
@@ -109,6 +122,7 @@ export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext
     "每个场景、变化和产品简介必须给 evidence；path 必须来自输入文件，startLine 使用输入的行号。没有用户变化的发布只生成 reviewed 项。",
     "只返回 JSON，不要 Markdown。结构：",
     '{"product":{"description":"","evidence":[{"path":"","startLine":1}]},"release":{"title":"","summary":""},"changes":[{"featureName":"","kind":"added|changed|removed|fixed|reviewed","description":"","userImpact":"","evidence":[{"path":"","startLine":1}]}],"features":[{"name":"","summary":"","scenarios":[{"reference":"HP-1","context":"","action":"","outcome":"","category":"happy","evidence":[{"path":"","startLine":1}]}]}]}',
+    ...(continuity ? [continuity] : []),
     `\n【本次提交】\n${change.message}\n\n【文件变化】\n${JSON.stringify(change.files)}`,
     `\n【当前代码，带行号】\n${sources.map((file) => `\n--- ${file.path} ---\n${file.content}`).join("\n")}`,
   ].join("\n");

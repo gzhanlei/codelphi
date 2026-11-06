@@ -32,7 +32,7 @@ vi.mock("../lib/code-hosting", async (importOriginal) => ({
 }));
 vi.mock("../lib/ai", () => ({ analyzeWithAI: vi.fn() }));
 vi.mock("../lib/remote-analysis", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/remote-analysis")>(), getRemoteAnalysisSources: vi.fn() }));
-vi.mock("../lib/spec-versions", () => ({ insertSpecVersion: vi.fn(async () => 44) }));
+vi.mock("../lib/spec-versions", () => ({ insertSpecVersion: vi.fn(async () => 44), loadPreviousFeatureNames: vi.fn(async () => ["统一登录"]) }));
 vi.mock("../lib/architecture-version", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/architecture-version")>(), generateRepositoryArchitectureVersion: vi.fn(async () => ({ status: "accepted", errorMessage: null })) }));
 
 const run = {
@@ -70,6 +70,7 @@ describe("analysis orchestration", () => {
       if (sql.includes("source_roots")) return [sourceRows];
       if (sql.includes("SELECT id FROM analysis_runs WHERE repository_id = ? AND after_sha = ?")) return [existingRunRows];
       if (sql.includes("INSERT INTO analysis_runs")) return [{ insertId: 55 }];
+      if (sql.includes("SELECT sf.name FROM spec_features")) return [[{ name: "统一登录" }]];
       return [{}];
     });
     connection.execute.mockImplementation(async (sql: string) => {
@@ -114,6 +115,7 @@ describe("analysis orchestration", () => {
       access: { connectionId: 42, organizationId: 7 },
       scopeRoots: [{ path: "", role: "shared" }],
     }), expect.anything());
+    expect(vi.mocked(analyzeWithAI).mock.calls[0][2]).toEqual({ previousFeatureNames: ["统一登录"] });
     expect(connection.commit).toHaveBeenCalledOnce();
     expect(connection.release).toHaveBeenCalledOnce();
     expect(execute).not.toHaveBeenCalledWith(expect.stringContaining("status = 'failed'"), expect.anything());

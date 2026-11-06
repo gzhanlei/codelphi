@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { capEvidence, parseAnalysisContent } from "../lib/ai";
+import { describe, expect, it, vi } from "vitest";
+import { analyzeWithAI, capEvidence, featureContinuitySection, parseAnalysisContent } from "../lib/ai";
 
 const result = {
   product: { description: "统一认证与产品知识中心。", evidence: [{ path: "app/auth/login/route.ts", startLine: 1 }] },
@@ -57,5 +57,44 @@ describe("AI analysis output", () => {
     const invalid = structuredClone(result);
     invalid.features[0].scenarios[0].category = "unknown";
     expect(() => parseAnalysisContent(JSON.stringify(invalid))).toThrow();
+  });
+});
+
+describe("feature naming continuity", () => {
+  it("renders the previous feature list with continuity instructions", () => {
+    const section = featureContinuitySection(["登录", "支付"]);
+    expect(section).toContain("【上一版规格的功能清单");
+    expect(section).toContain("- 登录");
+    expect(section).toContain("- 支付");
+    expect(section).toContain("不得重命名、不得合并重组");
+  });
+
+  it("returns null without previous names and caps long lists", () => {
+    expect(featureContinuitySection(undefined)).toBeNull();
+    expect(featureContinuitySection([])).toBeNull();
+    expect(featureContinuitySection(["  "])).toBeNull();
+    const section = featureContinuitySection(Array.from({ length: 70 }, (_, i) => `功能${i}`));
+    expect(section).toContain("功能59");
+    expect(section).not.toContain("功能60");
+    expect(section).toContain("已截断");
+  });
+
+  it("sends the continuity section in the gateway prompt when previous names are given", async () => {
+    vi.stubEnv("AI_API_KEY", "key");
+    vi.stubEnv("AI_MODEL", "test-model");
+    const bodies: Array<{ messages: Array<{ role: string; content: string }> }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      bodies.push(JSON.parse(String(init.body)));
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(result) } }] }), { status: 200 });
+    }));
+    await analyzeWithAI([{ path: "lib/a.ts", content: "1: x" }], { message: "m", files: [] }, { previousFeatureNames: ["登录", "支付"] });
+    const userMessage = bodies[0].messages.find((message) => message.role === "user")?.content ?? "";
+    expect(userMessage).toContain("【上一版规格的功能清单");
+    expect(userMessage).toContain("- 支付");
+
+    bodies.length = 0;
+    await analyzeWithAI([{ path: "lib/a.ts", content: "1: x" }], { message: "m", files: [] });
+    expect(bodies[0].messages[1].content).not.toContain("【上一版规格的功能清单");
+    vi.unstubAllGlobals();
   });
 });

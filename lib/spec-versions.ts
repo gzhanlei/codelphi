@@ -1,6 +1,7 @@
 import type { PoolConnection } from "mysql2/promise";
 import type { AnalysisResult } from "./ai";
 import type { RunContext } from "./analysis";
+import { defaultExecute, type Execute } from "./db";
 import { evidenceItems } from "./evidence";
 import { diffSpec, mergeSpecSources, specFeatureKey, specScenarioKey, type SpecChange, type SpecFeature, type SpecScenario, type SpecTombstones } from "./spec-diff";
 
@@ -169,4 +170,16 @@ export async function insertSpecVersion(connection: PoolConnection, run: RunCont
   await insertFeatures(connection, versionId, features);
   await insertChanges(connection, versionId, previous === null ? null : previous.id, changes);
   return versionId;
+}
+
+/** B：读取最新 spec 版本的功能名清单（分析前调用，供 prompt 命名连续性约束）。 */
+export async function loadPreviousFeatureNames(repositoryId: number, execute: Execute = defaultExecute) {
+  const result = await execute(
+    `SELECT sf.name FROM spec_features sf
+     WHERE sf.spec_version_id = (SELECT id FROM spec_versions WHERE repository_id = ? ORDER BY id DESC LIMIT 1)
+     ORDER BY sf.id`,
+    [repositoryId],
+  );
+  const rows = (Array.isArray(result) ? result : []) as Array<{ name: string }>;
+  return rows.map((row) => row.name);
 }

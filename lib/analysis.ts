@@ -4,7 +4,7 @@ import { analyzeWithAI, type AnalysisResult } from "./ai";
 import { resolveAnalysisTarget, type ChangeContext, type CodeHostingProvider } from "./code-hosting";
 import { analysisSliceBudgets, getRemoteAnalysisSources, parseSourceRoots } from "./remote-analysis";
 import { createSlicePlanner } from "./slice-planner";
-import { insertSpecVersion } from "./spec-versions";
+import { insertSpecVersion, loadPreviousFeatureNames } from "./spec-versions";
 import { rebuildSpecFileIndex } from "./spec-file-index";
 import { markSpecDrift } from "./spec-drift";
 
@@ -191,7 +191,8 @@ async function performAnalysis(run: RunContext) {
     scopeRoots,
   }, { planner, budgets: analysisSliceBudgets });
   const sources = remote.sources;
-  const result = await analyzeWithAI(sources, change);
+  const previousFeatureNames = await loadPreviousFeatureNames(run.repositoryId, getDb().execute);
+  const result = await analyzeWithAI(sources, change, { previousFeatureNames });
   assertEvidence(result, new Set([
     ...remote.slice.files.map((file) => file.path),
     ...change.files.map((file) => file.path),
