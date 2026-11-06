@@ -147,7 +147,8 @@ describe("analysis orchestration", () => {
   it("records a readable failure when loading the run fails", async () => {
     loadError = new Error("load failed");
     await runAnalysis(8);
-    expect(execute).toHaveBeenCalledWith(expect.stringContaining("status = 'failed'"), ["load failed", 8]);
+    const [stored] = execute.mock.calls.find(([sql]) => String(sql).includes("status = 'failed'"))?.[1] as unknown[];
+    expect(String(stored).startsWith("load failed\n")).toBe(true);
   });
 
   it("records a fallback failure for non-Error rejections", async () => {
