@@ -30,7 +30,12 @@ function CapabilitiesPanel({ data }: { data: ProductOverviewData }) {
 
 function ReleaseChanges({ data }: { data: ProductOverviewData }) {
   if (data.changes.length === 0) return <p className="overview-note">本次分析未发现规格行为变化。</p>;
-  return <div className="overview-change-list">{data.changes.map((change) => <div className="overview-change" key={change.id}><span className={`change-kind ${change.kind}`}>{change.kind}</span><strong>{change.featureName}{change.scenarioReference ? ` · ${change.scenarioReference}` : ""}</strong><p>{change.summary}</p></div>)}</div>;
+  return (
+    <div className="overview-change-list">
+      <p className="overview-change-stats">新增 {data.changeStats.added} · 移除 {data.changeStats.removed} · 更新 {data.changeStats.changed}</p>
+      {data.changes.map((change) => <div className="overview-change" key={change.id}><span className={`change-kind ${change.kind}`}>{change.kind}</span><strong>{change.featureName}{change.scenarioReference ? ` · ${change.scenarioReference}` : ""}</strong><p>{change.summary}</p></div>)}
+    </div>
+  );
 }
 
 function QuietRelease({ release }: { release: NonNullable<ProductOverviewData["latestRelease"]> }) {

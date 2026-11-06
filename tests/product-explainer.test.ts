@@ -11,6 +11,7 @@ const overview = {
   analysisLabel: "最近分析成功",
   capabilities: [{ id: 1, name: "登录|统一认证", summary: "OAuth", source: "generated" as const, scenarioCount: 3, href: "/products/radar?view=spec&feature=1" }],
   changes: [{ id: 1, releaseId: 8, kind: "changed" as const, entityType: "scenario" as const, featureName: "规格", scenarioReference: "HP-1", summary: "结果更明确", before: {}, after: {} }],
+  changeStats: { added: 0, removed: 0, changed: 1 },
   latestRelease: { id: 8, title: "规格改进", summary: "Summary", sha: "abcdef123456", url: "https://example.com/commit/abcdef1", committedAt: new Date("2026-11-01"), specVersionId: 8 },
   trust: { featureCount: 1, scenarioCount: 3, manualFeatureCount: 0, manualScenarioCount: 1, evidencePathCount: 2, specVersionId: 8 },
 };

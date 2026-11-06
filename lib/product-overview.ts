@@ -27,11 +27,19 @@ function compareCapabilities(a: { scenarioCount: number; name: string }, b: { sc
   return a.name.localeCompare(b.name);
 }
 
+const changeKindPriority: Record<string, number> = { added: 0, removed: 1, changed: 2 };
+
 export function buildProductOverview(input: ProductOverviewInput) {
   const latestRelease = input.releases[0];
   const specVersionId = latestRelease ? latestRelease.specVersionId : null;
   const revision = latestRelease?.sha;
   const evidencePaths = new Set(input.scenarios.flatMap((scenario) => evidenceItems(scenario.evidence).map((item) => item.path)));
+  const latestChanges = latestRelease ? input.behaviorChanges.filter((change) => change.releaseId === latestRelease.id) : [];
+  const changeStats = {
+    added: latestChanges.filter((change) => change.kind === "added").length,
+    removed: latestChanges.filter((change) => change.kind === "removed").length,
+    changed: latestChanges.filter((change) => change.kind !== "added" && change.kind !== "removed").length,
+  };
   return {
     slug: input.product.slug,
     description: input.product.description,
@@ -48,7 +56,10 @@ export function buildProductOverview(input: ProductOverviewInput) {
       scenarioCount: input.scenarios.filter((scenario) => scenario.featureId === feature.id).length,
       href: `/products/${input.product.slug}${featureHref(feature.id)}`,
     })).sort(compareCapabilities).slice(0, 6),
-    changes: latestRelease ? input.behaviorChanges.filter((change) => change.releaseId === latestRelease.id).slice(0, 3) : [],
+    changes: [...latestChanges]
+      .sort((a, b) => (changeKindPriority[a.kind] ?? 9) - (changeKindPriority[b.kind] ?? 9) || a.id - b.id)
+      .slice(0, 3),
+    changeStats,
     latestRelease,
     trust: {
       featureCount: input.features.length,

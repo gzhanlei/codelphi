@@ -72,4 +72,26 @@ describe("product overview rendering", () => {
     expect(editable).toContain("编辑产品概况");
     expect(editable).toContain("description-dialog");
   });
+
+  it("prioritizes added and removed changes over wording updates and shows kind counts", () => {
+    const data = buildProductOverview({
+      product: { id: 1, slug: "radar", name: "Radar", description: "" },
+      features: [], scenarios: [],
+      releases: [{ id: 10, title: "v2", summary: "", sha: "1234567890ab", url: "", committedAt: new Date("2026-11-07"), specVersionId: 10 }],
+      behaviorChanges: [
+        { id: 1, releaseId: 10, kind: "changed", entityType: "feature", featureName: "甲功能", scenarioReference: "", summary: "更早记录的更新", before: {}, after: {} },
+        { id: 2, releaseId: 10, kind: "added", entityType: "feature", featureName: "乙功能", scenarioReference: "", summary: "新增能力", before: null, after: {} },
+        { id: 3, releaseId: 10, kind: "removed", entityType: "feature", featureName: "丙功能", scenarioReference: "", summary: "移除能力", before: {}, after: null },
+        { id: 4, releaseId: 10, kind: "changed", entityType: "scenario", featureName: "丁功能", scenarioReference: "HP-1", summary: "场景更新", before: {}, after: {} },
+      ],
+      latestRun: { status: "succeeded" },
+    });
+    expect(data.changes.map((change) => change.id)).toEqual([2, 3, 1]);
+    expect(data.changeStats).toEqual({ added: 1, removed: 1, changed: 2 });
+    const html = renderToStaticMarkup(createElement(ProductOverview, { data }));
+    const panel = html.slice(html.indexOf("最近改变了什么"));
+    expect(panel.indexOf("新增能力")).toBeLessThan(panel.indexOf("更早记录的更新"));
+    expect(panel).not.toContain("场景更新");
+    expect(html).toContain("新增 1 · 移除 1 · 更新 2");
+  });
 });
