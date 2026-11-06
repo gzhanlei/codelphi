@@ -37,6 +37,7 @@ function ProductPageBody({ slug, view, mode, featureId, details, overview, actio
         <div className="page-actions">{actions}</div>
       </div>
       <RunStatus run={details.latestRun} />
+      {details.driftCount > 0 ? <div className="drift-banner" role="status">⚠️ {details.driftCount} 条人工规格可能已过时（最近一次分析的行为变化触及了这些功能）。逐一确认并重新保存后标记会消除。</div> : null}
       {showFeedback && details.latestRun?.status === "failed" ? <AnalysisFeedbackButton slug={details.product.slug} /> : null}
       <ProductTabs slug={slug} view={view} featureCount={details.features.length} releaseCount={details.releases.length} />
       <ProductView view={view} productSlug={slug} features={details.features} scenarios={details.scenarios} releases={details.releases} changes={details.changes} behaviorChanges={details.behaviorChanges} mode={mode} featureId={featureId} overview={overview} canEdit={canEdit} />

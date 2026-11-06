@@ -20,6 +20,7 @@ const details = {
   releases: [{ id: 8, title: "v1", summary: "", sha: "abcdef1234567890", url: "", committedAt: new Date(), specVersionId: 8 }],
   changes: [],
   behaviorChanges: [],
+  driftCount: 0,
   architecture: undefined,
 } as NonNullable<Awaited<ReturnType<typeof import("../lib/product-details").getProductDetails>>>;
 

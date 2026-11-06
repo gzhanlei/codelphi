@@ -77,6 +77,7 @@ describe("analysis orchestration", () => {
       if (sql.includes("SELECT id FROM releases")) return [[{ id: 6 }]];
       if (sql.includes("SELECT COUNT")) return [[{ count: 1 }]];
       if (sql.includes("FROM spec_features sf")) return [[]];
+      if (sql.includes("FROM spec_changes")) return [[]];
       return [{}];
     });
     adapter.getRepository.mockResolvedValue({ owner: "gzhanlei", name: "radar", defaultBranch: "main" });

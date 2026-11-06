@@ -1,0 +1,7 @@
+ALTER TABLE features
+  ADD COLUMN stale_since DATETIME(3) NULL,
+  ADD COLUMN stale_change_id BIGINT UNSIGNED NULL;
+
+ALTER TABLE scenarios
+  ADD COLUMN stale_since DATETIME(3) NULL,
+  ADD COLUMN stale_change_id BIGINT UNSIGNED NULL;

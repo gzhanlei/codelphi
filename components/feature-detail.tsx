@@ -28,7 +28,7 @@ function ImplementationFiles({ scenarios }: { scenarios?: ScenarioRow[] }) {
 function FeatureDetailHeader({ feature, onEdit, onDelete }: { feature: FeatureRow; onEdit: () => void; onDelete: () => void }) {
   return (
     <div className="feature-detail-header">
-      <div><h2>{feature.name}</h2><p>{feature.summary}</p><span className="feature-source">{featureSourceLabel(feature.source)}</span></div>
+      <div><h2>{feature.name}{feature.staleSince ? <span className="drift-badge">可能过时</span> : null}</h2><p>{feature.summary}</p><span className="feature-source">{featureSourceLabel(feature.source)}</span></div>
       <div className="feature-actions"><button className="text-button" type="button" onClick={onEdit}>编辑</button><button className="text-button danger-link" type="button" onClick={onDelete}>删除</button></div>
     </div>
   );

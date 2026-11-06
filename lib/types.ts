@@ -34,6 +34,8 @@ export interface FeatureRow {
   summary: string;
   parentId: number | null;
   source: "generated" | "manual";
+  staleSince?: Date | string | null;
+  staleChangeId?: number | null;
 }
 
 export interface ScenarioRow {
@@ -46,6 +48,8 @@ export interface ScenarioRow {
   category: "happy" | "edge" | "error";
   source: "generated" | "manual";
   evidence: unknown;
+  staleSince?: Date | string | null;
+  staleChangeId?: number | null;
 }
 
 export interface ReleaseRow {

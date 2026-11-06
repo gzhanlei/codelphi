@@ -6,6 +6,7 @@ import { analysisSliceBudgets, getRemoteAnalysisSources, parseSourceRoots } from
 import { createSlicePlanner } from "./slice-planner";
 import { insertSpecVersion } from "./spec-versions";
 import { rebuildSpecFileIndex } from "./spec-file-index";
+import { markSpecDrift } from "./spec-drift";
 
 export interface RunContext {
   id: number;
@@ -122,6 +123,7 @@ async function saveResult(run: RunContext, result: AnalysisResult, change: Chang
     );
     const specVersionId = await insertSpecVersion(connection, run, result);
     await rebuildSpecFileIndex(connection, run.repositoryId, specVersionId);
+    await markSpecDrift(connection, run.productId, specVersionId);
     await upsertGeneratedSpec(connection, run, result);
     await upsertRelease(connection, run, result, change, specVersionId);
     await connection.execute("UPDATE analysis_runs SET status = 'succeeded', finished_at = CURRENT_TIMESTAMP(3) WHERE id = ?", [run.id]);
