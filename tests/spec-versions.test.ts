@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { PoolConnection } from "mysql2/promise";
 import type { AnalysisResult } from "../lib/ai";
 import type { RunContext } from "../lib/analysis";
-import { featureParentKey, insertSpecVersion } from "../lib/spec-versions";
+import { featureParentKey, insertSpecVersion, loadPreviousFeatureNames } from "../lib/spec-versions";
 
 const run: RunContext = { id: 8, repositoryId: 3, productId: 4, owner: "gzhanlei", name: "radar", beforeSha: "a", afterSha: "b", connectionId: null, provider: "github", organizationId: 1, productSlug: "radar", productName: "Radar" };
 const scenario = { reference: "HP-1", context: "Visitor", action: "Signs in", outcome: "Dashboard", category: "happy" as const, evidence: [] };
@@ -90,5 +90,18 @@ describe("spec version persistence", () => {
     expect(db.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO spec_features"), expect.arrayContaining(["Authentication"]));
     expect(db.execute).not.toHaveBeenCalledWith(expect.stringContaining("INSERT INTO spec_features"), expect.arrayContaining(["New feature"]));
     expect(db.execute).not.toHaveBeenCalledWith(expect.stringContaining("INSERT INTO spec_scenarios"), expect.arrayContaining(["HP-1"]));
+  });
+});
+
+describe("loadPreviousFeatureNames", () => {
+  it("unwraps the mysql2 [rows, fields] tuple and maps feature names", async () => {
+    const execute = vi.fn(async () => [[{ name: "登录" }, { name: "支付" }], [{ name: "name" }]]);
+    await expect(loadPreviousFeatureNames(3, execute)).resolves.toEqual(["登录", "支付"]);
+    expect(execute).toHaveBeenCalledWith(expect.stringContaining("spec_version_id = (SELECT id FROM spec_versions"), [3]);
+  });
+
+  it("returns an empty list when no spec version exists", async () => {
+    const execute = vi.fn(async () => [[], []]);
+    await expect(loadPreviousFeatureNames(3, execute)).resolves.toEqual([]);
   });
 });

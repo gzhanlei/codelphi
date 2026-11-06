@@ -180,6 +180,8 @@ export async function loadPreviousFeatureNames(repositoryId: number, execute: Ex
      ORDER BY sf.id`,
     [repositoryId],
   );
-  const rows = (Array.isArray(result) ? result : []) as Array<{ name: string }>;
+  // mysql2 execute resolve 值是 [rows, fields] 元组；先取行数组再使用。
+  const payload = Array.isArray(result) ? result[0] : [];
+  const rows = (Array.isArray(payload) ? payload : []) as Array<{ name: string }>;
   return rows.map((row) => row.name);
 }
