@@ -191,7 +191,7 @@ async function performAnalysis(run: RunContext) {
     scopeRoots,
   }, { planner, budgets: analysisSliceBudgets });
   const sources = remote.sources;
-  const previousFeatureNames = await loadPreviousFeatureNames(run.repositoryId, getDb().execute);
+  const previousFeatureNames = await loadPreviousFeatureNames(run.repositoryId, (statement, parameters) => getDb().execute(statement, parameters));
   const result = await analyzeWithAI(sources, change, { previousFeatureNames });
   assertEvidence(result, new Set([
     ...remote.slice.files.map((file) => file.path),
