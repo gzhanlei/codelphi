@@ -7,6 +7,8 @@ import { createSlicePlanner } from "./slice-planner";
 import { insertSpecVersion, loadPreviousFeatureNames } from "./spec-versions";
 import { loadAffectedFeatureKeys, rebuildSpecFileIndex } from "./spec-file-index";
 import { resolveAnalysisMode } from "./incremental";
+import { compareIncrementalShadow } from "./incremental-shadow";
+import { incrementalShadowEnabled } from "./env";
 import { markSpecDrift } from "./spec-drift";
 
 export interface RunContext {
@@ -218,6 +220,15 @@ async function performAnalysis(run: RunContext) {
     ...change.files.map((file) => file.path),
   ]));
   await saveResult(run, result, change, affectedKeys);
+  // M9 影子对比：增量落库成功后额外跑一次全量提取，只对比不落库（放行门槛 ≥98% 一致率的数据来源）。
+  if (affectedKeys && incrementalShadowEnabled()) {
+    try {
+      const shadow = await analyzeWithAI(sources, change, { previousFeatureNames });
+      console.log("[incremental-shadow]", JSON.stringify(compareIncrementalShadow(result, shadow)));
+    } catch (error) {
+      console.error("[incremental-shadow] shadow analysis failed", error);
+    }
+  }
 }
 
 async function runAnalysisSafely(runId: number) {

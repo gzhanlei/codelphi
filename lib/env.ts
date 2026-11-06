@@ -33,3 +33,7 @@ export function publicDemoSlugs() {
 export function prPreviewEnabled() {
   return process.env.PR_PREVIEW_ENABLED === "true";
 }
+
+export function incrementalShadowEnabled() {
+  return process.env.INCREMENTAL_SHADOW === "true";
+}
