@@ -5,6 +5,7 @@ import { resolveAnalysisTarget, type ChangeContext, type CodeHostingProvider } f
 import { analysisSliceBudgets, getRemoteAnalysisSources, parseSourceRoots } from "./remote-analysis";
 import { createSlicePlanner } from "./slice-planner";
 import { insertSpecVersion } from "./spec-versions";
+import { rebuildSpecFileIndex } from "./spec-file-index";
 
 export interface RunContext {
   id: number;
@@ -120,6 +121,7 @@ async function saveResult(run: RunContext, result: AnalysisResult, change: Chang
       [result.product.description, JSON.stringify(result.product.evidence), run.productId],
     );
     const specVersionId = await insertSpecVersion(connection, run, result);
+    await rebuildSpecFileIndex(connection, run.repositoryId, specVersionId);
     await upsertGeneratedSpec(connection, run, result);
     await upsertRelease(connection, run, result, change, specVersionId);
     await connection.execute("UPDATE analysis_runs SET status = 'succeeded', finished_at = CURRENT_TIMESTAMP(3) WHERE id = ?", [run.id]);
