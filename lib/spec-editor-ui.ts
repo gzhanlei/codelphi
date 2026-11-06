@@ -40,6 +40,14 @@ export function scenariosForFeature(scenarios: ScenarioRow[], feature?: FeatureR
   return feature ? scenarios.filter((scenario) => scenario.featureId === feature.id) : [];
 }
 
+/** 选中功能及其子功能的全部场景（实现分布聚合用；不影响场景 Tab 的计数口径）。 */
+export function scenariosForFeatureTree(scenarios: ScenarioRow[], feature: FeatureRow | undefined, tree: FeatureTreeItem[]) {
+  if (!feature) return [];
+  const item = tree.find((node) => node.id === feature.id);
+  const ids = new Set([feature.id, ...(item?.children ?? []).map((child) => child.id)]);
+  return scenarios.filter((scenario) => ids.has(scenario.featureId));
+}
+
 export function selectedClass(selected: boolean) {
   return selected ? "selected" : "";
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canCreateChild, editorSubmitLabel, entityId, featureEditorKey, featureEditorProps, featureFormState, featureFormTitle, featureHref, featureMatches, featureNameLocked, featureSourceLabel, featureTabClass, scenarioBeingEdited, scenarioCategoryLabel, scenarioEditorKey, scenarioFilterCount, scenarioFilterLabel, scenarioFormState, scenarioFormTitle, scenariosForFeature, selectedClass } from "../lib/spec-editor-ui";
+import { canCreateChild, editorSubmitLabel, entityId, featureEditorKey, featureEditorProps, featureFormState, featureFormTitle, featureHref, featureMatches, featureNameLocked, featureSourceLabel, featureTabClass, scenarioBeingEdited, scenarioCategoryLabel, scenarioEditorKey, scenarioFilterCount, scenarioFilterLabel, scenarioFormState, scenarioFormTitle, scenariosForFeature, scenariosForFeatureTree, selectedClass } from "../lib/spec-editor-ui";
 
 const feature = { id: 1, name: "Authentication", summary: "OAuth", parentId: null, source: "generated" as const, children: [] };
 const scenario = { id: 1, featureId: 1, reference: "HP-1", context: "Visitor", action: "Signs in", outcome: "Dashboard", category: "happy" as const, source: "generated" as const, evidence: [] };
@@ -68,5 +68,16 @@ describe("spec editor presentation", () => {
     expect(scenarioCategoryLabel("error")).toBe("错误路径");
     expect(scenarioCategoryLabel("other")).toBeUndefined();
     expect(scenarioFilterLabel("edge")).toBe(scenarioCategoryLabel("edge"));
+  });
+
+  it("collects scenarios of the selected feature and its children", () => {
+    const tree = [{ ...feature, children: [{ ...feature, id: 2, name: "OAuth", parentId: 1 }, { ...feature, id: 3, name: "Password", parentId: 1 }] }];
+    const own = scenario;
+    const childScenario = { ...scenario, id: 2, featureId: 2, reference: "EC-1" };
+    const otherScenario = { ...scenario, id: 3, featureId: 9, reference: "ER-1" };
+    expect(scenariosForFeatureTree([own, childScenario, otherScenario], feature, tree)).toEqual([own, childScenario]);
+    expect(scenariosForFeatureTree([own], feature, [])).toEqual([own]);
+    expect(scenariosForFeatureTree([own], undefined, tree)).toEqual([]);
+    expect(scenariosForFeatureTree([own], { ...feature, id: 42 }, tree)).toEqual([]);
   });
 });

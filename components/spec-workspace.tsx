@@ -6,7 +6,7 @@ import type { FeatureTreeItem } from "@/lib/feature-tree";
 import type { FeatureRow, ScenarioRow } from "@/lib/types";
 import { deleteConfirmedFeature } from "@/lib/spec-editor-client";
 import { errorMessage } from "@/lib/error-message";
-import { entityId, featureHref } from "@/lib/spec-editor-ui";
+import { entityId, featureHref, scenariosForFeature, scenariosForFeatureTree } from "@/lib/spec-editor-ui";
 import { FeatureTree } from "./feature-tree";
 import { useDemoGuard } from "./demo-mode";
 import { FeatureEditor, SpecDetail, type FeatureEditorMode } from "./spec-workspace-content";
@@ -16,6 +16,8 @@ export function SpecWorkspace({ slug, tree, feature, scenarios, mode }: { slug: 
   const guard = useDemoGuard();
   const [editor, setEditor] = useState<FeatureEditorMode>(null);
   const [error, setError] = useState("");
+  const featureScenarios = scenariosForFeature(scenarios, feature);
+  const implementationScenarios = scenariosForFeatureTree(scenarios, feature, tree);
 
   async function removeFeature() {
     if (guard()) return;
@@ -31,7 +33,7 @@ export function SpecWorkspace({ slug, tree, feature, scenarios, mode }: { slug: 
       <FeatureTree slug={slug} items={tree} selectedId={entityId(feature)} onCreateRoot={() => setEditor("root")} />
       <div className="spec-detail">
         <FeatureEditor slug={slug} editor={editor} feature={feature} onSaved={(id) => { setEditor(null); router.push(featureHref(id)); }} onClose={() => setEditor(null)} />
-        <SpecDetail feature={feature} scenarios={scenarios} mode={mode} error={error} onEdit={() => setEditor("edit")} onDelete={removeFeature} onCreateChild={() => setEditor("child")} onCreateRoot={() => setEditor("root")} />
+        <SpecDetail feature={feature} scenarios={featureScenarios} implementationScenarios={implementationScenarios} mode={mode} error={error} onEdit={() => setEditor("edit")} onDelete={removeFeature} onCreateChild={() => setEditor("child")} onCreateRoot={() => setEditor("root")} />
       </div>
     </div>
   );

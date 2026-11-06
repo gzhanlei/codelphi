@@ -6,7 +6,6 @@ import { buildProductOverview, type ProductOverviewData } from "@/lib/product-ov
 import { SpecWorkspace } from "./spec-workspace";
 import { buildFeatureTree, selectFeature } from "@/lib/feature-tree";
 import { selectedClass } from "@/lib/spec-editor-ui";
-import { scenariosForFeature } from "@/lib/spec-editor-ui";
 import type { BehaviorChangeRow, ChangeRow, FeatureRow, ReleaseRow, ScenarioRow } from "@/lib/types";
 import { getCodeHostingAdapter } from "@/lib/code-hosting";
 
@@ -60,7 +59,7 @@ interface ProductViewProps {
 function ProductWorkspace({ view, productSlug, features, scenarios, releases, changes, behaviorChanges, mode = "spec", featureId }: Omit<ProductViewProps, "overview">) {
   const selectedFeature = selectFeature(features, featureId);
   return view === "spec"
-    ? <SpecWorkspace slug={productSlug} tree={buildFeatureTree(features)} feature={selectedFeature} scenarios={scenariosForFeature(scenarios, selectedFeature)} mode={mode} />
+    ? <SpecWorkspace slug={productSlug} tree={buildFeatureTree(features)} feature={selectedFeature} scenarios={scenarios} mode={mode} />
     : <ProductChanges releases={releases} changes={changes} behaviorChanges={behaviorChanges} />;
 }
 
