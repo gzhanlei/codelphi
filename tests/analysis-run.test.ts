@@ -185,8 +185,8 @@ describe("analysis orchestration", () => {
       expect(shadowCall.affectedFeatureNames).toBeUndefined();
       // 影子对比的对象是 carry-forward 合并后的完整 spec（insertSpecVersion 的返回），
       // 而非增量 AI 的原始输出——原始输出本就只含受影响功能，直接比会恒等失败。
-      const [compared] = compareIncrementalShadow.mock.calls[0];
-      expect(compared.features).toEqual([{ name: "统一登录", summary: "s", scenarios: [] }]);
+      const compared = compareIncrementalShadow.mock.calls.at(-1)?.[0];
+      expect(compared?.features).toEqual([{ name: "统一登录", summary: "s", scenarios: [] }]);
     } finally {
       vi.unstubAllEnvs();
     }
