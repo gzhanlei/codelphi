@@ -25,7 +25,7 @@ function createProductInvitationDb() {
       return [{ insertId: invitations.length }];
     }
     if (sql.includes("UPDATE product_invitations") && sql.includes("SET token_hash = ?")) {
-      const [tokenHash, , productId, email] = parameters as [string, string, number, string];
+      const [tokenHash, productId, email] = parameters as [string, number, string];
       const invitation = invitations.find((item) => item.productId === productId && item.email === email);
       if (invitation) invitation.tokenHash = tokenHash;
       return [{ affectedRows: 1 }];

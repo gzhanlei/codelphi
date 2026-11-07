@@ -19,22 +19,25 @@ export function EditDescriptionButton({ slug, description }: { slug: string; des
   const open = () => {
     setValue(description);
     setError("");
+    setPending(false);
     dialogRef.current?.showModal();
   };
   const close = () => dialogRef.current?.close();
-  const save = () => {
+  const save = async () => {
     if (guard()) {
       close();
       return;
     }
     setPending(true);
     setError("");
-    updateDescription(slug, value.trim()).then(() => {
+    try {
+      await updateDescription(slug, value.trim());
       close();
       router.refresh();
-    }).catch((cause: unknown) => {
+    } catch (cause: unknown) {
       setError(errorMessage(cause, "保存产品概况失败"));
-    }).finally(() => setPending(false));
+      setPending(false);
+    }
   };
 
   return (

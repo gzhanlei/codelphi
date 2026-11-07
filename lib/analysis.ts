@@ -141,20 +141,37 @@ async function saveResult(run: RunContext, result: AnalysisResult, change: Chang
   }
 }
 
+const ACTIVE_RUN_QUERY = "SELECT id FROM analysis_runs WHERE repository_id = ? AND after_sha = ? AND status IN ('queued', 'running') LIMIT 1";
+const INSERT_RUN_QUERY = "INSERT INTO analysis_runs (repository_id, trigger_type, before_sha, after_sha, status) VALUES (?, ?, ?, ?, 'queued')";
+
+function findActiveRun(db: Pick<ReturnType<typeof getDb>, "execute">, repositoryId: number, afterSha: string) {
+  return db.execute(ACTIVE_RUN_QUERY, [repositoryId, afterSha]).then((result) => {
+    const rows = (result as [Array<{ id: number }>, unknown])[0];
+    return rows[0] ? Number(rows[0].id) : null;
+  });
+}
+
+function isDuplicateEntry(error: unknown) {
+  return typeof error === "object" && error !== null && (error as { code?: string }).code === "ER_DUP_ENTRY";
+}
+
 export async function queueAnalysis(repositoryId: number, beforeSha: string | null, afterSha: string, trigger: "manual" | "push") {
   const db = getDb();
-  const [existing] = await db.execute(
-    "SELECT id FROM analysis_runs WHERE repository_id = ? AND after_sha = ? AND status IN ('queued', 'running') LIMIT 1",
-    [repositoryId, afterSha],
-  );
-  const current = (existing as Array<{ id: number }>)[0];
-  if (current) return current.id;
+  const existing = await findActiveRun(db, repositoryId, afterSha);
+  if (existing !== null) return existing;
 
-  const [result] = await db.execute(
-    "INSERT INTO analysis_runs (repository_id, trigger_type, before_sha, after_sha, status) VALUES (?, ?, ?, ?, 'queued')",
-    [repositoryId, trigger, beforeSha, afterSha],
-  );
-  return Number((result as { insertId: number }).insertId);
+  // 并发同 sha 推送靠 020 迁移的唯一索引兜底：输家捕获重复键错误后复用赢家的 run。
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const [result] = await db.execute(INSERT_RUN_QUERY, [repositoryId, trigger, beforeSha, afterSha]);
+      return Number((result as { insertId: number }).insertId);
+    } catch (error) {
+      if (!isDuplicateEntry(error)) throw error;
+      const winner = await findActiveRun(db, repositoryId, afterSha);
+      if (winner !== null) return winner;
+    }
+  }
+  throw new Error(`queueAnalysis lost the race twice for repository ${repositoryId} sha ${afterSha}`);
 }
 
 async function loadRun(runId: number) {

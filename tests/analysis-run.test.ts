@@ -101,6 +101,21 @@ describe("analysis orchestration", () => {
     expect(execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO analysis_runs"), [3, "manual", null, "sha-after"]);
   });
 
+  it("returns the winning run when a concurrent queue inserts the same sha", async () => {
+    let selectCount = 0;
+    execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("SELECT id FROM analysis_runs WHERE repository_id = ? AND after_sha = ?")) {
+        selectCount += 1;
+        return selectCount === 1 ? [[]] : [[{ id: 77 }]];
+      }
+      if (sql.includes("INSERT INTO analysis_runs")) {
+        throw Object.assign(new Error("Duplicate entry '3-sha-after-1' for key 'analysis_runs_active_unique'"), { code: "ER_DUP_ENTRY" });
+      }
+      return [{}];
+    });
+    await expect(queueAnalysis(3, null, "sha-after", "manual")).resolves.toBe(77);
+  });
+
   it("ignores an analysis run that no longer needs work", async () => {
     runRows = [];
     await runAnalysis(8);

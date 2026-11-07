@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { acceptOrganizationInvitation, getInvitationByToken, hashInvitationToken, invitationExpiryDate, invitationUrl, issueInvitationToken } from "../lib/invitation-tokens";
+import { acceptOrganizationInvitation, getInvitationByToken, hashInvitationToken, invitationUrl, issueInvitationToken } from "../lib/invitation-tokens";
 import { sendInvitationEmail } from "../lib/invitation-email";
 
 function tokenDb() {
@@ -17,13 +17,19 @@ function tokenDb() {
 
 describe("invitation tokens", () => {
   it("issues hashed expiring tokens without exposing the hash in the URL", async () => {
-    expect(invitationExpiryDate(0)).toBe("1970-01-08 00:00:00");
     const db = tokenDb();
     const token = await issueInvitationToken(1, "new@example.com", db.execute);
     expect(token).toMatch(/^[A-Za-z0-9_-]{40,}$/);
     expect(invitationUrl(token)).toContain(`/invitations/accept?token=${encodeURIComponent(token)}`);
     expect(invitationUrl(token)).not.toContain(hashInvitationToken(token));
     expect(db.calls[0].parameters[0]).toBe(hashInvitationToken(token));
+  });
+
+  it("computes expiry on the database clock so writes and comparisons share one timezone", async () => {
+    const db = tokenDb();
+    await issueInvitationToken(1, "new@example.com", db.execute);
+    expect(db.calls[0].sql).toContain("expires_at = DATE_ADD(CURRENT_TIMESTAMP(3), INTERVAL 7 DAY)");
+    expect(db.calls[0].parameters).toHaveLength(3);
   });
 
   it("accepts a valid invitation once with matching email", async () => {

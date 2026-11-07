@@ -1,13 +1,12 @@
 import { z } from "zod";
-import { getDb } from "./db";
+import { defaultExecute, type Execute } from "./db";
 import { randomToken } from "./oauth";
-import { hashInvitationToken, invitationExpiryDate, invitationUrl, tokenSchema } from "./invitation-tokens";
+import { hashInvitationToken, invitationUrl, tokenSchema } from "./invitation-tokens";
 import { sendInvitationEmail } from "./invitation-email";
 import type { SessionUser } from "./types";
 import type { InviteResult } from "./organization-invitations";
 import type { Organization } from "./organizations";
 
-type Execute = (statement: string, parameters: Array<string | number | null>) => Promise<unknown>;
 
 export type ProductRole = "editor" | "viewer";
 
@@ -56,14 +55,14 @@ async function issueProductInvitationToken(productId: number, email: string, exe
   const token = randomToken(32);
   await execute(
     `UPDATE product_invitations
-     SET token_hash = ?, expires_at = ?, status = 'pending', accepted_at = NULL, updated_at = CURRENT_TIMESTAMP(3)
+     SET token_hash = ?, expires_at = DATE_ADD(CURRENT_TIMESTAMP(3), INTERVAL 7 DAY), status = 'pending', accepted_at = NULL, updated_at = CURRENT_TIMESTAMP(3)
      WHERE product_id = ? AND email = ?`,
-    [hashInvitationToken(token), invitationExpiryDate(Date.now()), productId, email],
+    [hashInvitationToken(token), productId, email],
   );
   return token;
 }
 
-export async function claimProductInvitations(profile: SessionUser, execute: Execute = (sql, parameters) => getDb().execute(sql, parameters)) {
+export async function claimProductInvitations(profile: SessionUser, execute: Execute = defaultExecute) {
   if (!profile.email) return;
   const [invitations] = await execute(
     "SELECT product_id, role FROM product_invitations WHERE email = ? AND status = 'pending' AND token_hash IS NULL",
@@ -96,7 +95,7 @@ export interface ProductInvitation {
   expiresAt: Date | null;
 }
 
-export async function getProductInvitationByToken(token: string, execute: Execute = (sql, parameters) => getDb().execute(sql, parameters)): Promise<ProductInvitation | null> {
+export async function getProductInvitationByToken(token: string, execute: Execute = defaultExecute): Promise<ProductInvitation | null> {
   const value = tokenSchema.parse(token);
   const [rows] = await execute(
     `SELECT i.product_id, i.email, i.role, i.status, i.expires_at, p.slug, p.name
@@ -109,7 +108,7 @@ export async function getProductInvitationByToken(token: string, execute: Execut
   return row ? { productId: row.product_id, productSlug: row.slug, productName: row.name, email: row.email, role: row.role, status: row.status, expiresAt: row.expires_at } : null;
 }
 
-export async function acceptProductInvitation(profile: SessionUser, token: string, execute: Execute = (sql, parameters) => getDb().execute(sql, parameters)) {
+export async function acceptProductInvitation(profile: SessionUser, token: string, execute: Execute = defaultExecute) {
   const invitation = await getProductInvitationByToken(token, execute);
   if (!invitation) throw new Error("invitation_invalid");
   if (!profile.email || profile.email.toLowerCase() !== invitation.email) throw new Error("invitation_email_mismatch");

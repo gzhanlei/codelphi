@@ -1,4 +1,4 @@
-import { getDb } from "./db";
+import { defaultExecute, type Execute } from "./db";
 import { requiredEnv } from "./env";
 import { decryptSecret, encryptSecret } from "./secret-box";
 
@@ -16,13 +16,12 @@ interface Installation {
   account: { login: string; type: string };
 }
 
-type Execute = (sql: string, parameters: Array<string | number | null>) => Promise<unknown>;
 
 function integrationSecret() {
   return requiredEnv("SESSION_SECRET");
 }
 
-export async function saveGitHubApp(credentials: AppCredentials, execute: Execute = (sql, parameters) => getDb().execute(sql, parameters)) {
+export async function saveGitHubApp(credentials: AppCredentials, execute: Execute = defaultExecute) {
   const secret = integrationSecret();
   await execute(
     `INSERT INTO github_apps
@@ -56,7 +55,7 @@ function readApp(row: { id: number; slug: string; app_id: number; client_id: str
   };
 }
 
-export async function getGitHubAppBySlug(slug: string, execute: Execute = (sql, parameters) => getDb().execute(sql, parameters)) {
+export async function getGitHubAppBySlug(slug: string, execute: Execute = defaultExecute) {
   const [rows] = await execute(
     "SELECT id, slug, app_id, client_id, client_secret_encrypted, pem_encrypted, webhook_secret_encrypted FROM github_apps WHERE slug = ? LIMIT 1",
     [slug],
@@ -65,7 +64,7 @@ export async function getGitHubAppBySlug(slug: string, execute: Execute = (sql, 
   return row ? readApp(row) : null;
 }
 
-export async function getLatestGitHubApp(execute: Execute = (sql, parameters) => getDb().execute(sql, parameters)) {
+export async function getLatestGitHubApp(execute: Execute = defaultExecute) {
   const [rows] = await execute(
     "SELECT id, slug, app_id, client_id, client_secret_encrypted, pem_encrypted, webhook_secret_encrypted FROM github_apps ORDER BY id DESC LIMIT 1",
     [],
@@ -76,7 +75,7 @@ export async function getLatestGitHubApp(execute: Execute = (sql, parameters) =>
 
 export async function saveInstallation(appId: number, installation: Installation, organizationOrExecute: number | Execute = 1, maybeExecute?: Execute) {
   const organizationId = typeof organizationOrExecute === "number" ? organizationOrExecute : 1;
-  const execute = typeof organizationOrExecute === "function" ? organizationOrExecute : maybeExecute ?? ((sql, parameters) => getDb().execute(sql, parameters));
+  const execute = typeof organizationOrExecute === "function" ? organizationOrExecute : maybeExecute ?? defaultExecute;
   await execute(
     `INSERT INTO github_connections (app_id, installation_id, account_login, account_type, status, organization_id)
      VALUES (?, ?, ?, ?, 'active', ?)
@@ -97,7 +96,7 @@ export async function saveInstallation(appId: number, installation: Installation
 
 export async function listConnectionStates(organizationIdOrExecute?: number | Execute, maybeExecute?: Execute) {
   const organizationId = typeof organizationIdOrExecute === "number" ? organizationIdOrExecute : undefined;
-  const execute = typeof organizationIdOrExecute === "function" ? organizationIdOrExecute : maybeExecute ?? ((sql, parameters) => getDb().execute(sql, parameters));
+  const execute = typeof organizationIdOrExecute === "function" ? organizationIdOrExecute : maybeExecute ?? defaultExecute;
   const [rows] = await execute(
     `SELECT c.id, c.account_login AS accountLogin, c.account_type AS accountType,
             c.status, a.slug AS appSlug, c.installation_id AS installationId
@@ -111,7 +110,7 @@ export async function listConnectionStates(organizationIdOrExecute?: number | Ex
 
 export async function getConnectionWithApp(id: number, organizationOrExecute?: number | Execute, maybeExecute?: Execute) {
   const organizationId = typeof organizationOrExecute === "number" ? organizationOrExecute : undefined;
-  const execute = typeof organizationOrExecute === "function" ? organizationOrExecute : maybeExecute ?? ((sql, parameters) => getDb().execute(sql, parameters));
+  const execute = typeof organizationOrExecute === "function" ? organizationOrExecute : maybeExecute ?? defaultExecute;
   const [rows] = await execute(
     `SELECT a.id, a.slug, a.app_id, a.client_id, a.client_secret_encrypted, a.pem_encrypted,
             a.webhook_secret_encrypted, c.id AS connection_id, c.installation_id, c.account_login, c.account_type, c.status, c.organization_id
@@ -126,7 +125,7 @@ export async function getConnectionWithApp(id: number, organizationOrExecute?: n
 
 export async function setConnectionStatus(id: number, status: "active" | "disconnected", organizationOrExecute?: number | Execute, maybeExecute?: Execute) {
   const organizationId = typeof organizationOrExecute === "number" ? organizationOrExecute : undefined;
-  const execute = typeof organizationOrExecute === "function" ? organizationOrExecute : maybeExecute ?? ((sql, parameters) => getDb().execute(sql, parameters));
+  const execute = typeof organizationOrExecute === "function" ? organizationOrExecute : maybeExecute ?? defaultExecute;
   await execute(
     "UPDATE github_connections SET status = ?, updated_at = CURRENT_TIMESTAMP(3) WHERE id = ? AND (? IS NULL OR organization_id = ?)",
     [status, id, organizationId ?? null, organizationId ?? null],

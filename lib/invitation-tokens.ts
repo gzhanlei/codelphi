@@ -14,10 +14,6 @@ export function hashInvitationToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
 }
 
-export function invitationExpiryDate(nowMs: number) {
-  return new Date(nowMs + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 19).replace("T", " ");
-}
-
 export function invitationUrl(token: string) {
   return `${appUrl()}/invitations/accept?token=${encodeURIComponent(token)}`;
 }
@@ -26,9 +22,9 @@ export async function issueInvitationToken(organizationId: number, email: string
   const token = randomToken(32);
   await execute(
     `UPDATE organization_invitations
-     SET token_hash = ?, expires_at = ?, status = 'pending', accepted_at = NULL, updated_at = CURRENT_TIMESTAMP(3)
+     SET token_hash = ?, expires_at = DATE_ADD(CURRENT_TIMESTAMP(3), INTERVAL 7 DAY), status = 'pending', accepted_at = NULL, updated_at = CURRENT_TIMESTAMP(3)
      WHERE organization_id = ? AND email = ?`,
-    [hashInvitationToken(token), invitationExpiryDate(Date.now()), organizationId, email],
+    [hashInvitationToken(token), organizationId, email],
   );
   return token;
 }

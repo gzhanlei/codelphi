@@ -1,7 +1,6 @@
 import { getCodeHostingAdapter, type CodeHostingAdapter, type CodeHostingProvider, type RepositoryRef } from "./code-hosting";
-import { getDb } from "./db";
+import { defaultExecute, type Execute } from "./db";
 
-type Execute = (sql: string, parameters: Array<string | number>) => Promise<unknown>;
 type AdapterResolver = (provider: CodeHostingProvider) => CodeHostingAdapter;
 
 interface ManualRepository extends RepositoryRef {
@@ -27,12 +26,8 @@ function repositoryQuery(slug: string, organizationId?: number) {
   };
 }
 
-function databaseExecute(sql: string, parameters: Array<string | number>) {
-  return getDb().execute(sql, parameters);
-}
-
 export async function resolveManualAnalysis(slug: string, organizationId?: number, dependencies: ManualAnalysisDependencies = {}) {
-  const execute = dependencies.execute === undefined ? databaseExecute : dependencies.execute;
+  const execute = dependencies.execute ?? defaultExecute;
   const getAdapter = dependencies.getAdapter === undefined ? getCodeHostingAdapter : dependencies.getAdapter;
   const query = repositoryQuery(slug, organizationId);
   const [rows] = await execute(query.sql, query.parameters) as [ManualRepository[], unknown];

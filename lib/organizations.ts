@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { getDb } from "./db";
+import { defaultExecute, type Execute } from "./db";
 import { upsertCodelphiUser } from "./users";
 import { requiredEnv } from "./env";
 import { claimOrganizationInvitations } from "./organization-invitations";
@@ -15,7 +15,6 @@ export interface Organization {
 }
 
 export const ORGANIZATION_COOKIE = "codelphi_organization";
-type Execute = (statement: string, parameters: Array<string | number | null>) => Promise<unknown>;
 type Query = <T>(statement: string, parameters: Array<string | number | null>) => Promise<T[]>;
 
 function dbQuery<T>(execute: Execute): Query {
@@ -31,7 +30,7 @@ function defaultOrganization(profile: SessionUser): Organization {
   return { id: 0, slug: `u-${profile.sub}`, name: `${profile.name ?? profile.email ?? "CoDelphi 用户"} 的工作区`, role: "owner" };
 }
 
-export async function ensureUserWorkspace(profile: SessionUser, execute: Execute = (sql, parameters) => getDb().execute(sql, parameters)) {
+export async function ensureUserWorkspace(profile: SessionUser, execute: Execute = defaultExecute) {
   const query = dbQuery(execute);
   await upsertCodelphiUser(profile, execute);
   await claimOrganizationInvitations(profile, execute);
@@ -62,7 +61,7 @@ export async function ensureUserWorkspace(profile: SessionUser, execute: Execute
   return rows[0];
 }
 
-export async function listUserOrganizations(profile: SessionUser, execute: Execute = (sql, parameters) => getDb().execute(sql, parameters)) {
+export async function listUserOrganizations(profile: SessionUser, execute: Execute = defaultExecute) {
   const query = dbQuery(execute);
   return query<Organization>(
     `SELECT o.id, o.slug, o.name, m.role FROM organization_members m
@@ -72,7 +71,7 @@ export async function listUserOrganizations(profile: SessionUser, execute: Execu
   );
 }
 
-export async function getOrganizationMembership(profile: SessionUser, slug: string, execute: Execute = (sql, parameters) => getDb().execute(sql, parameters)) {
+export async function getOrganizationMembership(profile: SessionUser, slug: string, execute: Execute = defaultExecute) {
   const query = dbQuery(execute);
   const rows = await query<Organization>(
     `SELECT o.id, o.slug, o.name, m.role FROM organizations o JOIN organization_members m ON m.organization_id = o.id
@@ -82,7 +81,7 @@ export async function getOrganizationMembership(profile: SessionUser, slug: stri
   return rows[0];
 }
 
-export async function currentOrganization(profile: SessionUser, cookieSlug: string | null | undefined = undefined, execute: Execute = (sql, parameters) => getDb().execute(sql, parameters)): Promise<Organization> {
+export async function currentOrganization(profile: SessionUser, cookieSlug: string | null | undefined = undefined, execute: Execute = defaultExecute): Promise<Organization> {
   if (cookieSlug !== null) {
     const slug = cookieSlug ?? (await cookies()).get(ORGANIZATION_COOKIE)?.value;
     const membership = await getOrganizationMembership(profile, slug ?? "", execute);
@@ -105,7 +104,7 @@ export async function setCurrentOrganization(profile: SessionUser, slug: string)
   return organization;
 }
 
-export async function requireOrganization(profile: SessionUser, minimumRole: OrganizationRole = "viewer", cookieSlug: string | null | undefined = undefined, execute: Execute = (sql, parameters) => getDb().execute(sql, parameters)) {
+export async function requireOrganization(profile: SessionUser, minimumRole: OrganizationRole = "viewer", cookieSlug: string | null | undefined = undefined, execute: Execute = defaultExecute) {
   const organization = await currentOrganization(profile, cookieSlug, execute);
   const rank = { viewer: 0, editor: 1, owner: 2 };
   if (rank[organization.role] < rank[minimumRole]) throw new Error("forbidden");

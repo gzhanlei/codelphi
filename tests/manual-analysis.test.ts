@@ -7,7 +7,7 @@ const defaultAdapter = {
   getRepository: vi.fn(),
   getBranchHead: vi.fn(),
 };
-vi.mock("../lib/db", () => ({ getDb: () => ({ execute: defaultExecute }) }));
+vi.mock("../lib/db", () => ({ getDb: () => ({ execute: defaultExecute }), defaultExecute }));
 vi.mock("../lib/code-hosting", async (importOriginal) => ({
   ...await importOriginal<typeof import("../lib/code-hosting")>(),
   getCodeHostingAdapter: vi.fn(() => defaultAdapter),
@@ -23,7 +23,7 @@ const persisted = {
   organizationId: 7,
 };
 
-type Execute = (sql: string, parameters: Array<string | number>) => Promise<unknown>;
+type Execute = (sql: string, parameters: Array<string | number | null>) => Promise<unknown>;
 
 function dependencies(rows: unknown[]) {
   const execute = vi.fn<Execute>(async () => [rows]);

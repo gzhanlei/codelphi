@@ -1,11 +1,10 @@
 import { z } from "zod";
 import { type Organization, type OrganizationRole } from "./organizations";
-import { getDb } from "./db";
+import { defaultExecute, type Execute } from "./db";
 import { invitationUrl, issueInvitationToken } from "./invitation-tokens";
 import { sendInvitationEmail } from "./invitation-email";
 import type { SessionUser } from "./types";
 
-type Execute = (statement: string, parameters: Array<string | number | null>) => Promise<unknown>;
 type InviteRole = Exclude<OrganizationRole, "owner">;
 
 const inviteSchema = z.object({
@@ -51,7 +50,7 @@ export async function inviteOrganizationMember(profile: SessionUser, input: unkn
   return { status: "invitation_pending", email, role, inviteUrl, emailSent };
 }
 
-export async function claimOrganizationInvitations(profile: SessionUser, execute: Execute = (sql, parameters) => getDb().execute(sql, parameters)) {
+export async function claimOrganizationInvitations(profile: SessionUser, execute: Execute = defaultExecute) {
   if (!profile.email) return;
   const [invitations] = await execute(
     "SELECT organization_id, role FROM organization_invitations WHERE email = ? AND status = 'pending' AND token_hash IS NULL",
