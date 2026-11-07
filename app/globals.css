@@ -233,3 +233,4 @@ p { line-height: 1.7; }
 .release-load-more { display: flex; justify-content: center; padding: 4px 0 6px; }
 .release-list-head { display: flex; justify-content: flex-end; padding: 0 0 6px; }
 .release-load-more .secondary-button { min-width: 220px; }
+.evidence-kind { color: #94a19c; font-size: 11px; margin-right: 2px; }
