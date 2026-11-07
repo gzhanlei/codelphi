@@ -13,38 +13,58 @@ export interface ShadowReport {
   consistent: boolean;
   missingKeys: string[];
   extraKeys: string[];
-  scenarioDiffs: string[];
-}
-
-function scenarioSignatures(feature: ShadowAnalysis["features"][number]) {
-  return new Set(feature.scenarios.map((scenario) => `${scenario.reference}|${scenario.context}|${scenario.action}|${scenario.outcome}|${scenario.category}`));
+  /** (reference, category) 集合的宏平均 Jaccard，0..1；方案 A 的一致率指标。 */
+  referenceConsistency: number;
+  /** 低于门槛的功能 key（诊断用）。 */
+  inconsistentFeatures: string[];
 }
 
 /**
- * M9 影子对比：增量与全量两次 AI 提取的一致性判定。
- * 对比对象是 carry-forward 合并后的增量规格（调用方传入，即 insertSpecVersion 的
- * 三分合并产物）与全量 AI 输出——增量 AI 只提取受影响功能，直接比较其原始输出
- * 会恒等失败。合并与全量路径的 manual 叠加语义相同，因此合并后特性集与场景行为
- * 签名一致即等价于最终 spec 一致。
- * summary 措辞差异刻意不参与判定（B 已约束命名连续，措辞漂移不构成行为差异）。
+ * 方案 A 放行门槛（2026-11-07 排查结论，docs/m9-workbench-carry-forward-handoff.md）：
+ * ①功能 key 集合强制一致（missing/extra 均为空）；②(reference, category) 集合的
+ * 宏平均 Jaccard ≥ 98%。场景文本签名不参与判定——ds-flash 对同代码两次独立提取的
+ * 场景分解与措辞高度可变（实测文本级一致率 0%），门槛语义已由产品决策调整为 A。
+ * summary 措辞差异同理不参与判定。
  */
+export const SHADOW_REFERENCE_GATE = 0.98;
+
+type ReferenceSignature = string;
+
+function scenarioSignatures(feature: ShadowAnalysis["features"][number]): Set<ReferenceSignature> {
+  return new Set(feature.scenarios.map((scenario) => `${scenario.reference}|${scenario.category}`));
+}
+
 export function compareIncrementalShadow(incremental: ShadowAnalysis, full: ShadowAnalysis): ShadowReport {
   const incrementalKeys = new Map(incremental.features.map((feature) => [specFeatureKey(feature.name), feature]));
   const fullKeys = new Map(full.features.map((feature) => [specFeatureKey(feature.name), feature]));
   const missingKeys = [...fullKeys.keys()].filter((key) => !incrementalKeys.has(key));
   const extraKeys = [...incrementalKeys.keys()].filter((key) => !fullKeys.has(key));
-  const scenarioDiffs = new Set<string>();
-  for (const [key, incrementalFeature] of incrementalKeys) {
-    const fullFeature = fullKeys.get(key);
-    if (!fullFeature) continue;
-    const incrementalSignatures = scenarioSignatures(incrementalFeature);
-    const fullSignatures = scenarioSignatures(fullFeature);
-    for (const signature of fullSignatures) {
-      if (!incrementalSignatures.has(signature)) scenarioDiffs.add(`${key}:${signature.split("|")[0]}`);
+
+  const inconsistentFeatures: string[] = [];
+  let jaccardSum = 0;
+  const allKeys = [...new Set([...incrementalKeys.keys(), ...fullKeys.keys()])];
+  for (const key of allKeys) {
+    // 功能本身缺失（missing/extra）记 0：存在性是一致性的前提。
+    if (!incrementalKeys.has(key) || !fullKeys.has(key)) {
+      jaccardSum += 0;
+      inconsistentFeatures.push(key);
+      continue;
     }
-    for (const signature of incrementalSignatures) {
-      if (!fullSignatures.has(signature)) scenarioDiffs.add(`${key}:${signature.split("|")[0]}`);
-    }
+    const incrementalSignatures = scenarioSignatures(incrementalKeys.get(key)!);
+    const fullSignatures = scenarioSignatures(fullKeys.get(key)!);
+    const intersection = [...incrementalSignatures].filter((s) => fullSignatures.has(s)).length;
+    const union = incrementalSignatures.size + fullSignatures.size - intersection;
+    const ratio = union === 0 ? 1 : intersection / union;
+    jaccardSum += ratio;
+    if (ratio < 1) inconsistentFeatures.push(key);
   }
-  return { consistent: missingKeys.length === 0 && extraKeys.length === 0 && scenarioDiffs.size === 0, missingKeys, extraKeys, scenarioDiffs: [...scenarioDiffs] };
+  const referenceConsistency = allKeys.length === 0 ? 1 : jaccardSum / allKeys.length;
+
+  return {
+    consistent: missingKeys.length === 0 && extraKeys.length === 0 && referenceConsistency >= SHADOW_REFERENCE_GATE,
+    missingKeys,
+    extraKeys,
+    referenceConsistency,
+    inconsistentFeatures: inconsistentFeatures.sort(),
+  };
 }
