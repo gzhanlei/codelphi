@@ -196,3 +196,9 @@ p { line-height: 1.7; }
 .notification-form select { height: 40px; border: 1px solid #ccd8d1; border-radius: 7px; background: #fbfcfb; padding: 0 10px; font: inherit; font-size: 13px; }
 .notification-form input { flex: 1 1 320px; min-width: 0; height: 40px; box-sizing: border-box; border: 1px solid #ccd8d1; border-radius: 7px; background: #fbfcfb; padding: 0 12px; font: inherit; font-size: 13px; }
 .notification-form input:focus { border-color: var(--green); outline: none; }
+.regression-section h3 { display: flex; align-items: center; justify-content: space-between; }
+.regression-feature h4 { margin: 14px 0 8px; font-size: 13px; color: var(--muted); }
+.regression-item { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; background: #fbfcfb; }
+.regression-status { justify-self: start; height: 30px; border: 1px solid #ccd8d1; border-radius: 6px; background: #fff; padding: 0 8px; font: inherit; font-size: 12px; }
+.regression-status.verified { border-color: var(--green); color: var(--green); }
+.regression-status.skipped { color: #94a19c; }

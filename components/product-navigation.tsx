@@ -8,6 +8,7 @@ import { buildFeatureTree, selectFeature } from "@/lib/feature-tree";
 import { selectedClass } from "@/lib/spec-editor-ui";
 import type { BehaviorChangeRow, ChangeRow, FeatureRow, ReleaseRow, ScenarioRow } from "@/lib/types";
 import { getCodeHostingAdapter } from "@/lib/code-hosting";
+import type { RegressionStatusMap } from "@/lib/regression-view";
 
 interface Repository {
   provider?: string;
@@ -50,17 +51,18 @@ interface ProductViewProps {
   releases: ReleaseRow[];
   changes: ChangeRow[];
   behaviorChanges: BehaviorChangeRow[];
+  regressionStatuses?: RegressionStatusMap;
   mode?: string;
   featureId?: number;
   overview: ProductOverviewData;
   canEdit?: boolean;
 }
 
-function ProductWorkspace({ view, productSlug, features, scenarios, releases, changes, behaviorChanges, mode = "spec", featureId }: Omit<ProductViewProps, "overview">) {
+function ProductWorkspace({ view, productSlug, features, scenarios, releases, changes, behaviorChanges, regressionStatuses, mode = "spec", featureId, canEdit }: Omit<ProductViewProps, "overview">) {
   const selectedFeature = selectFeature(features, featureId);
   return view === "spec"
     ? <SpecWorkspace slug={productSlug} tree={buildFeatureTree(features)} feature={selectedFeature} scenarios={scenarios} mode={mode} />
-    : <ProductChanges releases={releases} changes={changes} behaviorChanges={behaviorChanges} />;
+    : <ProductChanges slug={productSlug} releases={releases} changes={changes} behaviorChanges={behaviorChanges} regressionStatuses={regressionStatuses} canEdit={canEdit} />;
 }
 
 export function ProductView(props: ProductViewProps) {

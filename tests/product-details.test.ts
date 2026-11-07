@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getProductDetails } from "../lib/product-details";
 
-const execute = vi.fn();
-vi.mock("../lib/db", () => ({ getDb: () => ({ execute }) }));
+const { execute } = vi.hoisted(() => ({ execute: vi.fn() }));
+vi.mock("../lib/db", () => ({ getDb: () => ({ execute }), defaultExecute: execute }));
 
 const product = { id: 4, slug: "radar", name: "Radar", description: "Product knowledge", descriptionSource: "generated", descriptionEvidence: JSON.stringify([{ path: "lib/analysis.ts", startLine: 185 }]) };
 
@@ -37,6 +37,7 @@ describe("product details", () => {
       if (sql.includes("FROM releases")) return [[{ id: 6, title: "v1", summary: "Release", sha: "abc", url: "https://github.com/commit/abc", committedAt: new Date("2026-11-01T00:00:00Z"), specVersionId: 3 }]];
       if (sql.includes("FROM scenarios")) return [[{ id: 7, featureId: 5, reference: "happy", context: "c", action: "a", outcome: "o", category: "happy", source: "generated", evidence: [] }]];
       if (sql.includes("FROM spec_changes")) return [[{ id: 8, releaseId: 6, kind: "modified", entityType: "scenario", featureName: "Login", scenarioReference: "happy", summary: "Changed", beforeJson: "{\"old\":true}", afterJson: "{\"new\":true}" }]];
+      if (sql.includes("FROM regression_items")) return [[]];
       if (sql.includes("FROM changes")) return [[{ id: 9, releaseId: 6, featureName: "Login", kind: "modified", description: "Changed", userImpact: "Impact", evidence: [] }]];
       if (!sql) return [[]];
       throw new Error(`Unexpected query: ${sql}`);
@@ -62,6 +63,7 @@ describe("product details", () => {
       if (sql.includes("FROM releases")) return [[{ id: 6, title: "v1", summary: "Release", sha, url: `https://github.com/commit/${sha}`, committedAt: new Date("2026-11-01T00:00:00Z"), specVersionId: 3 }]];
       if (sql.includes("FROM scenarios")) return [[{ id: 7, featureId: 5, reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy", source: "generated", evidence: JSON.stringify([{ path: "lib/analysis.ts", startLine: 24 }]) }]];
       if (sql.includes("FROM spec_changes")) return [[{ id: 8, releaseId: 6, kind: "modified", entityType: "scenario", featureName: "Login", scenarioReference: "HP-1", summary: "Changed", beforeJson: JSON.stringify({ old: true, evidence: [{ path: "lib/analysis.ts", startLine: 30 }] }), afterJson: JSON.stringify({ new: true, evidence: [{ path: "lib/analysis.ts", startLine: 40 }] }) }]];
+      if (sql.includes("FROM regression_items")) return [[]];
       if (sql.includes("FROM changes")) return [[{ id: 9, releaseId: 6, featureName: "Login", kind: "modified", description: "Changed", userImpact: "Impact", evidence: [{ path: "lib/analysis.ts", startLine: 50 }] }]];
       if (!sql) return [[]];
       throw new Error(`Unexpected query: ${sql}`);

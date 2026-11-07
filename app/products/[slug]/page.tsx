@@ -42,7 +42,7 @@ function ProductPageBody({ slug, view, mode, featureId, details, overview, actio
       {showFeedback && details.latestRun?.status === "failed" ? <AnalysisFeedbackButton slug={details.product.slug} /> : null}
       <ProductTabs slug={slug} view={view} featureCount={details.features.length} releaseCount={details.releases.length} />
       {view === "overview" && canEdit ? <NotificationSettings slug={slug} /> : null}
-      <ProductView view={view} productSlug={slug} features={details.features} scenarios={details.scenarios} releases={details.releases} changes={details.changes} behaviorChanges={details.behaviorChanges} mode={mode} featureId={featureId} overview={overview} canEdit={canEdit} />
+      <ProductView view={view} productSlug={slug} features={details.features} scenarios={details.scenarios} releases={details.releases} changes={details.changes} behaviorChanges={details.behaviorChanges} regressionStatuses={details.regressionStatuses} mode={mode} featureId={featureId} overview={overview} canEdit={canEdit} />
     </>
   );
 }

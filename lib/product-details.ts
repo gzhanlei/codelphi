@@ -2,6 +2,7 @@ import { getDb } from "./db";
 import { evidenceItems } from "./evidence";
 import { evidenceUrl } from "./evidence-url";
 import { parseJsonValue } from "./json";
+import { loadRegressionStatuses } from "./regression";
 import { annotateSuspectedRenames } from "./spec-rename";
 import type { BehaviorChangeRow, ChangeRow, FeatureRow, ReleaseRow, ScenarioRow } from "./types";
 
@@ -90,7 +91,7 @@ export async function getProductDetails(slug: string, organizationId?: number) {
   const [releaseRows] = await db.execute("SELECT id, title, summary, sha, url, committed_at AS committedAt, spec_version_id AS specVersionId FROM releases WHERE product_id = ? ORDER BY committed_at DESC LIMIT 30", [product.id]);
   const features = featureRows as FeatureRow[];
   const releases = releaseRows as ReleaseRow[];
-  const [scenarios, changes, behaviorChanges] = await Promise.all([loadScenarios(features), loadChanges(releases), loadBehaviorChanges(releases)]);
+  const [scenarios, changes, behaviorChanges, regressionStatuses] = await Promise.all([loadScenarios(features), loadChanges(releases), loadBehaviorChanges(releases), loadRegressionStatuses(product.id)]);
 
   const repository = (repositories as Array<{ provider?: string; owner: string; name: string; defaultBranch: string }>)[0];
   const afterSha = (runs as Array<{ status: string; errorMessage?: string; afterSha?: string | null }>)[0]?.afterSha;
@@ -105,6 +106,7 @@ export async function getProductDetails(slug: string, organizationId?: number) {
     releases,
     changes: changes.map((change) => ({ ...change, evidence: decorateEvidence(change.evidence, source) })),
     behaviorChanges: annotateSuspectedRenames(behaviorChanges.map((change) => ({ ...change, before: decorateSubject(change.before, source), after: decorateSubject(change.after, source) }))),
+    regressionStatuses,
     driftCount: features.filter((feature) => feature.staleSince).length + scenarios.filter((scenario) => scenario.staleSince).length,
   };
 }

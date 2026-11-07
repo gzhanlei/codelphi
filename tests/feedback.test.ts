@@ -22,6 +22,7 @@ const details = {
   behaviorChanges: [],
   driftCount: 0,
   architecture: undefined,
+  regressionStatuses: {},
 } as NonNullable<Awaited<ReturnType<typeof import("../lib/product-details").getProductDetails>>>;
 
 import { analysisFeedbackLabel } from "../components/analysis-feedback-button";
