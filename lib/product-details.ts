@@ -3,7 +3,7 @@ import { evidenceItems } from "./evidence";
 import { evidenceUrl } from "./evidence-url";
 import { parseJsonValue } from "./json";
 import { RELEASE_PAGE_SIZE, type ReleasePagePayload } from "./release-client";
-import { loadRegressionStatuses } from "./regression";
+import { loadRegressionTasks } from "./regression-tasks";
 import { annotateSuspectedRenames } from "./spec-rename";
 import type { BehaviorChangeRow, ChangeRow, FeatureRow, ReleaseRow, ScenarioRow } from "./types";
 
@@ -96,7 +96,7 @@ export async function getProductDetails(slug: string, organizationId?: number) {
   const features = featureRows as FeatureRow[];
   const releases = releaseRows[0] as ReleaseRow[];
   const releaseTotal = Number((countRows[0] as Array<{ total: number }>)[0]?.total ?? 0);
-  const [scenarios, changes, behaviorChanges, regressionStatuses] = await Promise.all([loadScenarios(features), loadChanges(releases), loadBehaviorChanges(releases), loadRegressionStatuses(product.id)]);
+  const [scenarios, changes, behaviorChanges, regressionTasks] = await Promise.all([loadScenarios(features), loadChanges(releases), loadBehaviorChanges(releases), loadRegressionTasks(product.id)]);
 
   const repository = (repositories as Array<{ provider?: string; owner: string; name: string; defaultBranch: string }>)[0];
   const afterSha = (runs as Array<{ status: string; errorMessage?: string; afterSha?: string | null }>)[0]?.afterSha;
@@ -112,7 +112,7 @@ export async function getProductDetails(slug: string, organizationId?: number) {
     releaseTotal,
     changes: changes.map((change) => ({ ...change, evidence: decorateEvidence(change.evidence, source) })),
     behaviorChanges: annotateSuspectedRenames(behaviorChanges.map((change) => ({ ...change, before: decorateSubject(change.before, source), after: decorateSubject(change.after, source) }))),
-    regressionStatuses,
+    regressionTasks,
     driftCount: features.filter((feature) => feature.staleSince).length + scenarios.filter((scenario) => scenario.staleSince).length,
   };
 }

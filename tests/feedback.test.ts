@@ -22,7 +22,7 @@ const details = {
   behaviorChanges: [],
   driftCount: 0,
   architecture: undefined,
-  regressionStatuses: {},
+  regressionTasks: [],
   releaseTotal: 0,
 } as NonNullable<Awaited<ReturnType<typeof import("../lib/product-details").getProductDetails>>>;
 

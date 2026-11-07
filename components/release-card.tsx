@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { BehaviorChangeRow, ChangeRow, ReleaseRow } from "@/lib/types";
-import { regressionStatusLabels, regressionStatusKey, type RegressionStatus, type RegressionStatusMap } from "@/lib/regression-view";
+import { hitTypeLabels, regressionStatusLabels, type RegressionTaskStatus, type RegressionTaskView } from "@/lib/regression-task-view";
 import { errorMessage } from "@/lib/error-message";
 import { BehaviorChangeItem } from "./behavior-change-item";
 import { ChangeItem } from "./change-item";
@@ -15,41 +15,65 @@ function QuietRelease({ specVersionId }: { specVersionId: number | null }) {
     : null;
 }
 
-function RegressionChecklist({ slug, release, changes, statuses, canEdit }: {
+function ReasonTags({ task }: { task: RegressionTaskView }) {
+  const tags = task.reasons.filter((reason) => reason.hitType !== "behavior_change");
+  const extra = task.sources.length > 1 ? [<span className="regression-reason" key="sources">来自 {task.sources.length} 条变化</span>] : [];
+  if (tags.length === 0 && extra.length === 0) return null;
+  return (
+    <span className="regression-reasons">
+      {extra}
+      {tags.map((reason, index) => (
+        <span className="regression-reason" key={index} title={reason.matchedPath ?? undefined}>
+          {hitTypeLabels[reason.hitType]}
+          {reason.matchedPath ? <code>{reason.matchedPath}</code> : null}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function RegressionChecklist({ slug, release, changes, tasks, canEdit }: {
   slug: string;
   release: ReleaseRow;
   changes: BehaviorChangeRow[];
-  statuses: RegressionStatusMap;
+  tasks: RegressionTaskView[];
   canEdit: boolean;
 }) {
   const router = useRouter();
   const guard = useDemoGuard();
   const [error, setError] = useState("");
 
-  const setStatus = async (specChangeId: number, status: RegressionStatus) => {
+  const save = async (taskId: number, status: RegressionTaskStatus, note?: string) => {
     if (guard()) return;
     setError("");
     try {
-      const response = await fetch(`/api/products/${slug}/regression-items`, {
+      const response = await fetch(`/api/products/${slug}/regression-tasks`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ releaseId: release.id, specChangeId, status }),
+        body: JSON.stringify({
+          releaseId: release.id,
+          taskId,
+          status,
+          ...(status === "skipped" && note !== undefined ? { skipReason: note } : {}),
+          ...(status === "failed" && note !== undefined ? { failureNote: note } : {}),
+        }),
       });
       if (!response.ok) {
         const data = await response.json() as { error?: string };
-        throw new Error(data.error ?? "保存勾选状态失败");
+        throw new Error(data.error ?? "保存验证状态失败");
       }
       router.refresh();
     } catch (cause: unknown) {
-      setError(errorMessage(cause, "保存勾选状态失败"));
+      setError(errorMessage(cause, "保存验证状态失败"));
     }
   };
 
-  const byFeature = new Map<string, BehaviorChangeRow[]>();
-  for (const change of changes) {
-    const list = byFeature.get(change.featureName) ?? [];
-    list.push(change);
-    byFeature.set(change.featureName, list);
+  const changeById = new Map(changes.map((change) => [change.id, change]));
+  const byFeature = new Map<string, RegressionTaskView[]>();
+  for (const task of tasks) {
+    const list = byFeature.get(task.featureName) ?? [];
+    list.push(task);
+    byFeature.set(task.featureName, list);
   }
 
   return (
@@ -58,27 +82,56 @@ function RegressionChecklist({ slug, release, changes, statuses, canEdit }: {
         回归清单
         <a className="overview-text-link" href={`/api/products/${slug}/releases/${release.id}/regression`}>导出 Markdown ↓</a>
       </h3>
-      {[...byFeature.entries()].map(([featureName, featureChanges]) => (
+      {[...byFeature.entries()].map(([featureName, featureTasks]) => (
         <div className="regression-feature" key={featureName}>
           <h4>{featureName}</h4>
-          {featureChanges.map((change) => {
-            const status = statuses[regressionStatusKey(release.id, change.id)]?.status ?? "pending";
-            const checkedBy = statuses[regressionStatusKey(release.id, change.id)]?.checkedBy ?? null;
+          {featureTasks.map((task) => {
+            const primary = task.primaryChangeId !== null ? changeById.get(task.primaryChangeId) : undefined;
             return (
-              <div className="regression-item" key={change.id}>
-                <BehaviorChangeItem change={change} />
-                <select
-                  aria-label={`回归状态：${change.featureName} ${change.scenarioReference || change.summary}`}
-                  className={`regression-status ${status}`}
-                  value={status}
-                  disabled={!canEdit}
-                  onChange={(event) => void setStatus(change.id, event.target.value as RegressionStatus)}
-                >
-                  {(Object.keys(regressionStatusLabels) as RegressionStatus[]).map((value) => (
-                    <option key={value} value={value}>{regressionStatusLabels[value]}</option>
-                  ))}
-                </select>
-                {status !== "pending" && checkedBy ? <span className="regression-checked-by">由 {checkedBy} 标记</span> : null}
+              <div className="regression-item" key={task.taskId}>
+                {primary ? <BehaviorChangeItem change={primary} /> : (
+                  <div className="change-item">
+                    <strong>{task.reference ?? `场景 ${task.subject.kind === "scenario" ? task.subject.scenarioId : ""}`}</strong>
+                    <span className="regression-impact-hint">影响面推荐 · 证据路径与本次改动文件命中</span>
+                  </div>
+                )}
+                <div className="regression-controls">
+                  <ReasonTags task={task} />
+                  <select
+                    aria-label={`回归状态：${task.featureName} ${task.reference ?? ""}`}
+                    className={`regression-status ${task.status}`}
+                    value={task.status}
+                    disabled={!canEdit}
+                    onChange={(event) => void save(task.taskId, event.target.value as RegressionTaskStatus)}
+                  >
+                    {(Object.keys(regressionStatusLabels) as RegressionTaskStatus[]).map((value) => (
+                      <option key={value} value={value}>{regressionStatusLabels[value]}</option>
+                    ))}
+                  </select>
+                  {canEdit && task.status === "skipped" ? (
+                    <input
+                      className="regression-note"
+                      placeholder="跳过原因（可选）"
+                      defaultValue={task.skipReason ?? ""}
+                      aria-label={`跳过原因：${task.featureName} ${task.reference ?? ""}`}
+                      onBlur={(event) => {
+                        if ((task.skipReason ?? "") !== event.target.value) void save(task.taskId, "skipped", event.target.value);
+                      }}
+                    />
+                  ) : null}
+                  {canEdit && task.status === "failed" ? (
+                    <input
+                      className="regression-note"
+                      placeholder="发现的问题 / 关联缺陷（可选）"
+                      defaultValue={task.failureNote ?? ""}
+                      aria-label={`失败备注：${task.featureName} ${task.reference ?? ""}`}
+                      onBlur={(event) => {
+                        if ((task.failureNote ?? "") !== event.target.value) void save(task.taskId, "failed", event.target.value);
+                      }}
+                    />
+                  ) : null}
+                  {task.status !== "pending" && task.checkedBy ? <span className="regression-checked-by">由 {task.checkedBy} 标记</span> : null}
+                </div>
               </div>
             );
           })}
@@ -89,15 +142,15 @@ function RegressionChecklist({ slug, release, changes, statuses, canEdit }: {
   );
 }
 
-function BehaviorList({ slug, release, changes, statuses, canEdit }: {
+function BehaviorList({ slug, release, changes, tasks, canEdit }: {
   slug: string;
   release: ReleaseRow;
   changes: BehaviorChangeRow[];
-  statuses: RegressionStatusMap;
+  tasks: RegressionTaskView[];
   canEdit: boolean;
 }) {
-  if (changes.length === 0) return <QuietRelease specVersionId={release.specVersionId} />;
-  return <RegressionChecklist slug={slug} release={release} changes={changes} statuses={statuses} canEdit={canEdit} />;
+  if (tasks.length === 0) return <QuietRelease specVersionId={release.specVersionId} />;
+  return <RegressionChecklist slug={slug} release={release} changes={changes} tasks={tasks} canEdit={canEdit} />;
 }
 
 function AiChangeList({ changes }: { changes: ChangeRow[] }) {
@@ -105,17 +158,18 @@ function AiChangeList({ changes }: { changes: ChangeRow[] }) {
   return <div className="ai-change-section"><h3>发布说明（AI）</h3>{changes.map((change) => <ChangeItem change={change} key={change.id} />)}</div>;
 }
 
-export function ReleaseCard({ slug, release, changes, behaviorChanges, statuses = {}, canEdit = false, defaultOpen = false }: {
+export function ReleaseCard({ slug, release, changes, behaviorChanges, tasks = [], canEdit = false, defaultOpen = false }: {
   slug: string;
   release: ReleaseRow;
   changes: ChangeRow[];
   behaviorChanges: BehaviorChangeRow[];
-  statuses?: RegressionStatusMap;
+  tasks?: RegressionTaskView[];
   canEdit?: boolean;
   defaultOpen?: boolean;
 }) {
   const releaseChanges = changes.filter((change) => change.releaseId === release.id);
   const releaseBehaviorChanges = behaviorChanges.filter((change) => change.releaseId === release.id);
+  const releaseTasks = tasks.filter((task) => task.releaseId === release.id);
   const hasDetails = releaseBehaviorChanges.length > 0 || releaseChanges.length > 0;
   return (
     <section className="release-card">
@@ -130,11 +184,11 @@ export function ReleaseCard({ slug, release, changes, behaviorChanges, statuses 
             <span>行为变化 {releaseBehaviorChanges.length} 条 · 发布说明 {releaseChanges.length} 条</span>
             <span className="release-details-toggle">{defaultOpen ? "收起" : "展开"}</span>
           </summary>
-          <BehaviorList slug={slug} release={release} changes={releaseBehaviorChanges} statuses={statuses} canEdit={canEdit} />
+          <BehaviorList slug={slug} release={release} changes={releaseBehaviorChanges} tasks={releaseTasks} canEdit={canEdit} />
           <AiChangeList changes={releaseChanges} />
         </details>
       ) : (
-        <BehaviorList slug={slug} release={release} changes={releaseBehaviorChanges} statuses={statuses} canEdit={canEdit} />
+        <BehaviorList slug={slug} release={release} changes={releaseBehaviorChanges} tasks={releaseTasks} canEdit={canEdit} />
       )}
     </section>
   );

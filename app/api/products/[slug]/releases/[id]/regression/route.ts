@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import { loadRegressionStatuses, renderRegressionMarkdown } from "@/lib/regression";
+import { loadRegressionTasks, renderRegressionTaskMarkdown } from "@/lib/regression-tasks";
 import { getSessionUser } from "@/lib/session";
 import { requireProductAccess } from "@/lib/product-access";
 import { resolvePublicDemoProduct } from "@/lib/public-demo";
@@ -44,8 +44,8 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ sl
     after: row.afterJson,
   })) as BehaviorChangeRow[];
 
-  const statuses = await loadRegressionStatuses(product.id);
-  const markdown = renderRegressionMarkdown({ productName: product.name, release, changes, statuses });
+  const tasks = (await loadRegressionTasks(product.id)).filter((task) => task.releaseId === releaseId);
+  const markdown = renderRegressionTaskMarkdown({ productName: product.name, release, changes, tasks });
   return new NextResponse(markdown, {
     headers: {
       "Content-Type": "text/markdown; charset=utf-8",

@@ -11,9 +11,9 @@ const { dbExecute, searchSpec, exportExplainer, readExplainerHtml, resolveDemo }
 
 vi.mock("../lib/db", () => ({ getDb: () => ({ execute: dbExecute }) }));
 vi.mock("../lib/spec-search", () => ({ searchSpec }));
-vi.mock("../lib/regression", () => ({
-  loadRegressionStatuses: vi.fn(async () => ({})),
-  renderRegressionMarkdown: vi.fn(() => "# regression markdown"),
+vi.mock("../lib/regression-tasks", () => ({
+  loadRegressionTasks: vi.fn(async () => []),
+  renderRegressionTaskMarkdown: vi.fn(() => "# regression markdown"),
 }));
 vi.mock("../lib/explainer-export", () => ({ exportProductExplainer: exportExplainer }));
 vi.mock("../lib/product-details", () => ({ getProductDetails: vi.fn(async () => ({ product: { slug: "codelphi", name: "CoDelphi" } })) }));

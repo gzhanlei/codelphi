@@ -51,29 +51,30 @@ CREATE TABLE IF NOT EXISTS regression_task_reasons (
   CONSTRAINT regression_task_reasons_task_fk FOREIGN KEY (task_id) REFERENCES regression_tasks(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
--- 回填：旧 regression_items（粒度 release+spec_change）→ 新任务。
--- 场景级 added/changed 变化锚定到场景（1:1，spec_changes 有 (version, entity_type, feature_key, scenario_reference) 唯一键）；
+-- 回填：以每个发布 spec_version 的全部 spec_changes 为基准生成任务（保证历史发布回归清单完整），
+-- 旧 regression_items（粒度 release+spec_change）仅用于继承勾选状态。
+-- 场景级 added/changed 锚定到场景（spec_changes 有 (version, entity_type, feature_key, scenario_reference) 唯一键，与场景 1:1）；
 -- 其余（移除场景、功能级变化）锚定到变化本身。verified → passed 对应四态语义。
-INSERT INTO regression_tasks (release_id, spec_scenario_id, spec_change_id, status, checked_by, checked_at)
+INSERT IGNORE INTO regression_tasks (release_id, spec_scenario_id, spec_change_id, status, checked_by, checked_at)
 SELECT r.id, ss.id, NULL,
-       CASE ri.status WHEN 'verified' THEN 'passed' ELSE ri.status END,
+       COALESCE(CASE ri.status WHEN 'verified' THEN 'passed' ELSE ri.status END, 'pending'),
        ri.checked_by, ri.checked_at
-FROM regression_items ri
-JOIN releases r ON r.id = ri.release_id
-JOIN spec_changes c ON c.id = ri.spec_change_id
+FROM releases r
+JOIN spec_changes c ON c.spec_version_id = r.spec_version_id AND c.entity_type = 'scenario' AND c.kind <> 'removed'
 JOIN spec_features sf ON sf.spec_version_id = c.spec_version_id AND sf.stable_key = c.feature_key
 JOIN spec_scenarios ss ON ss.spec_feature_id = sf.id AND ss.reference = c.scenario_reference
-WHERE c.entity_type = 'scenario' AND c.kind <> 'removed';
+LEFT JOIN regression_items ri ON ri.release_id = r.id AND ri.spec_change_id = c.id;
 
-INSERT INTO regression_tasks (release_id, spec_scenario_id, spec_change_id, status, checked_by, checked_at)
+INSERT IGNORE INTO regression_tasks (release_id, spec_scenario_id, spec_change_id, status, checked_by, checked_at)
 SELECT r.id, NULL, c.id,
-       CASE ri.status WHEN 'verified' THEN 'passed' ELSE ri.status END,
+       COALESCE(CASE ri.status WHEN 'verified' THEN 'passed' ELSE ri.status END, 'pending'),
        ri.checked_by, ri.checked_at
-FROM regression_items ri
-JOIN releases r ON r.id = ri.release_id
-JOIN spec_changes c ON c.id = ri.spec_change_id
+FROM releases r
+JOIN spec_changes c ON c.spec_version_id = r.spec_version_id
 LEFT JOIN spec_features sf ON sf.spec_version_id = c.spec_version_id AND sf.stable_key = c.feature_key
-LEFT JOIN spec_scenarios ss ON ss.spec_feature_id = sf.id AND ss.reference = c.scenario_reference AND c.entity_type = 'scenario' AND c.kind <> 'removed'
+LEFT JOIN spec_scenarios ss ON ss.spec_feature_id = sf.id AND ss.reference = c.scenario_reference
+     AND c.entity_type = 'scenario' AND c.kind <> 'removed'
+LEFT JOIN regression_items ri ON ri.release_id = r.id AND ri.spec_change_id = c.id
 WHERE ss.id IS NULL;
 
 -- 来源：场景任务 ← 其直接行为变化；变化锚定任务 ← 自身。

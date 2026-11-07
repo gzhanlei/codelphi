@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ReleaseCard } from "../components/release-card";
+import type { RegressionTaskView } from "../lib/regression-tasks";
 import type { BehaviorChangeRow, ChangeRow, ReleaseRow } from "../lib/types";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
@@ -16,17 +17,22 @@ const behaviorChanges: BehaviorChangeRow[] = [
 ];
 const aiChanges: ChangeRow[] = [{ id: 201, releaseId: 7, featureName: "统一登录", kind: "changed", description: "登录跳转逻辑调整", userImpact: "", evidence: [] }];
 
-function renderCard(overrides: { defaultOpen?: boolean; behaviorChanges?: BehaviorChangeRow[]; aiChanges?: ChangeRow[]; statuses?: Record<string, { status: "pending" | "verified" | "skipped"; checkedBy: string | null }> } = {}) {
+function renderCard(overrides: { defaultOpen?: boolean; behaviorChanges?: BehaviorChangeRow[]; aiChanges?: ChangeRow[]; tasks?: RegressionTaskView[] } = {}) {
   return renderToStaticMarkup(createElement(ReleaseCard, {
     slug: "codelphi",
     release,
     changes: overrides.aiChanges ?? aiChanges,
     behaviorChanges: overrides.behaviorChanges ?? behaviorChanges,
-    statuses: overrides.statuses ?? {},
+    tasks: overrides.tasks ?? tasks,
     canEdit: false,
     defaultOpen: overrides.defaultOpen,
   }));
 }
+
+const tasks: RegressionTaskView[] = [
+  { taskId: 9, releaseId: 7, subject: { kind: "scenario", scenarioId: 501 }, status: "pending", checkedBy: null, checkedAt: null, skipReason: null, failureNote: null, featureName: "统一登录", reference: "HP-1", primaryChangeId: 101, sources: [101], reasons: [{ hitType: "behavior_change", matchedPath: null, featureId: 11, scenarioId: 501 }] },
+  { taskId: 10, releaseId: 7, subject: { kind: "scenario", scenarioId: 502 }, status: "pending", checkedBy: null, checkedAt: null, skipReason: null, failureNote: null, featureName: "统一登录", reference: "HP-2", primaryChangeId: 102, sources: [102], reasons: [{ hitType: "behavior_change", matchedPath: null, featureId: 11, scenarioId: 502 }] },
+];
 
 describe("release card collapse", () => {
   beforeEach(() => {
@@ -50,27 +56,32 @@ describe("release card collapse", () => {
   });
 
   it("keeps quiet releases as inline text without a toggle", () => {
-    const html = renderCard({ behaviorChanges: [], aiChanges: [] });
+    const html = renderCard({ behaviorChanges: [], aiChanges: [], tasks: [] });
     expect(html).not.toContain("release-details");
     expect(html).toContain("未发现规格行为变化");
     expect(html).toContain("瘦身回归");
   });
 });
 
-describe("regression marker attribution", () => {
-  it("shows who marked a non-pending regression status", () => {
+describe("regression task rendering", () => {
+  it("shows the marker for a non-pending task", () => {
     const html = renderCard({
       defaultOpen: true,
-      statuses: { "7:101": { status: "verified", checkedBy: "pm@example.com" } },
+      tasks: [{ ...tasks[0], status: "passed", checkedBy: "pm@example.com" }],
     });
     expect(html).toContain("由 pm@example.com 标记");
   });
 
-  it("does not show a marker for pending items or anonymous marks", () => {
+  it("shows reason tags and impact-only tasks without a change card", () => {
     const html = renderCard({
       defaultOpen: true,
-      statuses: { "7:102": { status: "pending", checkedBy: "pm@example.com" }, "7:101": { status: "verified", checkedBy: null } },
+      tasks: [
+        { ...tasks[1], primaryChangeId: null, sources: [], reasons: [{ hitType: "evidence_path", matchedPath: "lib/token.ts", featureId: 11, scenarioId: 502 }] },
+      ],
     });
-    expect(html).not.toContain("标记");
+    expect(html).toContain("影响面推荐");
+    expect(html).toContain("证据路径命中");
+    expect(html).toContain("lib/token.ts");
+    expect(html).not.toContain("由 ");
   });
 });
