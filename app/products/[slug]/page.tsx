@@ -5,6 +5,7 @@ import { AnalyzeButton } from "@/components/analyze-button";
 import { AnalysisFeedbackButton } from "@/components/analysis-feedback-button";
 import { AppShell } from "@/components/app-shell";
 import { DemoShell } from "@/components/demo-shell";
+import { NotificationSettings } from "@/components/notification-settings";
 import { ProductTabs, ProductView, RepositoryLink, RunStatus } from "@/components/product-navigation";
 import { RemoveProductButton } from "@/components/remove-product-button";
 import { publicDemoSlugs } from "@/lib/env";
@@ -40,6 +41,7 @@ function ProductPageBody({ slug, view, mode, featureId, details, overview, actio
       {details.driftCount > 0 ? <div className="drift-banner" role="status">⚠️ {details.driftCount} 条人工规格可能已过时（最近一次分析的行为变化触及了这些功能）。逐一确认并重新保存后标记会消除。</div> : null}
       {showFeedback && details.latestRun?.status === "failed" ? <AnalysisFeedbackButton slug={details.product.slug} /> : null}
       <ProductTabs slug={slug} view={view} featureCount={details.features.length} releaseCount={details.releases.length} />
+      {view === "overview" && canEdit ? <NotificationSettings slug={slug} /> : null}
       <ProductView view={view} productSlug={slug} features={details.features} scenarios={details.scenarios} releases={details.releases} changes={details.changes} behaviorChanges={details.behaviorChanges} mode={mode} featureId={featureId} overview={overview} canEdit={canEdit} />
     </>
   );

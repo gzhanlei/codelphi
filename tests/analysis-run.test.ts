@@ -31,6 +31,7 @@ vi.mock("../lib/code-hosting", async (importOriginal) => ({
   })),
 }));
 vi.mock("../lib/ai", () => ({ analyzeWithAI: vi.fn() }));
+vi.mock("../lib/notifications", () => ({ deliverAnalysisNotifications: vi.fn(async () => undefined) }));
 vi.mock("../lib/remote-analysis", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/remote-analysis")>(), getRemoteAnalysisSources: vi.fn() }));
 vi.mock("../lib/spec-versions", () => ({ insertSpecVersion: vi.fn(async () => 44), loadPreviousFeatureNames: vi.fn(async () => ["统一登录", "支付", "规格导出"]) }));
 vi.mock("../lib/architecture-version", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/architecture-version")>(), generateRepositoryArchitectureVersion: vi.fn(async () => ({ status: "accepted", errorMessage: null })) }));

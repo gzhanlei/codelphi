@@ -10,6 +10,7 @@ import { resolveAnalysisMode } from "./incremental";
 import { compareIncrementalShadow } from "./incremental-shadow";
 import { incrementalShadowEnabled } from "./env";
 import { markSpecDrift } from "./spec-drift";
+import { deliverAnalysisNotifications } from "./notifications";
 
 export interface RunContext {
   id: number;
@@ -236,7 +237,13 @@ async function performAnalysis(run: RunContext) {
     ...remote.slice.files.map((file) => file.path),
     ...change.files.map((file) => file.path),
   ]));
-  await saveResult(run, result, change, affectedKeys);
+  const specVersionId = await saveResult(run, result, change, affectedKeys);
+  // M1 通知分发：分析事务提交后 best-effort 投递；失败只记日志，不影响分析结果。
+  try {
+    await deliverAnalysisNotifications({ run, releaseUrl: change.url, specVersionId });
+  } catch (error) {
+    console.error("[notifications] delivery failed", error);
+  }
   // M9 影子对比：增量落库成功后额外跑一次全量提取，只对比不落库（放行门槛 ≥98% 一致率的数据来源）。
   if (affectedKeys && incrementalShadowEnabled()) {
     try {

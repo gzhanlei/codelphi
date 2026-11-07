@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { githubCodeHostingAdapter } from "../lib/code-hosting";
 import { resolveManualAnalysis } from "../lib/manual-analysis";
 
-const defaultExecute = vi.fn();
+const { defaultExecute } = vi.hoisted(() => ({ defaultExecute: vi.fn() }));
 const defaultAdapter = {
   getRepository: vi.fn(),
   getBranchHead: vi.fn(),
