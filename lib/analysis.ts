@@ -250,6 +250,14 @@ async function performAnalysis(run: RunContext) {
   if (affectedKeys && incrementalShadowEnabled()) {
     try {
       const shadow = await analyzeWithAI(sources, change, { previousFeatureNames });
+      if (process.env.INCREMENTAL_SHADOW_DEBUG === "true") {
+        console.log("[incremental-shadow-debug]", JSON.stringify({
+          changeFiles: change.files.map((file) => file.path),
+          affected: [...affectedKeys],
+          merged: mergedFeatures,
+          shadow: shadow.features,
+        }));
+      }
       console.log("[incremental-shadow]", JSON.stringify(compareIncrementalShadow({ features: mergedFeatures, changes: result.changes }, shadow)));
     } catch (error) {
       console.error("[incremental-shadow] shadow analysis failed", error);
