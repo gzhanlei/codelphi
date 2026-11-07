@@ -231,4 +231,5 @@ p { line-height: 1.7; }
 .release-details-toggle { color: #94a19c; font-size: 11px; }
 .release-details[open] > .behavior-section h3, .release-details[open] > .ai-change-section h3 { border-top: 0; }
 .release-load-more { display: flex; justify-content: center; padding: 4px 0 6px; }
+.release-list-head { display: flex; justify-content: flex-end; padding: 0 0 6px; }
 .release-load-more .secondary-button { min-width: 220px; }
