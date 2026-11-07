@@ -63,3 +63,40 @@ export async function loadAffectedFeatureKeys(repositoryId: number, paths: strin
   const rows = (Array.isArray(payload) ? payload : []) as Array<{ stableKey: string; name: string }>;
   return { keys: new Set(rows.map((row) => row.stableKey)), names: [...new Set(rows.map((row) => row.name))] };
 }
+
+export interface AffectedScenario {
+  reference: string | null;
+  evidencePath: string;
+}
+
+export interface AffectedFeatureImpact {
+  feature: string;
+  scenarios: AffectedScenario[];
+}
+
+/** C2 事前影响分析 spike：给定文件清单，反查最新规格里受影响的功能与场景（PR 预演同源索引）。 */
+export async function loadAffectedScenarios(repositoryId: number, paths: string[], execute: Execute = defaultExecute): Promise<AffectedFeatureImpact[]> {
+  if (paths.length === 0) return [];
+  const placeholders = paths.map(() => "?").join(",");
+  const result = await execute(
+    `SELECT sf.name AS feature, ss.reference AS reference, i.path AS evidencePath
+     FROM spec_file_index i
+     JOIN spec_features sf ON sf.id = i.spec_feature_id
+     LEFT JOIN spec_scenarios ss ON ss.id = i.spec_scenario_id
+     WHERE i.repository_id = ? AND i.path IN (${placeholders})
+     ORDER BY sf.name, ss.reference`,
+    [repositoryId, ...paths],
+  );
+  const payload = Array.isArray(result) ? result[0] : [];
+  const rows = (Array.isArray(payload) ? payload : []) as Array<{ feature: string; reference: string | null; evidencePath: string }>;
+  const byFeature = new Map<string, AffectedFeatureImpact>();
+  for (const row of rows) {
+    let impact = byFeature.get(row.feature);
+    if (!impact) {
+      impact = { feature: row.feature, scenarios: [] };
+      byFeature.set(row.feature, impact);
+    }
+    impact.scenarios.push({ reference: row.reference, evidencePath: row.evidencePath });
+  }
+  return [...byFeature.values()];
+}
