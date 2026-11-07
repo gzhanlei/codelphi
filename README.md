@@ -16,7 +16,7 @@
 - 🏗️ **真实可用**：CoDelphi 在生产环境持续分析自身仓库等多个真实产品，本项目本身就是它的第一个分析对象。
 
 ## 与本仓库实时同步的Demo
-https://codelphi.com/products/reporadar  无需注册登录也可只读查看。
+https://codelphi.com/products/reporadar  无需注册登录也可只读查看。Demo slug 由部署环境的 `PUBLIC_DEMO_SLUGS` 控制。
 
 ## 懒得自托管，用我搭好的免费云服务
 https://codelphi.com
