@@ -55,7 +55,7 @@ openssl rand -hex 32  # 填入 SESSION_SECRET
 openssl rand -hex 32  # 填入 GITHUB_WEBHOOK_SECRET
 ```
 
-编辑 `.env`，至少填写：
+编辑 `.env`，至少填写（数据库名改为你希望的）：
 
 - `DATABASE_URL`：腾讯云 MySQL 的 `mysql://` URL，数据库名为 `radar`。
 - `CHANDLER_CLIENT_ID` / `CHANDLER_CLIENT_SECRET`。
@@ -68,7 +68,7 @@ openssl rand -hex 32  # 填入 GITHUB_WEBHOOK_SECRET
 
 ### 2. 创建独立数据库和账号
 
-由 MySQL 管理员在**现有腾讯云实例**中执行（替换密码和网段，不要在聊天中提交真实密码）：
+由 MySQL 管理员在**现有腾讯云实例**中执行（替换数据库名、密码和网段，不要在聊天中提交真实密码）：
 
 ```sql
 CREATE DATABASE radar CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
@@ -78,7 +78,7 @@ ON radar.* TO radar@'%';
 FLUSH PRIVILEGES;
 ```
 
-CoDelphi 不使用 WorkMembership 的业务表。生产环境建议按实际应用网段收紧账号 Host，并定期轮换密码。
+CoDelphi 不使用 Chandler 的业务表。生产环境建议按实际应用网段收紧账号 Host，并定期轮换密码。
 
 ### 3. 初始化并启动
 
@@ -110,8 +110,9 @@ npm run analyze -- <产品-slug>
 
 ```text
 http://localhost:3000/auth/callback
-https://codelphi.com/auth/callback
 ```
+
+注意：当你部署到互联网服务器时，localhost:3000要修改为你的网站域名和端口。
 
 有效 Chandler 用户默认可登录并自动获得个人工作区。共享工作区通过成员与邀请授权；只有特殊封闭部署才需要配置 `AUTH_ALLOWED_EMAILS`，留空不会拒绝用户。
 
