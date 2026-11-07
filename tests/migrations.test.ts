@@ -24,4 +24,11 @@ describe("database migrations", () => {
     expect(sql).toContain("ALTER TABLE architecture_documents");
     expect(sql).toContain("analysis_receipt JSON NULL");
   });
+
+  it("records old product slugs for redirect after rename", () => {
+    const sql = readFileSync(new URL("../migrations/024_product_slug_history.sql", import.meta.url), "utf8");
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS product_slug_history");
+    expect(sql).toContain("UNIQUE KEY product_slug_history_old_slug_unique (old_slug)");
+    expect(sql).toContain("REFERENCES products(id) ON DELETE CASCADE");
+  });
 });

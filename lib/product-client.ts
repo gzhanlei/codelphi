@@ -39,6 +39,18 @@ export async function updateDescription(slug: string, description: string, fetch
   return "updated" as const;
 }
 
+/** 改产品名 / slug；slug 变化时返回新地址，调用方据此跳转。 */
+export async function renameProduct(slug: string, input: { name?: string; slug?: string }, fetcher: Fetcher = fetch) {
+  const response = await fetcher(`/api/products/${slug}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = await productResponse<{ status?: string; slug?: string; error?: string }>(response, "保存产品信息失败");
+  if (data.status !== "updated" || !data.slug) throw new Error(data.error ?? "保存产品信息失败");
+  return data.slug;
+}
+
 export async function requestAnalysis(slug: string, fetcher: Fetcher = fetch) {
   const response = await fetcher(`/api/products/${slug}/analyze`, { method: "POST" });
   const data = await productResponse<{ runId?: number; error?: string }>(response, "分析请求失败");

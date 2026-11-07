@@ -8,12 +8,14 @@ import { requireProductAccess } from "@/lib/product-access";
 import { getSessionUser } from "@/lib/session";
 
 vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
   notFound: vi.fn(() => { throw new Error("NOT_FOUND"); }),
   redirect: vi.fn((url: string) => { throw new Error(`NEXT_REDIRECT:${url}`); }),
 }));
 vi.mock("@/lib/session", () => ({ getSessionUser: vi.fn(async () => null) }));
 vi.mock("@/lib/product-access", () => ({ requireProductAccess: vi.fn() }));
 vi.mock("@/lib/product-details", () => ({ getProductDetails: vi.fn() }));
+vi.mock("@/lib/product-rename", () => ({ findProductByOldSlug: vi.fn(async () => null) }));
 vi.mock("@/components/app-shell", () => ({ AppShell: ({ children }: { children: ReactNode }) => createElement("main", null, children) }));
 vi.mock("@/components/demo-shell", () => ({ DemoShell: ({ children }: { children: ReactNode }) => createElement("main", null, children) }));
 vi.mock("@/components/analyze-button", () => ({ AnalyzeButton: ({ slug }: { slug: string }) => createElement("button", { "data-analyze": slug }, "立即分析") }));
@@ -45,7 +47,7 @@ describe("public demo product page", () => {
 
   it("renders anonymously for an allowlisted slug without org scoping", async () => {
     const html = await renderPage("reporadar");
-    expect(html).toContain(">Radar</h1>");
+    expect(html).toContain("<h1>Radar<button");
     expect(html).toContain('data-can-edit="true"');
     expect(html).not.toContain("data-remove-product");
   });

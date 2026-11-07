@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { updateProductDescription } from "@/lib/product-description";
+import { updateProductIdentity } from "@/lib/product-rename";
 import { requireOrganization } from "@/lib/organizations";
 import { requireProductAccess } from "@/lib/product-access";
-import { descriptionUpdateSchema } from "@/lib/product-input";
+import { productUpdateSchema } from "@/lib/product-input";
 import { productRemovalError, removeProduct } from "@/lib/product-removal";
 import { requireSessionUser } from "@/lib/session";
 
@@ -15,11 +16,24 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ s
   const { slug } = await context.params;
   const access = await requireProductAccess(user, slug, "editor");
   if (!access) return NextResponse.json(NOT_FOUND, { status: 404 });
-  const parsed = descriptionUpdateSchema.safeParse(await request.json().catch(() => null));
-  if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "概况内容无效" }, { status: 400 });
-  const result = await updateProductDescription(slug, access.product.organizationId, parsed.data.description.trim());
-  if (!result) return NextResponse.json(NOT_FOUND, { status: 404 });
-  return NextResponse.json({ status: "updated", description: result.description });
+  const parsed = productUpdateSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "产品信息无效" }, { status: 400 });
+
+  const { name, slug: newSlug, description } = parsed.data;
+  let currentSlug = slug;
+  let currentName = access.product.name;
+  if (name !== undefined || newSlug !== undefined) {
+    const renamed = await updateProductIdentity(slug, access.product.organizationId, { name, newSlug });
+    if (renamed.status === "not_found") return NextResponse.json(NOT_FOUND, { status: 404 });
+    if (renamed.status === "slug_conflict") return NextResponse.json({ error: "该 Slug 已被同工作区其他产品使用" }, { status: 409 });
+    currentSlug = renamed.slug;
+    currentName = renamed.name;
+  }
+  if (description !== undefined) {
+    const result = await updateProductDescription(currentSlug, access.product.organizationId, description.trim());
+    if (!result) return NextResponse.json(NOT_FOUND, { status: 404 });
+  }
+  return NextResponse.json({ status: "updated", slug: currentSlug, name: currentName });
 }
 
 export async function DELETE(_request: NextRequest, context: { params: Promise<{ slug: string }> }) {
