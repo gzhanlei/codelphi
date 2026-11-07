@@ -103,16 +103,18 @@ function AiChangeList({ changes }: { changes: ChangeRow[] }) {
   return <div className="ai-change-section"><h3>发布说明（AI）</h3>{changes.map((change) => <ChangeItem change={change} key={change.id} />)}</div>;
 }
 
-export function ReleaseCard({ slug, release, changes, behaviorChanges, statuses = {}, canEdit = false }: {
+export function ReleaseCard({ slug, release, changes, behaviorChanges, statuses = {}, canEdit = false, defaultOpen = false }: {
   slug: string;
   release: ReleaseRow;
   changes: ChangeRow[];
   behaviorChanges: BehaviorChangeRow[];
   statuses?: RegressionStatusMap;
   canEdit?: boolean;
+  defaultOpen?: boolean;
 }) {
   const releaseChanges = changes.filter((change) => change.releaseId === release.id);
   const releaseBehaviorChanges = behaviorChanges.filter((change) => change.releaseId === release.id);
+  const hasDetails = releaseBehaviorChanges.length > 0 || releaseChanges.length > 0;
   return (
     <section className="release-card">
       <div className="release-header">
@@ -120,8 +122,18 @@ export function ReleaseCard({ slug, release, changes, behaviorChanges, statuses 
         <a href={release.url} target="_blank" rel="noreferrer"><code>{release.sha.slice(0, 7)}</code> ↗</a>
       </div>
       <p className="release-summary">{release.summary}</p>
-      <BehaviorList slug={slug} release={release} changes={releaseBehaviorChanges} statuses={statuses} canEdit={canEdit} />
-      <AiChangeList changes={releaseChanges} />
+      {hasDetails ? (
+        <details className="release-details" open={defaultOpen}>
+          <summary>
+            <span>行为变化 {releaseBehaviorChanges.length} 条 · 发布说明 {releaseChanges.length} 条</span>
+            <span className="release-details-toggle">{defaultOpen ? "收起" : "展开"}</span>
+          </summary>
+          <BehaviorList slug={slug} release={release} changes={releaseBehaviorChanges} statuses={statuses} canEdit={canEdit} />
+          <AiChangeList changes={releaseChanges} />
+        </details>
+      ) : (
+        <BehaviorList slug={slug} release={release} changes={releaseBehaviorChanges} statuses={statuses} canEdit={canEdit} />
+      )}
     </section>
   );
 }

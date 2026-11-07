@@ -16,7 +16,7 @@ export function ProductChanges({ slug, releases, changes, behaviorChanges, regre
 
   return (
     <div className="release-list">
-      {releases.map((release) => <ReleaseCard slug={slug} release={release} changes={changes} behaviorChanges={behaviorChanges} statuses={regressionStatuses} canEdit={canEdit} key={release.id} />)}
+      {releases.map((release, index) => <ReleaseCard slug={slug} release={release} changes={changes} behaviorChanges={behaviorChanges} statuses={regressionStatuses} canEdit={canEdit} defaultOpen={index === 0} key={release.id} />)}
     </div>
   );
 }
