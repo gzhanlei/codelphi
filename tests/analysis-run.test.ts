@@ -32,7 +32,7 @@ vi.mock("../lib/code-hosting", async (importOriginal) => ({
 }));
 vi.mock("../lib/ai", () => ({ analyzeWithAI: vi.fn() }));
 vi.mock("../lib/notifications", () => ({ deliverAnalysisNotifications: vi.fn(async () => undefined) }));
-const { compareIncrementalShadow } = vi.hoisted(() => ({ compareIncrementalShadow: vi.fn(() => ({ consistent: true, missingKeys: [], extraKeys: [], scenarioDiffs: [] })) }));
+const { compareIncrementalShadow } = vi.hoisted(() => ({ compareIncrementalShadow: vi.fn((incremental: { features: Array<{ name: string }>; changes: unknown[] }, _full: unknown) => ({ consistent: true, missingKeys: [] as string[], extraKeys: [] as string[], scenarioDiffs: [] as string[] })) }));
 vi.mock("../lib/incremental-shadow", () => ({ compareIncrementalShadow }));
 vi.mock("../lib/remote-analysis", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/remote-analysis")>(), getRemoteAnalysisSources: vi.fn() }));
 vi.mock("../lib/spec-versions", () => ({ insertSpecVersion: vi.fn(async () => ({ specVersionId: 44, features: [{ name: "统一登录", summary: "s", scenarios: [] }] })), loadPreviousFeatureNames: vi.fn(async () => ["统一登录", "支付", "规格导出"]) }));
