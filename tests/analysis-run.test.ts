@@ -32,8 +32,10 @@ vi.mock("../lib/code-hosting", async (importOriginal) => ({
 }));
 vi.mock("../lib/ai", () => ({ analyzeWithAI: vi.fn() }));
 vi.mock("../lib/notifications", () => ({ deliverAnalysisNotifications: vi.fn(async () => undefined) }));
+const { compareIncrementalShadow } = vi.hoisted(() => ({ compareIncrementalShadow: vi.fn(() => ({ consistent: true, missingKeys: [], extraKeys: [], scenarioDiffs: [] })) }));
+vi.mock("../lib/incremental-shadow", () => ({ compareIncrementalShadow }));
 vi.mock("../lib/remote-analysis", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/remote-analysis")>(), getRemoteAnalysisSources: vi.fn() }));
-vi.mock("../lib/spec-versions", () => ({ insertSpecVersion: vi.fn(async () => 44), loadPreviousFeatureNames: vi.fn(async () => ["统一登录", "支付", "规格导出"]) }));
+vi.mock("../lib/spec-versions", () => ({ insertSpecVersion: vi.fn(async () => ({ specVersionId: 44, features: [{ name: "统一登录", summary: "s", scenarios: [] }] })), loadPreviousFeatureNames: vi.fn(async () => ["统一登录", "支付", "规格导出"]) }));
 vi.mock("../lib/architecture-version", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/architecture-version")>(), generateRepositoryArchitectureVersion: vi.fn(async () => ({ status: "accepted", errorMessage: null })) }));
 
 const run = {
@@ -181,6 +183,10 @@ describe("analysis orchestration", () => {
       const shadowCall = vi.mocked(analyzeWithAI).mock.calls[1][2] as { affectedFeatureNames?: string[] };
       expect(scopeCall.affectedFeatureNames).toEqual(["统一登录"]);
       expect(shadowCall.affectedFeatureNames).toBeUndefined();
+      // 影子对比的对象是 carry-forward 合并后的完整 spec（insertSpecVersion 的返回），
+      // 而非增量 AI 的原始输出——原始输出本就只含受影响功能，直接比会恒等失败。
+      const [compared] = compareIncrementalShadow.mock.calls[0];
+      expect(compared.features).toEqual([{ name: "统一登录", summary: "s", scenarios: [] }]);
     } finally {
       vi.unstubAllEnvs();
     }

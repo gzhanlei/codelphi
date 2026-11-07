@@ -126,14 +126,14 @@ async function saveResult(run: RunContext, result: AnalysisResult, change: Chang
       "UPDATE products SET description = ?, description_source = 'generated', description_evidence = ? WHERE id = ? AND description = ''",
       [result.product.description, JSON.stringify(result.product.evidence), run.productId],
     );
-    const specVersionId = await insertSpecVersion(connection, run, result, affectedKeys ? { affectedKeys } : {});
+    const { specVersionId, features } = await insertSpecVersion(connection, run, result, affectedKeys ? { affectedKeys } : {});
     await rebuildSpecFileIndex(connection, run.repositoryId, specVersionId);
     await markSpecDrift(connection, run.productId, specVersionId);
     await upsertGeneratedSpec(connection, run, result);
     await upsertRelease(connection, run, result, change, specVersionId);
     await connection.execute("UPDATE analysis_runs SET status = 'succeeded', finished_at = CURRENT_TIMESTAMP(3) WHERE id = ?", [run.id]);
     await connection.commit();
-    return specVersionId;
+    return { specVersionId, features };
   } catch (error) {
     await connection.rollback();
     throw error;
@@ -237,7 +237,7 @@ async function performAnalysis(run: RunContext) {
     ...remote.slice.files.map((file) => file.path),
     ...change.files.map((file) => file.path),
   ]));
-  const specVersionId = await saveResult(run, result, change, affectedKeys);
+  const { specVersionId, features: mergedFeatures } = await saveResult(run, result, change, affectedKeys);
   // M1 通知分发：分析事务提交后 best-effort 投递；失败只记日志，不影响分析结果。
   try {
     await deliverAnalysisNotifications({ run, releaseUrl: change.url, specVersionId });
@@ -245,10 +245,12 @@ async function performAnalysis(run: RunContext) {
     console.error("[notifications] delivery failed", error);
   }
   // M9 影子对比：增量落库成功后额外跑一次全量提取，只对比不落库（放行门槛 ≥98% 一致率的数据来源）。
+  // 对比对象必须是 carry-forward 合并后的完整规格——增量 AI 输出本就只含受影响功能，
+  // 直接与全量输出比较会恒等失败（missingKeys = 全部未受影响功能）。
   if (affectedKeys && incrementalShadowEnabled()) {
     try {
       const shadow = await analyzeWithAI(sources, change, { previousFeatureNames });
-      console.log("[incremental-shadow]", JSON.stringify(compareIncrementalShadow(result, shadow)));
+      console.log("[incremental-shadow]", JSON.stringify(compareIncrementalShadow({ features: mergedFeatures, changes: result.changes }, shadow)));
     } catch (error) {
       console.error("[incremental-shadow] shadow analysis failed", error);
     }

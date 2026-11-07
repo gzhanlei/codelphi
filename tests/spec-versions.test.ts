@@ -46,8 +46,8 @@ function connection(previousVersions: Array<{ id: number }>, manual = false, tom
 describe("spec version persistence", () => {
   it("writes a complete version and deterministic before/after changes", async () => {
     const db = connection([{ id: 11 }]);
-    const versionId = await insertSpecVersion(db, run, result);
-    expect(versionId).toBe(99);
+    const { specVersionId } = await insertSpecVersion(db, run, result);
+    expect(specVersionId).toBe(99);
     expect(db.changes).toHaveLength(4);
     expect(db.changes.map((change) => change[3])).toEqual(expect.arrayContaining(["added", "changed", "removed"]));
     expect(db.changes.every((change) => change[1] === 11)).toBe(true);
@@ -86,10 +86,13 @@ describe("spec version persistence", () => {
 
   it("carries forward unaffected previous features without recording their changes", async () => {
     const db = connection([{ id: 11 }]);
-    await insertSpecVersion(db, run, { ...result, features: [result.features[0]] }, { affectedKeys: new Set(["authentication"]) });
+    const { features } = await insertSpecVersion(db, run, { ...result, features: [result.features[0]] }, { affectedKeys: new Set(["authentication"]) });
     expect(db.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO spec_features"), expect.arrayContaining(["Legacy"]));
     const featureChanges = db.changes.filter((change) => change[2] === "feature");
     expect(featureChanges.some((change) => change[5] === "Legacy")).toBe(false);
+    // 返回值是合并后的完整规格：AI 提取的受影响功能 + 沿用的未受影响功能，
+    // M9 影子对比以此（而非 AI 原始输出）为对比对象。
+    expect(features.map((feature) => feature.name)).toEqual(expect.arrayContaining(["Legacy", result.features[0].name]));
   });
 
   it("keeps full-mode semantics when no affected keys are given", async () => {

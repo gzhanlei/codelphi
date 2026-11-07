@@ -158,7 +158,7 @@ async function insertChanges(connection: PoolConnection, versionId: number, base
   }
 }
 
-export async function insertSpecVersion(connection: PoolConnection, run: RunContext, result: AnalysisResult, options: { affectedKeys?: ReadonlySet<string> } = {}) {
+export async function insertSpecVersion(connection: PoolConnection, run: RunContext, result: AnalysisResult, options: { affectedKeys?: ReadonlySet<string> } = {}): Promise<{ specVersionId: number; features: ReturnType<typeof mergeSpecSources> }> {
   const [previous, manual, tombstones] = await Promise.all([loadPreviousSpec(connection, run), loadManualSpec(connection, run.productId), loadManualTombstones(connection, run.productId)]);
   // M9 增量模式：受影响集之外的 generated 条目原样沿用上一版（三分合并：carried 种子 < AI < manual）。
   const affectedKeys = options.affectedKeys;
@@ -174,7 +174,8 @@ export async function insertSpecVersion(connection: PoolConnection, run: RunCont
   const versionId = Number((versionResult as { insertId: number }).insertId);
   await insertFeatures(connection, versionId, features);
   await insertChanges(connection, versionId, previous === null ? null : previous.id, changes);
-  return versionId;
+  // 合并后的完整 spec 一并返回：M9 影子对比必须以 carry-forward 之后的规格为对象。
+  return { specVersionId: versionId, features };
 }
 
 /** B：读取最新 spec 版本的功能名清单（分析前调用，供 prompt 命名连续性约束）。 */
