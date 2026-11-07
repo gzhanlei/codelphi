@@ -20,13 +20,15 @@ export interface ShadowReport {
 }
 
 /**
- * 方案 A 放行门槛（2026-11-07 排查结论，docs/m9-workbench-carry-forward-handoff.md）：
- * ①功能 key 集合强制一致（missing/extra 均为空）；②(reference, category) 集合的
- * 宏平均 Jaccard ≥ 98%。场景文本签名不参与判定——ds-flash 对同代码两次独立提取的
- * 场景分解与措辞高度可变（实测文本级一致率 0%），门槛语义已由产品决策调整为 A。
- * summary 措辞差异同理不参与判定。
+ * 方案 A 放行门槛（2026-11-07 排查 + 生产决策）：
+ * ①功能 key 集合强制一致（missing/extra 均为空，零容忍）；②(reference, category)
+ * 集合的宏平均 Jaccard ≥ 0.70。场景文本签名不参与判定。
+ * 0.70 的依据：全量 vs 全量（近同代码）的噪声底实测 0.80——ds-flash 对同代码两次
+ * 独立提取的 (ref,cat) 集合 Jaccard 只有约 0.80，98% 在数学上不可达；0.70 位于
+ * 噪声底之下、结构性故障态（约 0.33-0.5）之上，可检出增量链路的真回归。
+ * 98% 的原始语义转移到「功能 key 集合一致率」（当前 100%）。
  */
-export const SHADOW_REFERENCE_GATE = 0.98;
+export const SHADOW_REFERENCE_GATE = 0.7;
 
 type ReferenceSignature = string;
 

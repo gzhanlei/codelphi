@@ -129,7 +129,7 @@
 - **AI 提示收窄**：`analyzeWithAI` 增量模式提示词改为「只分析以下功能的当前行为」；输出 schema 不变（仍整仓形态，但只含受影响功能）。
 - **Generated carry-forward**（核心新逻辑，`lib/spec-versions.ts`）：`insertSpecVersion` 增加参数 `carried: SpecFeature[]`——取上一 `spec_versions` 快照中 stable_key ∉ 受影响集的 generated 条目（manual 合并路径 `loadManualSpec`/`loadManualTombstones` 逻辑**不动**）；`mergeSpecSources` 改为三分合并（AI 新析 + carried + manual）。diff 语义不变：carried 条目与上一版相同 → 不产生 `spec_changes`，发布页自然无噪音。
 - **不变量**：`assertEvidence` 只校验 AI 输出（carried 条目在产生时已校验过，不重复校验；其 path 可能已陈旧属已知可接受盲区，记录在案）；`saveResult` 的 description write-once（`lib/analysis.ts:118-121`）不动。
-- **影子验证**：feature flag `INCREMENTAL_SHADOW=true` 时同 push 双跑（增量落库、全量只对比不落库），比较两次 spec_change 集合的一致率；放行标准 ≥98%（对齐规划文档门槛），结果写入 `analysis_runs.error_message` 旁路字段或新表 `019` 内加 `incremental_shadow_report JSON`。
+- **影子验证**：feature flag `INCREMENTAL_SHADOW=true` 时同 push 双跑（增量落库、全量只对比不落库），比较两次提取的一致率；放行标准 = 功能集 100% 一致 + (reference,category) Jaccard ≥ 0.70（2026-11-07 修订：实测全量 vs 全量噪声底 0.80，原 ≥98% 门槛数学上不可达，产品决策改按方案 A），结果写入 `analysis_runs.error_message` 旁路字段或新表 `019` 内加 `incremental_shadow_report JSON`。
 - **回滚**：`analyze_mode` 改回 full 即回全量，无数据迁移风险（快照结构不变）。
 
 ### 测试
@@ -140,7 +140,7 @@
 - 影子对比报告生成；
 - 红线回归：增量模式下 manual 功能永不被 AI 覆盖或丢失（现有用例扩展增量路径）。
 
-**验收**：dogfooding 仓库连续 20 次 push：增量成本（AI read calls + tokens，`analysis_runs` 可加耗时/token 记录列）较全量基线降幅 ≥60%；行为变化产出与全量影子一致率 ≥98%；任一异常自动回退且有日志。
+**验收**：dogfooding 仓库连续 20 次 push：增量成本（AI read calls + tokens，`analysis_runs` 可加耗时/token 记录列）较全量基线降幅 ≥60%；行为变化产出的影子 (reference,category) Jaccard 不低于噪声底；任一异常自动回退且有日志。
 
 ---
 
