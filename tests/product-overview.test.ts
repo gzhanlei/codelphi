@@ -28,7 +28,7 @@ describe("product overview", () => {
       latestRun: { status: "succeeded" },
     });
     expect(overview.headline).toBe("产品知识中心");
-    expect(overview.freshness).toBe("Spec v8 · abcdef1");
+    expect(overview.freshness).toBe("Spec v8 · abcdef1 · 更新 11-01 00:00 UTC");
     expect(overview.analysisLabel).toBe("最近分析成功");
     expect(overview.capabilities[0]).toMatchObject({ id: 1, name: "登录", scenarioCount: 2, href: "/products/radar?view=spec&feature=1" });
     expect(overview.capabilities.map((feature) => feature.id)).toEqual([1, 2, 3]);
@@ -39,7 +39,7 @@ describe("product overview", () => {
 
   it("uses the release version and handles unknown analysis states", () => {
     const overview = buildProductOverview({ product: { id: 1, slug: "radar", name: "Radar", description: "" }, features: [], scenarios: [], releases, behaviorChanges: [], latestRun: { status: "degraded" } });
-    expect(overview.freshness).toBe("Spec v8 · abcdef1");
+    expect(overview.freshness).toBe("Spec v8 · abcdef1 · 更新 11-01 00:00 UTC");
     expect(overview.trust.specVersionId).toBe(8);
     expect(overview.analysisLabel).toBe("分析状态：degraded");
   });

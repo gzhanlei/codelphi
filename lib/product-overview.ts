@@ -17,9 +17,15 @@ function analysisLabel(status?: string) {
   return label === undefined ? `分析状态：${status}` : label;
 }
 
-function specLabel(specVersionId: number | null, sha?: string) {
+function specLabel(specVersionId: number | null, sha?: string, committedAt?: Date) {
   if (specVersionId === null) return "尚未生成规格";
-  return `Spec v${specVersionId}${sha ? ` · ${sha.slice(0, 7)}` : ""}`;
+  const shaPart = sha ? ` · ${sha.slice(0, 7)}` : "";
+  const timePart = committedAt ? ` · 更新 ${dayLabel(committedAt)}` : "";
+  return `Spec v${specVersionId}${shaPart}${timePart}`;
+}
+
+function dayLabel(date: Date) {
+  return `${date.toISOString().slice(5, 10)} ${date.toISOString().slice(11, 16)} UTC`;
 }
 
 function compareCapabilities(a: { scenarioCount: number; name: string }, b: { scenarioCount: number; name: string }) {
@@ -46,7 +52,7 @@ export function buildProductOverview(input: ProductOverviewInput) {
     headline: input.product.description.trim() || "产品概览",
     headlineSource: input.product.descriptionSource === undefined ? "manual" : input.product.descriptionSource,
     headlineEvidence: evidenceItems(input.product.descriptionEvidence),
-    freshness: specLabel(specVersionId, revision),
+    freshness: specLabel(specVersionId, revision, latestRelease?.committedAt),
     analysisLabel: analysisLabel(input.latestRun ? input.latestRun.status : undefined),
     capabilities: input.features.map((feature) => ({
       id: feature.id,

@@ -29,13 +29,19 @@ export function SpecWorkspace({ slug, tree, feature, scenarios, mode }: { slug: 
     if (deleted) router.push("?view=spec");
   }
 
+  // 只读 demo 下编辑面板不该打开：所有编辑入口先过 demo guard，保存时再拦一次。
+  const openEditor = (mode: FeatureEditorMode) => {
+    if (guard()) return;
+    setEditor(mode);
+  };
+
   return (
     <div className="spec-workspace">
       <div className="spec-search-bar"><SpecSearch slug={slug} /></div>
-      <FeatureTree slug={slug} items={tree} selectedId={entityId(feature)} onCreateRoot={() => setEditor("root")} />
+      <FeatureTree slug={slug} items={tree} selectedId={entityId(feature)} onCreateRoot={() => openEditor("root")} />
       <div className="spec-detail">
         <FeatureEditor slug={slug} editor={editor} feature={feature} onSaved={(id) => { setEditor(null); router.push(featureHref(id)); }} onClose={() => setEditor(null)} />
-        <SpecDetail slug={slug} feature={feature} scenarios={featureScenarios} implementationScenarios={implementationScenarios} mode={mode} error={error} onEdit={() => setEditor("edit")} onDelete={removeFeature} onCreateChild={() => setEditor("child")} onCreateRoot={() => setEditor("root")} />
+        <SpecDetail slug={slug} feature={feature} scenarios={featureScenarios} implementationScenarios={implementationScenarios} mode={mode} error={error} onEdit={() => openEditor("edit")} onDelete={removeFeature} onCreateChild={() => openEditor("child")} onCreateRoot={() => openEditor("root")} />
       </div>
     </div>
   );

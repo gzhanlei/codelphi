@@ -30,11 +30,17 @@ export function ScenarioWorkspace({ featureId, scenarios }: { featureId: number;
     if (deleted) router.refresh();
   }
 
+  // 只读 demo 下编辑面板不该打开：编辑入口先过 demo guard，保存时再拦一次。
+  const openEditing = (target: ScenarioRow | "new") => {
+    if (guard()) return;
+    setEditing(target);
+  };
+
   return (
     <section className="scenario-workspace">
-      <ScenarioTools category={category} query={query} view={view} scenarios={scenarios} onCategory={setCategory} onQuery={setQuery} onView={setView} onNew={() => setEditing("new")} />
+      <ScenarioTools category={category} query={query} view={view} scenarios={scenarios} onCategory={setCategory} onQuery={setQuery} onView={setView} onNew={() => openEditing("new")} />
       <FormError message={error} />
-      <ScenarioContent editing={editing} scenarios={filtered} view={view} featureId={featureId} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); router.refresh(); }} onEdit={setEditing} onDelete={remove} />
+      <ScenarioContent editing={editing} scenarios={filtered} view={view} featureId={featureId} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); router.refresh(); }} onEdit={openEditing} onDelete={remove} />
     </section>
   );
 }
