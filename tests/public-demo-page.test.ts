@@ -47,7 +47,7 @@ describe("public demo product page", () => {
 
   it("renders anonymously for an allowlisted slug without org scoping", async () => {
     const html = await renderPage("reporadar");
-    expect(html).toContain("<h1>Radar<button");
+    expect(html).toContain(">Radar</h1>");
     expect(html).toContain('data-can-edit="true"');
     expect(html).not.toContain("data-remove-product");
   });

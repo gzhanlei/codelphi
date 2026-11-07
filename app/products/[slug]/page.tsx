@@ -36,7 +36,7 @@ function ProductPageBody({ slug, view, mode, featureId, details, overview, actio
   return (
     <>
       <div className="page-heading product-heading">
-        <div><span className="eyebrow">PRODUCT SPACE</span><h1>{details.product.name}{canEdit ? <EditNameButton slug={details.product.slug} name={details.product.name} /> : null}</h1>{view === "overview" ? null : <p>{details.product.description}</p>}<RepositoryLink repository={details.repository} /></div>
+        <div><span className="eyebrow">PRODUCT SPACE</span><h1>{details.product.name}</h1>{view === "overview" ? null : <p>{details.product.description}</p>}<RepositoryLink repository={details.repository} /></div>
         <div className="page-actions">{actions}</div>
       </div>
       <RunStatus run={details.latestRun} />
@@ -100,6 +100,7 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
         actions={
           <>
             <AnalyzeButton slug={details.product.slug} />
+            {access.role !== "viewer" ? <EditNameButton slug={details.product.slug} name={details.product.name} /> : null}
             {access.via === "organization" && access.role !== "viewer" ? <RemoveProductButton slug={details.product.slug} name={details.product.name} /> : null}
           </>
         }

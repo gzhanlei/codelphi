@@ -54,7 +54,7 @@ export function EditNameButton({ slug, name }: { slug: string; name: string }) {
 
   return (
     <>
-      <button className="edit-description-button" type="button" aria-label="编辑产品名称" title="编辑产品名称" onClick={open}>✎</button>
+      <button className="rename-button" type="button" onClick={open}>✎ 改名</button>
       <dialog className="description-dialog" ref={dialogRef} aria-label="编辑产品名称">
         <h3>编辑产品名称</h3>
         <input className="name-dialog-input" value={value} maxLength={100} placeholder="产品名称" aria-label="产品名称" onChange={(event) => setValue(event.target.value)} />
