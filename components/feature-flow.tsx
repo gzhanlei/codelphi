@@ -36,10 +36,12 @@ function NodeText({ node }: { node: FlowNode }) {
 }
 
 function Node({ node }: { node: FlowNode }) {
+  const tooltip = `${node.title}${node.outcome ? ` → ${node.outcome}` : ""}`;
   return (
     <g className={`flow-node ${node.kind}`}>
       <rect x={node.x} y={node.y} width={160} height={70} rx={8} />
-      <title>{node.title}{node.outcome ? ` → ${node.outcome}` : ""}</title>
+      {/* React 19 会把 <title> 当文档元数据提升到 head，SVG 内的悬浮提示必须用原始 HTML 注入。 */}
+      <title dangerouslySetInnerHTML={{ __html: tooltip }} />
       <NodeText node={node} />
     </g>
   );

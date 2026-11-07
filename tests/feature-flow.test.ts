@@ -95,3 +95,21 @@ describe("feature flow generation", () => {
     expect(flow.nodes.find((node) => node.id === "ER-1")).toMatchObject({ x: 390, y: 150 });
   });
 });
+
+describe("FeatureFlow component", () => {
+  it("keeps the full (unclipped) title and outcome in the node hover tooltip", async () => {
+    const { createElement } = await import("react");
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const { FeatureFlow } = await import("../components/feature-flow");
+    const longOutcome = "这是一个特别长的结果描述，用来验证截断之后完整文本仍然出现在悬浮提示里不丢失";
+    const html = renderToStaticMarkup(createElement(FeatureFlow, {
+      featureName: "测试功能",
+      scenarios: [{
+        id: 1, featureId: 1, reference: "HP-1", context: "情境", action: "操作", outcome: longOutcome,
+        category: "happy", source: "generated", active: 1, evidence: "[]", staleSince: null, staleChangeId: null,
+      } as never],
+    }));
+    expect(html).toContain(clipFlowLabel(longOutcome));
+    expect(html).toContain(longOutcome);
+  });
+});
