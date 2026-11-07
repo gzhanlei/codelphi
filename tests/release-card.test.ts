@@ -30,8 +30,8 @@ function renderCard(overrides: { defaultOpen?: boolean; behaviorChanges?: Behavi
 }
 
 const tasks: RegressionTaskView[] = [
-  { taskId: 9, releaseId: 7, subject: { kind: "scenario", scenarioId: 501 }, status: "pending", checkedBy: null, checkedAt: null, skipReason: null, failureNote: null, featureName: "统一登录", reference: "HP-1", primaryChangeId: 101, sources: [101], reasons: [{ hitType: "behavior_change", matchedPath: null, featureId: 11, scenarioId: 501 }] },
-  { taskId: 10, releaseId: 7, subject: { kind: "scenario", scenarioId: 502 }, status: "pending", checkedBy: null, checkedAt: null, skipReason: null, failureNote: null, featureName: "统一登录", reference: "HP-2", primaryChangeId: 102, sources: [102], reasons: [{ hitType: "behavior_change", matchedPath: null, featureId: 11, scenarioId: 502 }] },
+  { taskId: 9, releaseId: 7, subject: { kind: "scenario", scenarioId: 501 }, status: "pending", checkedBy: null, checkedAt: null, skipReason: null, failureNote: null, featureName: "统一登录", reference: "HP-1", primaryChangeId: 101, scenarioContext: null, scenarioAction: null, sources: [101], reasons: [{ hitType: "behavior_change", matchedPath: null, featureId: 11, scenarioId: 501 }] },
+  { taskId: 10, releaseId: 7, subject: { kind: "scenario", scenarioId: 502 }, status: "pending", checkedBy: null, checkedAt: null, skipReason: null, failureNote: null, featureName: "统一登录", reference: "HP-2", primaryChangeId: 102, scenarioContext: null, scenarioAction: null, sources: [102], reasons: [{ hitType: "behavior_change", matchedPath: null, featureId: 11, scenarioId: 502 }] },
 ];
 
 describe("release card collapse", () => {
@@ -76,7 +76,7 @@ describe("regression task rendering", () => {
     const html = renderCard({
       defaultOpen: true,
       tasks: [
-        { ...tasks[1], primaryChangeId: null, sources: [], reasons: [{ hitType: "evidence_path", matchedPath: "lib/token.ts", featureId: 11, scenarioId: 502 }] },
+        { ...tasks[1], primaryChangeId: null, scenarioContext: null, scenarioAction: null, sources: [], reasons: [{ hitType: "evidence_path", matchedPath: "lib/token.ts", featureId: 11, scenarioId: 502 }] },
       ],
     });
     expect(html).toContain("影响面推荐");

@@ -144,6 +144,7 @@ export async function loadRegressionTasks(productId: number, execute: Execute = 
             t.spec_scenario_id AS specScenarioId, t.spec_change_id AS specChangeId,
             COALESCE(ss.reference, c.scenario_reference, NULL) AS reference,
             COALESCE(sf.name, c.feature_name) AS featureName,
+            ss.context AS scenarioContext, ss.action AS scenarioAction,
             (SELECT s.spec_change_id FROM regression_task_sources s
              JOIN spec_changes pc ON pc.id = s.spec_change_id AND pc.entity_type = 'scenario' AND pc.kind <> 'removed'
              WHERE s.task_id = t.id LIMIT 1) AS primaryChangeId
@@ -155,7 +156,7 @@ export async function loadRegressionTasks(productId: number, execute: Execute = 
      WHERE r.product_id = ?
      ORDER BY r.committed_at DESC, sf.name, ss.reference, t.id`,
     [productId],
-  ) as [Array<{ taskId: number; releaseId: number; status: RegressionTaskStatus; checkedBy: string | null; checkedAt: Date | null; skipReason: string | null; failureNote: string | null; specScenarioId: number | null; specChangeId: number | null; reference: string | null; featureName: string | null; primaryChangeId: number | null }>, unknown];
+  ) as [Array<{ taskId: number; releaseId: number; status: RegressionTaskStatus; checkedBy: string | null; checkedAt: Date | null; skipReason: string | null; failureNote: string | null; specScenarioId: number | null; specChangeId: number | null; reference: string | null; featureName: string | null; scenarioContext: string | null; scenarioAction: string | null; primaryChangeId: number | null }>, unknown];
 
   const [sourceRows] = await execute(
     `SELECT s.task_id AS taskId, s.spec_change_id AS changeId FROM regression_task_sources s
@@ -196,6 +197,8 @@ export async function loadRegressionTasks(productId: number, execute: Execute = 
     featureName: row.featureName ?? "",
     reference: row.reference,
     primaryChangeId: row.primaryChangeId === null ? null : Number(row.primaryChangeId),
+    scenarioContext: row.scenarioContext,
+    scenarioAction: row.scenarioAction,
     sources: sourcesByTask.get(Number(row.taskId)) ?? [],
     reasons: reasonsByTask.get(Number(row.taskId)) ?? [],
   }));

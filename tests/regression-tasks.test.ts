@@ -194,6 +194,7 @@ describe("regression markdown export", () => {
       featureName: "统一登录",
       reference: "HP-1",
       primaryChangeId: 101,
+      scenarioContext: null, scenarioAction: null,
       sources: [101, 102],
       reasons: [
         { hitType: "behavior_change", matchedPath: null, featureId: 11, scenarioId: 501 },
@@ -212,13 +213,25 @@ describe("regression markdown export", () => {
 
   it("renders failure notes and skip reasons", () => {
     const tasks: RegressionTaskView[] = [
-      { taskId: 9, releaseId: 7, subject: { kind: "change", changeId: 101 }, status: "failed", checkedBy: "qa@example.com", checkedAt: null, skipReason: null, failureNote: "BUG-12", featureName: "统一登录", reference: "HP-1", primaryChangeId: 101, sources: [101], reasons: [{ hitType: "behavior_change", matchedPath: null, featureId: 11, scenarioId: 501 }] },
-      { taskId: 10, releaseId: 7, subject: { kind: "scenario", scenarioId: 502 }, status: "skipped", checkedBy: "qa@example.com", checkedAt: null, skipReason: "与本次改动无关", failureNote: null, featureName: "统一登录", reference: "HP-2", primaryChangeId: null, sources: [], reasons: [{ hitType: "feature_wide", matchedPath: "lib/login-shared.ts", featureId: 11, scenarioId: 502 }] },
+      { taskId: 9, releaseId: 7, subject: { kind: "change", changeId: 101 }, status: "failed", checkedBy: "qa@example.com", checkedAt: null, skipReason: null, failureNote: "BUG-12", featureName: "统一登录", reference: "HP-1", primaryChangeId: 101, scenarioContext: null, scenarioAction: null, sources: [101], reasons: [{ hitType: "behavior_change", matchedPath: null, featureId: 11, scenarioId: 501 }] },
+      { taskId: 10, releaseId: 7, subject: { kind: "scenario", scenarioId: 502 }, status: "skipped", checkedBy: "qa@example.com", checkedAt: null, skipReason: "与本次改动无关", failureNote: null, featureName: "统一登录", reference: "HP-2", primaryChangeId: null, scenarioContext: null, scenarioAction: null, sources: [], reasons: [{ hitType: "feature_wide", matchedPath: "lib/login-shared.ts", featureId: 11, scenarioId: 502 }] },
     ];
     const markdown = renderRegressionTaskMarkdown({ productName: "Radar", release, changes, tasks });
     expect(markdown).toContain("未通过：BUG-12");
     expect(markdown).toContain("整功能受影响 lib/login-shared.ts");
     expect(markdown).toContain("已跳过：与本次改动无关");
+  });
+
+  it("renders impact-only tasks with the scenario context so QA knows what to test", () => {
+    const tasks: RegressionTaskView[] = [{
+      taskId: 11, releaseId: 7, subject: { kind: "scenario", scenarioId: 502 }, status: "pending", checkedBy: null, checkedAt: null,
+      skipReason: null, failureNote: null, featureName: "统一登录", reference: "HP-2", primaryChangeId: null, sources: [],
+      reasons: [{ hitType: "evidence_path", matchedPath: "lib/token.ts", featureId: 11, scenarioId: 502 }],
+      scenarioContext: "用户在登录页勾选记住状态", scenarioAction: "关闭浏览器后重新访问",
+    }];
+    const markdown = renderRegressionTaskMarkdown({ productName: "Radar", release, changes, tasks });
+    expect(markdown).toContain("HP-2 — 用户在登录页勾选记住状态 关闭浏览器后重新访问");
+    expect(markdown).toContain("影响面推荐");
   });
 
   it("renders a slimmed-down regression suggestion when no tasks exist", () => {

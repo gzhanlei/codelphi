@@ -64,6 +64,9 @@ export interface RegressionTaskView {
   reference: string | null;
   /** 直接行为变化来源的 spec_change id，用于复用行为变化卡片渲染；纯影响面推荐的任务为 null。 */
   primaryChangeId: number | null;
+  /** 纯影响面推荐任务带的场景内容，让 QA 不用查规格就知道要测什么。 */
+  scenarioContext: string | null;
+  scenarioAction: string | null;
   sources: number[];
   reasons: PlannedReason[];
 }
@@ -158,7 +161,8 @@ function taskSubjectText(task: RegressionTaskView, changeById: Map<number, Behav
     }
   }
   if (task.subject.kind === "scenario") {
-    return `[回归] ${task.reference ?? `场景 ${task.subject.scenarioId}`}（影响面推荐）`;
+    const scenario = [task.scenarioContext, task.scenarioAction].filter(Boolean).join(" ");
+    return `[回归] ${task.reference ?? `场景 ${task.subject.scenarioId}`}${scenario ? ` — ${scenario}` : ""}（影响面推荐）`;
   }
   const change = changeById.get(task.subject.changeId);
   if (change) {
