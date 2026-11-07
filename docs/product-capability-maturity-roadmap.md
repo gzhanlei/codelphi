@@ -62,7 +62,7 @@ CoDelphi 不负责宣称自己理解了整个软件系统，而是负责让团�
 | Chandler OAuth 登录 | ✅ 已实现 | `lib/chandler.ts`、`lib/oauth.ts`、`lib/session.ts` |
 | GitHub App / webhook / 仓库连接 | ✅ 已实现 | `lib/github-app.ts`、`lib/github-webhook.ts`、`lib/github-connections.ts`、migrations `003`/`012`/`013` |
 | 公开只读 demo 页（匿名可用性收敛） | ✅ 已实现 | `lib/public-demo.ts`、migration `025_product_public_demo.sql`、`tests/demo-guard.test.ts`（B3，f12699c） |
-| 影响面 → 回归范围联动（P0） | ✅ 已实现（2026-11-08） | 场景级回归任务：`lib/regression-tasks.ts` + `lib/regression-task-view.ts`、migration `027_regression_tasks.sql`（任务 (release, scenario) 唯一、来源多对多、三类推荐理由、四态验证）、分析事务内生成（`lib/analysis.ts` `ensureRegressionTasks` + `release_files`）、规格页与 Markdown 导出（`components/release-card.tsx`）；行为证据：`tests/regression-tasks.test.ts` 等 23 项。**线上端到端验证待部署后执行** |
+| 影响面 → 回归范围联动（P0） | ✅ 已实现并经生产端到端验收（2026-11-08） | 场景级回归任务：`lib/regression-tasks.ts` + `lib/regression-task-view.ts`、migration `027_regression_tasks.sql`（任务 (release, scenario) 唯一、来源多对多、三类推荐理由、四态验证）、分析事务内生成（`lib/analysis.ts` `ensureRegressionTasks` + `release_files`）、规格页与 Markdown 导出（`components/release-card.tsx`）；行为证据：`tests/regression-tasks.test.ts` 等。生产验收（release 71 / run 100）：4 个改动文件落库、20 条任务分析时生成、5 条 evidence_path 命中精确对应被触碰文件与场景、导出含合并理由 |
 | 规格确认状态（人工核实 ≠ 人工编辑） | ⚠️ 部分实现 | `source`（来源）与 `stale_since`（时效）已有；**无**独立 `verification_status`/`verified_at`/`verified_by`；且现语义为「编辑即清除 stale」（`spec-editor-service.ts:110,164`），编辑与核实混同 |
 | 知识健康视图（stale 分布 / 验证覆盖 / 维护分布） | ⚠️ 部分实现 | 可冷启动数据：`stale_since`（`product-details.ts:42,91` 已透出）、`regression_items.checked_by`（验证人，`checked_at`）。**缺口（2026-11-08 代码核实）：规格编辑归因未持久化**——`spec-editor-service.ts` 的全部 INSERT/UPDATE 均不记录编辑人，migrations 无归因列；「维护分布」维度缺数据基础（见 P2） |
 | 多代码托管（M12） | ⚠️ 部分实现 | adapter 抽象已建：`lib/code-hosting/`（`adapter.ts`/`registry.ts`）；仅 `github-provider.ts`，Gitee/GitLab 未实现 |
@@ -76,7 +76,9 @@ CoDelphi 不负责宣称自己理解了整个软件系统，而是负责让团�
 
 ## P0 · 影响面 → 场景 → 回归联动（QA 工作流闭环）
 
-**状态：已实现（2026-11-08）。** 实现与设计约束的对应：任务 = 场景验证任务（`(release_id, spec_scenario_id)` 唯一，migration 027 CHECK 约束保证主体二选一）；变化来源多对多汇总（`regression_task_sources`）；推荐理由为可追溯关联记录（`regression_task_reasons`，三类：behavior_change / evidence_path / feature_wide）；四态验证 + 跳过原因 + 未通过备注（`regression_tasks.status/skip_reason/failure_note`）；导出含理由与来源计数。剩余：部署后做真实变更的端到端验收（下述验收标准）。
+**状态：已实现，生产端到端验收通过（2026-11-08）。** 实现与设计约束的对应：任务 = 场景验证任务（`(release_id, spec_scenario_id)` 唯一，migration 027 CHECK 约束保证主体二选一）；变化来源多对多汇总（`regression_task_sources`）；推荐理由为可追溯关联记录（`regression_task_reasons`，三类：behavior_change / evidence_path / feature_wide）；四态验证 + 跳过原因 + 未通过备注（`regression_tasks.status/skip_reason/failure_note`）；导出含理由与来源计数。
+
+**端到端验收记录**：部署 migration 027（生产回填 2520 条历史任务、旧表下线）后，真实推送 `7fa4230`（影响面推荐任务携带场景上下文）触发 webhook 分析（run 100 succeeded）：`release_files` 落库 4 个改动文件 → 20 条场景任务在分析事务内生成 → 5 条 evidence_path 命中精确对应被触碰文件（`lib/regression-task-view.ts`、`tests/regression-tasks.test.ts`）与 QA 回归清单功能的 HP-3/EC-1/EC-2 等场景 → 导出正确渲染「行为变化；证据路径命中 …」合并理由。验收中一项附带发现：docs-only 推送（run 99）被 AI 证据守卫正确拒绝（AI 引用了不在源码切片与 diff 内的证据路径）——守卫行为符合「可追溯证据」红线，属 AI 瞬时错误类，重试通过。
 
 **最高优先级。** 强化 QA 最强场景，把两条独立链路合成一条：
 
