@@ -19,3 +19,5 @@ export async function POST(_request: NextRequest, context: { params: Promise<{ s
   after(() => runAnalysis(runId));
   return NextResponse.json({ accepted: true, runId }, { status: 202 });
 }
+
+// PR 预演端到端测试提交:验证 M5 反向影响索引与 PR 评论链路。
