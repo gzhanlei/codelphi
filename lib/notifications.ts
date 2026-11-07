@@ -267,3 +267,5 @@ export async function sendNotificationChannelTest(channelId: number, productName
   await post(target, JSON.stringify(row.kind === "slack" ? { text } : { test: true, product: productName, sentAt: new Date().toISOString() }));
   return { productId: Number(row.product_id) };
 }
+
+// 影子场景漂移排查注释(带 INCREMENTAL_SHADOW_DEBUG dump)。
