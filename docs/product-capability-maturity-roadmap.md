@@ -2,7 +2,7 @@
 
 > 本文档是一份**基线文档**：严格区分「已实现 / 部分实现 / 未实现」，供后续任何评审者（人类或 AI）先理解真实产品状态，而不是从官网文案或推断出发。
 >
-> **基线元数据**：最后核实日期 2026-11-08；对账代码 commit `e99f594`（2026-11-07 23:30 +0800，main）；migrations 至 `026_incremental_default.sql`。核心能力的部分条目（滑窗坍缩 P0 修复、webhook 健康）经过 2026-11-07 生产只读验证（见 [demo-improvement-plan.md](demo-improvement-plan.md)）；其余能力以代码与测试为证，未逐一做线上端到端验证。
+> **基线元数据**：最后核实日期 2026-11-08（P0 部署后对账）；对账代码范围 `e99f594…502fbe2`（main）；migrations 至 `027_regression_tasks.sql`（2026-11-08 生产已应用：2520 条历史任务回填、旧 regression_items 下线）。P0 影响面→回归联动已部署生产（codelphi.service 重启于 migration 之后），线上端到端验收见 P0 节。核心能力的部分条目（滑窗坍缩 P0 修复、webhook 健康）经过 2026-11-07 生产只读验证（见 [demo-improvement-plan.md](demo-improvement-plan.md)）；其余能力以代码与测试为证。
 >
 > **修订记录**：2026-11-07 初稿；2026-11-08 按外部评审修订后冻结 v1（P0/P1 数据模型收敛、P2 归因审计、证据分级、基线元数据）。
 >
