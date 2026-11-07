@@ -118,7 +118,7 @@ export function incrementalScopeSection(affectedFeatureNames?: string[]) {
     "本次只深入分析以下功能（这些功能的代码被本次提交触及）：",
     ...affectedFeatureNames.map((name) => `- ${name}`),
     "features 数组必须且只能包含上述功能；其余功能由系统沿用上一版规格，请勿输出。",
-    "对上述每个功能，输出其当前行为的完整清单，覆盖程度必须与全量分析同等完整，不得少于全量分析的覆盖；增量模式不适用「每个功能保留最关键的 1-5 个场景」的约束，happy/edge/error 全部类别逐一检查，边界与错误路径不得省略。",
+    "对上述每个功能，输出其当前行为的完整清单，覆盖程度与全量分析相当（通常每功能 3-8 个场景），happy/edge/error 全部类别逐一检查，边界与错误路径不得省略。",
     "product 简介与 release 变化仍需覆盖整个提交的内容。",
   ].join("\n");
 }
