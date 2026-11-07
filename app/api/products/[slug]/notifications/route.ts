@@ -29,3 +29,5 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
   await saveNotificationChannel(access.product.id, parsed.data.kind, parsed.data.target);
   return NextResponse.json({ status: "saved" }, { status: 201 });
 }
+
+// 影子对比修复后的链路验证注释。
