@@ -21,7 +21,7 @@ export function AppShell({ user, organizationName, children }: { user: SessionUs
       }
       topbar={
         <>
-          <span className="environment"><i />{organizationName ?? "内部工作区"}</span>
+          <span className="environment"><i />{organizationName ?? "工作区"}</span>
           <div className="user-menu">
             <span className="avatar">{userInitial(user)}</span>
             <span className="user-name">{userDisplayName(user)}</span>

@@ -15,16 +15,16 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           <h1>读懂每一次<br />产品变化。</h1>
           <p>从 GitHub 代码到可追溯的产品规格、发布摘要和团队知识，保持所有产品同频。</p>
         </div>
-        <div className="auth-foot">BUILT FOR THE CHANDLER PRODUCT FAMILY</div>
+        <div className="auth-foot">SOURCE-BACKED PRODUCT KNOWLEDGE</div>
       </section>
       <section className="auth-panel">
         <div className="login-card">
-          <span className="eyebrow">内部工作区</span>
+          <span className="eyebrow">工作区登录</span>
           <h2>欢迎回来</h2>
           <p>使用 Chandler 统一账号继续。CoDelphi 不保存你的账号密码。</p>
           <LoginError error={error} />
           <Link className="login-button" href="/auth/login">使用 Chandler 登录 <span>→</span></Link>
-          <small>仅允许团队名单中的成员访问</small>
+          <small>所有 Chandler 用户均可登录，自动创建个人工作区</small>
         </div>
       </section>
     </main>

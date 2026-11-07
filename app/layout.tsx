@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: { default: "CoDelphi", template: "%s · CoDelphi" },
-  description: "Chandler 内部产品知识与变更中心",
+  description: "从 GitHub 代码维护可追溯的产品规格与变更知识",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

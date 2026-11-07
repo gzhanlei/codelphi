@@ -126,7 +126,7 @@ export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext
   const continuity = featureContinuitySection(context.previousFeatureNames);
   const scope = incrementalScopeSection(context.affectedFeatureNames);
   const prompt = [
-    "你在维护一个内部产品知识库。仅根据给定代码和 diff 输出事实，不要补充猜测。",
+    "你在维护一个产品知识库。仅根据给定代码和 diff 输出事实，不要补充猜测。",
     "用简体中文生成：1) 产品简介；2) 当前产品功能规格；3) 本次发布的用户可感知变化。",
     "产品简介用一到两句话说明服务对象和核心能力，不超过 200 字，必须概括整个代码库而不是本次提交，并给出输入文件中的 evidence；不要只写产品名或营销词。",
     "规格按功能组织，每个场景包含情境、操作、结果，分类为 happy/edge/error，reference 使用 HP-n/EC-n/ER-n。",
