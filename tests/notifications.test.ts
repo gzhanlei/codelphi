@@ -222,19 +222,22 @@ describe("email delivery via Chandler", () => {
     );
   });
 
-  it("sends a test email through the Chandler mail API", async () => {
-    vi.stubEnv("CHANDLER_MAIL_API_KEY", "test-key");
+  it("sends a test email through the Chandler mail API with client credentials", async () => {
+    vi.stubEnv("CHANDLER_CLIENT_ID", "client-codelphi");
+    vi.stubEnv("CHANDLER_CLIENT_SECRET", "client-secret");
     const fetcher = vi.fn(async () => new Response(JSON.stringify({ data: { status: "sent" } }), { status: 200 }));
     vi.stubGlobal("fetch", fetcher);
     await sendEmailNotification("qa@example.com", "【CoDelphi】Radar 通知渠道测试", "正文");
     const [url, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit];
     expect(String(url)).toContain("/v1/mail/send");
-    expect(init).toMatchObject({ method: "POST", headers: { authorization: "Bearer test-key" } });
+    expect(init).toMatchObject({ method: "POST" });
+    const auth = (init.headers as Record<string, string>).authorization;
+    expect(auth).toBe(`Basic ${Buffer.from("client-codelphi:client-secret").toString("base64")}`);
     expect(JSON.parse(String(init.body))).toMatchObject({ to: "qa@example.com", subject: "【CoDelphi】Radar 通知渠道测试" });
   });
 
-  it("fails with a clear error when the Chandler mail API key is not configured", async () => {
-    vi.stubEnv("CHANDLER_MAIL_API_KEY", "");
-    await expect(sendEmailNotification("qa@example.com", "s", "t")).rejects.toThrow("CHANDLER_MAIL_API_KEY not configured");
+  it("fails with a clear error when Chandler client credentials are not configured", async () => {
+    vi.stubEnv("CHANDLER_CLIENT_ID", "");
+    await expect(sendEmailNotification("qa@example.com", "s", "t")).rejects.toThrow("CHANDLER_CLIENT_ID is not configured");
   });
 });

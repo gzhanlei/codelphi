@@ -239,13 +239,14 @@ export async function getUserEmailPref(productId: number, userId: number, execut
   return rows.length > 0 && Number(rows[0].email_enabled) === 1;
 }
 
-/** 默认邮件通道：Chandler /v1/mail/send，服务鉴权走 CHANDLER_MAIL_API_KEY（Chandler 用户 API key，属主需为平台超管）。 */
+/** 默认邮件通道：Chandler /v1/mail/send，应用级认证复用 OAuth 客户端凭证（CHANDLER_CLIENT_ID/SECRET），资格由 Chandler 伙伴审核门禁。 */
 export async function sendEmailNotification(to: string, subject: string, text: string) {
-  const apiKey = process.env.CHANDLER_MAIL_API_KEY?.trim();
-  if (!apiKey) throw new Error("CHANDLER_MAIL_API_KEY not configured");
+  const clientId = requiredEnv("CHANDLER_CLIENT_ID");
+  const clientSecret = requiredEnv("CHANDLER_CLIENT_SECRET");
+  const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
   const response = await fetch(`${chandlerBaseUrl()}/v1/mail/send`, {
     method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+    headers: { "content-type": "application/json", authorization: `Basic ${basic}` },
     body: JSON.stringify({ to, subject, text }),
     cache: "no-store",
     signal: AbortSignal.timeout(15_000),
