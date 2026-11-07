@@ -56,8 +56,23 @@ describe("analysis persistence guards", () => {
 
   it("retains generated parents that still have active children", async () => {
     const connection = { execute: vi.fn(async () => [{}]) } as unknown as PoolConnection;
-    await upsertGeneratedSpec(connection, run, { ...result, features: [] });
+    await upsertGeneratedSpec(connection, run, []);
     expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("LEFT JOIN features child ON child.parent_id = f.id AND child.active = 1"), [4]);
     expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("AND child.id IS NULL"), [4]);
+    // 空合并列表(极端情形)下没有任何重新激活 upsert:工作台全下线是诚实状态
+    expect(connection.execute).toHaveBeenCalledTimes(2);
+  });
+
+  it("reactivates carried features passed in the merged spec, not just AI output", async () => {
+    const connection = { execute: vi.fn(async () => [{}]) } as unknown as PoolConnection;
+    // 增量模式:AI 原始输出只含 Auth;合并结果额外含 carried 的 Legacy 与 Manual(人工条目)
+    await upsertGeneratedSpec(connection, run, [
+      { name: "Auth", summary: "Auth", scenarios: [] },
+      { name: "Legacy", summary: "Legacy", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy" as const, evidence: [] }] },
+      { name: "Manual feature", summary: "Curated", scenarios: [], source: "manual" as const },
+    ]);
+    const upserts = (connection.execute as ReturnType<typeof vi.fn>).mock.calls.filter((call: unknown[]) => String(call[0]).includes("INSERT INTO features"));
+    const names = upserts.map((call: unknown[]) => (call[1] as unknown[])[1]);
+    expect(names).toEqual(["Auth", "Legacy", "Manual feature"]);
   });
 });

@@ -76,7 +76,7 @@ async function upsertFeature(connection: PoolConnection, run: RunContext, featur
   }
 }
 
-export async function upsertGeneratedSpec(connection: PoolConnection, run: RunContext, result: AnalysisResult) {
+export async function upsertGeneratedSpec(connection: PoolConnection, run: RunContext, features: AnalysisResult["features"]) {
   await connection.execute(
     `UPDATE features f
      LEFT JOIN features child ON child.parent_id = f.id AND child.active = 1
@@ -91,7 +91,7 @@ export async function upsertGeneratedSpec(connection: PoolConnection, run: RunCo
      SET s.active = 0 WHERE f.product_id = ? AND s.source = 'generated'`,
     [run.productId],
   );
-  for (const feature of result.features) await upsertFeature(connection, run, feature);
+  for (const feature of features) await upsertFeature(connection, run, feature);
 }
 
 export async function upsertRelease(connection: PoolConnection, run: RunContext, result: AnalysisResult, change: ChangeContext, specVersionId: number | null = null) {
@@ -126,10 +126,12 @@ async function saveResult(run: RunContext, result: AnalysisResult, change: Chang
       "UPDATE products SET description = ?, description_source = 'generated', description_evidence = ? WHERE id = ? AND description = ''",
       [result.product.description, JSON.stringify(result.product.evidence), run.productId],
     );
-    const { specVersionId, features } = await insertSpecVersion(connection, run, result, affectedKeys ? { affectedKeys } : {});
+    const { specVersionId, features: mergedFeatures } = await insertSpecVersion(connection, run, result, affectedKeys ? { affectedKeys } : {});
     await rebuildSpecFileIndex(connection, run.repositoryId, specVersionId);
     await markSpecDrift(connection, run.productId, specVersionId);
-    await upsertGeneratedSpec(connection, run, result);
+    // P0(I1):下线基准必须是 carry-forward 合并后的完整规格——用 AI 原始输出会让
+    // 增量模式把未受影响的 generated 功能全部下线,工作台坍缩为本次触及的功能。
+    await upsertGeneratedSpec(connection, run, mergedFeatures);
     await upsertRelease(connection, run, result, change, specVersionId);
     await connection.execute("UPDATE analysis_runs SET status = 'succeeded', finished_at = CURRENT_TIMESTAMP(3) WHERE id = ?", [run.id]);
     await connection.commit();
