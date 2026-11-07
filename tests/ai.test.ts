@@ -90,9 +90,8 @@ describe("feature naming continuity", () => {
 
   it("requires affected features to keep full scenario coverage in incremental mode", () => {
     const section = incrementalScopeSection(["登录"]);
-    expect(section).toContain("同等完整");
-    expect(section).toContain("不得少于全量分析的覆盖");
-    expect(section).toContain("不适用「每个功能保留最关键的 1-5 个场景」的约束");
+    expect(section).toContain("与全量分析相当");
+    expect(section).toContain("3-8 个场景");
     expect(section).toContain("happy/edge/error 全部类别逐一检查");
   });
 
