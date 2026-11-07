@@ -52,7 +52,7 @@ CoDelphi 不负责宣称自己理解了整个软件系统，而是负责让团�
 | 规格漂移追踪（M8） | ✅ 已实现 | `lib/spec-drift.ts`、migration `018_spec_drift.sql`（`stale_since`/`stale_change_id`）；行为证据：`tests/spec-drift.test.ts` |
 | 影响面查询（文件路径 → 受影响功能/场景，事前影响，规格页入口） | ✅ 已实现 | `lib/spec-file-index.ts`、`app/api/products/[slug]/impact/route.ts`、`components/impact-query.tsx`（C2，commit 70ba11b + ec37f45）；行为证据：`tests/impact-query.test.ts`、`tests/impact-preview.test.ts`、`tests/spec-file-index.test.ts` |
 | PR 预演（受影响规格评论到 PR） | ✅ 已实现 | `lib/pr-preview.ts`（`AffectedSpecEntry`、issue comment upsert）；行为证据：`tests/pr-preview.test.ts` |
-| QA 回归清单（逐条勾选 + 标记人 + Markdown 导出） | ✅ 已实现 | `lib/regression.ts`、`lib/regression-view.ts`、migration `022_regression_items.sql`、`components/release-card.tsx`（B2，f7b0289）；行为证据：`tests/regression.test.ts` |
+| QA 回归清单（逐条勾选 + 标记人 + Markdown 导出） | ✅ 已实现 | 已并入场景级回归任务（见上）；原 `022_regression_items.sql` 变更级清单由 migration 027 迁移并下线（f7b0289 的标记人展示保留于任务模型） |
 | 行为变化通知分发（Slack / 通用 webhook / email 偏好） | ✅ 已实现 | `lib/notifications.ts`、`lib/notification-client.ts`、migrations `021_notification_channels`/`023_user_email_prefs` |
 | 稳定引用 + 规格搜索 + 导出（M3） | ✅ 已实现 | `lib/stable-links.ts`、`lib/spec-search.ts`、`lib/scenario-export.ts`、`app/api/products/[slug]/spec.json/route.ts` |
 | 进展摘要导出（CTO「对上说不清进展」） | ✅ 已实现 | `lib/progress-summary.ts`、`app/api/products/[slug]/progress-summary/route.ts`（B1，c968065）；行为证据：`tests/progress-summary.test.ts`、`tests/progress-summary-route.test.ts` |
@@ -62,7 +62,7 @@ CoDelphi 不负责宣称自己理解了整个软件系统，而是负责让团�
 | Chandler OAuth 登录 | ✅ 已实现 | `lib/chandler.ts`、`lib/oauth.ts`、`lib/session.ts` |
 | GitHub App / webhook / 仓库连接 | ✅ 已实现 | `lib/github-app.ts`、`lib/github-webhook.ts`、`lib/github-connections.ts`、migrations `003`/`012`/`013` |
 | 公开只读 demo 页（匿名可用性收敛） | ✅ 已实现 | `lib/public-demo.ts`、migration `025_product_public_demo.sql`、`tests/demo-guard.test.ts`（B3，f12699c） |
-| 影响面 → 回归范围联动 | ⚠️ 部分实现 | 两条链独立：影响面查询（`impact/route.ts`）与回归清单（`022_regression_items.sql`，粒度为 `release_id + spec_change_id`，无场景级关联、无推荐理由字段） |
+| 影响面 → 回归范围联动（P0） | ✅ 已实现（2026-11-08） | 场景级回归任务：`lib/regression-tasks.ts` + `lib/regression-task-view.ts`、migration `027_regression_tasks.sql`（任务 (release, scenario) 唯一、来源多对多、三类推荐理由、四态验证）、分析事务内生成（`lib/analysis.ts` `ensureRegressionTasks` + `release_files`）、规格页与 Markdown 导出（`components/release-card.tsx`）；行为证据：`tests/regression-tasks.test.ts` 等 23 项。**线上端到端验证待部署后执行** |
 | 规格确认状态（人工核实 ≠ 人工编辑） | ⚠️ 部分实现 | `source`（来源）与 `stale_since`（时效）已有；**无**独立 `verification_status`/`verified_at`/`verified_by`；且现语义为「编辑即清除 stale」（`spec-editor-service.ts:110,164`），编辑与核实混同 |
 | 知识健康视图（stale 分布 / 验证覆盖 / 维护分布） | ⚠️ 部分实现 | 可冷启动数据：`stale_since`（`product-details.ts:42,91` 已透出）、`regression_items.checked_by`（验证人，`checked_at`）。**缺口（2026-11-08 代码核实）：规格编辑归因未持久化**——`spec-editor-service.ts` 的全部 INSERT/UPDATE 均不记录编辑人，migrations 无归因列；「维护分布」维度缺数据基础（见 P2） |
 | 多代码托管（M12） | ⚠️ 部分实现 | adapter 抽象已建：`lib/code-hosting/`（`adapter.ts`/`registry.ts`）；仅 `github-provider.ts`，Gitee/GitLab 未实现 |
@@ -75,6 +75,8 @@ CoDelphi 不负责宣称自己理解了整个软件系统，而是负责让团�
 | 需求 / 设计决策等代码外信息接入 | ❌ 未实现 | — |
 
 ## P0 · 影响面 → 场景 → 回归联动（QA 工作流闭环）
+
+**状态：已实现（2026-11-08）。** 实现与设计约束的对应：任务 = 场景验证任务（`(release_id, spec_scenario_id)` 唯一，migration 027 CHECK 约束保证主体二选一）；变化来源多对多汇总（`regression_task_sources`）；推荐理由为可追溯关联记录（`regression_task_reasons`，三类：behavior_change / evidence_path / feature_wide）；四态验证 + 跳过原因 + 未通过备注（`regression_tasks.status/skip_reason/failure_note`）；导出含理由与来源计数。剩余：部署后做真实变更的端到端验收（下述验收标准）。
 
 **最高优先级。** 强化 QA 最强场景，把两条独立链路合成一条：
 
@@ -154,7 +156,7 @@ stateDiagram-v2
 - 相关代码变化后，受影响的已核实条目自动回到待核实；无关条目不受影响。
 - 规格页可按核实状态筛选。
 
-> 实施前置：本项暂不直接进入编码，先完成**状态转换表 + 历史核实记录数据模型设计**（评审结论），设计文档另立或更新本节。
+> 实施前置：本项暂不直接进入编码，先完成**状态转换表 + 历史核实记录数据模型设计**（评审结论）。设计已完成：[spec-verification-lifecycle-design.md](spec-verification-lifecycle-design.md)（2026-11-08），待拍板其遗留决策后实施。
 
 ## P2 · 组织知识健康（从查询走向主动发现）
 
