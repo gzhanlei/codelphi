@@ -1,15 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { loadRegressionStatuses, renderRegressionMarkdown } from "@/lib/regression";
-import { requireSessionUser } from "@/lib/session";
+import { getSessionUser } from "@/lib/session";
 import { requireProductAccess } from "@/lib/product-access";
+import { resolvePublicDemoProduct } from "@/lib/public-demo";
 import type { BehaviorChangeRow, ReleaseRow } from "@/lib/types";
 
+/** 回归清单导出：登录成员按工作区读取；公开 demo 产品允许匿名只读（与页面 demo 视图同权）。 */
 export async function GET(_request: NextRequest, context: { params: Promise<{ slug: string; id: string }> }) {
-  const user = await requireSessionUser();
   const { slug, id } = await context.params;
-  const access = await requireProductAccess(user, slug);
-  if (!access) return NextResponse.json({ error: "产品不存在或不属于当前工作区" }, { status: 404 });
+  const user = await getSessionUser();
+  const access = user ? await requireProductAccess(user, slug) : null;
+  let product: { id: number; name: string };
+  if (access) {
+    product = access.product;
+  } else {
+    const demo = await resolvePublicDemoProduct(slug);
+    if (!demo) return NextResponse.json({ error: user ? "产品不存在或不属于当前工作区" : "未登录" }, { status: user ? 404 : 401 });
+    product = demo;
+  }
 
   const releaseId = Number(id);
   if (!Number.isInteger(releaseId) || releaseId <= 0) return NextResponse.json({ error: "发布不存在" }, { status: 404 });
@@ -17,7 +26,7 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ sl
   const db = getDb();
   const [releaseRows] = await db.execute(
     "SELECT id, title, summary, sha, url, committed_at AS committedAt, spec_version_id AS specVersionId FROM releases WHERE id = ? AND product_id = ?",
-    [releaseId, access.product.id],
+    [releaseId, product.id],
   );
   const release = (releaseRows as ReleaseRow[])[0];
   if (!release) return NextResponse.json({ error: "发布不存在" }, { status: 404 });
@@ -35,8 +44,8 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ sl
     after: row.afterJson,
   })) as BehaviorChangeRow[];
 
-  const statuses = await loadRegressionStatuses(access.product.id);
-  const markdown = renderRegressionMarkdown({ productName: access.product.name, release, changes, statuses });
+  const statuses = await loadRegressionStatuses(product.id);
+  const markdown = renderRegressionMarkdown({ productName: product.name, release, changes, statuses });
   return new NextResponse(markdown, {
     headers: {
       "Content-Type": "text/markdown; charset=utf-8",

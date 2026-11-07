@@ -8,6 +8,7 @@ import { featureHref } from "@/lib/spec-editor-ui";
 export function SpecSearch({ slug }: { slug: string }) {
   const [query, setQuery] = useState("");
   const [result, setResult] = useState<SpecSearchResult | null>(null);
+  const [failed, setFailed] = useState(false);
   const [pending, setPending] = useState(false);
   const requestId = useRef(0);
 
@@ -15,14 +16,21 @@ export function SpecSearch({ slug }: { slug: string }) {
     const trimmed = query.trim();
     if (!trimmed) {
       setResult(null);
+      setFailed(false);
       return;
     }
     const id = ++requestId.current;
     const timer = setTimeout(async () => {
       setPending(true);
+      setFailed(false);
       try {
         const response = await fetch(`/api/products/${slug}/spec/search?q=${encodeURIComponent(trimmed)}`, { cache: "no-store" });
-        if (response.ok && requestId.current === id) setResult(await response.json() as SpecSearchResult);
+        if (!response.ok) throw new Error(`search failed: ${response.status}`);
+        const payload = await response.json() as SpecSearchResult;
+        if (requestId.current === id) setResult(payload);
+      } catch {
+        // 匿名 demo 下接口可能不可用：给出可见失败态，而不是静默无结果。
+        if (requestId.current === id) setFailed(true);
       } finally {
         if (requestId.current === id) setPending(false);
       }
@@ -41,6 +49,7 @@ export function SpecSearch({ slug }: { slug: string }) {
         onChange={(event) => setQuery(event.target.value)}
       />
       {pending ? <span className="spec-search-hint">搜索中…</span> : null}
+      {failed ? <p className="spec-search-hint" role="alert">搜索暂时不可用，请稍后重试。</p> : null}
       {result ? (
         <div className="spec-search-results">
           {result.features.map((feature) => (
