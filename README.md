@@ -57,7 +57,7 @@ openssl rand -hex 32  # 填入 GITHUB_WEBHOOK_SECRET
 
 编辑 `.env`，至少填写：
 
-- `DATABASE_URL`：腾讯云 MySQL 的 `mysql://` URL，数据库名为 `codelphi`。
+- `DATABASE_URL`：腾讯云 MySQL 的 `mysql://` URL，数据库名为 `radar`。
 - `CHANDLER_CLIENT_ID` / `CHANDLER_CLIENT_SECRET`。
 - `AUTH_ALLOWED_EMAILS`（可选）：特殊封闭部署的登录限制，英文逗号分隔；留空允许所有有效 Chandler 用户，不用于工作区成员管理。
 - `PUBLIC_DEMO_SLUGS`（可选）：公开只读 Demo 的产品 slug，英文逗号分隔（如 `reporadar`）。匿名访客可浏览该产品页面，所有保存/分析操作会弹出 Demo 提示而不发请求；留空关闭。
@@ -71,10 +71,10 @@ openssl rand -hex 32  # 填入 GITHUB_WEBHOOK_SECRET
 由 MySQL 管理员在**现有腾讯云实例**中执行（替换密码和网段，不要在聊天中提交真实密码）：
 
 ```sql
-CREATE DATABASE codelphi CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
-CREATE USER 'codelphi'@'%' IDENTIFIED BY 'replace-with-a-strong-password';
+CREATE DATABASE radar CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE USER 'radar'@'%' IDENTIFIED BY 'replace-with-a-strong-password';
 GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, INDEX, ALTER, REFERENCES, DROP
-ON codelphi.* TO codelphi@'%';
+ON radar.* TO radar@'%';
 FLUSH PRIVILEGES;
 ```
 
