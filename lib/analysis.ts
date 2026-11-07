@@ -9,6 +9,7 @@ import { loadAffectedFeatureKeys, rebuildSpecFileIndex } from "./spec-file-index
 import { resolveAnalysisMode } from "./incremental";
 import { compareIncrementalShadow } from "./incremental-shadow";
 import { incrementalShadowEnabled } from "./env";
+import type { SpecFeature } from "./spec-diff";
 import { markSpecDrift } from "./spec-drift";
 import { deliverAnalysisNotifications } from "./notifications";
 
@@ -76,7 +77,7 @@ async function upsertFeature(connection: PoolConnection, run: RunContext, featur
   }
 }
 
-export async function upsertGeneratedSpec(connection: PoolConnection, run: RunContext, features: AnalysisResult["features"]) {
+export async function upsertGeneratedSpec(connection: PoolConnection, run: RunContext, features: SpecFeature[]) {
   await connection.execute(
     `UPDATE features f
      LEFT JOIN features child ON child.parent_id = f.id AND child.active = 1
@@ -135,7 +136,7 @@ async function saveResult(run: RunContext, result: AnalysisResult, change: Chang
     await upsertRelease(connection, run, result, change, specVersionId);
     await connection.execute("UPDATE analysis_runs SET status = 'succeeded', finished_at = CURRENT_TIMESTAMP(3) WHERE id = ?", [run.id]);
     await connection.commit();
-    return { specVersionId, features };
+    return { specVersionId, features: mergedFeatures };
   } catch (error) {
     await connection.rollback();
     throw error;
