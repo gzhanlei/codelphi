@@ -7,8 +7,8 @@ async function seed() {
   try {
     const repository = parseRepository(process.env.GITHUB_REPOSITORY ?? "gzhanlei/codelphi");
     await db.execute(
-      `INSERT INTO products (slug, name, description)
-       VALUES ('radar', 'CoDelphi', '产品知识与变更中心：从代码和发布中维护可追溯的产品规格。')
+      `INSERT INTO products (slug, name, description, organization_id)
+       VALUES ('radar', 'CoDelphi', '产品知识与变更中心：从代码和发布中维护可追溯的产品规格。', 1)
        ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description)`,
     );
     const [products] = await db.execute("SELECT id FROM products WHERE slug = 'radar'");
