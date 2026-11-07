@@ -16,13 +16,13 @@ const behaviorChanges: BehaviorChangeRow[] = [
 ];
 const aiChanges: ChangeRow[] = [{ id: 201, releaseId: 7, featureName: "统一登录", kind: "changed", description: "登录跳转逻辑调整", userImpact: "", evidence: [] }];
 
-function renderCard(overrides: { defaultOpen?: boolean; behaviorChanges?: BehaviorChangeRow[]; aiChanges?: ChangeRow[] } = {}) {
+function renderCard(overrides: { defaultOpen?: boolean; behaviorChanges?: BehaviorChangeRow[]; aiChanges?: ChangeRow[]; statuses?: Record<string, { status: "pending" | "verified" | "skipped"; checkedBy: string | null }> } = {}) {
   return renderToStaticMarkup(createElement(ReleaseCard, {
     slug: "codelphi",
     release,
     changes: overrides.aiChanges ?? aiChanges,
     behaviorChanges: overrides.behaviorChanges ?? behaviorChanges,
-    statuses: {},
+    statuses: overrides.statuses ?? {},
     canEdit: false,
     defaultOpen: overrides.defaultOpen,
   }));
@@ -54,5 +54,23 @@ describe("release card collapse", () => {
     expect(html).not.toContain("release-details");
     expect(html).toContain("未发现规格行为变化");
     expect(html).toContain("瘦身回归");
+  });
+});
+
+describe("regression marker attribution", () => {
+  it("shows who marked a non-pending regression status", () => {
+    const html = renderCard({
+      defaultOpen: true,
+      statuses: { "7:101": { status: "verified", checkedBy: "pm@example.com" } },
+    });
+    expect(html).toContain("由 pm@example.com 标记");
+  });
+
+  it("does not show a marker for pending items or anonymous marks", () => {
+    const html = renderCard({
+      defaultOpen: true,
+      statuses: { "7:102": { status: "pending", checkedBy: "pm@example.com" }, "7:101": { status: "verified", checkedBy: null } },
+    });
+    expect(html).not.toContain("标记");
   });
 });

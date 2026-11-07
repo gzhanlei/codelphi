@@ -63,6 +63,7 @@ function RegressionChecklist({ slug, release, changes, statuses, canEdit }: {
           <h4>{featureName}</h4>
           {featureChanges.map((change) => {
             const status = statuses[regressionStatusKey(release.id, change.id)]?.status ?? "pending";
+            const checkedBy = statuses[regressionStatusKey(release.id, change.id)]?.checkedBy ?? null;
             return (
               <div className="regression-item" key={change.id}>
                 <BehaviorChangeItem change={change} />
@@ -77,6 +78,7 @@ function RegressionChecklist({ slug, release, changes, statuses, canEdit }: {
                     <option key={value} value={value}>{regressionStatusLabels[value]}</option>
                   ))}
                 </select>
+                {status !== "pending" && checkedBy ? <span className="regression-checked-by">由 {checkedBy} 标记</span> : null}
               </div>
             );
           })}
