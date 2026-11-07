@@ -8,7 +8,7 @@ import { ArchifyCommandError } from "../lib/archify-cli";
 import { readFile } from "node:fs/promises";
 
 vi.mock("node:fs/promises", () => ({ readFile: vi.fn() }));
-vi.mock("../lib/session", () => ({ requireSessionUser: vi.fn(async () => ({ sub: "user" })) }));
+vi.mock("../lib/session", () => ({ getSessionUser: vi.fn(async () => ({ sub: "user" })), requireSessionUser: vi.fn(async () => ({ sub: "user" })) }));
 vi.mock("../lib/product-access", () => ({
   requireProductAccess: vi.fn(async () => ({
     product: { id: 1, slug: "radar", name: "Radar", description: "", organizationId: 7 },
