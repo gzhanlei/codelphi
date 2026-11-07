@@ -41,3 +41,5 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
 // 全覆盖 scope 指令验证注释。
 
 // 漂移结构采样注释。
+
+// 有界覆盖措辞验证注释。
