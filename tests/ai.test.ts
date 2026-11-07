@@ -88,6 +88,14 @@ describe("feature naming continuity", () => {
     expect(incrementalScopeSection([])).toBeNull();
   });
 
+  it("requires affected features to keep full scenario coverage in incremental mode", () => {
+    const section = incrementalScopeSection(["登录"]);
+    expect(section).toContain("同等完整");
+    expect(section).toContain("不得少于全量分析的覆盖");
+    expect(section).toContain("不适用「每个功能保留最关键的 1-5 个场景」的约束");
+    expect(section).toContain("happy/edge/error 全部类别逐一检查");
+  });
+
   it("sends the continuity section in the gateway prompt when previous names are given", async () => {
     vi.stubEnv("AI_API_KEY", "key");
     vi.stubEnv("AI_MODEL", "test-model");
