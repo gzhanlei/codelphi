@@ -49,7 +49,8 @@ function ProductPageBody({ slug, view, mode, featureId, details, overview, actio
       {showFeedback && details.latestRun?.status === "failed" ? <AnalysisFeedbackButton slug={details.product.slug} /> : null}
       <ProductTabs slug={slug} view={view} featureCount={details.features.length} releaseCount={details.releases.length} showSettings={showSettings} />
       {settings}
-      <ProductView view={view} productSlug={slug} features={details.features} scenarios={details.scenarios} releases={details.releases} changes={details.changes} behaviorChanges={details.behaviorChanges} regressionStatuses={details.regressionStatuses} mode={mode} featureId={featureId} overview={overview} canEdit={canEdit} />
+      {/* settings 是独立视图；ProductView 对未知 view 会静默落到发布变化，这里显式排除 */}
+      {view === "settings" ? null : <ProductView view={view} productSlug={slug} features={details.features} scenarios={details.scenarios} releases={details.releases} changes={details.changes} behaviorChanges={details.behaviorChanges} regressionStatuses={details.regressionStatuses} mode={mode} featureId={featureId} overview={overview} canEdit={canEdit} />}
     </>
   );
 }
