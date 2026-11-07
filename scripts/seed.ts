@@ -20,6 +20,12 @@ async function seed() {
       [productId, repository.owner, repository.name, repository.defaultBranch],
     );
     console.log(`Registered CoDelphi: ${repository.owner}/${repository.name}`);
+    // 按 PUBLIC_DEMO_SLUGS 回填数据库公开演示开关（产品设置页可改；env 白名单仅作过渡兜底）。
+    const demoSlugs = (process.env.PUBLIC_DEMO_SLUGS ?? "").split(",").map((slug) => slug.trim().toLowerCase()).filter(Boolean);
+    for (const slug of demoSlugs) {
+      await db.execute("UPDATE products SET is_public_demo = 1 WHERE slug = ?", [slug]);
+      console.log(`Public demo enabled: ${slug}`);
+    }
   } finally {
     await db.end();
   }

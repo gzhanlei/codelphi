@@ -74,11 +74,11 @@ export async function getProductDetails(slug: string, organizationId?: number) {
   const db = getDb();
   const [products] = await db.execute(
     organizationId === undefined
-      ? "SELECT id, slug, name, description, description_source AS descriptionSource, description_evidence AS descriptionEvidence FROM products WHERE slug = ?"
-      : "SELECT id, slug, name, description, description_source AS descriptionSource, description_evidence AS descriptionEvidence FROM products WHERE slug = ? AND organization_id = ?",
+      ? "SELECT id, slug, name, description, description_source AS descriptionSource, description_evidence AS descriptionEvidence, is_public_demo AS isPublicDemo FROM products WHERE slug = ?"
+      : "SELECT id, slug, name, description, description_source AS descriptionSource, description_evidence AS descriptionEvidence, is_public_demo AS isPublicDemo FROM products WHERE slug = ? AND organization_id = ?",
     organizationId === undefined ? [slug] : [slug, organizationId],
   );
-  const product = (products as Array<{ id: number; slug: string; name: string; description: string; descriptionSource: "manual" | "generated"; descriptionEvidence: unknown }>)[0];
+  const product = (products as Array<{ id: number; slug: string; name: string; description: string; descriptionSource: "manual" | "generated"; descriptionEvidence: unknown; isPublicDemo?: number }>)[0];
   if (!product) return null;
 
   const [repositories] = await db.execute("SELECT provider, owner, name, default_branch AS defaultBranch FROM repositories WHERE product_id = ?", [product.id]);

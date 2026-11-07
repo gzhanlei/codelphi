@@ -19,11 +19,15 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ s
   const parsed = productUpdateSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "产品信息无效" }, { status: 400 });
 
-  const { name, slug: newSlug, description } = parsed.data;
+  const { name, slug: newSlug, description, isPublicDemo } = parsed.data;
   let currentSlug = slug;
   let currentName = access.product.name;
-  if (name !== undefined || newSlug !== undefined) {
-    const renamed = await updateProductIdentity(slug, access.product.organizationId, { name, newSlug });
+  if (name !== undefined || newSlug !== undefined || isPublicDemo !== undefined) {
+    // 公开演示影响匿名可见性：仅工作区成员可切换，产品级 editor 不能把产品变公开。
+    if (isPublicDemo !== undefined && access.via !== "organization") {
+      return NextResponse.json({ error: "只有工作区成员可以修改公开演示设置" }, { status: 403 });
+    }
+    const renamed = await updateProductIdentity(slug, access.product.organizationId, { name, newSlug, isPublicDemo });
     if (renamed.status === "not_found") return NextResponse.json(NOT_FOUND, { status: 404 });
     if (renamed.status === "slug_conflict") return NextResponse.json({ error: "该 Slug 已被同工作区其他产品使用" }, { status: 409 });
     currentSlug = renamed.slug;

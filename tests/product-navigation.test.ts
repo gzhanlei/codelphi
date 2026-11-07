@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { RepositoryLink } from "../components/product-navigation";
+import { ProductTabs, RepositoryLink } from "../components/product-navigation";
 
 describe("repository links", () => {
   it("renders the provider repository URL and default branch", () => {
@@ -15,5 +15,22 @@ describe("repository links", () => {
     expect(renderToStaticMarkup(createElement(RepositoryLink, { repository: { owner: "gzhanlei", name: "codelphi", defaultBranch: "main" } }))).toContain("https://github.com/gzhanlei/codelphi");
     expect(renderToStaticMarkup(createElement(RepositoryLink, {}))).toBe("");
     expect(() => renderToStaticMarkup(createElement(RepositoryLink, { repository: { provider: "", owner: "gzhanlei", name: "codelphi", defaultBranch: "main" } }))).toThrow();
+  });
+});
+
+describe("product tabs", () => {
+  const base = { slug: "codelphi", featureCount: 3, releaseCount: 5 };
+
+  it("shows the settings tab only when allowed", () => {
+    const withSettings = renderToStaticMarkup(createElement(ProductTabs, { ...base, view: "changes", showSettings: true }));
+    expect(withSettings).toContain("?view=settings");
+    expect(withSettings).toContain("设置");
+    const withoutSettings = renderToStaticMarkup(createElement(ProductTabs, { ...base, view: "changes" }));
+    expect(withoutSettings).not.toContain("设置");
+  });
+
+  it("marks the active view", () => {
+    const html = renderToStaticMarkup(createElement(ProductTabs, { ...base, view: "settings", showSettings: true }));
+    expect(html).toContain('href="/products/codelphi?view=settings"');
   });
 });

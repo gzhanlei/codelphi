@@ -31,4 +31,9 @@ describe("database migrations", () => {
     expect(sql).toContain("UNIQUE KEY product_slug_history_old_slug_unique (old_slug)");
     expect(sql).toContain("REFERENCES products(id) ON DELETE CASCADE");
   });
+
+  it("adds the public demo flag to products with a closed default", () => {
+    const sql = readFileSync(new URL("../migrations/025_product_public_demo.sql", import.meta.url), "utf8");
+    expect(sql).toContain("ALTER TABLE products ADD COLUMN is_public_demo TINYINT(1) NOT NULL DEFAULT 0");
+  });
 });

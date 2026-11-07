@@ -8,8 +8,8 @@ import { useDemoGuard } from "./demo-mode";
 
 const kindLabels: Record<NotificationChannelView["kind"], string> = { slack: "Slack", webhook: "通用 Webhook" };
 
-/** 产品概览里的通知渠道设置：每类渠道一条，目标加密存储，可启停、测试、删除。 */
-export function NotificationSettings({ slug }: { slug: string }) {
+/** 通知渠道设置（现挂产品设置页）：每类渠道一条，目标加密存储，可启停、测试、删除；viewer 仍可改自己的邮件偏好。 */
+export function NotificationSettings({ slug, canEditChannels = true }: { slug: string; canEditChannels?: boolean }) {
   const guard = useDemoGuard();
   const [channels, setChannels] = useState<NotificationChannelView[]>([]);
   const [kind, setKind] = useState<"slack" | "webhook">("slack");
@@ -64,7 +64,7 @@ export function NotificationSettings({ slug }: { slug: string }) {
           {emailPref === null ? "…" : emailPref ? "已开启，点击关闭" : "已关闭，点击开启"}
         </button>
       </div>
-      {channels.length > 0 ? (
+      {canEditChannels && channels.length > 0 ? (
         <ul className="notification-channel-list">
           {channels.map((channel) => (
             <li key={channel.id} className="notification-channel">
@@ -81,8 +81,9 @@ export function NotificationSettings({ slug }: { slug: string }) {
       ) : (
         <p className="empty-state">尚未配置通知渠道。</p>
       )}
-      <form
-        className="notification-form"
+      {canEditChannels ? (
+        <form
+          className="notification-form"
         onSubmit={(event) => {
           event.preventDefault();
           void act(async () => {
@@ -104,7 +105,8 @@ export function NotificationSettings({ slug }: { slug: string }) {
           onChange={(event) => setTarget(event.target.value)}
         />
         <button className="secondary-button" type="submit" disabled={pending}>{pending ? "处理中…" : "保存渠道"}</button>
-      </form>
+        </form>
+      ) : null}
       {error ? <p className="description-dialog-error" role="alert">{error}</p> : null}
       {notice && !error ? <p className="form-success" role="status">{notice}</p> : null}
     </section>

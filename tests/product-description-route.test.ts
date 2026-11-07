@@ -89,4 +89,21 @@ describe("product rename route", () => {
     expect(response.status).toBe(200);
     expect(updateProductDescription).toHaveBeenCalledWith("codelphi", 7, "概况");
   });
+
+  it("toggles the public demo flag for workspace members and rejects product-scoped editors", async () => {
+    vi.mocked(updateProductIdentity).mockResolvedValue({ status: "updated", id: 2, name: "SalesBuddy", slug: "salesbuddy" });
+    const response = await patchRequest("salesbuddy", { isPublicDemo: true });
+    expect(response.status).toBe(200);
+    expect(updateProductIdentity).toHaveBeenCalledWith("salesbuddy", 7, { isPublicDemo: true });
+
+    vi.mocked(requireProductAccess).mockResolvedValue({
+      product: { id: 2, slug: "salesbuddy", name: "SalesBuddy", description: "", organizationId: 7 },
+      organization: { id: 7, slug: "team", name: "Team", role: "editor" },
+      role: "editor",
+      via: "product",
+    });
+    const forbidden = await patchRequest("salesbuddy", { isPublicDemo: false });
+    expect(forbidden.status).toBe(403);
+    expect(updateProductIdentity).toHaveBeenCalledTimes(1);
+  });
 });

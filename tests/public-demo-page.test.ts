@@ -5,6 +5,7 @@ import ProductPage from "../app/products/[slug]/page";
 import { publicDemoSlugs } from "@/lib/env";
 import { getProductDetails } from "@/lib/product-details";
 import { requireProductAccess } from "@/lib/product-access";
+import { isPublicDemo } from "@/lib/public-demo";
 import { getSessionUser } from "@/lib/session";
 
 vi.mock("next/navigation", () => ({
@@ -12,6 +13,7 @@ vi.mock("next/navigation", () => ({
   notFound: vi.fn(() => { throw new Error("NOT_FOUND"); }),
   redirect: vi.fn((url: string) => { throw new Error(`NEXT_REDIRECT:${url}`); }),
 }));
+vi.mock("@/lib/public-demo", () => ({ isPublicDemo: vi.fn(async () => false), isPublicDemoProduct: vi.fn(async () => false) }));
 vi.mock("@/lib/session", () => ({ getSessionUser: vi.fn(async () => null) }));
 vi.mock("@/lib/product-access", () => ({ requireProductAccess: vi.fn() }));
 vi.mock("@/lib/product-details", () => ({ getProductDetails: vi.fn() }));
@@ -41,6 +43,7 @@ async function renderPage(slug: string) {
 describe("public demo product page", () => {
   beforeEach(() => {
     process.env.PUBLIC_DEMO_SLUGS = "reporadar";
+    vi.mocked(isPublicDemo).mockImplementation(async (slug: string) => slug === "reporadar");
     vi.mocked(getProductDetails).mockResolvedValue(details);
   });
   afterEach(() => { delete process.env.PUBLIC_DEMO_SLUGS; });
@@ -50,6 +53,19 @@ describe("public demo product page", () => {
     expect(html).toContain(">Radar</h1>");
     expect(html).toContain('data-can-edit="true"');
     expect(html).not.toContain("data-remove-product");
+    expect(isPublicDemo).toHaveBeenCalledWith("reporadar");
+  });
+
+  it("grants demo access from the database flag even without the env whitelist", async () => {
+    delete process.env.PUBLIC_DEMO_SLUGS;
+    vi.mocked(isPublicDemo).mockResolvedValue(true);
+    const html = await renderPage("reporadar");
+    expect(html).toContain(">Radar</h1>");
+  });
+
+  it("hides the settings tab from anonymous demo visitors", async () => {
+    const html = await renderPage("reporadar");
+    expect(html).not.toContain("?view=settings");
   });
 
   it("loads product details without an organization filter in demo mode", async () => {

@@ -33,12 +33,13 @@ export function RunStatus({ run }: { run?: { status: string; errorMessage?: stri
   return <div className={`run-status ${run.status}`} role="status" aria-live="polite"><span>最近一次分析：{run.status}</span><RunError message={run.errorMessage} /><AnalysisStatusRefresh status={run.status} /></div>;
 }
 
-export function ProductTabs({ slug, view, featureCount, releaseCount }: { slug: string; view: string; featureCount: number; releaseCount: number }) {
+export function ProductTabs({ slug, view, featureCount, releaseCount, showSettings = false }: { slug: string; view: string; featureCount: number; releaseCount: number; showSettings?: boolean }) {
   return (
     <nav className="view-tabs" aria-label="产品视图">
       <Link className={selectedClass(view === "overview")} href={`/products/${slug}`}>概览</Link>
       <Link className={selectedClass(view === "spec")} href={`/products/${slug}?view=spec`}>产品规格 <span>{featureCount}</span></Link>
       <Link className={selectedClass(view === "changes")} href={`/products/${slug}?view=changes`}>发布变化 <span>{releaseCount}</span></Link>
+      {showSettings ? <Link className={selectedClass(view === "settings")} href={`/products/${slug}?view=settings`}>设置</Link> : null}
     </nav>
   );
 }

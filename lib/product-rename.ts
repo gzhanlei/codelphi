@@ -8,6 +8,7 @@ export type ProductRenameResult =
 export interface ProductRenameInput {
   name?: string;
   newSlug?: string;
+  isPublicDemo?: boolean;
 }
 
 function isDuplicateEntryError(error: unknown) {
@@ -34,7 +35,10 @@ export async function updateProductIdentity(slug: string, organizationId: number
   }
 
   try {
-    await db.execute("UPDATE products SET name = COALESCE(?, name), slug = COALESCE(?, slug) WHERE id = ?", [nextName ?? null, slugChanged ? nextSlug : null, product.id]);
+    await db.execute(
+      "UPDATE products SET name = COALESCE(?, name), slug = COALESCE(?, slug), is_public_demo = COALESCE(?, is_public_demo) WHERE id = ?",
+      [nextName ?? null, slugChanged ? nextSlug : null, input.isPublicDemo === undefined ? null : input.isPublicDemo ? 1 : 0, product.id],
+    );
   } catch (error) {
     // 并发下唯一键 (organization_id, slug) 冲突视为改名失败。
     if (isDuplicateEntryError(error)) return { status: "slug_conflict" };

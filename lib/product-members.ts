@@ -85,6 +85,74 @@ export async function claimProductInvitations(profile: SessionUser, execute: Exe
   }
 }
 
+export interface ProductMemberEntry {
+  userId: number;
+  displayName: string;
+  email: string;
+  role: string;
+}
+
+export interface ProductInvitationEntry {
+  id: number;
+  email: string;
+  role: ProductRole;
+  expiresAt: Date | null;
+}
+
+export interface ProductMemberRoster {
+  organizationMembers: ProductMemberEntry[];
+  productMembers: ProductMemberEntry[];
+  invitations: ProductInvitationEntry[];
+}
+
+/** 产品设置页成员面板：工作区成员（只读）+ 产品级成员 + 待接受邀请。 */
+export async function listProductMembers(productId: number, organizationId: number, execute: Execute = defaultExecute): Promise<ProductMemberRoster> {
+  const [orgRows] = await execute(
+    `SELECT u.id AS userId, u.display_name AS displayName, COALESCE(u.email, '') AS email, om.role
+     FROM organization_members om JOIN users u ON u.id = om.user_id
+     WHERE om.organization_id = ? ORDER BY FIELD(om.role, 'owner', 'editor', 'viewer'), u.id`,
+    [organizationId],
+  ) as [Array<{ userId: number; displayName: string | null; email: string; role: string }>, unknown];
+  const [productRows] = await execute(
+    `SELECT u.id AS userId, u.display_name AS displayName, COALESCE(u.email, '') AS email, pm.role
+     FROM product_members pm JOIN users u ON u.id = pm.user_id
+     WHERE pm.product_id = ? ORDER BY pm.role, u.id`,
+    [productId],
+  ) as [Array<{ userId: number; displayName: string | null; email: string; role: string }>, unknown];
+  const [invitationRows] = await execute(
+    "SELECT id, email, role, expires_at FROM product_invitations WHERE product_id = ? AND status = 'pending' AND expires_at > CURRENT_TIMESTAMP(3) ORDER BY id",
+    [productId],
+  ) as [Array<{ id: number; email: string; role: ProductRole; expires_at: Date | null }>, unknown];
+  const toEntry = (row: { userId: number; displayName: string | null; email: string; role: string }): ProductMemberEntry => ({
+    userId: Number(row.userId),
+    displayName: row.displayName ?? "",
+    email: row.email,
+    role: row.role,
+  });
+  return {
+    organizationMembers: orgRows.map(toEntry),
+    productMembers: productRows.map(toEntry),
+    invitations: invitationRows.map((row) => ({ id: Number(row.id), email: row.email, role: row.role, expiresAt: row.expires_at })),
+  };
+}
+
+/** 移除产品级成员；工作区成员的访问来自组织，不可在产品维度移除。 */
+export async function removeProductMember(productId: number, organizationId: number, userId: number, execute: Execute = defaultExecute): Promise<"removed" | "organization_member" | "not_member"> {
+  const [orgRows] = await execute(
+    "SELECT 1 FROM organization_members WHERE organization_id = ? AND user_id = ? LIMIT 1",
+    [organizationId, userId],
+  ) as [Array<unknown>, unknown];
+  if (orgRows.length > 0) return "organization_member";
+  const [result] = await execute("DELETE FROM product_members WHERE product_id = ? AND user_id = ?", [productId, userId]) as [{ affectedRows?: number }, unknown];
+  return (result?.affectedRows ?? 0) > 0 ? "removed" : "not_member";
+}
+
+/** 取消待接受的产品邀请。 */
+export async function cancelProductInvitation(productId: number, invitationId: number, execute: Execute = defaultExecute): Promise<boolean> {
+  const [result] = await execute("DELETE FROM product_invitations WHERE id = ? AND product_id = ? AND status = 'pending'", [invitationId, productId]) as [{ affectedRows?: number }, unknown];
+  return (result?.affectedRows ?? 0) > 0;
+}
+
 export interface ProductInvitation {
   productId: number;
   productSlug: string;

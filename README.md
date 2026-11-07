@@ -16,7 +16,7 @@
 - 🏗️ **真实可用**：CoDelphi 在生产环境持续分析自身仓库等多个真实产品，本项目本身就是它的第一个分析对象。
 
 ## 与本仓库实时同步的Demo
-https://codelphi.com/products/reporadar  无需注册登录也可只读查看。Demo slug 由部署环境的 `PUBLIC_DEMO_SLUGS` 控制。
+https://codelphi.com/products/reporadar  无需注册登录也可只读查看。Demo 由产品的「设置」页里的公开演示开关控制（数据库 `products.is_public_demo`；`PUBLIC_DEMO_SLUGS` 环境变量仍作过渡兜底）。
 
 ## 懒得自托管，用我搭好的免费云服务
 https://codelphi.com
@@ -60,7 +60,7 @@ openssl rand -hex 32  # 填入 GITHUB_WEBHOOK_SECRET
 - `DATABASE_URL`：腾讯云 MySQL 的 `mysql://` URL，数据库名为 `radar`。
 - `CHANDLER_CLIENT_ID` / `CHANDLER_CLIENT_SECRET`。
 - `AUTH_ALLOWED_EMAILS`（可选）：特殊封闭部署的登录限制，英文逗号分隔；留空允许所有有效 Chandler 用户，不用于工作区成员管理。
-- `PUBLIC_DEMO_SLUGS`（可选）：公开只读 Demo 的产品 slug，英文逗号分隔（如 `reporadar`）。匿名访客可浏览该产品页面，所有保存/分析操作会弹出 Demo 提示而不发请求；留空关闭。
+- `PUBLIC_DEMO_SLUGS`（可选，过渡兜底）：公开只读 Demo 的产品 slug 白名单。推荐改用产品「设置」页的公开演示开关（写入数据库）；此变量仍生效，便于未迁移的部署。匿名访客可浏览该产品页面，所有保存/分析操作会弹出 Demo 提示而不发请求。
 - `GITHUB_TOKEN`：对内部仓库具有只读权限的 Token。
 - `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL`：LLMGateway 配置。
 
