@@ -47,10 +47,10 @@ function ProductPageBody({ slug, view, mode, featureId, details, overview, actio
       <RunStatus run={details.latestRun} />
       {details.driftCount > 0 ? <div className="drift-banner" role="status">⚠️ {details.driftCount} 条人工规格可能已过时（最近一次分析的行为变化触及了这些功能）。逐一确认并重新保存后标记会消除。</div> : null}
       {showFeedback && details.latestRun?.status === "failed" ? <AnalysisFeedbackButton slug={details.product.slug} /> : null}
-      <ProductTabs slug={slug} view={view} featureCount={details.features.length} releaseCount={details.releases.length} showSettings={showSettings} />
+      <ProductTabs slug={slug} view={view} featureCount={details.features.length} releaseCount={details.releaseTotal} showSettings={showSettings} />
       {settings}
       {/* settings 是独立视图；ProductView 对未知 view 会静默落到发布变化，这里显式排除 */}
-      {view === "settings" ? null : <ProductView view={view} productSlug={slug} features={details.features} scenarios={details.scenarios} releases={details.releases} changes={details.changes} behaviorChanges={details.behaviorChanges} regressionStatuses={details.regressionStatuses} mode={mode} featureId={featureId} overview={overview} canEdit={canEdit} />}
+      {view === "settings" ? null : <ProductView view={view} productSlug={slug} features={details.features} scenarios={details.scenarios} releases={details.releases} changes={details.changes} behaviorChanges={details.behaviorChanges} regressionStatuses={details.regressionStatuses} releaseTotal={details.releaseTotal} mode={mode} featureId={featureId} overview={overview} canEdit={canEdit} />}
     </>
   );
 }

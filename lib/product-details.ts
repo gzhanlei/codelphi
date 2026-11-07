@@ -2,6 +2,7 @@ import { getDb } from "./db";
 import { evidenceItems } from "./evidence";
 import { evidenceUrl } from "./evidence-url";
 import { parseJsonValue } from "./json";
+import { RELEASE_PAGE_SIZE, type ReleasePagePayload } from "./release-client";
 import { loadRegressionStatuses } from "./regression";
 import { annotateSuspectedRenames } from "./spec-rename";
 import type { BehaviorChangeRow, ChangeRow, FeatureRow, ReleaseRow, ScenarioRow } from "./types";
@@ -88,9 +89,13 @@ export async function getProductDetails(slug: string, organizationId?: number) {
     [product.id],
   );
   const [featureRows] = await db.execute("SELECT id, name, summary, parent_id AS parentId, source, stale_since AS staleSince, stale_change_id AS staleChangeId FROM features WHERE product_id = ? AND active = 1 ORDER BY name", [product.id]);
-  const [releaseRows] = await db.execute("SELECT id, title, summary, sha, url, committed_at AS committedAt, spec_version_id AS specVersionId FROM releases WHERE product_id = ? ORDER BY committed_at DESC LIMIT 30", [product.id]);
+  const [releaseRows, countRows] = await Promise.all([
+    db.execute("SELECT id, title, summary, sha, url, committed_at AS committedAt, spec_version_id AS specVersionId FROM releases WHERE product_id = ? ORDER BY committed_at DESC LIMIT ?", [product.id, RELEASE_PAGE_SIZE]),
+    db.execute("SELECT COUNT(*) AS total FROM releases WHERE product_id = ?", [product.id]),
+  ]);
   const features = featureRows as FeatureRow[];
-  const releases = releaseRows as ReleaseRow[];
+  const releases = releaseRows[0] as ReleaseRow[];
+  const releaseTotal = Number((countRows[0] as Array<{ total: number }>)[0]?.total ?? 0);
   const [scenarios, changes, behaviorChanges, regressionStatuses] = await Promise.all([loadScenarios(features), loadChanges(releases), loadBehaviorChanges(releases), loadRegressionStatuses(product.id)]);
 
   const repository = (repositories as Array<{ provider?: string; owner: string; name: string; defaultBranch: string }>)[0];
@@ -104,9 +109,51 @@ export async function getProductDetails(slug: string, organizationId?: number) {
     features,
     scenarios: scenarios.map((scenario) => ({ ...scenario, evidence: decorateEvidence(scenario.evidence, source) })),
     releases,
+    releaseTotal,
     changes: changes.map((change) => ({ ...change, evidence: decorateEvidence(change.evidence, source) })),
     behaviorChanges: annotateSuspectedRenames(behaviorChanges.map((change) => ({ ...change, before: decorateSubject(change.before, source), after: decorateSubject(change.after, source) }))),
     regressionStatuses,
     driftCount: features.filter((feature) => feature.staleSince).length + scenarios.filter((scenario) => scenario.staleSince).length,
+  };
+}
+
+/**
+ * 发布变化列表的分页读取：「加载更多」按 offset 取下一页，返回值与首屏同构
+ * （证据 blob URL、疑似改名装饰均在服务端完成）。产品不存在时返回 null。
+ */
+export async function loadReleasePage(slug: string, organizationId: number | undefined, offset: number, limit: number): Promise<ReleasePagePayload | null> {
+  const db = getDb();
+  const [products] = await db.execute(
+    organizationId === undefined
+      ? "SELECT id FROM products WHERE slug = ?"
+      : "SELECT id FROM products WHERE slug = ? AND organization_id = ?",
+    organizationId === undefined ? [slug] : [slug, organizationId],
+  );
+  const product = (products as Array<{ id: number }>)[0];
+  if (!product) return null;
+
+  const [repositories] = await db.execute("SELECT owner, name FROM repositories WHERE product_id = ?", [product.id]);
+  const [runs] = await db.execute(
+    `SELECT r.after_sha AS afterSha FROM analysis_runs r
+     JOIN repositories repo ON repo.id = r.repository_id WHERE repo.product_id = ? ORDER BY r.created_at DESC LIMIT 1`,
+    [product.id],
+  );
+  const [releaseRows, countRows] = await Promise.all([
+    db.execute("SELECT id, title, summary, sha, url, committed_at AS committedAt, spec_version_id AS specVersionId FROM releases WHERE product_id = ? ORDER BY committed_at DESC LIMIT ? OFFSET ?", [product.id, limit, offset]),
+    db.execute("SELECT COUNT(*) AS total FROM releases WHERE product_id = ?", [product.id]),
+  ]);
+  const releases = releaseRows[0] as ReleaseRow[];
+  const total = Number((countRows[0] as Array<{ total: number }>)[0]?.total ?? 0);
+  const [changes, behaviorChanges] = await Promise.all([loadChanges(releases), loadBehaviorChanges(releases)]);
+
+  const repository = (repositories as Array<{ owner: string; name: string }>)[0];
+  const afterSha = (runs as Array<{ afterSha?: string | null }>)[0]?.afterSha;
+  const source: EvidenceSource | undefined = repository && afterSha ? { owner: repository.owner, name: repository.name, revision: afterSha } : undefined;
+
+  return {
+    total,
+    releases,
+    changes: changes.map((change) => ({ ...change, evidence: decorateEvidence(change.evidence, source) })),
+    behaviorChanges: annotateSuspectedRenames(behaviorChanges.map((change) => ({ ...change, before: decorateSubject(change.before, source), after: decorateSubject(change.after, source) }))),
   };
 }

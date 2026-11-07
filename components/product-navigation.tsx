@@ -53,17 +53,18 @@ interface ProductViewProps {
   changes: ChangeRow[];
   behaviorChanges: BehaviorChangeRow[];
   regressionStatuses?: RegressionStatusMap;
+  releaseTotal?: number;
   mode?: string;
   featureId?: number;
   overview: ProductOverviewData;
   canEdit?: boolean;
 }
 
-function ProductWorkspace({ view, productSlug, features, scenarios, releases, changes, behaviorChanges, regressionStatuses, mode = "spec", featureId, canEdit }: Omit<ProductViewProps, "overview">) {
+function ProductWorkspace({ view, productSlug, features, scenarios, releases, changes, behaviorChanges, regressionStatuses, releaseTotal, mode = "spec", featureId, canEdit }: Omit<ProductViewProps, "overview">) {
   const selectedFeature = selectFeature(features, featureId);
   return view === "spec"
     ? <SpecWorkspace slug={productSlug} tree={buildFeatureTree(features)} feature={selectedFeature} scenarios={scenarios} mode={mode} />
-    : <ProductChanges slug={productSlug} releases={releases} changes={changes} behaviorChanges={behaviorChanges} regressionStatuses={regressionStatuses} canEdit={canEdit} />;
+    : <ProductChanges slug={productSlug} releases={releases} changes={changes} behaviorChanges={behaviorChanges} regressionStatuses={regressionStatuses} releaseTotal={releaseTotal} canEdit={canEdit} />;
 }
 
 export function ProductView(props: ProductViewProps) {
