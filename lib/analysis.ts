@@ -12,6 +12,7 @@ import { incrementalShadowEnabled } from "./env";
 import type { SpecFeature } from "./spec-diff";
 import { markSpecDrift } from "./spec-drift";
 import { deliverAnalysisNotifications } from "./notifications";
+import { ensureRegressionTasks } from "./regression-tasks";
 
 export interface RunContext {
   id: number;
@@ -105,9 +106,19 @@ export async function upsertRelease(connection: PoolConnection, run: RunContext,
   );
   const [existing] = await connection.execute("SELECT id FROM releases WHERE repository_id = ? AND sha = ?", [run.repositoryId, run.afterSha]);
   const releaseId = Number((existing as Array<{ id: number }>)[0].id);
+  // P0：发布改动文件清单落库，供回归任务的影响面映射（文件 → 证据路径 → 场景）离线复算。
+  if (change.files.length > 0) {
+    await connection.execute("DELETE FROM release_files WHERE release_id = ?", [releaseId]);
+    for (const file of change.files) {
+      await connection.execute("INSERT IGNORE INTO release_files (release_id, path) VALUES (?, ?)", [releaseId, file.path]);
+    }
+  }
   const [changeRows] = await connection.execute("SELECT COUNT(*) AS count FROM changes WHERE release_id = ?", [releaseId]);
-  const hasChanges = Number((changeRows as Array<{ count: number }>)[0].count) > 0;
-  if (hasChanges) return;
+  const hasChanges = Number((changeRows as Array<{ count: number }>)[0]?.count ?? 0) > 0;
+  if (hasChanges) {
+    await ensureRegressionTasks(connection, releaseId);
+    return;
+  }
 
   for (const item of result.changes) {
     await connection.execute(
@@ -116,6 +127,7 @@ export async function upsertRelease(connection: PoolConnection, run: RunContext,
       [releaseId, item.featureName, item.kind, item.description, item.userImpact, JSON.stringify(item.evidence)],
     );
   }
+  await ensureRegressionTasks(connection, releaseId);
 }
 
 async function saveResult(run: RunContext, result: AnalysisResult, change: ChangeContext, affectedKeys: ReadonlySet<string> | null = null) {

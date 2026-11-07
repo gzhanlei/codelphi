@@ -38,14 +38,43 @@ describe("analysis persistence guards", () => {
   it("does not duplicate changes for an existing release", async () => {
     const connection = connectionWithCount(1);
     await upsertRelease(connection, run, result, change);
-    expect(connection.execute).toHaveBeenCalledTimes(3);
+    expect(connection.execute).toHaveBeenCalledTimes(6);
   });
 
   it("inserts changes when the release has none", async () => {
     const connection = connectionWithCount(0);
     await upsertRelease(connection, run, result, change);
-    expect(connection.execute).toHaveBeenCalledTimes(4);
-    expect(connection.execute).toHaveBeenLastCalledWith(expect.stringContaining("INSERT INTO changes"), [10, "Auth", "changed", "Changed", "", "[]"]);
+    expect(connection.execute).toHaveBeenCalledTimes(7);
+    expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO changes"), [10, "Auth", "changed", "Changed", "", "[]"]);
+  });
+
+  it("stores the release's changed files for evidence-path mapping", async () => {
+    const connection = connectionWithCount(0);
+    const files = [{ path: "components/login.tsx", status: "modified", patch: "" }, { path: "lib/token.ts", status: "added", patch: "" }];
+    await upsertRelease(connection, run, result, { ...change, files });
+    expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("DELETE FROM release_files"), [10]);
+    expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT IGNORE INTO release_files"), [10, "components/login.tsx"]);
+    expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT IGNORE INTO release_files"), [10, "lib/token.ts"]);
+  });
+
+  it("generates scenario regression tasks inside the same transaction", async () => {
+    const connection = {
+      execute: vi.fn(async (sql: string) => {
+        if (sql.includes("SELECT id FROM releases")) return [[{ id: 10 }]];
+        if (sql.includes("SELECT COUNT(*)")) return [[{ count: 1 }]];
+        if (sql.includes("spec_version_id AS specVersionId")) return [[{ specVersionId: 44, repositoryId: 3 }]];
+        if (sql.includes("FROM spec_changes c")) return [[{ id: 101, entityType: "scenario", kind: "changed", featureKey: "login", featureName: "统一登录", scenarioReference: "HP-1", featureId: 11, scenarioId: 501 }]];
+        if (sql.includes("FROM release_files")) return [[{ path: "components/login.tsx" }]];
+        if (sql.includes("spec_file_index")) return [[]];
+        if (sql.includes("spec_scenarios ss ON ss.spec_feature_id")) return [[]];
+        if (sql.includes("FROM regression_tasks")) return [[]];
+        return [{}];
+      }),
+    } as unknown as PoolConnection;
+    await upsertRelease(connection, run, result, change);
+    expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO regression_tasks"), [10, 501, null]);
+    expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("regression_task_sources"), expect.anything());
+    expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("regression_task_reasons"), expect.anything());
   });
 
   it("moves an existing release to the latest spec version for the same SHA", async () => {
