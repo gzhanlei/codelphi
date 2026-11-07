@@ -16,9 +16,9 @@ export function ShellFrame({ sidebar, topbar, children }: { sidebar: ReactNode; 
 
 export function Brand() {
   return (
-    <Link href="/" className="brand" aria-label="Radar 首页">
+    <Link href="/" className="brand" aria-label="CoDelphi 首页">
       <span className="brand-mark" aria-hidden="true"><i /><i /><i /></span>
-      <span><strong>Radar</strong><small>产品变化雷达</small></span>
+      <span><strong>CoDelphi</strong><small>产品变化雷达</small></span>
     </Link>
   );
 }

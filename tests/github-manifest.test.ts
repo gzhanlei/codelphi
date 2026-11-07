@@ -3,7 +3,7 @@ import { manifestCallbackAllowed, manifestDocument } from "../lib/github-manifes
 
 describe("GitHub manifest flow", () => {
   it("renders an official POST form without exposing writable permissions", () => {
-    const html = manifestDocument({ name: "Radar \"Test\"", default_permissions: { contents: "read", metadata: "read" }, "state\"<script>": "value" }, "state-token");
+    const html = manifestDocument({ name: "CoDelphi \"Test\"", default_permissions: { contents: "read", metadata: "read" }, "state\"<script>": "value" }, "state-token");
     expect(html).toContain("https://github.com/settings/apps/new?state=state-token");
     expect(html).toContain("https://github.com/settings/apps/new");
     expect(html).toContain("method=\"post\"");

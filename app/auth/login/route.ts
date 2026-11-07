@@ -18,8 +18,8 @@ export async function GET(request: NextRequest) {
 
   const response = NextResponse.redirect(authorizationUrl);
   const cookieOptions = secureCookieOptions(600);
-  response.cookies.set("radar_oauth_state", state, cookieOptions);
-  response.cookies.set("radar_oauth_verifier", verifier, cookieOptions);
-  response.cookies.set("radar_oauth_next", safeNextPath(request.nextUrl.searchParams.get("next")), cookieOptions);
+  response.cookies.set("codelphi_oauth_state", state, cookieOptions);
+  response.cookies.set("codelphi_oauth_verifier", verifier, cookieOptions);
+  response.cookies.set("codelphi_oauth_next", safeNextPath(request.nextUrl.searchParams.get("next")), cookieOptions);
   return response;
 }

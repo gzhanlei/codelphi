@@ -1,7 +1,7 @@
-# Radar 开发约定
+# CoDelphi 开发约定
 
 - 数据库使用现有腾讯云 MySQL 8；不要引入 PostgreSQL 或本地数据库容器。
-- Radar 使用独立数据库，不直接读取或修改 WorkMembership 业务表。
+- CoDelphi 使用独立数据库，不直接读取或修改 WorkMembership 业务表。
 - 统一登录使用 Chandler OAuth 授权码 + PKCE，不新增账号密码体系。
 - 所有密钥仅通过环境变量配置，不提交 `.env` 或真实凭证。
 - AI 生成的产品事实必须带可追溯代码证据；不要绕过证据校验。

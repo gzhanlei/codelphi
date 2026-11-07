@@ -17,7 +17,7 @@ export function safeNextPath(value: string | null | undefined) {
     /[\r\n]/.test(value),
   ];
   if (invalid.some(Boolean)) return "/";
-  const base = "https://radar.local";
+  const base = "https://codelphi.local";
   const parsed = new URL(value, base);
   return parsed.origin === base ? value : "/";
 }

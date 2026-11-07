@@ -4,10 +4,10 @@ import { requiredEnv } from "./env";
 import { createSessionToken, verifySessionToken } from "./session-token";
 import type { SessionUser } from "./types";
 
-export const SESSION_COOKIE = "radar_session";
+export const SESSION_COOKIE = "codelphi_session";
 const SESSION_MAX_AGE = 60 * 60 * 24 * 7;
 
-/** Radar 下发的浏览器 cookie 统一属性：HttpOnly + 生产环境 Secure + Lax。 */
+/** CoDelphi 下发的浏览器 cookie 统一属性：HttpOnly + 生产环境 Secure + Lax。 */
 export function secureCookieOptions(maxAge: number, path = "/") {
   return {
     httpOnly: true as const,

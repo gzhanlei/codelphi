@@ -92,7 +92,7 @@
 ### 5c 评论渲染与去重
 
 - 评论体：产品名 + 「此 PR 触碰 N 个文件，涉及 M 个功能」+ 按功能分组的场景清单（`HP-n/EC-n/ER-n` + WP0 风格证据路径）+ 免责行「预演基于最近一次成功分析，合并后以实际分析为准」。
-- 去重：评论首行嵌隐藏 marker `<!-- radar-pr-preview:{full_name}#{number} -->`；先 `GET /issues/{n}/comments` 查 marker，命中则 PATCH 原评论，否则 POST。
+- 去重：评论首行嵌隐藏 marker `<!-- codelphi-pr-preview:{full_name}#{number} -->`；先 `GET /issues/{n}/comments` 查 marker，命中则 PATCH 原评论，否则 POST。
 - 开关与节流：env `PR_PREVIEW_ENABLED`（`lib/env.ts` 惯例新增读取函数）；同 PR 60 秒内 synchronize 合并处理可后置优化，首版接受逐 commit 更新。
 - 边界：fork PR（head 仓库未安装）——files API 走 base 仓库即可，评论照常；未注册仓库/无索引 → 静默 202。
 

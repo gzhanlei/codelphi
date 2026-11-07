@@ -45,7 +45,7 @@ describe("feedback button rendering", () => {
   it("renders the failure feedback and GitHub actions", () => {
     expect(renderToStaticMarkup(createElement(AnalysisFeedbackButton, { slug: "tingfeng" }))).toContain("提交反馈");
     expect(renderToStaticMarkup(createElement(FeedbackIssueButton, { id: 42, issueUrl: null, status: "new" }))).toContain("提交到 GitHub");
-    expect(renderToStaticMarkup(createElement(FeedbackIssueButton, { id: 42, issueUrl: "https://github.com/gzhanlei/radar/issues/42", status: "submitted" }))).toContain("查看 Issue");
+    expect(renderToStaticMarkup(createElement(FeedbackIssueButton, { id: 42, issueUrl: "https://github.com/gzhanlei/codelphi/issues/42", status: "submitted" }))).toContain("查看 Issue");
   });
 });
 
@@ -61,7 +61,7 @@ describe("feedback submission handlers", () => {
     await handleAnalysisFeedback("tingfeng", controls);
     expect(controls.setPending).toHaveBeenNthCalledWith(1, true);
     expect(controls.setPending).toHaveBeenLastCalledWith(false);
-    expect(controls.setMessage).toHaveBeenLastCalledWith("反馈已提交，Radar 团队会查看诊断信息。");
+    expect(controls.setMessage).toHaveBeenLastCalledWith("反馈已提交，CoDelphi 团队会查看诊断信息。");
   });
 
   it("surfaces product feedback errors and resets pending", async () => {
@@ -81,10 +81,10 @@ describe("feedback submission handlers", () => {
   });
 
   it("stores the created GitHub issue URL", async () => {
-    vi.mocked(submitGithubIssue).mockResolvedValue("https://github.com/gzhanlei/radar/issues/42");
+    vi.mocked(submitGithubIssue).mockResolvedValue("https://github.com/gzhanlei/codelphi/issues/42");
     const controls = { setPending: vi.fn(), setError: vi.fn(), setIssueUrl: vi.fn(), setStatus: vi.fn() };
     await handleGithubIssue(42, controls);
-    expect(controls.setIssueUrl).toHaveBeenCalledWith("https://github.com/gzhanlei/radar/issues/42");
+    expect(controls.setIssueUrl).toHaveBeenCalledWith("https://github.com/gzhanlei/codelphi/issues/42");
     expect(controls.setStatus).toHaveBeenCalledWith("submitted");
   });
 
@@ -150,7 +150,7 @@ describe("analysis failure feedback", () => {
     expect(insert?.[1]).toEqual(expect.arrayContaining([1, 3, "gzhanlei/workmembership", "abcdef1234567890", "No architecture components detected", "reporter"]));
   });
 
-  it("builds a diagnostic issue body and submits it to the Radar repository", async () => {
+  it("builds a diagnostic issue body and submits it to the CoDelphi repository", async () => {
     const report = {
       id: 42,
       organizationId: 1,
@@ -172,10 +172,10 @@ describe("analysis failure feedback", () => {
       if (sql.includes("FROM feedback_reports f")) return [[report]];
       return [{ affectedRows: 1 }];
     });
-    const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ html_url: "https://github.com/gzhanlei/radar/issues/42" }));
-    expect(await submitFeedbackToGitHub(42, { token: "test-token", fetcher })).toBe("https://github.com/gzhanlei/radar/issues/42");
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ html_url: "https://github.com/gzhanlei/codelphi/issues/42" }));
+    expect(await submitFeedbackToGitHub(42, { token: "test-token", fetcher })).toBe("https://github.com/gzhanlei/codelphi/issues/42");
     const [url, init] = fetcher.mock.calls[0];
-    expect(url).toBe("https://api.github.com/repos/gzhanlei/radar/issues");
+    expect(url).toBe("https://api.github.com/repos/gzhanlei/codelphi/issues");
     expect(JSON.parse(String(init?.body)).labels).toEqual(["feedback", "analysis-failure"]);
   });
 

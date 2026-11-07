@@ -13,12 +13,12 @@ function createAccessDb(memberships: Array<{ sub: string; slug: string; organiza
     if (sql.includes("SELECT id, slug, name, description, organization_id FROM products")) {
       const [slug, organizationId] = parameters as [string, number];
       const product = orgProducts.find((item) => item.slug === slug && item.organizationId === organizationId);
-      return [product ? [{ id: 7, slug: product.slug, name: "Radar", description: "产品知识中心", organization_id: product.organizationId }] : []];
+      return [product ? [{ id: 7, slug: product.slug, name: "CoDelphi", description: "产品知识中心", organization_id: product.organizationId }] : []];
     }
     if (sql.includes("FROM product_members pm")) {
       const [sub, slug] = parameters as [string, string];
       const grant = productMembers.find((item) => item.sub === sub && item.productSlug === slug);
-      return [grant ? [{ id: 7, slug: grant.productSlug, name: "Radar", description: "产品知识中心", organization_id: TEAM_ORG.id, role: grant.role, org_slug: TEAM_ORG.slug, org_name: TEAM_ORG.name }] : []];
+      return [grant ? [{ id: 7, slug: grant.productSlug, name: "CoDelphi", description: "产品知识中心", organization_id: TEAM_ORG.id, role: grant.role, org_slug: TEAM_ORG.slug, org_name: TEAM_ORG.name }] : []];
     }
     if (sql.includes("SELECT p.slug FROM features f")) {
       const [featureId] = parameters as [number];

@@ -2,7 +2,7 @@ import type { SessionUser } from "./types";
 import type { Organization } from "./organizations";
 
 export function adminEmails() {
-  return new Set((process.env.RADAR_ADMIN_EMAILS ?? "").split(",").map((email) => email.trim().toLowerCase()).filter(Boolean));
+  return new Set((process.env.CODELPHI_ADMIN_EMAILS ?? "").split(",").map((email) => email.trim().toLowerCase()).filter(Boolean));
 }
 
 export function isPlatformAdmin(user: SessionUser, organization: Organization, emails = adminEmails()) {

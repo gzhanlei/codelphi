@@ -16,7 +16,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: refreshMock }) 
 vi.mock("../lib/integration-client", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/integration-client")>(), saveRepositoryConnection: saveMock }));
 
 const connection: RepositoryConnectionState = {
-  id: 9, provider: "gitee", displayName: "Radar User", accountLogin: "radar-user", baseUrl: "https://gitee.com", tokenHint: "····cret", status: "active", lastError: null, lastCheckedAt: null,
+  id: 9, provider: "gitee", displayName: "CoDelphi User", accountLogin: "radar-user", baseUrl: "https://gitee.com", tokenHint: "····cret", status: "active", lastError: null, lastCheckedAt: null,
 };
 
 function props(kind: "gitee" | "self-hosted" = "gitee") {

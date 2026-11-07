@@ -3,7 +3,7 @@ import type { SessionUser } from "./types";
 
 type Execute = (statement: string, parameters: Array<string | null>) => Promise<unknown>;
 
-export async function upsertRadarUser(profile: SessionUser, execute: Execute = (statement, parameters) => getDb().execute(statement, parameters)) {
+export async function upsertCodelphiUser(profile: SessionUser, execute: Execute = (statement, parameters) => getDb().execute(statement, parameters)) {
   await execute(
     `INSERT INTO users (chandler_sub, email, display_name, picture_url)
      VALUES (?, ?, ?, ?)

@@ -47,7 +47,7 @@ const run = {
   provider: "github",
   organizationId: 7,
   productSlug: "radar",
-  productName: "Radar",
+  productName: "CoDelphi",
 };
 
 let runRows: unknown[] = [];

@@ -9,7 +9,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   return (
     <main className="auth-page">
       <section className="auth-visual">
-        <div className="auth-brand"><span className="brand-mark"><i /><i /><i /></span><strong>Radar</strong></div>
+        <div className="auth-brand"><span className="brand-mark"><i /><i /><i /></span><strong>CoDelphi</strong></div>
         <div className="auth-statement">
           <span className="eyebrow">PRODUCT OBSERVABILITY</span>
           <h1>读懂每一次<br />产品变化。</h1>
@@ -21,7 +21,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         <div className="login-card">
           <span className="eyebrow">内部工作区</span>
           <h2>欢迎回来</h2>
-          <p>使用 Chandler 统一账号继续。Radar 不保存你的账号密码。</p>
+          <p>使用 Chandler 统一账号继续。CoDelphi 不保存你的账号密码。</p>
           <LoginError error={error} />
           <Link className="login-button" href="/auth/login">使用 Chandler 登录 <span>→</span></Link>
           <small>仅允许团队名单中的成员访问</small>

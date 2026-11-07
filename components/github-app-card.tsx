@@ -34,7 +34,7 @@ export function GitHubAppCard({ app, connections, canEdit = true }: { app: App |
     <section className="integration-card" id="github">
       <div className="integration-card-heading"><div className="integration-icon" aria-hidden="true">GH</div><div><h2>GitHub</h2><p>推荐使用 GitHub App · 按仓库授权 · Contents 与 Metadata 只读</p></div></div>
       {!app ? (
-        <div className="integration-empty"><p>{canEdit ? "通过 GitHub 官方引导创建 Radar App，然后选择允许读取的仓库。" : "尚未创建 GitHub App，请联系工作区编辑者或所有者配置。"}</p>{canEdit && <Link className="primary-button" href="/integrations/github/manifest">连接 GitHub</Link>}</div>
+        <div className="integration-empty"><p>{canEdit ? "通过 GitHub 官方引导创建 CoDelphi App，然后选择允许读取的仓库。" : "尚未创建 GitHub App，请联系工作区编辑者或所有者配置。"}</p>{canEdit && <Link className="primary-button" href="/integrations/github/manifest">连接 GitHub</Link>}</div>
       ) : (
         <>
           <div className="integration-summary"><span>应用 <strong>{app.slug}</strong></span><span>{connections.filter((connection) => connection.status === "active").length} 个可用安装</span>{canEdit && <Link className="secondary-button" href="/integrations/github/install">添加账号或组织</Link>}{canEdit && <a className="secondary-button" href={`https://github.com/settings/apps/${encodeURIComponent(app.slug)}`} target="_blank" rel="noreferrer">设置 Push 通知</a>}</div>

@@ -136,9 +136,9 @@ describe("architecture version generation", () => {
   });
 
   it("resolves repository roots only from explicit mappings or the current repository", () => {
-    expect(localRepositoryRoot(run, { RADAR_REPOSITORY_ROOTS: JSON.stringify({ "gzhanlei/radar": "/tmp/radar" }) })).toBe("/tmp/radar");
+    expect(localRepositoryRoot(run, { CODELPHI_REPOSITORY_ROOTS: JSON.stringify({ "gzhanlei/radar": "/tmp/radar" }) })).toBe("/tmp/radar");
     expect(localRepositoryRoot(run, { GITHUB_REPOSITORY: "gzhanlei/radar" })).toBe(process.cwd());
     expect(localRepositoryRoot(run, {})).toBeUndefined();
-    expect(localRepositoryRoot(run, { RADAR_REPOSITORY_ROOTS: "" })).toBeUndefined();
+    expect(localRepositoryRoot(run, { CODELPHI_REPOSITORY_ROOTS: "" })).toBeUndefined();
   });
 });

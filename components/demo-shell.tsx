@@ -17,7 +17,7 @@ export function DemoShell({ children }: { children: ReactNode }) {
           <>
             <span className="environment"><i />演示模式</span>
             <div className="user-menu">
-              <a href="https://github.com/gzhanlei/radar" className="text-button" target="_blank" rel="noreferrer">GitHub</a>
+              <a href="https://github.com/gzhanlei/codelphi" className="text-button" target="_blank" rel="noreferrer">GitHub</a>
               <Link href="/login" className="text-button">使用 Chandler 登录</Link>
             </div>
           </>

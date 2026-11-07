@@ -13,7 +13,7 @@ vi.mock("../lib/github-webhook", () => ({
 }));
 
 function requestFor(event: string) {
-  return new NextRequest("https://radar.chandler.work/api/webhooks/github", {
+  return new NextRequest("https://codelphi.com/api/webhooks/github", {
     method: "POST",
     headers: { "x-github-event": event, "x-hub-signature-256": "sig" },
     body: JSON.stringify({ ref: "refs/heads/main" }),

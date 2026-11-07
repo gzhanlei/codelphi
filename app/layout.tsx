@@ -3,7 +3,7 @@ import { IcpFooter } from "@/components/icp-footer";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: { default: "Radar", template: "%s · Radar" },
+  title: { default: "CoDelphi", template: "%s · CoDelphi" },
   description: "Chandler 内部产品知识与变更中心",
 };
 

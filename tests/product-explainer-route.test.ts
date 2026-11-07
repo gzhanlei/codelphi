@@ -30,7 +30,7 @@ vi.mock("../lib/archify-cli", () => ({
   },
 }));
 
-const request = new NextRequest("https://radar.chandler.work/api/products/radar/explainer");
+const request = new NextRequest("https://codelphi.com/api/products/radar/explainer");
 const context = { params: Promise.resolve({ slug: "radar" }) };
 
 describe("product Explainer route", () => {

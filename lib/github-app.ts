@@ -21,10 +21,10 @@ function webhookConfiguration(appUrl: string) {
   return { hook_attributes: { url: `${baseUrl}/api/webhooks/github`, active: true }, default_events: ["push", "pull_request"] };
 }
 
-export function radarManifest(appUrl: string) {
+export function codelphiManifest(appUrl: string) {
   const redirectUrl = `${appUrl}/integrations/github/callback`;
   return {
-    name: "Radar Product Observer",
+    name: "CoDelphi Product Observer",
     description: "Read product code and maintain traceable specifications and behavior changes.",
     url: appUrl,
     public: false,

@@ -8,7 +8,7 @@ export function NewProductContent({ connections, hasServerToken }: { connections
       <section className="integration-card credentials-required">
         <span className="eyebrow">CONNECTION REQUIRED</span>
         <h2>先连接 GitHub</h2>
-        <p>添加产品之前，需要安装只读 Radar GitHub App，或由管理员配置 Personal Access Token。</p>
+        <p>添加产品之前，需要安装只读 CoDelphi GitHub App，或由管理员配置 Personal Access Token。</p>
         <Link className="primary-button" href="/integrations">前往 Integrations</Link>
       </section>
     );

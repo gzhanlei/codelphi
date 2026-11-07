@@ -109,7 +109,7 @@ export async function getFeedbackReport(id: number): Promise<FeedbackReport | nu
 
 export function feedbackIssueBody(report: FeedbackReport) {
   const architecture = report.architectureError ? `\n\n### Architecture Error\n\`\`\`text\n${report.architectureError}\n\`\`\`` : "";
-  return `## Radar 自动分析失败反馈\n\n- Product: ${report.productName}\n- Repository: ${report.repositoryFullName}\n- Revision: ${report.revision}\n- Organization: ${report.organizationName}\n- Report ID: ${report.id}\n\n### Analysis Error\n\`\`\`text\n${report.errorMessage}\n\`\`\`${architecture}`;
+  return `## CoDelphi 自动分析失败反馈\n\n- Product: ${report.productName}\n- Repository: ${report.repositoryFullName}\n- Revision: ${report.revision}\n- Organization: ${report.organizationName}\n- Report ID: ${report.id}\n\n### Analysis Error\n\`\`\`text\n${report.errorMessage}\n\`\`\`${architecture}`;
 }
 
 const issueSchema = z.object({ html_url: z.string().url() });
@@ -126,16 +126,16 @@ function issueCreationMessage(status: number) {
 }
 
 async function createGithubIssue(report: FeedbackReport, token: string, fetcher: typeof fetch) {
-  const response = await fetcher("https://api.github.com/repos/gzhanlei/radar/issues", {
+  const response = await fetcher("https://api.github.com/repos/gzhanlei/codelphi/issues", {
     method: "POST",
     headers: {
       Accept: "application/vnd.github+json",
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
-      "User-Agent": "radar-feedback",
+      "User-Agent": "codelphi-feedback",
     },
     body: JSON.stringify({
-      title: `[Radar] ${report.productName} 分析失败反馈`,
+      title: `[CoDelphi] ${report.productName} 分析失败反馈`,
       body: feedbackIssueBody(report),
       labels: ["feedback", "analysis-failure"],
     }),

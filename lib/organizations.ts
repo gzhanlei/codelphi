@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { getDb } from "./db";
-import { upsertRadarUser } from "./users";
+import { upsertCodelphiUser } from "./users";
 import { requiredEnv } from "./env";
 import { claimOrganizationInvitations } from "./organization-invitations";
 import { claimProductInvitations } from "./product-members";
@@ -14,7 +14,7 @@ export interface Organization {
   role: OrganizationRole;
 }
 
-export const ORGANIZATION_COOKIE = "radar_organization";
+export const ORGANIZATION_COOKIE = "codelphi_organization";
 type Execute = (statement: string, parameters: Array<string | number | null>) => Promise<unknown>;
 type Query = <T>(statement: string, parameters: Array<string | number | null>) => Promise<T[]>;
 
@@ -28,12 +28,12 @@ function dbQuery<T>(execute: Execute): Query {
 }
 
 function defaultOrganization(profile: SessionUser): Organization {
-  return { id: 0, slug: `u-${profile.sub}`, name: `${profile.name ?? profile.email ?? "Radar 用户"} 的工作区`, role: "owner" };
+  return { id: 0, slug: `u-${profile.sub}`, name: `${profile.name ?? profile.email ?? "CoDelphi 用户"} 的工作区`, role: "owner" };
 }
 
 export async function ensureUserWorkspace(profile: SessionUser, execute: Execute = (sql, parameters) => getDb().execute(sql, parameters)) {
   const query = dbQuery(execute);
-  await upsertRadarUser(profile, execute);
+  await upsertCodelphiUser(profile, execute);
   await claimOrganizationInvitations(profile, execute);
   await claimProductInvitations(profile, execute);
   const defaultOrg = defaultOrganization(profile);

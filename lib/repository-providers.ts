@@ -48,7 +48,7 @@ function assertAllowedRepositoryHost(url: URL) {
     .filter(Boolean);
   const allowed = new Set(["gitlab.com", ...configured]);
   if (!allowed.has(url.host.toLowerCase())) {
-    throw new RepositoryConnectionError("该主机和端口未加入 REPOSITORY_HOST_ALLOWLIST，请联系 Radar 管理员配置", 400);
+    throw new RepositoryConnectionError("该主机和端口未加入 REPOSITORY_HOST_ALLOWLIST，请联系 CoDelphi 管理员配置", 400);
   }
 }
 

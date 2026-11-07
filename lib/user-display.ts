@@ -1,7 +1,7 @@
 import type { SessionUser } from "./types";
 
 export function userDisplayName(user: SessionUser) {
-  return user.name ?? user.email ?? "Radar 用户";
+  return user.name ?? user.email ?? "CoDelphi 用户";
 }
 
 export function userInitial(user: SessionUser) {

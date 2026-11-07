@@ -15,7 +15,7 @@ async function githubHeaders(access: GitHubAccess) {
     Accept: "application/vnd.github+json",
     Authorization: `Bearer ${await resolveGitHubToken(access)}`,
     "X-GitHub-Api-Version": "2022-11-28",
-    "User-Agent": "radar-chandler",
+    "User-Agent": "codelphi-chandler",
   };
 }
 

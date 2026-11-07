@@ -6,14 +6,14 @@
 
 ## 背景：我们在竞争格局中的位置
 
-| 赛道 | 代表产品 | 用户群体 | 与 Radar 关系 |
+| 赛道 | 代表产品 | 用户群体 | 与 CoDelphi 关系 |
 |---|---|---|---|
 | A. 版本通知 | NewReleases.io、GitWatchman | 个人开发者、平台团队；盯**别人维护的仓库** | 参照系（分发渠道），非竞品 |
 | B. AI Release Notes | GitHub 原生、Marketplace Actions | OSS 维护者、产品/DevRel | 单次写作工具，无知识资产 |
 | C. AI 仓库理解 | DeepWiki、Greptile、CodeRabbit | 开发者（理解代码实现）；付费验证在工程组织 | 视角是"实现"，与我们的"行为"受众几乎不重叠 |
-| D. 规格驱动开发 | GitHub Spec Kit | 使用 AI agent 的开发者（绿地项目） | spec→code 正向；反向提取（Radar 方向）无主流工具 |
+| D. 规格驱动开发 | GitHub Spec Kit | 使用 AI agent 的开发者（绿地项目） | spec→code 正向；反向提取（CoDelphi 方向）无主流工具 |
 
-核心判断：不卷赛道 C；把「可信的行为规格时间线」做成品类。Radar 当前形态为单公司内部工具（Chandler OAuth + 邮箱白名单，`app/auth/callback/route.ts:20-44`）。
+核心判断：不卷赛道 C；把「可信的行为规格时间线」做成品类。CoDelphi 当前形态为单公司内部工具（Chandler OAuth + 邮箱白名单，`app/auth/callback/route.ts:20-44`）。
 
 ---
 
@@ -44,9 +44,9 @@
 
 1. **接手项目（第一次）**：读功能树 + 场景 + 行为变迁史建立行为全貌；每条结论点开证据直达源码。这是目前唯一能真实跑通的开发者场景。
    【已有：证据可点击 `components/evidence-links.tsx:7-9`；spec 版本链 `lib/spec-versions.ts:160-172`】
-2. **写代码时**：在 Cursor/Claude Code 里问 agent，agent 经 MCP 引用 Radar 的规格事实与证据路径。
+2. **写代码时**：在 Cursor/Claude Code 里问 agent，agent 经 MCP 引用 CoDelphi 的规格事实与证据路径。
    【缺口 E：MCP server】
-3. **提 PR 时**：机器人评论"此 PR 触碰的文件涉及功能 X（场景 EC-3、HP-2），预期行为变化：……"。每个 PR 都和 Radar 打一次交道。
+3. **提 PR 时**：机器人评论"此 PR 触碰的文件涉及功能 X（场景 EC-3、HP-2），预期行为变化：……"。每个 PR 都和 CoDelphi 打一次交道。
    【缺口 B：反向影响索引 + PR 预演；现状 webhook 只处理 push，`lib/github-webhook.ts` 非 push 事件 202 忽略】
 4. **合并后**：AI 生成的行为变化就是"这次改动对外说明"，只需校对不用手写。
    【缺口：双向闭环导出】
@@ -55,7 +55,7 @@
 6. **日常查"改这个功能要动哪里"**：功能页一屏列出该功能证据文件聚合。
    【缺口 A：功能→实现聚合视图】
 
-**理想状态的标志**：Radar 出现在 PR 流里（高频），而不是只在交接文档里（低频）。
+**理想状态的标志**：CoDelphi 出现在 PR 流里（高频），而不是只在交接文档里（低频）。
 
 ## QA
 
@@ -80,7 +80,7 @@
 
 **理想旅程**：
 
-1. **基建决策**：规定所有产品接入 Radar（注册即自动分析），作为团队知识基建。
+1. **基建决策**：规定所有产品接入 CoDelphi（注册即自动分析），作为团队知识基建。
    【已有：GitHub App manifest 全自动接入，`app/integrations/github/manifest|install|callback`】
 2. **看团队全貌**：首页产品卡片看每个产品的分析状态、功能数、发布节奏。
    【已有：`app/page.tsx`】

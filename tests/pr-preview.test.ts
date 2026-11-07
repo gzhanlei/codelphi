@@ -15,7 +15,7 @@ vi.mock("../lib/code-hosting", () => ({
 vi.mock("../lib/github-access", () => ({ resolveGitHubToken: vi.fn(async () => "installation-token") }));
 vi.mock("../lib/env", () => ({ prPreviewEnabled: vi.fn(() => process.env.PR_PREVIEW_ENABLED === "true") }));
 
-const job = { repositoryId: 9, number: 7, sha: "pr-sha", owner: "gzhanlei", name: "radar" };
+const job = { repositoryId: 9, number: 7, sha: "pr-sha", owner: "gzhanlei", name: "codelphi" };
 
 describe("renderPrPreview", () => {
   it("groups affected entries by feature with references and evidence paths", () => {
@@ -25,8 +25,8 @@ describe("renderPrPreview", () => {
       { featureName: "登录", scenarioReference: "EC-2", path: "lib/auth.ts" },
       { featureName: "支付", scenarioReference: null, path: "lib/pay.ts" },
     ];
-    const body = renderPrPreview(entries, 3, "gzhanlei/radar", 7);
-    expect(body).toContain(prPreviewCommentMarker("gzhanlei", "radar", 7));
+    const body = renderPrPreview(entries, 3, "gzhanlei/codelphi", 7);
+    expect(body).toContain(prPreviewCommentMarker("gzhanlei", "codelphi", 7));
     expect(body).toContain("此 PR 触碰 3 个文件，涉及 2 个功能");
     expect(body).toContain("**登录**：场景 HP-1、EC-2（`lib/auth.ts`、`lib/session.ts`）");
     expect(body).toContain("**支付**：`lib/pay.ts`");
@@ -50,20 +50,20 @@ describe("runPrPreview", () => {
       return [[]];
     });
     getPullRequestFiles.mockResolvedValue([{ path: "lib/auth.ts", status: "modified", patch: "" }]);
-    listIssueComments.mockResolvedValue([{ id: 1, body: "other" }, { id: 2, body: `${prPreviewCommentMarker("gzhanlei", "radar", 7)}old` }]);
+    listIssueComments.mockResolvedValue([{ id: 1, body: "other" }, { id: 2, body: `${prPreviewCommentMarker("gzhanlei", "codelphi", 7)}old` }]);
     upsertIssueComment.mockResolvedValue(2);
   });
 
   it("comments on the PR when touched files intersect the spec index", async () => {
     await runPrPreview(job);
-    expect(getPullRequestFiles).toHaveBeenCalledWith(expect.objectContaining({ owner: "gzhanlei", name: "radar" }), 7, { connectionId: 42, organizationId: 7 });
+    expect(getPullRequestFiles).toHaveBeenCalledWith(expect.objectContaining({ owner: "gzhanlei", name: "codelphi" }), 7, { connectionId: 42, organizationId: 7 });
     expect(upsertIssueComment).toHaveBeenCalledWith(expect.anything(), 7, expect.stringContaining("涉及 1 个功能"), 2, { connectionId: 42, organizationId: 7 });
   });
 
   it("updates the existing marker comment instead of creating a new one", async () => {
     await runPrPreview(job);
     const body = upsertIssueComment.mock.calls[0][2] as string;
-    expect(body.startsWith(prPreviewCommentMarker("gzhanlei", "radar", 7))).toBe(true);
+    expect(body.startsWith(prPreviewCommentMarker("gzhanlei", "codelphi", 7))).toBe(true);
     expect(upsertIssueComment.mock.calls[0][3]).toBe(2);
   });
 

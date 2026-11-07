@@ -1,4 +1,4 @@
-# Radar
+# CoDelphi
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -6,20 +6,20 @@
 [![React](https://img.shields.io/badge/React-61DAFB?logo=react&logoColor=black)](https://react.dev/)
 [![MySQL](https://img.shields.io/badge/MySQL-4479A1?logo=mysql&logoColor=white)](https://www.mysql.com/)
 
-**Radar 把 GitHub 仓库变成一份可追溯的产品规格。** 连接仓库后，AI 自动提取功能清单与用户场景，每次 push 自动总结行为变化——每一条结论都附带可点击的源码证据，而不是凭空生成的摘要。
+**CoDelphi 把 GitHub 仓库变成一份可追溯的产品规格。** 连接仓库后，AI 自动提取功能清单与用户场景，每次 push 自动总结行为变化——每一条结论都附带可点击的源码证据，而不是凭空生成的摘要。
 
-> Radar turns a GitHub repository into a traceable product spec: AI-extracted features and scenarios, per-push behavior changes, every claim backed by source-code evidence.
+> CoDelphi turns a GitHub repository into a traceable product spec: AI-extracted features and scenarios, per-push behavior changes, every claim backed by source-code evidence.
 
 - 🔍 **证据可溯**：AI 只能引用本次实际读取的代码路径，未知路径会让分析直接失败——从机制上杜绝幻觉，而不是靠提示词约定。
 - 🔄 **随代码演进**：GitHub App webhook 驱动，push 即自动分析；发布页优先展示功能与场景的前后行为差异，Commit 与 AI 摘要仅作证据补充。
 - ✍️ **人机协作**：功能树、场景与产品概况支持手动编辑；标记为人工来源的内容永远不会被自动分析覆盖。
-- 🏗️ **真实可用**：Radar 在生产环境持续分析自身仓库等多个真实产品，本项目本身就是它的第一个分析对象。
+- 🏗️ **真实可用**：CoDelphi 在生产环境持续分析自身仓库等多个真实产品，本项目本身就是它的第一个分析对象。
 
 ## 与本仓库实时同步的Demo
-https://radar.chandler.work/products/reporadar  无需注册登录也可只读查看。
+https://codelphi.com/products/reporadar  无需注册登录也可只读查看。
 
 ## 懒得自托管，用我搭好的免费云服务
-https://radar.chandler.work
+https://codelphi.com
 
 ## 技术栈
 
@@ -41,7 +41,7 @@ Next.js（App Router）· TypeScript · React · MySQL 8 · Vitest · OpenAI 兼
 - 不可变 Spec Version 快照，合并人工功能与场景，并计算确定性的功能/场景行为 Diff。
 - 发布页优先展示行为变化及前后差异，Commit 与 AI 摘要仅作为证据和补充。
 - LLM 结构化输出校验、代码证据路径校验。
-- MySQL 版本化迁移、Radar 自产品注册脚本。
+- MySQL 版本化迁移、CoDelphi 自产品注册脚本。
 - 自动分析仅更新 generated 内容，不覆盖 manual 功能或场景；生成功能名作为稳定关联键不可直接修改。
 - 响应式中文界面。
 
@@ -57,7 +57,7 @@ openssl rand -hex 32  # 填入 GITHUB_WEBHOOK_SECRET
 
 编辑 `.env`，至少填写：
 
-- `DATABASE_URL`：腾讯云 MySQL 的 `mysql://` URL，数据库名为 `radar`。
+- `DATABASE_URL`：腾讯云 MySQL 的 `mysql://` URL，数据库名为 `codelphi`。
 - `CHANDLER_CLIENT_ID` / `CHANDLER_CLIENT_SECRET`。
 - `AUTH_ALLOWED_EMAILS`（可选）：特殊封闭部署的登录限制，英文逗号分隔；留空允许所有有效 Chandler 用户，不用于工作区成员管理。
 - `PUBLIC_DEMO_SLUGS`（可选）：公开只读 Demo 的产品 slug，英文逗号分隔（如 `reporadar`）。匿名访客可浏览该产品页面，所有保存/分析操作会弹出 Demo 提示而不发请求；留空关闭。
@@ -71,14 +71,14 @@ openssl rand -hex 32  # 填入 GITHUB_WEBHOOK_SECRET
 由 MySQL 管理员在**现有腾讯云实例**中执行（替换密码和网段，不要在聊天中提交真实密码）：
 
 ```sql
-CREATE DATABASE radar CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
-CREATE USER 'radar'@'%' IDENTIFIED BY 'replace-with-a-strong-password';
+CREATE DATABASE codelphi CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE USER 'codelphi'@'%' IDENTIFIED BY 'replace-with-a-strong-password';
 GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, INDEX, ALTER, REFERENCES, DROP
-ON radar.* TO 'radar'@'%';
+ON codelphi.* TO codelphi@'%';
 FLUSH PRIVILEGES;
 ```
 
-Radar 不使用 WorkMembership 的业务表。生产环境建议按实际应用网段收紧账号 Host，并定期轮换密码。
+CoDelphi 不使用 WorkMembership 的业务表。生产环境建议按实际应用网段收紧账号 Host，并定期轮换密码。
 
 ### 3. 初始化并启动
 
@@ -94,7 +94,7 @@ npm run dev
 
 ### 添加其他产品
 
-登录后点击产品总览右上角的“添加产品”，填写产品名称、URL Slug、GitHub `owner/repo` 和默认分支。Radar 会先验证仓库读取权限，再写入产品与仓库记录；保持“添加后立即分析”选中即可生成第一版规格。
+登录后点击产品总览右上角的“添加产品”，填写产品名称、URL Slug、GitHub `owner/repo` 和默认分支。CoDelphi 会先验证仓库读取权限，再写入产品与仓库记录；保持“添加后立即分析”选中即可生成第一版规格。
 
 也可以在本地对已经注册的产品手动执行：
 
@@ -106,20 +106,20 @@ npm run analyze -- <产品-slug>
 
 ### 4. 配置 Chandler OAuth
 
-在 `https://app.chandler.work/partner/apps` 创建 Radar 应用，scope 为 `openid profile email`，登记以下回调：
+在 `https://app.chandler.work/partner/apps` 创建 CoDelphi 应用，scope 为 `openid profile email`，登记以下回调：
 
 ```text
 http://localhost:3000/auth/callback
-https://radar.chandler.work/auth/callback
+https://codelphi.com/auth/callback
 ```
 
 有效 Chandler 用户默认可登录并自动获得个人工作区。共享工作区通过成员与邀请授权；只有特殊封闭部署才需要配置 `AUTH_ALLOWED_EMAILS`，留空不会拒绝用户。
 
 ### 使用 GitHub App（推荐）
 
-打开 `/integrations`，点击“创建 Radar GitHub App”，在 GitHub 官方页面完成创建，然后点击“添加安装”。App 仅申请 `contents:read` 和 `metadata:read`；新 App 的 Manifest 同时声明 App 级 Webhook URL 与 `push` 事件，安装后所选仓库的默认分支更新会自动通知 Radar。已有 App 可点击“设置 Push 通知”跳转 GitHub 设置，一次性补设相同 URL、Webhook Secret 和事件；GitHub 没有更新 App Webhook 的公开 REST API，因此旧 App 需要这一次手工操作。
+打开 `/integrations`，点击“创建 CoDelphi GitHub App”，在 GitHub 官方页面完成创建，然后点击“添加安装”。App 仅申请 `contents:read` 和 `metadata:read`；新 App 的 Manifest 同时声明 App 级 Webhook URL 与 `push` 事件，安装后所选仓库的默认分支更新会自动通知 CoDelphi。已有 App 可点击“设置 Push 通知”跳转 GitHub 设置，一次性补设相同 URL、Webhook Secret 和事件；GitHub 没有更新 App Webhook 的公开 REST API，因此旧 App 需要这一次手工操作。
 
-安装时可选择全部仓库或指定仓库。Radar 将 App 私钥、Client Secret 和 Webhook Secret 使用 AES-256-GCM 加密后存入 MySQL，仅在服务端内存中解密换取 Installation Token 或验证 Webhook。页面支持重新检查连接和本地断开；断开不会卸载 GitHub App，也不会删除已有规格。
+安装时可选择全部仓库或指定仓库。CoDelphi 将 App 私钥、Client Secret 和 Webhook Secret 使用 AES-256-GCM 加密后存入 MySQL，仅在服务端内存中解密换取 Installation Token 或验证 Webhook。页面支持重新检查连接和本地断开；断开不会卸载 GitHub App，也不会删除已有规格。
 
 添加产品时选择对应的 GitHub App 安装即可；现有 `GITHUB_TOKEN` 仅作为兼容回退。
 
@@ -148,7 +148,7 @@ GitHub 没有更新 App Webhook 的公开 REST API，因此在本功能上线前
 不使用 App 级通知时，仍可在单个仓库的 Webhook 设置中手工填写：
 
 ```text
-Payload URL: https://radar.chandler.work/api/webhooks/github
+Payload URL: https://codelphi.com/api/webhooks/github
 Content type: application/json
 Secret: 与 GITHUB_WEBHOOK_SECRET 相同
 Events: Push events
@@ -160,8 +160,8 @@ PR 预演（`pull_request` 事件触发、在 PR 中评论受影响的规格）�
 
 1. **权限**（App 设置 → Permissions & events → Pull requests）：从 Repository permissions 里把 Pull requests 提升为 **Read and write**，Save changes。安装了该 App 的组织/账号需要在通知里重新批准权限。
 2. **事件订阅**（同页面 Subscribe to events）：勾选 **Pull request**，Save changes。与 push 迁移一样，只提权限不订阅事件不会有任何投递。
-3. **服务器开关**：在部署环境 `.env` 设置 `PR_PREVIEW_ENABLED=true` 并重启服务（`systemctl restart radar.service`）。开关默认关闭，权限升级期间预演静默失败不影响 push 分析主链路。
-4. **验证**：在一个已注册产品的仓库开测试 PR 改动某功能的证据文件，PR 应出现「Radar 规格预演」评论；追加 commit 后同一评论被更新而非新建。若未出现：检查 Recent Deliveries 是否有 `pull_request` 投递（无 → 第 2 步遗漏）、服务器日志 `[pr-preview] failed`（有 → 通常是 installation token 权限尚未被重新批准）。
+3. **服务器开关**：在部署环境 `.env` 设置 `PR_PREVIEW_ENABLED=true` 并重启服务（`systemctl restart codelphi.service`）。开关默认关闭，权限升级期间预演静默失败不影响 push 分析主链路。
+4. **验证**：在一个已注册产品的仓库开测试 PR 改动某功能的证据文件，PR 应出现「CoDelphi 规格预演」评论；追加 commit 后同一评论被更新而非新建。若未出现：检查 Recent Deliveries 是否有 `pull_request` 投递（无 → 第 2 步遗漏）、服务器日志 `[pr-preview] failed`（有 → 通常是 installation token 权限尚未被重新批准）。
 
 回滚：把 `PR_PREVIEW_ENABLED` 设为 `false` 重启即可，权限可以保留。
 
@@ -175,7 +175,7 @@ Webhook 和页面上的“立即分析”都通过 Next.js `after()` 在响应�
 
 ## 数据与安全边界
 
-- Radar 只保存 Chandler `sub`、邮箱、显示名和头像；不保存 Chandler 密码或 OAuth token。
+- CoDelphi 只保存 Chandler `sub`、邮箱、显示名和头像；不保存 Chandler 密码或 OAuth token。
 - 每次会话有效期 7 天，过期后重新通过 Chandler 登录。
 - AI 只能引用本次读取的代码或 diff 文件，未知证据路径会使分析失败。
 - 代码仅发送给配置的 AI 网关；应确保 LLMGateway 及其上游符合内部代码保密要求。
@@ -205,7 +205,7 @@ git push origin main
 git pull --ff-only origin main
 npm install   # 依赖变更时
 npm run build
-systemctl restart radar.service
+systemctl restart codelphi.service
 curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3008/login
 ```
 

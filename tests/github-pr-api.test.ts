@@ -59,11 +59,11 @@ describe("GitHub PR API helpers", () => {
 
   it("lists issue comments with id and body", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify([
-      { id: 1, body: "<!-- radar-pr-preview -->preview" },
+      { id: 1, body: "<!-- codelphi-pr-preview -->preview" },
       { id: 2, body: "other" },
     ]), { status: 200 })));
     expect(await listIssueComments(repo, 7)).toEqual([
-      { id: 1, body: "<!-- radar-pr-preview -->preview" },
+      { id: 1, body: "<!-- codelphi-pr-preview -->preview" },
       { id: 2, body: "other" },
     ]);
   });

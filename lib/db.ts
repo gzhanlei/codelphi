@@ -2,12 +2,12 @@ import mysql, { type Pool } from "mysql2/promise";
 import { databaseConfig } from "./database-config";
 
 declare global {
-  var radarDb: Pool | undefined;
+  var codelphiDb: Pool | undefined;
 }
 
 export function getDb() {
-  globalThis.radarDb ??= mysql.createPool(databaseConfig());
-  return globalThis.radarDb;
+  globalThis.codelphiDb ??= mysql.createPool(databaseConfig());
+  return globalThis.codelphiDb;
 }
 
 /** 数据访问函数的可注入执行入口：生产走连接池，测试注入 stub。 */

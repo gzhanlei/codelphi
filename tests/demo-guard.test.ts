@@ -31,6 +31,6 @@ describe("useDemoGuard", () => {
     const html = renderToStaticMarkup(createElement(DemoModeProvider, null, createElement(Probe)));
     expect(html).toContain("intercepted:true");
     expect(html).toContain("Demo 模式");
-    expect(html).toContain("这是 Radar 的只读演示站点，编辑内容不会保存。");
+    expect(html).toContain("这是 CoDelphi 的只读演示站点，编辑内容不会保存。");
   });
 });

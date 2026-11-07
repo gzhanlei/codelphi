@@ -4,7 +4,7 @@ import { normalizeChangeContext, numberedSourceContent, selectSourceCandidates }
 describe("GitHub source boundaries", () => {
   it("normalizes compare responses into release context", () => {
     const result = normalizeChangeContext({
-      html_url: "https://github.com/gzhanlei/radar/compare/a...b",
+      html_url: "https://github.com/gzhanlei/codelphi/compare/a...b",
       commits: [{ sha: "b", commit: { message: "feat: add specs", committer: { date: "2026-11-01T00:00:00Z" } } }],
       files: [{ filename: "lib/spec.ts", status: "modified", patch: "@@ -1 +1 @@" }],
     }, "b");
@@ -15,7 +15,7 @@ describe("GitHub source boundaries", () => {
 
   it("normalizes a single initial commit and tolerates missing patches", () => {
     const result = normalizeChangeContext({
-      html_url: "https://github.com/gzhanlei/radar/commit/b",
+      html_url: "https://github.com/gzhanlei/codelphi/commit/b",
       commit: { message: "chore: initial", committer: { date: "2026-11-01T01:00:00Z" } },
       files: [{ filename: "image.png", status: "added" }],
     }, "b");
@@ -86,9 +86,9 @@ describe("GitHub source boundaries", () => {
   });
 
   it("falls back to the short SHA and supplied commit URL when commit metadata is absent", () => {
-    const result = normalizeChangeContext({}, "abcdef123456", "https://github.com/gzhanlei/radar/commit/abcdef123456");
+    const result = normalizeChangeContext({}, "abcdef123456", "https://github.com/gzhanlei/codelphi/commit/abcdef123456");
     expect(result.message).toBe("Release abcdef1");
-    expect(result.url).toBe("https://github.com/gzhanlei/radar/commit/abcdef123456");
+    expect(result.url).toBe("https://github.com/gzhanlei/codelphi/commit/abcdef123456");
     expect(result.files).toEqual([]);
   });
 

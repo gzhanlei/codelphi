@@ -17,11 +17,11 @@ describe("product details", () => {
   it("keeps provider identity and supports empty product history", async () => {
     execute.mockImplementation(async (sql: string = "") => {
       if (sql.includes("FROM products")) return [[product]];
-      if (sql.includes("FROM repositories")) return [[{ provider: "github", owner: "gzhanlei", name: "radar", defaultBranch: "main" }]];
+      if (sql.includes("FROM repositories")) return [[{ provider: "github", owner: "gzhanlei", name: "codelphi", defaultBranch: "main" }]];
       return [[]];
     });
     const details = await getProductDetails("radar", 7);
-    expect(details?.repository).toEqual({ provider: "github", owner: "gzhanlei", name: "radar", defaultBranch: "main" });
+    expect(details?.repository).toEqual({ provider: "github", owner: "gzhanlei", name: "codelphi", defaultBranch: "main" });
     expect(details?.features).toEqual([]);
     expect(details?.releases).toEqual([]);
     expect(execute.mock.calls[0][1]).toEqual(["radar", 7]);
@@ -31,7 +31,7 @@ describe("product details", () => {
   it("loads feature, release and parsed behavior evidence without an organization filter", async () => {
     execute.mockImplementation(async (sql: string = "") => {
       if (sql.includes("FROM products")) return [[product]];
-      if (sql.includes("FROM repositories")) return [[{ provider: "github", owner: "gzhanlei", name: "radar", defaultBranch: "main" }]];
+      if (sql.includes("FROM repositories")) return [[{ provider: "github", owner: "gzhanlei", name: "codelphi", defaultBranch: "main" }]];
       if (sql.includes("FROM analysis_runs")) return [[{ status: "succeeded", errorMessage: null }]];
       if (sql.includes("FROM features")) return [[{ id: 5, name: "Login", summary: "OAuth", parentId: null, source: "generated" }]];
       if (sql.includes("FROM releases")) return [[{ id: 6, title: "v1", summary: "Release", sha: "abc", url: "https://github.com/commit/abc", committedAt: new Date("2026-11-01T00:00:00Z"), specVersionId: 3 }]];
@@ -56,7 +56,7 @@ describe("product details", () => {
     const sha = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0";
     execute.mockImplementation(async (sql: string = "") => {
       if (sql.includes("FROM products")) return [[product]];
-      if (sql.includes("FROM repositories")) return [[{ provider: "github", owner: "gzhanlei", name: "radar", defaultBranch: "main" }]];
+      if (sql.includes("FROM repositories")) return [[{ provider: "github", owner: "gzhanlei", name: "codelphi", defaultBranch: "main" }]];
       if (sql.includes("FROM analysis_runs")) return [[{ status: "succeeded", errorMessage: null, afterSha: sha }]];
       if (sql.includes("FROM features")) return [[{ id: 5, name: "Login", summary: "OAuth", parentId: null, source: "generated" }]];
       if (sql.includes("FROM releases")) return [[{ id: 6, title: "v1", summary: "Release", sha, url: `https://github.com/commit/${sha}`, committedAt: new Date("2026-11-01T00:00:00Z"), specVersionId: 3 }]];
@@ -67,7 +67,7 @@ describe("product details", () => {
       throw new Error(`Unexpected query: ${sql}`);
     });
     const details = await getProductDetails("radar");
-    const blob = (line: number) => `https://github.com/gzhanlei/radar/blob/${sha}/lib/analysis.ts#L${line}`;
+    const blob = (line: number) => `https://github.com/gzhanlei/codelphi/blob/${sha}/lib/analysis.ts#L${line}`;
     expect(details?.product.descriptionEvidence).toEqual([{ path: "lib/analysis.ts", startLine: 185, url: blob(185) }]);
     expect(details?.scenarios[0].evidence).toEqual([{ path: "lib/analysis.ts", startLine: 24, url: blob(24) }]);
     expect(details?.changes[0].evidence).toEqual([{ path: "lib/analysis.ts", startLine: 50, url: blob(50) }]);
@@ -78,7 +78,7 @@ describe("product details", () => {
   it("leaves evidence untouched when the latest run has no revision", async () => {
     execute.mockImplementation(async (sql: string = "") => {
       if (sql.includes("FROM products")) return [[product]];
-      if (sql.includes("FROM repositories")) return [[{ provider: "github", owner: "gzhanlei", name: "radar", defaultBranch: "main" }]];
+      if (sql.includes("FROM repositories")) return [[{ provider: "github", owner: "gzhanlei", name: "codelphi", defaultBranch: "main" }]];
       if (sql.includes("FROM analysis_runs")) return [[{ status: "queued", errorMessage: null, afterSha: null }]];
       if (sql.includes("FROM features")) return [[]];
       if (sql.includes("FROM releases")) return [[]];

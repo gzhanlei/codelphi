@@ -17,8 +17,8 @@ export async function createSessionToken(user: SessionUser, secret: string, maxA
   return new SignJWT({ email: user.email, name: user.name, picture: user.picture })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(user.sub)
-    .setIssuer("radar")
-    .setAudience("radar-web")
+    .setIssuer("codelphi")
+    .setAudience("codelphi-web")
     .setIssuedAt()
     .setExpirationTime(`${maxAge}s`)
     .sign(key(secret));
@@ -26,7 +26,7 @@ export async function createSessionToken(user: SessionUser, secret: string, maxA
 
 export async function verifySessionToken(token: string, secret: string): Promise<SessionUser | null> {
   try {
-    const { payload } = await jwtVerify(token, key(secret), { issuer: "radar", audience: "radar-web" });
+    const { payload } = await jwtVerify(token, key(secret), { issuer: "codelphi", audience: "codelphi-web" });
     return sessionSchema.parse(payload);
   } catch {
     return null;

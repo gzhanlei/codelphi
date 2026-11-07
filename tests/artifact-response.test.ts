@@ -4,7 +4,7 @@ import { architectureArtifactResponse } from "../lib/artifact-response";
 const record = {
   productId: 4,
   productSlug: "radar",
-  productName: "Radar",
+  productName: "CoDelphi",
   specVersionId: 7,
   revision: "43d8ce7b96f7e7deff9bb3b8429eb8ca361466ea",
   status: "accepted" as const,

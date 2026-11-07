@@ -42,7 +42,7 @@ interface RepositorySectionProps {
 export function RepositorySection({ repository, defaultBranch, connectionId, connections, hasServerToken, onRepositoryChange, onBranchChange, onConnectionChange }: RepositorySectionProps) {
   return (
     <div className="form-section">
-      <div className="form-section-heading"><span>02</span><div><h2>GitHub 仓库</h2><p>Radar 会验证当前选择的凭据是否有读取权限。</p></div></div>
+      <div className="form-section-heading"><span>02</span><div><h2>GitHub 仓库</h2><p>CoDelphi 会验证当前选择的凭据是否有读取权限。</p></div></div>
       <ConnectionSelect connectionId={connectionId} connections={connections} hasServerToken={hasServerToken} onChange={onConnectionChange} />
       <GitHubRepositoryPicker connectionId={connectionId} repository={repository} onRepositoryChange={onRepositoryChange} onBranchChange={onBranchChange} />
       <div className="form-grid">

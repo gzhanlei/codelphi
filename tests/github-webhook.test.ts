@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { processGitHubWebhook, resolveGitHubWebhookSecrets } from "../lib/github-webhook";
 
-const payload = JSON.stringify({ ref: "refs/heads/main", before: "before", after: "after", repository: { full_name: "gzhanlei/radar" } });
+const payload = JSON.stringify({ ref: "refs/heads/main", before: "before", after: "after", repository: { full_name: "gzhanlei/codelphi" } });
 
 function dependencies() {
   return {
@@ -38,7 +38,7 @@ describe("GitHub webhook processing", () => {
   });
 
   it("ignores deleted branches, unknown repositories and non-default branches", async () => {
-    expect((await processGitHubWebhook({ rawBody: JSON.stringify({ ref: "refs/heads/main", before: "b", after: "0000000000000000000000000000000000000000", repository: { full_name: "gzhanlei/radar" } }), event: "push", signature: "sig", secret: "secret" }, dependencies())).body).toEqual({ ignored: "branch_deleted" });
+    expect((await processGitHubWebhook({ rawBody: JSON.stringify({ ref: "refs/heads/main", before: "b", after: "0000000000000000000000000000000000000000", repository: { full_name: "gzhanlei/codelphi" } }), event: "push", signature: "sig", secret: "secret" }, dependencies())).body).toEqual({ ignored: "branch_deleted" });
     const deps = dependencies();
     deps.findRepository.mockResolvedValue(undefined);
     expect((await processGitHubWebhook({ rawBody: payload, event: "push", signature: "sig", secret: "secret" }, deps)).status).toBe(202);
@@ -63,22 +63,22 @@ describe("GitHub webhook processing", () => {
 
   it("dispatches opened and synchronized pull requests to preview", async () => {
     const deps = dependencies();
-    const prPayload = (action: string, number = 7) => JSON.stringify({ action, pull_request: { number, head: { sha: "pr-sha" }, base: { ref: "main" } }, repository: { full_name: "gzhanlei/radar" } });
+    const prPayload = (action: string, number = 7) => JSON.stringify({ action, pull_request: { number, head: { sha: "pr-sha" }, base: { ref: "main" } }, repository: { full_name: "gzhanlei/codelphi" } });
     for (const action of ["opened", "synchronize"]) {
       const result = await processGitHubWebhook({ rawBody: prPayload(action), event: "pull_request", signature: "sig", secret: "secret" }, deps);
       expect(result.status).toBe(202);
-      expect(result.preview).toEqual({ repositoryId: 9, number: 7, sha: "pr-sha", owner: "gzhanlei", name: "radar" });
+      expect(result.preview).toEqual({ repositoryId: 9, number: 7, sha: "pr-sha", owner: "gzhanlei", name: "codelphi" });
       expect(deps.queue).not.toHaveBeenCalled();
     }
   });
 
   it("ignores pull request actions and unregistered repositories without queuing analysis", async () => {
     const deps = dependencies();
-    const closed = JSON.stringify({ action: "closed", pull_request: { number: 7, head: { sha: "pr-sha" }, base: { ref: "main" } }, repository: { full_name: "gzhanlei/radar" } });
+    const closed = JSON.stringify({ action: "closed", pull_request: { number: 7, head: { sha: "pr-sha" }, base: { ref: "main" } }, repository: { full_name: "gzhanlei/codelphi" } });
     expect((await processGitHubWebhook({ rawBody: closed, event: "pull_request", signature: "sig", secret: "secret" }, deps)).body).toEqual({ ignored: true });
     const unknown = dependencies();
     unknown.findRepository.mockResolvedValue(undefined);
-    const opened = JSON.stringify({ action: "opened", pull_request: { number: 7, head: { sha: "pr-sha" }, base: { ref: "main" } }, repository: { full_name: "gzhanlei/radar" } });
+    const opened = JSON.stringify({ action: "opened", pull_request: { number: 7, head: { sha: "pr-sha" }, base: { ref: "main" } }, repository: { full_name: "gzhanlei/codelphi" } });
     const result = await processGitHubWebhook({ rawBody: opened, event: "pull_request", signature: "sig", secret: "secret" }, unknown);
     expect(result.body).toEqual({ ignored: true });
     expect(result.preview).toBeUndefined();

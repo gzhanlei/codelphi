@@ -23,14 +23,14 @@ function ConnectionGuide({ kind, allowlistConfigured }: { kind: TokenIntegration
   if (kind === "gitee") {
     return (
       <div className="connection-guide">
-        <ol><li>在 Gitee 创建私人令牌，只勾选读取用户信息和仓库所需的最小权限。</li><li>粘贴令牌，Radar 会验证账号后再加密保存。</li></ol>
+        <ol><li>在 Gitee 创建私人令牌，只勾选读取用户信息和仓库所需的最小权限。</li><li>粘贴令牌，CoDelphi 会验证账号后再加密保存。</li></ol>
         <a href="https://gitee.com/profile/personal_access_tokens" target="_blank" rel="noreferrer">打开 Gitee 令牌设置 ↗</a>
       </div>
     );
   }
   return (
     <div className="connection-guide">
-      <ol><li>确保 Radar 服务器能访问你的 Git 服务，并启用有效的 HTTPS 证书。</li><li>创建访问令牌：GitLab 使用 <code>read_api</code>，Gitea 使用 <code>read:user</code>，再按仓库读取需要授权。</li></ol>
+      <ol><li>确保 CoDelphi 服务器能访问你的 Git 服务，并启用有效的 HTTPS 证书。</li><li>创建访问令牌：GitLab 使用 <code>read_api</code>，Gitea 使用 <code>read:user</code>，再按仓库读取需要授权。</li></ol>
       <span>当前支持 GitLab 与 Gitea API；暂不支持 SSH 地址。</span>
       <span className="allowlist-note">{allowlistConfigured ? "仅允许 REPOSITORY_HOST_ALLOWLIST 中登记的主机和端口；GitLab.com 默认可用。" : "自有服务尚未配置主机白名单，请联系管理员设置 REPOSITORY_HOST_ALLOWLIST；GitLab.com 可直接连接。"}</span>
     </div>

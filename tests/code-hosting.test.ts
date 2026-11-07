@@ -6,8 +6,8 @@ describe("code hosting provider registry", () => {
   it("resolves GitHub for explicit and legacy default calls", () => {
     expect(getCodeHostingAdapter()).toBe(githubCodeHostingAdapter);
     expect(getCodeHostingAdapter("github").provider).toBe("github");
-    expect(githubCodeHostingAdapter.parseRepository("gzhanlei/radar")).toEqual({ owner: "gzhanlei", name: "radar", defaultBranch: "main" });
-    expect(githubCodeHostingAdapter.repositoryUrl({ owner: "gzhanlei", name: "radar" })).toBe("https://github.com/gzhanlei/radar");
+    expect(githubCodeHostingAdapter.parseRepository("gzhanlei/codelphi")).toEqual({ owner: "gzhanlei", name: "codelphi", defaultBranch: "main" });
+    expect(githubCodeHostingAdapter.repositoryUrl({ owner: "gzhanlei", name: "codelphi" })).toBe("https://github.com/gzhanlei/codelphi");
   });
 
   it("passes persisted provider, access and product identity to an analysis target", () => {

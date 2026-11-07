@@ -20,7 +20,7 @@ function inviteRequest(origin: string) {
 describe("organization invite route redirect", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv("APP_URL", "https://radar.chandler.work");
+    vi.stubEnv("APP_URL", "https://codelphi.com");
     vi.mocked(requireSessionUser).mockResolvedValue({ sub: "owner-sub", email: "owner@example.com" });
     vi.mocked(currentOrganization).mockResolvedValue({ id: 1, slug: "default", name: "Default", role: "owner" });
     vi.mocked(inviteOrganizationMember).mockResolvedValue({ status: "member_added", email: "partner@example.com", role: "editor", emailSent: false });
@@ -29,12 +29,12 @@ describe("organization invite route redirect", () => {
   it("redirects to the APP_URL origin even when the request host is the proxy target", async () => {
     const response = await POST(inviteRequest("https://localhost:3008"));
     expect(response.status).toBe(303);
-    expect(response.headers.get("location")).toBe("https://radar.chandler.work/organizations?invited=member_added");
+    expect(response.headers.get("location")).toBe("https://codelphi.com/organizations?invited=member_added");
   });
 
   it("keeps the invitation link and email flag as query parameters", async () => {
-    vi.mocked(inviteOrganizationMember).mockResolvedValue({ status: "invitation_pending", email: "new@example.com", role: "viewer", inviteUrl: "https://radar.chandler.work/invitations/accept?token=abc", emailSent: true });
+    vi.mocked(inviteOrganizationMember).mockResolvedValue({ status: "invitation_pending", email: "new@example.com", role: "viewer", inviteUrl: "https://codelphi.com/invitations/accept?token=abc", emailSent: true });
     const response = await POST(inviteRequest("https://localhost:3008"));
-    expect(response.headers.get("location")).toBe("https://radar.chandler.work/organizations?invited=invitation_pending&inviteUrl=https%3A%2F%2Fradar.chandler.work%2Finvitations%2Faccept%3Ftoken%3Dabc&emailSent=true");
+    expect(response.headers.get("location")).toBe("https://codelphi.com/organizations?invited=invitation_pending&inviteUrl=https%3A%2F%2Fcodelphi.com%2Finvitations%2Faccept%3Ftoken%3Dabc&emailSent=true");
   });
 });

@@ -50,7 +50,7 @@ export function ConnectionActions({ id, status, kind = "github" }: { id: number;
       isPending: () => pendingRef.current,
       setPending: updatePending,
       setError,
-      confirmDelete: () => window.confirm("删除后会清除 Radar 保存的访问令牌，且不能撤销。确定删除此连接吗？"),
+      confirmDelete: () => window.confirm("删除后会清除 CoDelphi 保存的访问令牌，且不能撤销。确定删除此连接吗？"),
       refresh: router.refresh,
       runClient: runConnectionAction,
     });

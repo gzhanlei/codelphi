@@ -36,7 +36,7 @@ function ProductCardContent({ product, pending }: { product: DashboardProduct; p
 
 export function ProductGrid({ products }: { products: DashboardProduct[] }) {
   if (products.length === 0) {
-    return <div className="empty-state"><strong>还没有接入产品</strong><p>配置 MySQL 后运行 <code>npm run db:seed</code> 注册 Radar 自身。</p></div>;
+    return <div className="empty-state"><strong>还没有接入产品</strong><p>配置 MySQL 后运行 <code>npm run db:seed</code> 注册 CoDelphi 自身。</p></div>;
   }
   return (
     <>

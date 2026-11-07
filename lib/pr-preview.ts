@@ -13,7 +13,7 @@ export interface AffectedSpecEntry {
 }
 
 export function prPreviewCommentMarker(owner: string, name: string, number: number) {
-  return `<!-- radar-pr-preview:${owner}/${name}#${number} -->`;
+  return `<!-- codelphi-pr-preview:${owner}/${name}#${number} -->`;
 }
 
 const referenceOrder: Record<string, number> = { HP: 0, EC: 1, ER: 2 };
@@ -45,8 +45,8 @@ export function renderPrPreview(entries: AffectedSpecEntry[], fileCount: number,
     return `- **${featureName}**：${scenarioPart}`;
   });
   return [
-    `<!-- radar-pr-preview:${fullName}#${number} -->`,
-    "## 🔭 Radar 规格预演",
+    `<!-- codelphi-pr-preview:${fullName}#${number} -->`,
+    "## 🔭 CoDelphi 规格预演",
     "",
     `此 PR 触碰 ${fileCount} 个文件，涉及 ${byFeature.size} 个功能（基于最近一次成功分析的规格索引）：`,
     "",

@@ -34,7 +34,7 @@ export default async function AcceptInvitationPage({ searchParams }: { searchPar
   const { token = "" } = await searchParams;
   const invitation = token ? await resolveInvitation(token) : null;
   if (!invitation) {
-    return <InviteNotice title="邀请链接无效或已过期"><p>请联系工作区所有者重新发送邀请链接。</p><Link className="primary-button" href="/">返回 Radar</Link></InviteNotice>;
+    return <InviteNotice title="邀请链接无效或已过期"><p>请联系工作区所有者重新发送邀请链接。</p><Link className="primary-button" href="/">返回 CoDelphi</Link></InviteNotice>;
   }
 
   const targetLabel = invitation.kind === "product" ? `产品「${invitation.targetName}」` : `工作区「${invitation.targetName}」`;

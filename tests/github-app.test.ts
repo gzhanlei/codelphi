@@ -1,7 +1,7 @@
 import { generateKeyPairSync } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { importSPKI, jwtVerify } from "jose";
-import { convertManifestCode, createAppJwt, getAppInstallation, getInstallationAccessToken, radarManifest } from "../lib/github-app";
+import { convertManifestCode, createAppJwt, getAppInstallation, getInstallationAccessToken, codelphiManifest } from "../lib/github-app";
 
 const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const pem = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
@@ -10,7 +10,7 @@ const app = { clientId: "Iv1.test", pem };
 
 describe("GitHub App boundaries", () => {
   it("requests read permissions plus PR comment write and uses local callback routes", () => {
-    const manifest = radarManifest("http://localhost:3008");
+    const manifest = codelphiManifest("http://localhost:3008");
     expect(manifest.default_permissions).toEqual({ contents: "read", metadata: "read", pull_requests: "write" });
     expect(manifest).not.toHaveProperty("default_permissions.administration");
     expect(manifest.redirect_url).toBe("http://localhost:3008/integrations/github/callback");
@@ -18,7 +18,7 @@ describe("GitHub App boundaries", () => {
     expect(manifest.public).toBe(false);
     expect(manifest.hook_attributes).toEqual({ url: "http://localhost:3008/api/webhooks/github", active: true });
     expect(manifest.default_events).toEqual(["push", "pull_request"]);
-    expect(radarManifest("http://localhost:3008/").hook_attributes.url).toBe("http://localhost:3008/api/webhooks/github");
+    expect(codelphiManifest("http://localhost:3008/").hook_attributes.url).toBe("http://localhost:3008/api/webhooks/github");
   });
 
   it("converts a manifest code into validated app credentials", async () => {

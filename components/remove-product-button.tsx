@@ -41,7 +41,7 @@ export function RemoveProductControl(props: RemoveProductControlProps) {
   return (
     <div className="remove-product-confirmation" role="alertdialog" aria-label={`移除 ${props.name}`}>
       <strong>移除 {props.name}？</strong>
-      <p>Radar 中的分析、规格和历史产物将被永久删除；GitHub 仓库和连接会保留。此操作不可撤销。</p>
+      <p>CoDelphi 中的分析、规格和历史产物将被永久删除；GitHub 仓库和连接会保留。此操作不可撤销。</p>
       <div className="remove-product-actions">
         <button className="danger-button" type="button" onClick={props.onConfirm} disabled={props.pending}>{props.pending ? "移除中…" : "确认移除"}</button>
         <button className="secondary-button" type="button" onClick={props.onCancel} disabled={props.pending}>取消</button>

@@ -52,7 +52,7 @@ const rootsSchema = z.record(z.string(), z.string());
 
 export function localRepositoryRoot(run: ArchitectureRun, env: Record<string, string | undefined> = process.env) {
   const fullName = `${run.owner}/${run.name}`;
-  const roots = rootsSchema.parse(JSON.parse(env.RADAR_REPOSITORY_ROOTS || "{}"));
+  const roots = rootsSchema.parse(JSON.parse(env.CODELPHI_REPOSITORY_ROOTS || "{}"));
   if (roots[fullName]) return roots[fullName];
   return env.GITHUB_REPOSITORY === fullName ? process.cwd() : undefined;
 }

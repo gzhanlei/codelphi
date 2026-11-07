@@ -1,8 +1,8 @@
 # Archify 阶段 1：固定运行时与原型验收
 
-> 当前边界：Radar 已停止生成和展示系统架构图，旧架构页面与 API 已移除。本文仅保留历史验收记录和独立 CLI/Skill 项目的抽取参考；Radar 的 Explainer 导出仍使用 Archify finalize，但不包含架构图。
+> 当前边界：CoDelphi 已停止生成和展示系统架构图，旧架构页面与 API 已移除。本文仅保留历史验收记录和独立 CLI/Skill 项目的抽取参考；CoDelphi 的 Explainer 导出仍使用 Archify finalize，但不包含架构图。
 
-Radar 只使用 **Archify v3.2.0（MIT）**。官方 ZIP 保存在 `vendor/archify/archify-v3.2.0.zip`，版本、来源与 SHA-256 记录在 `vendor/archify/release.json`。
+CoDelphi 只使用 **Archify v3.2.0（MIT）**。官方 ZIP 保存在 `vendor/archify/archify-v3.2.0.zip`，版本、来源与 SHA-256 记录在 `vendor/archify/release.json`。
 
 - Release：`https://github.com/tt-a1i/archify/releases/download/v3.2.0/archify.zip`
 - SHA-256：`70e210265c59f24dcbdf2a502ff671104b5454e7ee7d3554aecd86bad32384f5`
@@ -45,17 +45,17 @@ npm run archify:prototype
 
 每次尝试都回写同一版本，保留 `spec_json`、规格/产物 SHA-256、delivery/visual 回执和错误信息。`migrations/015_architecture_analysis_receipts.sql` 增加独立的 `analysis_receipt`，记录 fixed-SHA 源码范围、语义覆盖和 `architecture.facts.json` / `architecture.analysis.json` 哈希。架构异常不会回滚已提交的产品规格。
 
-生成文件位于 `artifacts/products/<slug>/<specVersionId>/`，该目录不进入 Git。访问路径为 `/api/architecture/<id>`，需要有效 Radar 会话；响应使用无 `allow-same-origin` 的 sandbox CSP，并验证产品与 Spec Version 对应的受管路径。
+生成文件位于 `artifacts/products/<slug>/<specVersionId>/`，该目录不进入 Git。访问路径为 `/api/architecture/<id>`，需要有效 CoDelphi 会话；响应使用无 `allow-same-origin` 的 sandbox CSP，并验证产品与 Spec Version 对应的受管路径。
 
 Archify 的 Viewer 源码链接需要匹配本地 Git checkout 做第二次验证。当前仓库通过 `GITHUB_REPOSITORY` 自动识别；其他工作目录可在环境变量中显式配置 JSON 映射：
 
 ```bash
-RADAR_REPOSITORY_ROOTS='{"owner/repo":"/absolute/local/checkout"}'
+CODELPHI_REPOSITORY_ROOTS='{"owner/repo":"/absolute/local/checkout"}'
 ```
 
 没有本地 checkout 的远程仓库仍然通过固定 revision 的 Tree/Blob 内容生成并验收架构，组件和关系不变；仅省略 `meta.repository`、组件 `sources` 和 Archify 的本地 Git 证据回执，不伪造 Viewer 源码链接。产品简介、功能与场景的证据不受此影响。
 
-生产分析统一使用固定 revision 的事实提取、独立信号清单和语义覆盖门禁，不再按 Radar、AIVlog 或其他仓库名称选择模板。完整架构源码读取独立于 AI 切片，截断或预算耗尽会失败；缺失关键信号、无证据事实或不可达运行时单元会保存诊断并阻止 Archify 交付。只有覆盖通过后，通用投影才以 `standard` 质量进入 delivery 和 visual-check。旧专用模板只保留作历史/corpus 回归基线，既有 accepted 架构不会因引擎升级自动重建。架构查看使用 `/products/<slug>/architecture/<id>` 原生页面并提供“返回产品概览”按钮，`prepare` 阶段的无组件、覆盖失败、spec 写入失败等也会保存 `failed` 文档与错误信息。
+生产分析统一使用固定 revision 的事实提取、独立信号清单和语义覆盖门禁，不再按 CoDelphi、AIVlog 或其他仓库名称选择模板。完整架构源码读取独立于 AI 切片，截断或预算耗尽会失败；缺失关键信号、无证据事实或不可达运行时单元会保存诊断并阻止 Archify 交付。只有覆盖通过后，通用投影才以 `standard` 质量进入 delivery 和 visual-check。旧专用模板只保留作历史/corpus 回归基线，既有 accepted 架构不会因引擎升级自动重建。架构查看使用 `/products/<slug>/architecture/<id>` 原生页面并提供“返回产品概览”按钮，`prepare` 阶段的无组件、覆盖失败、spec 写入失败等也会保存 `failed` 文档与错误信息。
 
 ## 阶段 3：原生产品概览
 
@@ -75,7 +75,7 @@ RADAR_REPOSITORY_ROOTS='{"owner/repo":"/absolute/local/checkout"}'
 - 输出目录：`artifacts/products/<slug>/<specVersionId>/`。
 - 输入：`explainer.md`，可选复用 accepted 的 `architecture.json`。
 - 输出：`explainer.html`，通过固定 MIT Archify `finalize explainer --browser-check` 生成。
-- 路由：`GET /api/products/<slug>/explainer`，需要有效 Radar 会话，返回与架构 Viewer 相同的 sandbox 和 `private, no-store` 头。
+- 路由：`GET /api/products/<slug>/explainer`，需要有效 CoDelphi 会话，返回与架构 Viewer 相同的 sandbox 和 `private, no-store` 头。
 - 只有 accepted 架构才嵌入源码证据并传入 `repoRoot`；其他状态仅显示真实状态。
 - 版本不一致、缺少 Spec Version、重复 ID 和 finalize 错误均会返回明确错误，不伪造成果。
 

@@ -11,8 +11,8 @@ function key(secret: string) {
 export function createGitHubInstallationState(organizationId: number, appId: number, secret: string) {
   return new SignJWT({ organizationId, appId, nonce: randomToken(12) })
     .setProtectedHeader({ alg: "HS256" })
-    .setIssuer("radar")
-    .setAudience("radar-github-installation")
+    .setIssuer("codelphi")
+    .setAudience("codelphi-github-installation")
     .setIssuedAt()
     .setExpirationTime("10m")
     .sign(key(secret));
@@ -27,7 +27,7 @@ export async function verifyGitHubInstallationState(
 ) {
   if (!state || !expectedState || state !== expectedState) return false;
   try {
-    const { payload } = await jwtVerify(state, key(secret), { issuer: "radar", audience: "radar-github-installation" });
+    const { payload } = await jwtVerify(state, key(secret), { issuer: "codelphi", audience: "codelphi-github-installation" });
     const verified = installationStateSchema.parse(payload);
     return verified.organizationId === organizationId && verified.appId === appId;
   } catch {

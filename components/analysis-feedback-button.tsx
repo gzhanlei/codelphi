@@ -19,7 +19,7 @@ export async function handleAnalysisFeedback(slug: string, controls: AnalysisFee
   controls.setMessage("");
   try {
     await submitProductFeedback(slug);
-    controls.setMessage("反馈已提交，Radar 团队会查看诊断信息。");
+    controls.setMessage("反馈已提交，CoDelphi 团队会查看诊断信息。");
   } catch (error) {
     controls.setMessage(error instanceof Error ? error.message : "反馈提交失败");
   } finally {
