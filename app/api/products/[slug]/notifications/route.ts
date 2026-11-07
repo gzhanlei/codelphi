@@ -37,3 +37,5 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
 // I1 修复后的窄推送回归验证注释。
 
 // 方案 A 门槛上线后的首个生产数据点。
+
+// 全覆盖 scope 指令验证注释。
