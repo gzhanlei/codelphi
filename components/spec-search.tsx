@@ -11,6 +11,23 @@ export function SpecSearch({ slug }: { slug: string }) {
   const [failed, setFailed] = useState(false);
   const [pending, setPending] = useState(false);
   const requestId = useRef(0);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  // 结果面板是绝对定位下拉：点击面板外或按 Escape 时收起，否则会一直盖住下方内容（影响面查询栏）。
+  useEffect(() => {
+    function onPointerDown(event: PointerEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) setResult(null);
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setResult(null);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, []);
 
   useEffect(() => {
     const trimmed = query.trim();
@@ -40,13 +57,14 @@ export function SpecSearch({ slug }: { slug: string }) {
 
   const empty = result && result.features.length === 0 && result.scenarios.length === 0;
   return (
-    <div className="spec-search">
+    <div className="spec-search" ref={containerRef}>
       <input
         aria-label="搜索规格"
         type="search"
         placeholder="搜索功能、场景或证据路径…"
         value={query}
         onChange={(event) => setQuery(event.target.value)}
+        onKeyDown={(event) => { if (event.key === "Escape") setResult(null); }}
       />
       {pending ? <span className="spec-search-hint">搜索中…</span> : null}
       {failed ? <p className="spec-search-hint" role="alert">搜索暂时不可用，请稍后重试。</p> : null}
