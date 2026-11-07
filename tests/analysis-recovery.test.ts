@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { failOrphanedRuns, redispatchQueuedRuns } from "../lib/analysis-recovery";
+import { orphanedRunMessage, recoverInterruptedRuns } from "../lib/analysis-recovery";
 
 const execute = vi.fn();
 const runAnalysis = vi.fn(async () => undefined);
@@ -9,38 +9,53 @@ beforeEach(() => {
 });
 
 describe("startup analysis recovery", () => {
-  it("marks every orphaned running run as failed with an explicit message", async () => {
-    execute.mockResolvedValue([{ affectedRows: 2 }]);
-    await expect(failOrphanedRuns(execute)).resolves.toBe(2);
+  it("re-queues orphaned running runs and legacy orphan-failures, then re-dispatches the whole queue", async () => {
+    execute
+      .mockResolvedValueOnce([{ affectedRows: 2 }]) // running + 旧版本孤儿失败 → queued
+      .mockResolvedValueOnce([[{ id: 51 }, { id: 57 }, { id: 64 }]]); // 派发队列
+    const result = await recoverInterruptedRuns(runAnalysis, execute);
+    expect(result).toEqual({ requeued: 2, dispatched: 3 });
     expect(execute).toHaveBeenCalledWith(
-      expect.stringContaining("WHERE status = 'running'"),
-      ["analysis interrupted by server restart (orphaned running run)"],
+      expect.stringContaining("WHERE status = 'running' OR (status = 'failed' AND error_message = ?)"),
+      [orphanedRunMessage],
     );
+    expect(runAnalysis).toHaveBeenCalledTimes(3);
+    expect(runAnalysis).toHaveBeenCalledWith(64);
   });
 
-  it("returns zero when no run was orphaned", async () => {
-    execute.mockResolvedValue([{ affectedRows: 0 }]);
-    await expect(failOrphanedRuns(execute)).resolves.toBe(0);
+  it("never leaves an orphaned run visible as failed: the re-queue clears the error marker", async () => {
+    execute
+      .mockResolvedValueOnce([{ affectedRows: 1 }])
+      .mockResolvedValueOnce([[{ id: 92 }]]);
+    await recoverInterruptedRuns(runAnalysis, execute);
+    const requeueSql = execute.mock.calls[0][0] as string;
+    expect(requeueSql).toContain("error_message = NULL");
+    expect(requeueSql).toContain("finished_at = NULL");
   });
 
-  it("re-dispatches queued runs that lost their executor", async () => {
-    execute.mockResolvedValue([[{ id: 51 }, { id: 57 }]]);
-    await expect(redispatchQueuedRuns(runAnalysis, execute)).resolves.toBe(2);
-    expect(runAnalysis).toHaveBeenCalledTimes(2);
-    expect(runAnalysis).toHaveBeenCalledWith(51);
-    expect(runAnalysis).toHaveBeenCalledWith(57);
+  it("does not resurrect genuinely failed runs (other error messages stay failed)", async () => {
+    execute
+      .mockResolvedValueOnce([{ affectedRows: 0 }])
+      .mockResolvedValueOnce([[{ id: 51 }]]);
+    await recoverInterruptedRuns(runAnalysis, execute);
+    const requeueSql = execute.mock.calls[0][0] as string;
+    expect(requeueSql).not.toContain("WHERE status = 'failed' AND error_message IS NOT NULL");
   });
 
   it("keeps re-dispatching when one queued run fails immediately", async () => {
-    execute.mockResolvedValue([[{ id: 51 }, { id: 57 }]]);
+    execute
+      .mockResolvedValueOnce([{ affectedRows: 0 }])
+      .mockResolvedValueOnce([[{ id: 51 }, { id: 57 }]]);
     runAnalysis.mockRejectedValueOnce(new Error("boom"));
-    await expect(redispatchQueuedRuns(runAnalysis, execute)).resolves.toBe(2);
+    await expect(recoverInterruptedRuns(runAnalysis, execute)).resolves.toEqual({ requeued: 0, dispatched: 2 });
     expect(runAnalysis).toHaveBeenCalledTimes(2);
   });
 
-  it("does nothing when the queue is empty", async () => {
-    execute.mockResolvedValue([[]]);
-    await expect(redispatchQueuedRuns(runAnalysis, execute)).resolves.toBe(0);
+  it("does nothing when there is nothing to recover", async () => {
+    execute
+      .mockResolvedValueOnce([{ affectedRows: 0 }])
+      .mockResolvedValueOnce([[]]);
+    await expect(recoverInterruptedRuns(runAnalysis, execute)).resolves.toEqual({ requeued: 0, dispatched: 0 });
     expect(runAnalysis).not.toHaveBeenCalled();
   });
 });
