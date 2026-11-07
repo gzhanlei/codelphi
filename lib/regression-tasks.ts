@@ -1,3 +1,4 @@
+import type { PoolConnection } from "mysql2/promise";
 import { defaultExecute, type Execute } from "./db";
 import type { BehaviorChangeRow, ReleaseRow } from "./types";
 
@@ -117,7 +118,7 @@ export function planRegressionTasks(input: { changes: PlannedChange[]; fileHits:
 }
 
 /** 生成任务（事务内）：先规划，再幂等插入缺失的任务/来源/理由。 */
-export async function ensureRegressionTasks(connection: { execute: (sql: string, params?: unknown[]) => Promise<unknown> }, releaseId: number) {
+export async function ensureRegressionTasks(connection: Pick<PoolConnection, "execute">, releaseId: number) {
   const [releaseRows, changeRows, fileRows] = await Promise.all([
     connection.execute("SELECT id, spec_version_id AS specVersionId, repository_id AS repositoryId FROM releases WHERE id = ?", [releaseId]),
     connection.execute(
@@ -214,7 +215,7 @@ export async function ensureRegressionTasks(connection: { execute: (sql: string,
          ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)`,
         [releaseId, scenarioId, changeId],
       );
-      const insertId = (result as [{ insertId?: number }])[0]?.insertId;
+      const insertId = (result as unknown as [{ insertId?: number }])[0]?.insertId;
       entry = { taskId: Number(insertId ?? 0), sources: new Set(), reasons: new Set() };
       existing.set(key, entry);
     }
