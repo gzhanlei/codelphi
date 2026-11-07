@@ -140,7 +140,7 @@
 - 未触及功能**沿用上一版 generated 条目**进快照（合并语义需新写「generated carry-forward」，与 `loadManualSpec` 的 manual 合并路径并存）；
 - 不变量必须保持：`assertEvidence` 校验、manual 保护（`lib/analysis.ts:50-79`）、预算上限；
 - diff 过宽/索引缺失/置信度不足 → 自动回退全量分析；
-- 按产品级 feature flag 切换，灰度期跑影子对比（同 push 双跑增量+全量，diff 结果一致性达标再放量——corpus 影子回归已有先例）。
+- 按产品级 feature flag 切换，灰度期跑影子对比（同 push 双跑增量+全量，diff 结果一致性达标再放量——corpus 影子回归已有先例）。**放量记录（2026-11-07）**：门槛落地后（功能集 100% 一致 + (ref,category) Jaccard ≥ 0.70，噪声底依据 0.80），dogfooding 产品过门槛，迁移 026 全库切默认增量（新产品自动继承）；保守回退链（首次分析/宽 diff/高占比 → 全量）保证新产品首个 run 自动建全量基线。
 
 **规模**：L，高风险 ｜ **依赖**：M5 索引；放在阶段二末尾，等索引经真实数据验证后再动引擎。
 
