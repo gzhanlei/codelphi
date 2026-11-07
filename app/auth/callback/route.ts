@@ -42,3 +42,5 @@ export async function GET(request: NextRequest) {
   await createSession(authentication.profile);
   return redirectWithClearedOAuth(authentication.input.next);
 }
+
+// 第二个提交:同时触碰另一个已索引文件,验证评论原地更新。
