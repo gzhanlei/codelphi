@@ -45,3 +45,19 @@ export async function testChannel(slug: string, id: number, fetcher: Fetcher = f
   await parse(response, "发送测试消息失败");
   return "sent" as const;
 }
+
+export async function getEmailPref(slug: string, fetcher: Fetcher = fetch) {
+  const response = await fetcher(`/api/products/${slug}/notification-prefs`, { cache: "no-store" });
+  const data = await parse<{ error?: string; enabled?: boolean }>(response, "读取邮件通知偏好失败");
+  return data.enabled ?? false;
+}
+
+export async function setEmailPref(slug: string, enabled: boolean, fetcher: Fetcher = fetch) {
+  const response = await fetcher(`/api/products/${slug}/notification-prefs`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+  await parse(response, "保存邮件通知偏好失败");
+  return "saved" as const;
+}

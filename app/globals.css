@@ -215,3 +215,5 @@ p { line-height: 1.7; }
 .stable-link { display: inline-flex; gap: 6px; align-items: baseline; margin-top: 6px; font-size: 11px; color: var(--muted); text-decoration: none; }
 .stable-link:hover { color: var(--green); }
 .stable-link code { font-size: 11px; }
+.notification-email-row { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px; background: #fbfcfb; margin-bottom: 16px; }
+.notification-email-text { flex: 1; font-size: 13px; }

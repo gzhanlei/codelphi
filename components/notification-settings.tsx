@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { errorMessage } from "@/lib/error-message";
 import type { NotificationChannelView } from "@/lib/notifications";
-import { listChannels, removeChannel, saveChannel, testChannel, toggleChannel } from "@/lib/notification-client";
+import { listChannels, getEmailPref, setEmailPref, removeChannel, saveChannel, testChannel, toggleChannel } from "@/lib/notification-client";
 import { useDemoGuard } from "./demo-mode";
 
 const kindLabels: Record<NotificationChannelView["kind"], string> = { slack: "Slack", webhook: "通用 Webhook" };
@@ -17,10 +17,12 @@ export function NotificationSettings({ slug }: { slug: string }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [emailPref, setEmailPrefState] = useState<boolean | null>(null);
 
   const reload = useCallback(async () => {
     try {
       setChannels(await listChannels(slug));
+      setEmailPrefState(await getEmailPref(slug));
     } catch (cause: unknown) {
       setError(errorMessage(cause, "加载通知渠道失败"));
     }
@@ -47,6 +49,21 @@ export function NotificationSettings({ slug }: { slug: string }) {
     <section className="overview-panel notification-panel">
       <div className="overview-panel-heading"><span>04</span><h2>通知分发</h2></div>
       <p className="overview-note">分析发现规格行为变化时，把变化摘要推送到团队日常动线；无变化则保持静默。</p>
+      <div className="notification-email-row">
+        <span className="notification-kind on">Email</span>
+        <span className="notification-email-text">给我自己发行为变化摘要（发送到登录邮箱）</span>
+        <button
+          className="text-button"
+          type="button"
+          disabled={pending || emailPref === null}
+          onClick={() => act(async () => {
+            await setEmailPref(slug, !emailPref);
+            setEmailPrefState(!emailPref);
+          }, emailPref ? "邮件通知已关闭" : "邮件通知已开启")}
+        >
+          {emailPref === null ? "…" : emailPref ? "已开启，点击关闭" : "已关闭，点击开启"}
+        </button>
+      </div>
       {channels.length > 0 ? (
         <ul className="notification-channel-list">
           {channels.map((channel) => (

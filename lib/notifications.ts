@@ -1,5 +1,5 @@
 import { defaultExecute, type Execute } from "./db";
-import { requiredEnv } from "./env";
+import { chandlerBaseUrl, requiredEnv } from "./env";
 import { evidenceUrl } from "./evidence-url";
 import { decryptSecret, encryptSecret } from "./secret-box";
 import type { Evidence } from "./types";
@@ -111,6 +111,7 @@ export interface AnalysisNotificationInput {
 export interface NotificationDependencies {
   execute?: Execute;
   post?: (target: string, body: string) => Promise<void>;
+  sendEmail?: (to: string, subject: string, text: string) => Promise<void>;
 }
 
 async function postJson(target: string, body: string) {
@@ -138,7 +139,6 @@ export async function deliverAnalysisNotifications(input: AnalysisNotificationIn
     "SELECT id, kind, target_encrypted FROM notification_channels WHERE product_id = ? AND enabled = 1 ORDER BY id",
     [run.productId],
   ) as [Array<{ id: number; kind: NotificationChannelKind; target_encrypted: string }>, unknown];
-  if (channelRows.length === 0) return;
 
   const [changeRows] = await execute(
     `SELECT kind, entity_type AS entityType, feature_name AS featureName, scenario_reference AS scenarioReference,
@@ -183,21 +183,74 @@ export async function deliverAnalysisNotifications(input: AnalysisNotificationIn
     const body = row.kind === "slack" ? JSON.stringify({ text }) : webhookPayload;
     try {
       await post(target, body);
-      await recordDelivery(execute, Number(row.id), run.id, "sent", null);
+      await recordDelivery(execute, { channelId: Number(row.id), runId: run.id, status: "sent", error: null });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown notification error";
-      await recordDelivery(execute, Number(row.id), run.id, "failed", message.slice(0, 2000)).catch(() => undefined);
+      await recordDelivery(execute, { channelId: Number(row.id), runId: run.id, status: "failed", error: message.slice(0, 2000) }).catch(() => undefined);
+    }
+  }
+
+  // 邮件渠道：收件人 = 开启偏好的产品成员，发送走 Chandler /v1/mail/send。
+  const [prefRows] = await execute(
+    `SELECT p.user_id AS userId, u.email FROM user_email_prefs p JOIN users u ON u.id = p.user_id
+     WHERE p.product_id = ? AND p.email_enabled = 1 AND u.email IS NOT NULL AND u.email != ''
+     ORDER BY p.user_id`,
+    [run.productId],
+  ) as [Array<{ userId: number; email: string }>, unknown];
+  const sendEmail = dependencies.sendEmail ?? sendEmailNotification;
+  const subject = `【CoDelphi】${run.productName} 检测到 ${changes.length} 条规格行为变化`;
+  for (const pref of prefRows) {
+    try {
+      await sendEmail(pref.email, subject, text);
+      await recordDelivery(execute, { userId: Number(pref.userId), runId: run.id, status: "sent", error: null });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown notification error";
+      await recordDelivery(execute, { userId: Number(pref.userId), runId: run.id, status: "failed", error: message.slice(0, 2000) }).catch(() => undefined);
     }
   }
 }
 
-function recordDelivery(execute: Execute, channelId: number, runId: number, status: "sent" | "failed", error: string | null) {
+type DeliveryTarget = { channelId: number; userId?: undefined } | { userId: number; channelId?: undefined };
+
+function recordDelivery(execute: Execute, input: DeliveryTarget & { runId: number; status: "sent" | "failed"; error: string | null }) {
   return execute(
-    `INSERT INTO notification_deliveries (channel_id, analysis_run_id, status, error)
-     VALUES (?, ?, ?, ?)
+    `INSERT INTO notification_deliveries (channel_id, user_id, analysis_run_id, status, error)
+     VALUES (?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE status = VALUES(status), error = VALUES(error)`,
-    [channelId, runId, status, error],
+    [input.channelId ?? null, input.userId ?? null, input.runId, input.status, input.error],
   );
+}
+
+/** 每用户邮件偏好：开启后该产品每次分析的行为变化摘要会经 Chandler 发到成员邮箱。 */
+export async function setUserEmailPref(productId: number, userId: number, enabled: boolean, execute: Execute = defaultExecute) {
+  await execute(
+    `INSERT INTO user_email_prefs (user_id, product_id, email_enabled)
+     VALUES (?, ?, ?)
+     ON DUPLICATE KEY UPDATE email_enabled = VALUES(email_enabled)`,
+    [userId, productId, enabled ? 1 : 0],
+  );
+}
+
+export async function getUserEmailPref(productId: number, userId: number, execute: Execute = defaultExecute): Promise<boolean> {
+  const [rows] = await execute(
+    "SELECT email_enabled FROM user_email_prefs WHERE user_id = ? AND product_id = ? LIMIT 1",
+    [userId, productId],
+  ) as [Array<{ email_enabled: number }>, unknown];
+  return rows.length > 0 && Number(rows[0].email_enabled) === 1;
+}
+
+/** 默认邮件通道：Chandler /v1/mail/send，服务鉴权走 CHANDLER_MAIL_API_KEY（Chandler 用户 API key，属主需为平台超管）。 */
+export async function sendEmailNotification(to: string, subject: string, text: string) {
+  const apiKey = process.env.CHANDLER_MAIL_API_KEY?.trim();
+  if (!apiKey) throw new Error("CHANDLER_MAIL_API_KEY not configured");
+  const response = await fetch(`${chandlerBaseUrl()}/v1/mail/send`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({ to, subject, text }),
+    cache: "no-store",
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) throw new Error(`chandler mail ${response.status}: ${(await response.text()).slice(0, 200)}`);
 }
 
 /** 管理端测试按钮：向渠道发一条探测消息。 */

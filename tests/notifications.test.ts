@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { deliverAnalysisNotifications, renderNotificationText, saveNotificationChannel } from "../lib/notifications";
+import { deliverAnalysisNotifications, getUserEmailPref, renderNotificationText, saveNotificationChannel, sendEmailNotification, setUserEmailPref } from "../lib/notifications";
 
 vi.mock("../lib/secret-box", () => ({
   encryptSecret: (plaintext: string) => plaintext,
@@ -45,6 +45,7 @@ function stubDb({ channels = 1, changeRows = changes as never[] } = {}) {
     if (sql.includes("FROM notification_channels")) {
       return channels > 0 ? [[{ id: 5, kind: "slack", target_encrypted: "enc-slack" }]] : [[]];
     }
+    if (sql.includes("FROM user_email_prefs")) return [[]];
     if (sql.includes("FROM spec_changes")) return [changeRows];
     return [{ affectedRows: 1 }];
   });
@@ -85,7 +86,7 @@ describe("analysis notification delivery", () => {
     expect(JSON.parse(body).text).toContain("Radar 检测到 2 条规格行为变化");
     expect(execute).toHaveBeenCalledWith(
       expect.stringContaining("INSERT INTO notification_deliveries"),
-      [5, 8, "sent", null],
+      [5, null, 8, "sent", null],
     );
   });
 
@@ -102,7 +103,7 @@ describe("analysis notification delivery", () => {
     await deliverAnalysisNotifications({ run, releaseUrl: "https://codelphi.com/commit/abc", specVersionId: 44 }, { execute, post });
     expect(execute).toHaveBeenCalledWith(
       expect.stringContaining("INSERT INTO notification_deliveries"),
-      [5, 8, "failed", "connection refused"],
+      [5, null, 8, "failed", "connection refused"],
     );
   });
 
@@ -121,6 +122,7 @@ describe("analysis notification delivery", () => {
       if (sql.includes("FROM notification_channels")) {
         return [[{ id: 6, kind: "webhook", target_encrypted: "enc-hook" }]];
       }
+      if (sql.includes("FROM user_email_prefs")) return [[]];
       if (sql.includes("FROM spec_changes")) return [changes];
       return [{ affectedRows: 1 }];
     });
@@ -146,5 +148,93 @@ describe("channel management", () => {
       expect.stringContaining("ON DUPLICATE KEY UPDATE"),
       [3, "slack", "https://hooks.slack.com/services/T/B/X"],
     );
+  });
+});
+
+describe("per-user email preference", () => {
+  beforeEach(() => {
+    vi.stubEnv("SESSION_SECRET", "test-secret");
+    vi.clearAllMocks();
+  });
+
+  it("upserts the preference keyed by user and product", async () => {
+    execute.mockResolvedValue([{ affectedRows: 1 }]);
+    await setUserEmailPref(3, 9, true, execute);
+    expect(execute).toHaveBeenCalledWith(
+      expect.stringContaining("INSERT INTO user_email_prefs"),
+      [9, 3, 1],
+    );
+  });
+
+  it("reads the preference as disabled when no row exists", async () => {
+    execute.mockResolvedValue([[]]);
+    await expect(getUserEmailPref(3, 9, execute)).resolves.toBe(false);
+  });
+});
+
+describe("email delivery via Chandler", () => {
+  beforeEach(() => {
+    vi.stubEnv("SESSION_SECRET", "test-secret");
+    vi.clearAllMocks();
+    post.mockResolvedValue(undefined);
+  });
+
+  it("emails every opted-in user and records a user-scoped delivery", async () => {
+    execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("FROM notification_channels")) return [[]];
+      if (sql.includes("FROM user_email_prefs")) {
+        return [[{ userId: 9, email: "qa@example.com" }, { userId: 10, email: "pm@example.com" }]];
+      }
+      if (sql.includes("FROM spec_changes")) return [changes];
+      return [{ affectedRows: 1 }];
+    });
+    const sendEmail = vi.fn().mockResolvedValue(undefined);
+    await deliverAnalysisNotifications({ run, releaseUrl: "https://codelphi.com/commit/abc", specVersionId: 44 }, { execute, post, sendEmail });
+    expect(sendEmail).toHaveBeenCalledTimes(2);
+    const [to, subject, text] = sendEmail.mock.calls[0];
+    expect(to).toBe("qa@example.com");
+    expect(subject).toBe("【CoDelphi】Radar 检测到 2 条规格行为变化");
+    expect(text).toContain("https://codelphi.com/commit/abc");
+    expect(execute).toHaveBeenCalledWith(
+      expect.stringContaining("INSERT INTO notification_deliveries"),
+      [null, 9, 8, "sent", null],
+    );
+  });
+
+  it("records a failed email without affecting other recipients", async () => {
+    execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("FROM notification_channels")) return [[]];
+      if (sql.includes("FROM user_email_prefs")) return [[{ userId: 9, email: "qa@example.com" }, { userId: 10, email: "pm@example.com" }]];
+      if (sql.includes("FROM spec_changes")) return [changes];
+      return [{ affectedRows: 1 }];
+    });
+    const sendEmail = vi.fn()
+      .mockRejectedValueOnce(new Error("chandler mail 502: mail.send_failed"))
+      .mockResolvedValueOnce(undefined);
+    await deliverAnalysisNotifications({ run, releaseUrl: "https://codelphi.com/commit/abc", specVersionId: 44 }, { execute, post, sendEmail });
+    expect(execute).toHaveBeenCalledWith(
+      expect.stringContaining("INSERT INTO notification_deliveries"),
+      [null, 9, 8, "failed", "chandler mail 502: mail.send_failed"],
+    );
+    expect(execute).toHaveBeenCalledWith(
+      expect.stringContaining("INSERT INTO notification_deliveries"),
+      [null, 10, 8, "sent", null],
+    );
+  });
+
+  it("sends a test email through the Chandler mail API", async () => {
+    vi.stubEnv("CHANDLER_MAIL_API_KEY", "test-key");
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ data: { status: "sent" } }), { status: 200 }));
+    vi.stubGlobal("fetch", fetcher);
+    await sendEmailNotification("qa@example.com", "【CoDelphi】Radar 通知渠道测试", "正文");
+    const [url, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit];
+    expect(String(url)).toContain("/v1/mail/send");
+    expect(init).toMatchObject({ method: "POST", headers: { authorization: "Bearer test-key" } });
+    expect(JSON.parse(String(init.body))).toMatchObject({ to: "qa@example.com", subject: "【CoDelphi】Radar 通知渠道测试" });
+  });
+
+  it("fails with a clear error when the Chandler mail API key is not configured", async () => {
+    vi.stubEnv("CHANDLER_MAIL_API_KEY", "");
+    await expect(sendEmailNotification("qa@example.com", "s", "t")).rejects.toThrow("CHANDLER_MAIL_API_KEY not configured");
   });
 });
