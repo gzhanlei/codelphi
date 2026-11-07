@@ -70,6 +70,7 @@ export interface AffectedScenario {
 }
 
 export interface AffectedFeatureImpact {
+  featureId: number;
   feature: string;
   scenarios: AffectedScenario[];
 }
@@ -79,7 +80,7 @@ export async function loadAffectedScenarios(repositoryId: number, paths: string[
   if (paths.length === 0) return [];
   const placeholders = paths.map(() => "?").join(",");
   const result = await execute(
-    `SELECT sf.name AS feature, ss.reference AS reference, i.path AS evidencePath
+    `SELECT sf.id AS featureId, sf.name AS feature, ss.reference AS reference, i.path AS evidencePath
      FROM spec_file_index i
      JOIN spec_features sf ON sf.id = i.spec_feature_id
      LEFT JOIN spec_scenarios ss ON ss.id = i.spec_scenario_id
@@ -88,12 +89,12 @@ export async function loadAffectedScenarios(repositoryId: number, paths: string[
     [repositoryId, ...paths],
   );
   const payload = Array.isArray(result) ? result[0] : [];
-  const rows = (Array.isArray(payload) ? payload : []) as Array<{ feature: string; reference: string | null; evidencePath: string }>;
+  const rows = (Array.isArray(payload) ? payload : []) as Array<{ featureId: number; feature: string; reference: string | null; evidencePath: string }>;
   const byFeature = new Map<string, AffectedFeatureImpact>();
   for (const row of rows) {
     let impact = byFeature.get(row.feature);
     if (!impact) {
-      impact = { feature: row.feature, scenarios: [] };
+      impact = { featureId: Number(row.featureId), feature: row.feature, scenarios: [] };
       byFeature.set(row.feature, impact);
     }
     impact.scenarios.push({ reference: row.reference, evidencePath: row.evidencePath });
