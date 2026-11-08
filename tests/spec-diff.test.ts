@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diffSpec, mergeSpecSources, normalizeSpecText, specChangeWordingOnly, specFeatureKey, specScenarioKey, specTextEquivalent, type SpecFeature } from "../lib/spec-diff";
+import { diffSpec, diffSpecWithFolded, mergeSpecSources, normalizeSpecText, specChangeWordingOnly, specFeatureKey, specScenarioKey, specTextEquivalent, type SpecFeature } from "../lib/spec-diff";
 
 const authentication: SpecFeature = {
   name: "Authentication",
@@ -174,6 +174,57 @@ describe("specChangeWordingOnly (历史回填判定)", () => {
     expect(specChangeWordingOnly(feature, { ...feature, summary: "使用 Chandler 账号登录，并保持会话状态。" })).toBe(true);
     expect(specChangeWordingOnly(feature, { ...feature, name: "Chandler 统一登录与会话" })).toBe(false);
     expect(specChangeWordingOnly(feature, { ...feature, parentKey: "工作区" })).toBe(false);
+  });
+});
+
+describe("diffSpecWithFolded (折叠明细)", () => {
+  it("reports the wording-collapsed scenario rewording without emitting a change", () => {
+    const before = structuredClone(authentication);
+    before.scenarios.push({ reference: "HP-2", context: "提交的任务不属于当前产品", action: "查询任务详情", outcome: "返回 404。", category: "error", evidence: [] });
+    const after = structuredClone(authentication);
+    after.scenarios.push({ reference: "HP-2", context: "提交的任务不属于该产品", action: "查询任务详情", outcome: "返回 404", category: "error", evidence: [] });
+    const outcome = diffSpecWithFolded([before], [after]);
+    expect(outcome.changes).toEqual([]);
+    expect(outcome.folded).toHaveLength(1);
+    expect(outcome.folded[0]).toMatchObject({ reason: "wording", entityType: "scenario", scenarioReference: "HP-2" });
+  });
+
+  it("does not report folded entries when the text is byte-identical", () => {
+    const outcome = diffSpecWithFolded([structuredClone(authentication)], [structuredClone(authentication)]);
+    expect(outcome.changes).toEqual([]);
+    expect(outcome.folded).toEqual([]);
+  });
+
+  it("reports renumbered scenario pairs as folded renumber entries", () => {
+    const before = structuredClone(authentication);
+    before.scenarios.push({ reference: "HP-2", context: "任务不存在", action: "查询任务详情", outcome: "返回 404", category: "error", evidence: [] });
+    const after = structuredClone(authentication);
+    after.scenarios.push({ reference: "HP-6", context: "任务不存在", action: "查询任务详情", outcome: "返回 404", category: "error", evidence: [] });
+    const outcome = diffSpecWithFolded([before], [after]);
+    expect(outcome.changes).toEqual([]);
+    expect(outcome.folded).toHaveLength(1);
+    expect(outcome.folded[0]).toMatchObject({ reason: "renumber", scenarioReference: "HP-6" });
+  });
+
+  it("reports a feature-summary rewording as a folded feature entry", () => {
+    const before = structuredClone(authentication);
+    before.summary = "登录并恢复账号的访问。";
+    const after = structuredClone(authentication);
+    after.summary = "登录并恢复账号访问。";
+    const outcome = diffSpecWithFolded([before], [after]);
+    expect(outcome.changes).toEqual([]);
+    expect(outcome.folded).toHaveLength(1);
+    expect(outcome.folded[0]).toMatchObject({ reason: "wording", entityType: "feature", featureName: "Authentication" });
+  });
+
+  it("keeps diffSpec output unchanged when only the folded report is added", () => {
+    const before = structuredClone(authentication);
+    before.scenarios.push({ reference: "HP-2", context: "任务不存在", action: "查询任务详情", outcome: "返回 404", category: "error", evidence: [] });
+    const after = structuredClone(authentication);
+    after.scenarios.push({ reference: "HP-2", context: "任务不存在", action: "查询任务详情", outcome: "返回 500", category: "error", evidence: [] });
+    const outcome = diffSpecWithFolded([before], [after]);
+    expect(outcome.changes).toEqual(diffSpec([before], [after]));
+    expect(outcome.folded).toEqual([]);
   });
 });
 

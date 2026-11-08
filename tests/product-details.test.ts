@@ -41,6 +41,9 @@ describe("product details", () => {
       if (sql.includes("AS changeId")) return [[]];
       if (sql.includes("COALESCE(ss.reference")) return [[]];
       if (sql.includes("FROM changes")) return [[{ id: 9, releaseId: 6, featureName: "Login", kind: "modified", description: "Changed", userImpact: "Impact", evidence: [] }]];
+      if (sql.includes("AS baseVersionId")) return [[{ versionId: 3, baseVersionId: 2 }]];
+      if (sql.includes("FROM spec_features WHERE spec_version_id IN")) return [[{ id: 5, versionId: 3, name: "Login", summary: "OAuth", parentKey: null, source: "generated" }]];
+      if (sql.includes("FROM spec_scenarios ss JOIN")) return [[{ versionId: 3, featureId: 5, reference: "happy", context: "c", action: "a", outcome: "o", category: "happy", source: "generated", evidence: [] }]];
       if (!sql) return [[]];
       throw new Error(`Unexpected query: ${sql}`);
     });
@@ -48,11 +51,39 @@ describe("product details", () => {
     expect(details?.scenarios).toHaveLength(1);
     expect(details?.changes).toHaveLength(1);
     expect(details?.behaviorChanges[0]).toMatchObject({ before: { old: true }, after: { new: true } });
+    expect(details?.foldedChanges).toEqual([]);
     expect(details).not.toHaveProperty("architecture");
     expect(details?.latestRun?.status).toBe("succeeded");
     expect(details?.product.descriptionEvidence).toEqual([{ path: "lib/analysis.ts", startLine: 185 }]);
     expect(execute.mock.calls[0][1]).toEqual(["radar"]);
     expect(execute.mock.calls[0][0]).not.toContain("organization_id = ?");
+  });
+
+  it("recomputes wording-folded differences from the base and current spec versions", async () => {
+    // 上一版（id 2）只在措辞上不同：行为等价 → 不落 spec_changes，但折叠明细可见。
+    const baseFeatures = [{ id: 15, versionId: 2, name: "登录", summary: "登录并保持会话", parentKey: null, source: "generated" }];
+    const baseScenarios = [{ versionId: 2, featureId: 15, reference: "HP-1", context: "提交的任务不属于该产品", action: "查询任务详情", outcome: "返回 404", category: "error", source: "generated", evidence: [] }];
+    execute.mockImplementation(async (sql: string = "") => {
+      if (sql.includes("FROM products")) return [[product]];
+      if (sql.includes("FROM repositories")) return [[{ provider: "github", owner: "gzhanlei", name: "codelphi", defaultBranch: "main" }]];
+      if (sql.includes("FROM analysis_runs")) return [[{ status: "succeeded", errorMessage: null }]];
+      if (sql.includes("FROM features")) return [[]];
+      if (sql.includes("FROM releases")) return [[{ id: 6, title: "v1", summary: "Release", sha: "abc", url: "https://github.com/commit/abc", committedAt: new Date("2026-11-01T00:00:00Z"), specVersionId: 3 }]];
+      if (sql.includes("r.hit_type AS hitType")) return [[]];
+      if (sql.includes("AS changeId")) return [[]];
+      if (sql.includes("COALESCE(ss.reference")) return [[]];
+      if (sql.includes("FROM changes")) return [[]];
+      if (sql.includes("FROM spec_changes")) return [[]];
+      if (sql.includes("AS baseVersionId")) return [[{ versionId: 3, baseVersionId: 2 }]];
+      if (sql.includes("FROM spec_features WHERE spec_version_id IN")) return [[...baseFeatures, { id: 5, versionId: 3, name: "登录", summary: "登录并保持会话", parentKey: null, source: "generated" }]];
+      if (sql.includes("FROM spec_scenarios ss JOIN")) return [[...baseScenarios, { versionId: 3, featureId: 5, reference: "HP-1", context: "提交的任务不属于当前产品", action: "查询任务详情", outcome: "返回 404。", category: "error", source: "generated", evidence: [] }]];
+      if (!sql) return [[]];
+      throw new Error(`Unexpected query: ${sql}`);
+    });
+    const details = await getProductDetails("radar");
+    expect(details?.foldedChanges).toHaveLength(1);
+    expect(details?.foldedChanges[0]).toMatchObject({ reason: "wording", featureName: "登录", scenarioReference: "HP-1", releaseId: 6 });
+    expect(String(details?.foldedChanges[0].summary)).toContain("仅措辞差异");
   });
 
   it("decorates evidence with blob URLs when the analyzed revision is known", async () => {
@@ -69,6 +100,9 @@ describe("product details", () => {
       if (sql.includes("AS changeId")) return [[]];
       if (sql.includes("COALESCE(ss.reference")) return [[]];
       if (sql.includes("FROM changes")) return [[{ id: 9, releaseId: 6, featureName: "Login", kind: "modified", description: "Changed", userImpact: "Impact", evidence: [{ path: "lib/analysis.ts", startLine: 50 }] }]];
+      if (sql.includes("AS baseVersionId")) return [[{ versionId: 3, baseVersionId: null }]];
+      if (sql.includes("FROM spec_features WHERE spec_version_id IN")) return [[{ id: 5, versionId: 3, name: "Login", summary: "OAuth", parentKey: null, source: "generated" }]];
+      if (sql.includes("FROM spec_scenarios ss JOIN")) return [[{ versionId: 3, featureId: 5, reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy", source: "generated", evidence: [] }]];
       if (!sql) return [[]];
       throw new Error(`Unexpected query: ${sql}`);
     });

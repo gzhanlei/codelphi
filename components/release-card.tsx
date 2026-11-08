@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import type { BehaviorChangeRow, ChangeRow, ReleaseRow } from "@/lib/types";
+import type { BehaviorChangeRow, ChangeRow, FoldedBehaviorChangeRow, ReleaseRow } from "@/lib/types";
 import { hitTypeLabels, regressionStatusLabels, type RegressionTaskStatus, type RegressionTaskView } from "@/lib/regression-task-view";
 import { errorMessage } from "@/lib/error-message";
 import { BehaviorChangeItem } from "./behavior-change-item";
@@ -158,17 +158,19 @@ function AiChangeList({ changes }: { changes: ChangeRow[] }) {
   return <div className="ai-change-section"><h3>发布说明（AI）</h3>{changes.map((change) => <ChangeItem change={change} key={change.id} />)}</div>;
 }
 
-export function ReleaseCard({ slug, release, changes, behaviorChanges, tasks = [], canEdit = false, defaultOpen = false }: {
+export function ReleaseCard({ slug, release, changes, behaviorChanges, foldedChanges = [], tasks = [], canEdit = false, defaultOpen = false }: {
   slug: string;
   release: ReleaseRow;
   changes: ChangeRow[];
   behaviorChanges: BehaviorChangeRow[];
+  foldedChanges?: FoldedBehaviorChangeRow[];
   tasks?: RegressionTaskView[];
   canEdit?: boolean;
   defaultOpen?: boolean;
 }) {
   const releaseChanges = changes.filter((change) => change.releaseId === release.id);
   const releaseBehaviorChanges = behaviorChanges.filter((change) => change.releaseId === release.id);
+  const releaseFolded = foldedChanges.filter((change) => change.releaseId === release.id);
   const releaseTasks = tasks.filter((task) => task.releaseId === release.id);
   const hasDetails = releaseBehaviorChanges.length > 0 || releaseChanges.length > 0;
   return (
@@ -190,6 +192,15 @@ export function ReleaseCard({ slug, release, changes, behaviorChanges, tasks = [
       ) : (
         <BehaviorList slug={slug} release={release} changes={releaseBehaviorChanges} tasks={releaseTasks} canEdit={canEdit} />
       )}
+      {releaseFolded.length > 0 ? (
+        <details className="release-details folded-changes">
+          <summary>
+            <span>另有 {releaseFolded.length} 条差异判定为仅措辞/编号调整，已折叠（未计入行为变化）</span>
+            <span className="release-details-toggle">展开</span>
+          </summary>
+          {releaseFolded.map((change) => <BehaviorChangeItem change={change} key={change.id} />)}
+        </details>
+      ) : null}
     </section>
   );
 }

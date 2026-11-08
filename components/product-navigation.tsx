@@ -6,7 +6,7 @@ import { buildProductOverview, type ProductOverviewData } from "@/lib/product-ov
 import { SpecWorkspace } from "./spec-workspace";
 import { buildFeatureTree, selectFeature } from "@/lib/feature-tree";
 import { selectedClass } from "@/lib/spec-editor-ui";
-import type { BehaviorChangeRow, ChangeRow, FeatureRow, ReleaseRow, ScenarioRow } from "@/lib/types";
+import type { BehaviorChangeRow, ChangeRow, FeatureRow, FoldedBehaviorChangeRow, ReleaseRow, ScenarioRow } from "@/lib/types";
 import { getCodeHostingAdapter } from "@/lib/code-hosting";
 import type { RegressionTaskView } from "@/lib/regression-task-view";
 
@@ -52,6 +52,7 @@ interface ProductViewProps {
   releases: ReleaseRow[];
   changes: ChangeRow[];
   behaviorChanges: BehaviorChangeRow[];
+  foldedChanges?: FoldedBehaviorChangeRow[];
   regressionTasks?: RegressionTaskView[];
   releaseTotal?: number;
   mode?: string;
@@ -60,11 +61,11 @@ interface ProductViewProps {
   canEdit?: boolean;
 }
 
-function ProductWorkspace({ view, productSlug, features, scenarios, releases, changes, behaviorChanges, regressionTasks, releaseTotal, mode = "spec", featureId, canEdit }: Omit<ProductViewProps, "overview">) {
+function ProductWorkspace({ view, productSlug, features, scenarios, releases, changes, behaviorChanges, foldedChanges, regressionTasks, releaseTotal, mode = "spec", featureId, canEdit }: Omit<ProductViewProps, "overview">) {
   const selectedFeature = selectFeature(features, featureId);
   return view === "spec"
     ? <SpecWorkspace slug={productSlug} tree={buildFeatureTree(features)} feature={selectedFeature} scenarios={scenarios} mode={mode} />
-    : <ProductChanges slug={productSlug} releases={releases} changes={changes} behaviorChanges={behaviorChanges} regressionTasks={regressionTasks} releaseTotal={releaseTotal} canEdit={canEdit} />;
+    : <ProductChanges slug={productSlug} releases={releases} changes={changes} behaviorChanges={behaviorChanges} foldedChanges={foldedChanges} regressionTasks={regressionTasks} releaseTotal={releaseTotal} canEdit={canEdit} />;
 }
 
 export function ProductView(props: ProductViewProps) {

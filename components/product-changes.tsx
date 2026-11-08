@@ -5,13 +5,14 @@ import { ReleaseCard } from "./release-card";
 import { loadMoreReleases } from "@/lib/release-client";
 import type { RegressionTaskView } from "@/lib/regression-task-view";
 import { errorMessage } from "@/lib/error-message";
-import type { BehaviorChangeRow, ChangeRow, ReleaseRow } from "@/lib/types";
+import type { BehaviorChangeRow, ChangeRow, FoldedBehaviorChangeRow, ReleaseRow } from "@/lib/types";
 
-export function ProductChanges({ slug, releases: initialReleases, changes: initialChanges, behaviorChanges: initialBehaviorChanges, regressionTasks = [], releaseTotal = 0, canEdit = false }: {
+export function ProductChanges({ slug, releases: initialReleases, changes: initialChanges, behaviorChanges: initialBehaviorChanges, foldedChanges: initialFoldedChanges = [], regressionTasks = [], releaseTotal = 0, canEdit = false }: {
   slug: string;
   releases: ReleaseRow[];
   changes: ChangeRow[];
   behaviorChanges: BehaviorChangeRow[];
+  foldedChanges?: FoldedBehaviorChangeRow[];
   regressionTasks?: RegressionTaskView[];
   releaseTotal?: number;
   canEdit?: boolean;
@@ -19,6 +20,7 @@ export function ProductChanges({ slug, releases: initialReleases, changes: initi
   const [releases, setReleases] = useState(initialReleases);
   const [changes, setChanges] = useState(initialChanges);
   const [behaviorChanges, setBehaviorChanges] = useState(initialBehaviorChanges);
+  const [foldedChanges, setFoldedChanges] = useState(initialFoldedChanges);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const hasMore = releases.length < releaseTotal;
@@ -32,6 +34,7 @@ export function ProductChanges({ slug, releases: initialReleases, changes: initi
       setReleases((current) => [...current, ...page.releases]);
       setChanges((current) => [...current, ...page.changes]);
       setBehaviorChanges((current) => [...current, ...page.behaviorChanges]);
+      setFoldedChanges((current) => [...current, ...page.foldedChanges]);
     } catch (cause: unknown) {
       setError(errorMessage(cause, "加载更多发布失败"));
     } finally {
@@ -48,7 +51,7 @@ export function ProductChanges({ slug, releases: initialReleases, changes: initi
       <div className="release-list-head">
         <a className="overview-text-link" href={`/api/products/${slug}/progress-summary?days=30`}>导出进展摘要（30 天）↓</a>
       </div>
-      {releases.map((release, index) => <ReleaseCard slug={slug} release={release} changes={changes} behaviorChanges={behaviorChanges} tasks={regressionTasks} canEdit={canEdit} defaultOpen={index === 0} key={release.id} />)}
+      {releases.map((release, index) => <ReleaseCard slug={slug} release={release} changes={changes} behaviorChanges={behaviorChanges} foldedChanges={foldedChanges} tasks={regressionTasks} canEdit={canEdit} defaultOpen={index === 0} key={release.id} />)}
       {hasMore ? (
         <div className="release-load-more">
           <button className="secondary-button" type="button" onClick={() => void loadMore()} disabled={loading}>

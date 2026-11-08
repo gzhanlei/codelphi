@@ -28,6 +28,16 @@ export interface SpecChange {
   after: SpecFeature | SpecScenario | null;
 }
 
+/** 被等价判定折叠的差异：wording=行为等价但原文不同；renumber=同功能内场景换编号。仅供审计展示，不落库。 */
+export interface FoldedSpecChange {
+  reason: "wording" | "renumber";
+  entityType: "feature" | "scenario";
+  featureName: string;
+  scenarioReference: string | null;
+  before: SpecFeature | SpecScenario | null;
+  after: SpecFeature | SpecScenario | null;
+}
+
 export function specFeatureKey(name: string) {
   return name.trim().toLowerCase().replace(/\s+/g, " ");
 }
@@ -150,7 +160,12 @@ export function specChangeWordingOnly(before: unknown, after: unknown) {
   return false;
 }
 
-function scenarioChanges(before: SpecFeature, after: SpecFeature): SpecChange[] {
+interface DiffOutcome {
+  changes: SpecChange[];
+  folded: FoldedSpecChange[];
+}
+
+function scenarioChanges(before: SpecFeature, after: SpecFeature, outcome: DiffOutcome) {
   const beforeScenarios = scenarioMap(before);
   const afterScenarios = scenarioMap(after);
   const changes: SpecChange[] = [];
@@ -159,7 +174,13 @@ function scenarioChanges(before: SpecFeature, after: SpecFeature): SpecChange[] 
     const previous = beforeScenarios.get(reference);
     const current = afterScenarios.get(reference);
     const kind = previous ? current ? "changed" : "removed" : "added";
-    if (previous && current && !scenarioBehaviorChanged(previous, current)) continue;
+    if (previous && current && !scenarioBehaviorChanged(previous, current)) {
+      // 行为等价不落变化行；若原文确有差异，记入折叠明细供审计（完全相同的文本没有审计价值）。
+      if (previous.context !== current.context || previous.action !== current.action || previous.outcome !== current.outcome) {
+        outcome.folded.push({ reason: "wording", entityType: "scenario", featureName: after.name, scenarioReference: reference, before: previous, after: current });
+      }
+      continue;
+    }
     changes.push({
       kind,
       entityType: "scenario",
@@ -182,33 +203,45 @@ function scenarioChanges(before: SpecFeature, after: SpecFeature): SpecChange[] 
       if (!scenarioBehaviorEqual(previous, current)) continue;
       droppedIndexes.add(removedIndex);
       droppedIndexes.add(addedIndex);
+      outcome.folded.push({ reason: "renumber", entityType: "scenario", featureName: after.name, scenarioReference: current.reference, before: previous, after: current });
       break;
     }
   }
-  return changes.filter((_, index) => !droppedIndexes.has(index));
+  for (const [index, change] of changes.entries()) if (!droppedIndexes.has(index)) outcome.changes.push(change);
 }
 
-function diffFeature(previous: SpecFeature | undefined, current: SpecFeature | undefined): SpecChange[] {
-  if (!previous && current) return [featureChange("added", current, null, current)];
-  if (previous && !current) return [featureChange("removed", previous, previous, null)];
-  if (!previous || !current) return [];
-
-  const changes: SpecChange[] = [];
-  if (featureBehaviorChanged(previous, current)) {
-    changes.push({ kind: "changed", entityType: "feature", featureName: current.name, scenarioReference: null, summary: changeSummary("changed", "feature", current.name, null), before: previous, after: current });
+function diffFeature(previous: SpecFeature | undefined, current: SpecFeature | undefined, outcome: DiffOutcome) {
+  if (!previous && current) {
+    outcome.changes.push(featureChange("added", current, null, current));
+    return;
   }
-  changes.push(...scenarioChanges(previous, current));
-  return changes;
+  if (previous && !current) {
+    outcome.changes.push(featureChange("removed", previous, previous, null));
+    return;
+  }
+  if (!previous || !current) return;
+
+  if (featureBehaviorChanged(previous, current)) {
+    outcome.changes.push({ kind: "changed", entityType: "feature", featureName: current.name, scenarioReference: null, summary: changeSummary("changed", "feature", current.name, null), before: previous, after: current });
+  } else if (previous.summary !== current.summary) {
+    outcome.folded.push({ reason: "wording", entityType: "feature", featureName: current.name, scenarioReference: null, before: previous, after: current });
+  }
+  scenarioChanges(previous, current, outcome);
 }
 
 export function diffSpec(before: SpecFeature[] | null, after: SpecFeature[]): SpecChange[] {
-  if (!before) return [];
+  return diffSpecWithFolded(before, after).changes;
+}
+
+/** 与 diffSpec 同判定的折叠报告版：changes 之外同时返回被等价判定吞掉的差异明细。 */
+export function diffSpecWithFolded(before: SpecFeature[] | null, after: SpecFeature[]): DiffOutcome {
+  const outcome: DiffOutcome = { changes: [], folded: [] };
+  if (!before) return outcome;
   const beforeFeatures = new Map(before.map((feature) => [specFeatureKey(feature.name), feature]));
   const afterFeatures = new Map(after.map((feature) => [specFeatureKey(feature.name), feature]));
-  const changes: SpecChange[] = [];
 
-  for (const key of mergedSortedKeys(beforeFeatures, afterFeatures)) changes.push(...diffFeature(beforeFeatures.get(key), afterFeatures.get(key)));
-  return changes;
+  for (const key of mergedSortedKeys(beforeFeatures, afterFeatures)) diffFeature(beforeFeatures.get(key), afterFeatures.get(key), outcome);
+  return outcome;
 }
 
 export interface SpecTombstones {

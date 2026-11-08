@@ -5,7 +5,9 @@ import { parseJsonValue } from "./json";
 import { RELEASE_PAGE_SIZE, type ReleasePagePayload } from "./release-client";
 import { loadRegressionTasks } from "./regression-tasks";
 import { annotateSuspectedRenames } from "./spec-rename";
-import type { BehaviorChangeRow, ChangeRow, FeatureRow, ReleaseRow, ScenarioRow } from "./types";
+import { diffSpecWithFolded, type FoldedSpecChange, type SpecScenario } from "./spec-diff";
+import { loadBaseVersionMap, loadVersionFeatureMap } from "./spec-versions";
+import type { BehaviorChangeRow, ChangeRow, FeatureRow, FoldedBehaviorChangeRow, ReleaseRow, ScenarioRow } from "./types";
 
 interface EvidenceSource {
   owner: string;
@@ -71,6 +73,47 @@ async function loadBehaviorChanges(releases: ReleaseRow[]) {
   }));
 }
 
+/** 折叠差异的展示摘要（发布变化视图的审计说明）。 */
+function foldedSummary(folded: FoldedSpecChange) {
+  if (folded.reason === "renumber") {
+    const before = folded.before as SpecScenario;
+    const after = folded.after as SpecScenario;
+    return `场景编号调整：${before.reference} → ${after.reference}（行为等价，未计入行为变化）`;
+  }
+  return folded.entityType === "feature" ? "功能描述仅措辞调整（行为等价，未计入行为变化）" : "场景表述仅措辞差异（行为等价，未计入行为变化）";
+}
+
+/** 逐发布重算被等价判定折叠的差异（落库行只有变化，折叠项不落库，现算是唯一完整口径）。 */
+async function loadFoldedChanges(releases: ReleaseRow[]): Promise<FoldedBehaviorChangeRow[]> {
+  const versionIds = [...new Set(releases.map((release) => release.specVersionId).filter((id): id is number => id !== null))];
+  if (versionIds.length === 0) return [];
+  const baseMap = await loadBaseVersionMap(getDb().execute.bind(getDb()), versionIds);
+  const needed = [...new Set([...versionIds, ...[...baseMap.values()].filter((id): id is number => id !== null)])];
+  const featureMap = await loadVersionFeatureMap(getDb().execute.bind(getDb()), needed);
+  const folded: FoldedBehaviorChangeRow[] = [];
+  let syntheticId = 0;
+  for (const release of releases) {
+    if (release.specVersionId === null) continue;
+    const base = baseMap.get(release.specVersionId);
+    const outcome = diffSpecWithFolded(base === null || base === undefined ? null : featureMap.get(base) ?? null, featureMap.get(release.specVersionId) ?? []);
+    for (const item of outcome.folded) {
+      folded.push({
+        id: --syntheticId,
+        releaseId: release.id,
+        kind: "changed",
+        entityType: item.entityType,
+        featureName: item.featureName,
+        scenarioReference: item.scenarioReference ?? "",
+        summary: foldedSummary(item),
+        before: item.before,
+        after: item.after,
+        reason: item.reason,
+      });
+    }
+  }
+  return folded;
+}
+
 export async function getProductDetails(slug: string, organizationId?: number) {
   const db = getDb();
   const [products] = await db.execute(
@@ -96,7 +139,7 @@ export async function getProductDetails(slug: string, organizationId?: number) {
   const features = featureRows as FeatureRow[];
   const releases = releaseRows[0] as ReleaseRow[];
   const releaseTotal = Number((countRows[0] as Array<{ total: number }>)[0]?.total ?? 0);
-  const [scenarios, changes, behaviorChanges, regressionTasks] = await Promise.all([loadScenarios(features), loadChanges(releases), loadBehaviorChanges(releases), loadRegressionTasks(product.id)]);
+  const [scenarios, changes, behaviorChanges, regressionTasks, foldedChanges] = await Promise.all([loadScenarios(features), loadChanges(releases), loadBehaviorChanges(releases), loadRegressionTasks(product.id), loadFoldedChanges(releases)]);
 
   const repository = (repositories as Array<{ provider?: string; owner: string; name: string; defaultBranch: string }>)[0];
   const afterSha = (runs as Array<{ status: string; errorMessage?: string; afterSha?: string | null }>)[0]?.afterSha;
@@ -113,6 +156,7 @@ export async function getProductDetails(slug: string, organizationId?: number) {
     changes: changes.map((change) => ({ ...change, evidence: decorateEvidence(change.evidence, source) })),
     behaviorChanges: annotateSuspectedRenames(behaviorChanges.map((change) => ({ ...change, before: decorateSubject(change.before, source), after: decorateSubject(change.after, source) }))),
     regressionTasks,
+    foldedChanges: foldedChanges.map((change) => ({ ...change, before: decorateSubject(change.before, source), after: decorateSubject(change.after, source) })),
     driftCount: features.filter((feature) => feature.staleSince).length + scenarios.filter((scenario) => scenario.staleSince).length,
   };
 }
@@ -144,7 +188,7 @@ export async function loadReleasePage(slug: string, organizationId: number | und
   ]);
   const releases = releaseRows[0] as ReleaseRow[];
   const total = Number((countRows[0] as Array<{ total: number }>)[0]?.total ?? 0);
-  const [changes, behaviorChanges] = await Promise.all([loadChanges(releases), loadBehaviorChanges(releases)]);
+  const [changes, behaviorChanges, foldedChanges] = await Promise.all([loadChanges(releases), loadBehaviorChanges(releases), loadFoldedChanges(releases)]);
 
   const repository = (repositories as Array<{ owner: string; name: string }>)[0];
   const afterSha = (runs as Array<{ afterSha?: string | null }>)[0]?.afterSha;
@@ -155,5 +199,6 @@ export async function loadReleasePage(slug: string, organizationId: number | und
     releases,
     changes: changes.map((change) => ({ ...change, evidence: decorateEvidence(change.evidence, source) })),
     behaviorChanges: annotateSuspectedRenames(behaviorChanges.map((change) => ({ ...change, before: decorateSubject(change.before, source), after: decorateSubject(change.after, source) }))),
+    foldedChanges: foldedChanges.map((change) => ({ ...change, before: decorateSubject(change.before, source), after: decorateSubject(change.after, source) })),
   };
 }

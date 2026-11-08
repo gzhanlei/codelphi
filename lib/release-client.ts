@@ -1,4 +1,4 @@
-import type { BehaviorChangeRow, ChangeRow, ReleaseRow } from "./types";
+import type { BehaviorChangeRow, ChangeRow, FoldedBehaviorChangeRow, ReleaseRow } from "./types";
 
 /** 发布变化列表的分页大小：首屏与每次「加载更多」各取一页。 */
 export const RELEASE_PAGE_SIZE = 10;
@@ -8,6 +8,7 @@ export interface ReleasePagePayload {
   releases: ReleaseRow[];
   changes: ChangeRow[];
   behaviorChanges: BehaviorChangeRow[];
+  foldedChanges: FoldedBehaviorChangeRow[];
 }
 
 type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;

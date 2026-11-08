@@ -61,6 +61,24 @@ describe("release card collapse", () => {
     expect(html).toContain("未发现规格行为变化");
     expect(html).toContain("瘦身回归");
   });
+
+  it("lists wording-folded differences in a separate audit section", () => {
+    const html = renderToStaticMarkup(createElement(ReleaseCard, {
+      slug: "codelphi",
+      release,
+      changes: [],
+      behaviorChanges,
+      foldedChanges: [
+        { id: -1, releaseId: 7, kind: "changed", entityType: "scenario", featureName: "统一登录", scenarioReference: "HP-3", summary: "场景表述仅措辞差异（行为等价，未计入行为变化）", before: null, after: null, reason: "wording" },
+        { id: -2, releaseId: 8, kind: "changed", entityType: "scenario", featureName: "统一登录", scenarioReference: "HP-4", summary: "其他发布的折叠项", before: null, after: null, reason: "renumber" },
+      ],
+      tasks,
+      canEdit: false,
+    }));
+    expect(html).toContain("另有 1 条差异判定为仅措辞/编号调整");
+    expect(html).toContain("场景表述仅措辞差异（行为等价，未计入行为变化）");
+    expect(html).not.toContain("其他发布的折叠项");
+  });
 });
 
 describe("regression task rendering", () => {

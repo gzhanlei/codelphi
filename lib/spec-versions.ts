@@ -105,6 +105,54 @@ async function loadVersionFeatures(connection: PoolConnection, versionId: number
   return loadFeatureSpec(connection, "version", "SELECT id, name, summary, parent_key AS parentKey, source FROM spec_features WHERE spec_version_id = ? ORDER BY position", [versionId]);
 }
 
+/** 批量读取多个 spec 版本的完整规格（发布变化视图的折叠明细重算用），key 为版本 id。 */
+export async function loadVersionFeatureMap(execute: Execute, versionIds: number[]): Promise<Map<number, SpecFeature[]>> {
+  const featureMap = new Map<number, SpecFeature[]>();
+  if (versionIds.length === 0) return featureMap;
+  const placeholders = versionIds.map(() => "?").join(",");
+  const [featureResult, scenarioResult] = await Promise.all([
+    execute(`SELECT id, spec_version_id AS versionId, name, summary, parent_key AS parentKey, source FROM spec_features WHERE spec_version_id IN (${placeholders}) ORDER BY position`, versionIds),
+    execute(
+      `SELECT sf.spec_version_id AS versionId, ss.spec_feature_id AS featureId, ss.reference, ss.context, ss.action, ss.outcome, ss.category, ss.source, ss.evidence
+       FROM spec_scenarios ss JOIN spec_features sf ON sf.id = ss.spec_feature_id
+       WHERE sf.spec_version_id IN (${placeholders})`,
+      versionIds,
+    ),
+  ]);
+  const featureRows = (Array.isArray(featureResult) ? featureResult[0] : []) as Array<FeatureRow & { versionId: number }>;
+  const scenarioRows = (Array.isArray(scenarioResult) ? scenarioResult[0] : []) as Array<ScenarioRow & { versionId: number }>;
+
+  const featuresByVersion = new Map<number, FeatureRow[]>();
+  for (const row of featureRows) {
+    const list = featuresByVersion.get(Number(row.versionId)) ?? [];
+    list.push(row);
+    featuresByVersion.set(Number(row.versionId), list);
+  }
+  for (const [versionId, rows] of featuresByVersion) {
+    featureMap.set(versionId, featuresFromRows(rows, scenarioRows.filter((scenario) => scenario.versionId === versionId)));
+  }
+  return featureMap;
+}
+
+/** 读取每个 spec 版本在同仓库下的前一版本 id（diffSpec 的 base）；首个版本无 base 返回 null。 */
+export async function loadBaseVersionMap(execute: Execute, versionIds: number[]): Promise<Map<number, number | null>> {
+  const baseMap = new Map<number, number | null>();
+  if (versionIds.length === 0) return baseMap;
+  const placeholders = versionIds.map(() => "?").join(",");
+  const result = await execute(
+    `SELECT v.id AS versionId,
+            (SELECT prev.id FROM spec_versions prev WHERE prev.repository_id = v.repository_id AND prev.id < v.id ORDER BY prev.id DESC LIMIT 1) AS baseVersionId
+     FROM spec_versions v WHERE v.id IN (${placeholders})`,
+    versionIds,
+  );
+  // mysql2 execute resolve 值是 [rows, fields] 元组；先取行数组再使用。
+  const payload = Array.isArray(result) ? result[0] : [];
+  for (const row of (Array.isArray(payload) ? payload : []) as Array<{ versionId: number; baseVersionId: number | null }>) {
+    baseMap.set(Number(row.versionId), row.baseVersionId === null ? null : Number(row.baseVersionId));
+  }
+  return baseMap;
+}
+
 async function loadPreviousSpec(connection: PoolConnection, run: RunContext) {
   const [versions] = await connection.execute(
     "SELECT id FROM spec_versions WHERE repository_id = ? ORDER BY id DESC LIMIT 1",
