@@ -138,28 +138,23 @@ describe("spec wording equivalence (P0 noise collapse)", () => {
     expect(result.map((change) => `${change.kind}:${change.entityType}`)).toEqual(["changed:feature"]);
   });
 
-  it("folds an added feature whose evidence is exclusively tests and docs (tests-only gate)", () => {
-    const sdk: SpecFeature = {
+  it("keeps added features on kind-only evidence when no behavioral set is given (gate requires disproof)", () => {
+    const pureTest: SpecFeature = {
       name: "嵌入式 SDK",
       summary: "Guest token refresh flow",
       scenarios: [
-        { reference: "HP-1", context: "Host page", action: "Calls embedDashboard", outcome: "Loads the dashboard", category: "happy", evidence: [{ path: "sdk/src/index.ts", startLine: 1 }] },
+        { reference: "HP-1", context: "Host page", action: "Calls embedDashboard", outcome: "Loads the dashboard", category: "happy", evidence: [{ path: "sdk/src/index.test.ts", startLine: 1 }] },
         { reference: "EC-1", context: "Token near expiry", action: "SDK schedules refresh", outcome: "Refreshes on interval", category: "edge", evidence: [{ path: "sdk/src/guestTokenRefresh.test.ts", startLine: 1 }] },
       ],
     };
-    // index.ts 在此构造里是真实实现路径——换成纯测试证据的场景组才触发门禁。
-    const pureTest: SpecFeature = {
-      ...sdk,
-      scenarios: sdk.scenarios.map((scenario) => ({ ...scenario, evidence: [{ path: `sdk/src/${scenario.reference.toLowerCase()}.test.ts`, startLine: 1 }] })),
-    };
-    const outcome = diffSpecWithFolded([], [pureTest]);
-    expect(outcome.changes).toEqual([]);
-    expect(outcome.folded).toHaveLength(1);
-    expect(outcome.folded[0]).toMatchObject({ reason: "tests-only", entityType: "feature", featureName: "嵌入式 SDK" });
-    expect(diffSpec([], [pureTest])).toEqual([]);
+    // 无行为变更集时无法证伪实现主张——纯测试/文档证据保留可见（宽松模式教训：随代码交付文档的真功能会被误杀）。
+    expect(diffSpec([], [pureTest])).toEqual([expect.objectContaining({ kind: "added", entityType: "feature" })]);
+    const withSet = diffSpecWithFolded([], [pureTest], { behavioralChangePaths: new Set(["lib/other.ts"]) });
+    expect(withSet.changes).toEqual([expect.objectContaining({ kind: "added", entityType: "feature" })]);
+    expect(withSet.folded).toEqual([]);
   });
 
-  it("keeps an added feature with at least one implementation-backed scenario (known residual)", () => {
+  it("keeps an added feature with implementation-backed scenarios when no behavioral set is given (default semantics)", () => {
     const sdk: SpecFeature = {
       name: "嵌入式 SDK",
       summary: "Guest token refresh flow",
@@ -170,6 +165,45 @@ describe("spec wording equivalence (P0 noise collapse)", () => {
     };
     const result = diffSpec([], [sdk]);
     expect(result.map((change) => `${change.kind}:${change.entityType}`)).toEqual(["added:feature"]);
+  });
+
+  it("folds a coverage-catch-up feature whose implementation evidence is not behaviorally changed in this release (#1009)", () => {
+    const sdk: SpecFeature = {
+      name: "嵌入式 SDK",
+      summary: "Guest token refresh flow",
+      scenarios: [
+        { reference: "HP-1", context: "Host page", action: "Calls embedDashboard", outcome: "Loads the dashboard", category: "happy", evidence: [{ path: "sdk/src/index.ts", startLine: 1 }] },
+        { reference: "EC-1", context: "Token near expiry", action: "SDK schedules refresh", outcome: "Refreshes on interval", category: "edge", evidence: [{ path: "sdk/src/guestTokenRefresh.test.ts", startLine: 1 }] },
+      ],
+    };
+    // index.ts 本次仅 JSDoc 变动（patch-scan 判非行为性），不在行为变更集内。
+    const behavioral = new Set(["superset/db_engine_specs/databricks.py"]);
+    const outcome = diffSpecWithFolded([], [sdk], { behavioralChangePaths: behavioral });
+    expect(outcome.changes).toEqual([]);
+    expect(outcome.folded).toHaveLength(1);
+    expect(outcome.folded[0]).toMatchObject({ reason: "tests-only", featureName: "嵌入式 SDK" });
+
+    // 实现文件有行为性行变更 → 保持 added。
+    const kept = diffSpecWithFolded([], [sdk], { behavioralChangePaths: new Set(["sdk/src/index.ts"]) });
+    expect(kept.changes.map((change) => `${change.kind}:${change.entityType}`)).toEqual(["added:feature"]);
+    // 不传选项 → 旧语义（实现证据即通过）。
+    expect(diffSpec([], [sdk]).map((change) => `${change.kind}:${change.entityType}`)).toEqual(["added:feature"]);
+  });
+
+  it("keeps a docs-evidenced feature whose implementation shipped elsewhere in the same release (宽松模式 lesson)", () => {
+    const viewer: SpecFeature = {
+      name: "查看者宽松模式访问控制",
+      summary: "Promiscuous viewer grant bound to its dashboard",
+      scenarios: [
+        { reference: "HP-1", context: "已发布仪表盘的列名查看者", action: "查看该仪表盘及图表数据", outcome: "无需数据集权限即可读取", category: "happy", evidence: [{ path: "UPDATING.md", startLine: 1 }] },
+        { reference: "ER-1", context: "非该仪表盘请求", action: "发起请求", outcome: "不享受宽松授权，按常规权限校验", category: "error", evidence: [{ path: "docs/admin_docs/security/security.mdx", startLine: 1 }] },
+      ],
+    };
+    // 证据全为文档，但实现文件（security/manager.py 等）在本发布中有行为变更——无法证伪，保留。
+    const behavioral = new Set(["superset/security/manager.py", "superset/dashboards/api.py"]);
+    const outcome = diffSpecWithFolded([], [viewer], { behavioralChangePaths: behavioral });
+    expect(outcome.changes.map((change) => `${change.kind}:${change.entityType}`)).toEqual(["added:feature"]);
+    expect(outcome.folded).toEqual([]);
   });
 
   it("treats an absent parentKey as null instead of a reparenting (superset pilot noise mode)", () => {

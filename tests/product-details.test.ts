@@ -44,6 +44,7 @@ describe("product details", () => {
       if (sql.includes("AS baseVersionId")) return [[{ versionId: 3, baseVersionId: 2 }]];
       if (sql.includes("FROM spec_features WHERE spec_version_id IN")) return [[{ id: 5, versionId: 3, name: "Login", summary: "OAuth", parentKey: null, source: "generated" }]];
       if (sql.includes("FROM spec_scenarios ss JOIN")) return [[{ versionId: 3, featureId: 5, reference: "happy", context: "c", action: "a", outcome: "o", category: "happy", source: "generated", evidence: [] }]];
+      if (sql.includes("FROM release_files WHERE behavioral_change")) return [[{ release_id: 6, path: "lib/analysis.ts" }]];
       if (!sql) return [[]];
       throw new Error(`Unexpected query: ${sql}`);
     });
@@ -77,6 +78,7 @@ describe("product details", () => {
       if (sql.includes("AS baseVersionId")) return [[{ versionId: 3, baseVersionId: 2 }]];
       if (sql.includes("FROM spec_features WHERE spec_version_id IN")) return [[...baseFeatures, { id: 5, versionId: 3, name: "登录", summary: "登录并保持会话", parentKey: null, source: "generated" }]];
       if (sql.includes("FROM spec_scenarios ss JOIN")) return [[...baseScenarios, { versionId: 3, featureId: 5, reference: "HP-1", context: "提交的任务不属于当前产品", action: "查询任务详情", outcome: "返回 404。", category: "error", source: "generated", evidence: [] }]];
+      if (sql.includes("FROM release_files WHERE behavioral_change")) return [[]];
       if (!sql) return [[]];
       throw new Error(`Unexpected query: ${sql}`);
     });
@@ -103,6 +105,7 @@ describe("product details", () => {
       if (sql.includes("AS baseVersionId")) return [[{ versionId: 3, baseVersionId: null }]];
       if (sql.includes("FROM spec_features WHERE spec_version_id IN")) return [[{ id: 5, versionId: 3, name: "Login", summary: "OAuth", parentKey: null, source: "generated" }]];
       if (sql.includes("FROM spec_scenarios ss JOIN")) return [[{ versionId: 3, featureId: 5, reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy", source: "generated", evidence: [] }]];
+      if (sql.includes("FROM release_files WHERE behavioral_change")) return [[{ release_id: 6, path: "lib/analysis.ts" }]];
       if (!sql) return [[]];
       throw new Error(`Unexpected query: ${sql}`);
     });

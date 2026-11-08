@@ -17,6 +17,7 @@ import type { SpecAnchorFeature } from "./spec-versions";
 import { markSpecDrift } from "./spec-drift";
 import { deliverAnalysisNotifications } from "./notifications";
 import { ensureRegressionTasks } from "./regression-tasks";
+import { behavioralChangePaths } from "./patch-scan";
 
 export interface RunContext {
   id: number;
@@ -117,10 +118,16 @@ export async function upsertRelease(connection: PoolConnection, run: RunContext,
   const [existing] = await connection.execute("SELECT id FROM releases WHERE repository_id = ? AND sha = ?", [run.repositoryId, run.afterSha]);
   const releaseId = Number((existing as Array<{ id: number }>)[0].id);
   // P0：发布改动文件清单落库，供回归任务的影响面映射（文件 → 证据路径 → 场景）离线复算。
+  // 行为性标志（patch-scan）：注释/空白变动的文件不构成行为变更，渲染期折叠重算与
+  // tests-only 门禁共用该标志。
+  const behavioralPaths = behavioralChangePaths(change.files);
   if (change.files.length > 0) {
     await connection.execute("DELETE FROM release_files WHERE release_id = ?", [releaseId]);
     for (const file of change.files) {
-      await connection.execute("INSERT IGNORE INTO release_files (release_id, path) VALUES (?, ?)", [releaseId, file.path]);
+      await connection.execute(
+        "INSERT IGNORE INTO release_files (release_id, path, behavioral_change) VALUES (?, ?, ?)",
+        [releaseId, file.path, behavioralPaths.has(file.path) ? 1 : 0],
+      );
     }
   }
   const [changeRows] = await connection.execute("SELECT COUNT(*) AS count FROM changes WHERE release_id = ?", [releaseId]);
@@ -149,7 +156,8 @@ async function saveResult(run: RunContext, result: AnalysisResult, change: Chang
       "UPDATE products SET description = ?, description_source = 'generated', description_evidence = ? WHERE id = ? AND description = ''",
       [result.product.description, JSON.stringify(result.product.evidence), run.productId],
     );
-    const { specVersionId, features: mergedFeatures } = await insertSpecVersion(connection, run, result, affectedKeys ? { affectedKeys } : {});
+    const behavioralPaths = behavioralChangePaths(change.files);
+    const { specVersionId, features: mergedFeatures } = await insertSpecVersion(connection, run, result, { ...(affectedKeys ? { affectedKeys } : {}), behavioralChangePaths: behavioralPaths });
     await rebuildSpecFileIndex(connection, run.repositoryId, specVersionId);
     await markSpecDrift(connection, run.productId, specVersionId);
     // P0(I1):下线基准必须是 carry-forward 合并后的完整规格——用 AI 原始输出会让

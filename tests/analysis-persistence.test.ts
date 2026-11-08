@@ -55,8 +55,8 @@ describe("analysis persistence guards", () => {
     const files = [{ path: "components/login.tsx", status: "modified", patch: "" }, { path: "lib/token.ts", status: "added", patch: "" }];
     await upsertRelease(connection, run, result, { ...change, files });
     expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("DELETE FROM release_files"), [10]);
-    expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT IGNORE INTO release_files"), [10, "components/login.tsx"]);
-    expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT IGNORE INTO release_files"), [10, "lib/token.ts"]);
+    expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT IGNORE INTO release_files"), [10, "components/login.tsx", 1]);
+    expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT IGNORE INTO release_files"), [10, "lib/token.ts", 1]);
   });
 
   it("generates scenario regression tasks inside the same transaction", async () => {

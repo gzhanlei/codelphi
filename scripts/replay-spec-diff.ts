@@ -14,30 +14,44 @@ async function loadFeatures(db: Pool, versionId: number): Promise<SpecFeature[]>
     [versionId],
   ) as [Array<{ id: number; name: string; summary: string; parentKey: string | null }>, unknown];
   const [scenarioRows] = await db.execute(
-    `SELECT ss.spec_feature_id AS featureId, ss.reference, ss.context, ss.action, ss.outcome, ss.category
+    `SELECT ss.spec_feature_id AS featureId, ss.reference, ss.context, ss.action, ss.outcome, ss.category, ss.evidence
      FROM spec_scenarios ss
      WHERE ss.spec_feature_id IN (SELECT id FROM spec_features WHERE spec_version_id = ?)
      ORDER BY ss.id`,
     [versionId],
-  ) as [Array<{ featureId: number; reference: string; context: string; action: string; outcome: string; category: string }>, unknown];
+  ) as [Array<{ featureId: number; reference: string; context: string; action: string; outcome: string; category: string; evidence: unknown }>, unknown];
   return featureRows.map((feature) => ({
     name: feature.name,
     summary: feature.summary,
     parentKey: feature.parentKey,
     scenarios: scenarioRows
       .filter((scenario) => scenario.featureId === feature.id)
-      .map((scenario): SpecScenario => ({ ...scenario, category: scenario.category as SpecScenario["category"], evidence: [] })),
+      .map((scenario): SpecScenario => ({
+        ...scenario,
+        category: scenario.category as SpecScenario["category"],
+        evidence: Array.isArray(scenario.evidence) ? scenario.evidence as SpecScenario["evidence"] : [],
+      })),
   }));
 }
 
 async function main() {
   const [beforeId, afterId] = [Number(process.argv[2]), Number(process.argv[3])];
-  if (!beforeId || !afterId) throw new Error("用法：npx tsx scripts/replay-spec-diff.ts <beforeSpecVersionId> <afterSpecVersionId>");
+  const releaseId = Number(process.argv[4]) || null;
+  if (!beforeId || !afterId) throw new Error("用法：npx tsx scripts/replay-spec-diff.ts <beforeSpecVersionId> <afterSpecVersionId> [releaseId]");
   const db = mysql.createPool(databaseConfig(true));
   try {
     const before = await loadFeatures(db, beforeId);
     const after = await loadFeatures(db, afterId);
-    const outcome = diffSpecWithFolded(before, after);
+    let behavioral: Set<string> | undefined;
+    if (releaseId) {
+      const [rows] = await db.execute(
+        "SELECT path FROM release_files WHERE behavioral_change = 1 AND release_id = ?",
+        [releaseId],
+      ) as [Array<{ path: string }>, unknown];
+      behavioral = new Set(rows.map((row) => row.path));
+      console.log(`使用 release ${releaseId} 的行为变更文件集（${behavioral.size} 个）`);
+    }
+    const outcome = diffSpecWithFolded(before, after, behavioral ? { behavioralChangePaths: behavioral } : undefined);
     console.log(`v${beforeId}（${before.length} 功能）→ v${afterId}（${after.length} 功能）`);
     console.log(`行为变化 ${outcome.changes.length} 条，折叠 ${outcome.folded.length} 条\n`);
     for (const change of outcome.changes) {

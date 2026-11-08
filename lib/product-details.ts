@@ -86,6 +86,26 @@ function foldedSummary(folded: FoldedSpecChange) {
   return folded.entityType === "feature" ? "功能描述仅措辞调整（行为等价，未计入行为变化）" : "场景表述仅措辞差异（行为等价，未计入行为变化）";
 }
 
+/** 逐发布读取行为性变更文件集（patch-scan 落库标志）：折叠重算与保存期判定共用同一口径。 */
+async function loadBehavioralPathsByRelease(releaseIds: number[]): Promise<Map<number, Set<string>>> {
+  const map = new Map<number, Set<string>>();
+  if (releaseIds.length === 0) return map;
+  const placeholders = releaseIds.map(() => "?").join(",");
+  const [rows] = await getDb().execute(
+    `SELECT release_id, path FROM release_files WHERE behavioral_change = 1 AND release_id IN (${placeholders})`,
+    releaseIds,
+  ) as [Array<{ release_id: number; path: string }>, unknown];
+  for (const row of rows) {
+    let set = map.get(Number(row.release_id));
+    if (!set) {
+      set = new Set<string>();
+      map.set(Number(row.release_id), set);
+    }
+    set.add(row.path);
+  }
+  return map;
+}
+
 /** 逐发布重算被等价判定折叠的差异（落库行只有变化，折叠项不落库，现算是唯一完整口径）。 */
 async function loadFoldedChanges(releases: ReleaseRow[]): Promise<FoldedBehaviorChangeRow[]> {
   const versionIds = [...new Set(releases.map((release) => release.specVersionId).filter((id): id is number => id !== null))];
@@ -93,12 +113,18 @@ async function loadFoldedChanges(releases: ReleaseRow[]): Promise<FoldedBehavior
   const baseMap = await loadBaseVersionMap(getDb().execute.bind(getDb()), versionIds);
   const needed = [...new Set([...versionIds, ...[...baseMap.values()].filter((id): id is number => id !== null)])];
   const featureMap = await loadVersionFeatureMap(getDb().execute.bind(getDb()), needed);
+  const behavioralByRelease = await loadBehavioralPathsByRelease(releases.map((release) => release.id));
   const folded: FoldedBehaviorChangeRow[] = [];
   let syntheticId = 0;
   for (const release of releases) {
     if (release.specVersionId === null) continue;
     const base = baseMap.get(release.specVersionId);
-    const outcome = diffSpecWithFolded(base === null || base === undefined ? null : featureMap.get(base) ?? null, featureMap.get(release.specVersionId) ?? []);
+    const behavioral = behavioralByRelease.get(release.id);
+    const outcome = diffSpecWithFolded(
+      base === null || base === undefined ? null : featureMap.get(base) ?? null,
+      featureMap.get(release.specVersionId) ?? [],
+      behavioral ? { behavioralChangePaths: behavioral } : undefined,
+    );
     for (const item of outcome.folded) {
       folded.push({
         id: --syntheticId,

@@ -171,6 +171,11 @@ interface DiffOutcome {
   folded: FoldedSpecChange[];
 }
 
+/** 折叠判定的可选上下文：本发布中确有行为性行变更的文件路径集（lib/patch-scan 产出）。 */
+export interface DiffSpecOptions {
+  behavioralChangePaths?: ReadonlySet<string>;
+}
+
 function scenarioChanges(before: SpecFeature, after: SpecFeature, outcome: DiffOutcome) {
   const beforeScenarios = scenarioMap(before);
   const afterScenarios = scenarioMap(after);
@@ -218,17 +223,22 @@ function scenarioChanges(before: SpecFeature, after: SpecFeature, outcome: DiffO
 
 /** 场景集（行为单元）差异：运行时折叠判定与历史回填共用同一口径。旧行 JSON 缺 scenarios 时按空集处理。 */
 /**
- * 新增功能的证据门禁：所有场景的证据都只来自测试/文档（无任何实现代码证据）时，
- * 「新增功能」没有行为性依据——测试描述的是预期，文档描述的是要求，都不是运行时行为
- * （superset 盲评 #1009 的 EC-1 场景即直接引用 test 文件）。折叠供审计，不落行为变化。
- * 注意残余：证据混合（部分实现代码）的功能不被此门禁覆盖——实现文件仅注释变动的
- * 「覆盖补录型新增」需要 patch 级判断，当前版本如实保留为已知边界。
+ * 新增功能的证伪门禁：仅当功能**主张了实现证据、且每条主张都被证伪**时折叠——
+ * 实现证据文件本次无行为性行变更（仅注释/空白）或不在本发布行为变更集内
+ * （superset 盲评 #1009：实现文件仅 JSDoc 变动的覆盖补录型新增）。折叠供审计，
+ * 不落行为变化。
+ *
+ * 无行为集、或功能未主张任何实现证据（全部场景只引测试/文档）时**不折叠**：
+ * 随代码一起交付文档的真功能（盲评「查看者宽松模式」，证据全为文档但实现真实存在）
+ * 会被误杀——无法证伪的主张保留可见，交人工核实，而不是静默吞掉。
  */
-function featureEvidenceNonBehavioral(feature: SpecFeature) {
+function featureEvidenceNonBehavioral(feature: SpecFeature, behavioral?: ReadonlySet<string>) {
+  if (!behavioral) return false;
   if (feature.scenarios.length === 0) return false;
-  return feature.scenarios.every((scenario) =>
-    scenario.evidence.length > 0 && scenario.evidence.every((item) => evidenceKind(item.path) !== "implementation"),
-  );
+  const implementationPaths = feature.scenarios
+    .flatMap((scenario) => scenario.evidence.filter((item) => evidenceKind(item.path) === "implementation").map((item) => item.path));
+  if (implementationPaths.length === 0) return false;
+  return implementationPaths.every((path) => !behavioral.has(path));
 }
 
 function featureScenarioSetChanges(before: SpecFeature, after: SpecFeature): SpecChange[] {
@@ -241,9 +251,9 @@ function featureScenarioSetChanges(before: SpecFeature, after: SpecFeature): Spe
   return outcome.changes;
 }
 
-function diffFeature(previous: SpecFeature | undefined, current: SpecFeature | undefined, outcome: DiffOutcome) {
+function diffFeature(previous: SpecFeature | undefined, current: SpecFeature | undefined, outcome: DiffOutcome, options?: DiffSpecOptions) {
   if (!previous && current) {
-    if (featureEvidenceNonBehavioral(current)) {
+    if (featureEvidenceNonBehavioral(current, options?.behavioralChangePaths)) {
       outcome.folded.push({ reason: "tests-only", entityType: "feature", featureName: current.name, scenarioReference: null, before: null, after: current });
     } else {
       outcome.changes.push(featureChange("added", current, null, current));
@@ -276,18 +286,18 @@ function diffFeature(previous: SpecFeature | undefined, current: SpecFeature | u
   outcome.folded.push(...scenarioOutcome.folded);
 }
 
-export function diffSpec(before: SpecFeature[] | null, after: SpecFeature[]): SpecChange[] {
-  return diffSpecWithFolded(before, after).changes;
+export function diffSpec(before: SpecFeature[] | null, after: SpecFeature[], options?: DiffSpecOptions): SpecChange[] {
+  return diffSpecWithFolded(before, after, options).changes;
 }
 
 /** 与 diffSpec 同判定的折叠报告版：changes 之外同时返回被等价判定吞掉的差异明细。 */
-export function diffSpecWithFolded(before: SpecFeature[] | null, after: SpecFeature[]): DiffOutcome {
+export function diffSpecWithFolded(before: SpecFeature[] | null, after: SpecFeature[], options?: DiffSpecOptions): DiffOutcome {
   const outcome: DiffOutcome = { changes: [], folded: [] };
   if (!before) return outcome;
   const beforeFeatures = new Map(before.map((feature) => [specFeatureKey(feature.name), feature]));
   const afterFeatures = new Map(after.map((feature) => [specFeatureKey(feature.name), feature]));
 
-  for (const key of mergedSortedKeys(beforeFeatures, afterFeatures)) diffFeature(beforeFeatures.get(key), afterFeatures.get(key), outcome);
+  for (const key of mergedSortedKeys(beforeFeatures, afterFeatures)) diffFeature(beforeFeatures.get(key), afterFeatures.get(key), outcome, options);
   return outcome;
 }
 
