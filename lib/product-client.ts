@@ -97,6 +97,8 @@ export async function cancelInvitation(slug: string, invitationId: number, fetch
 
 export async function requestAnalysis(slug: string, fetcher: Fetcher = fetch) {
   const response = await fetcher(`/api/products/${slug}/analyze`, { method: "POST" });
-  const data = await productResponse<{ runId?: number; error?: string }>(response, "分析请求失败");
+  const data = await productResponse<{ runId?: number; error?: string; message?: string }>(response, "分析请求失败");
+  // 额度闸门拒绝（402）带友好中文 message；抛给调用方展示
+  if (data.message) throw new Error(data.message);
   return data.runId;
 }

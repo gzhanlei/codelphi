@@ -6,6 +6,7 @@ import { verifyGitHubSignature } from "./github";
 import { getLatestGitHubApp } from "./github-integrations";
 import { requiredEnv } from "./env";
 import { BillingError, enqueueRunWithReservationInTransaction } from "./billing/core";
+import { enqueueBillingNotification } from "./billing/notifications";
 
 const pushSchema = z.object({
   ref: z.string(),
@@ -188,6 +189,25 @@ async function deliverStagedPush(
       await conn.commit();
       conn.release();
       console.warn("[billing] auto push skipped by gate", { deliveryId: input.deliveryId, repositoryId: input.repositoryId, reason });
+      try {
+        const [orgRows] = await conn.execute(
+          `SELECT p.organization_id AS organizationId FROM repositories repo JOIN products p ON p.id = repo.product_id WHERE repo.id = ?`,
+          [input.repositoryId],
+        );
+        const accountId = Number((orgRows as Array<{ organizationId: number }>)[0]?.organizationId ?? 0);
+        if (accountId) {
+          await enqueueBillingNotification({
+            accountId,
+            billingPeriod: "trial",
+            type: "skipped_push",
+            threshold: 0,
+            subject: "[CoDelphi] 自动分析因额度跳过",
+            body: `一次代码推送（${input.after.slice(0, 10)}）因额度不足被跳过，未产生费用。购买套餐后可在产品页「补分析最新提交」恢复同步。`,
+          });
+        }
+      } catch (notifyError) {
+        console.warn("[billing] skipped push notification enqueue failed", notifyError);
+      }
       return { status: 202, body };
     }
   } catch (error) {

@@ -5,6 +5,8 @@ import { markPaidAndFulfill, getOrderWithReconcile } from "../pay-orders";
 import { confirmRefundFromRemote, reclaimWalletIfSettled } from "../pay-refunds";
 import { getValidUserToken } from "../chandler-token";
 import { queryChandlerOrder } from "../chandler-pay";
+import { deliverPendingBillingNotifications, enqueueBillingNotification, ownerEmailForAccount } from "./notifications";
+import { runDailyReconcileOnce } from "./reconcile";
 import { DEADLOCK_RETRIES, FIRST_RUN_UNITS, HEARTBEAT_FRESH_WINDOW_MINUTES, RESERVATION_TTL_MINUTES, SWEEP_RESERVATION_INTERVAL_MS } from "./constants";
 
 /**
@@ -127,6 +129,8 @@ export function startBillingSweeps() {
   if (startedJobs.size > 0) return { started: false };
   scheduleJob("reservation-ttl", SWEEP_RESERVATION_INTERVAL_MS, runReservationSweepOnce);
   scheduleJob("payment-reconcile", 60 * 1_000, runPaymentReconcileOnce);
+  scheduleJob("billing-notify-delivery", 60 * 1_000, runBillingNotifyDeliveryOnce);
+  scheduleJob("billing-daily", 24 * 60 * 60 * 1_000, runBillingDailyOnce);
   scheduleJob("rate-limit-cleanup", 60 * 60 * 1_000, () => runRateLimitCleanupOnce(3600));
   return { started: true, jobs: [...startedJobs] };
 }
@@ -242,5 +246,51 @@ export async function runPaymentReconcileOnce(): Promise<JobResult> {
     }
     detail.reclaimed = reclaimed;
     return detail;
+  });
+}
+
+
+/** 计费通知投递（M4-T4）：outbox pending → 邮件；unknown/failed 留给对账。 */
+export async function runBillingNotifyDeliveryOnce(): Promise<JobResult> {
+  return withSweepLock("billing-notify-delivery", async () => {
+    const detail = await deliverPendingBillingNotifications(20);
+    return { executed: true, detail };
+  });
+}
+
+/** 账务每日作业（M4-T5）：到期/宽限提醒入队 + 每日对账（只读 SQL 集 + 管理员告警邮件）。 */
+export async function runBillingDailyOnce(): Promise<JobResult> {
+  return withSweepLock("billing-daily", async (conn) => {
+    // 到期提醒（契约 §13.1）：active 且周期将结束（7/3/0 天内）→ period_ending（threshold=剩余整天数）
+    const [endingRows] = await conn.execute(
+      `SELECT b.account_id, b.current_period_end,
+              CEILING(TIMESTAMPDIFF(HOUR, NOW(3), b.current_period_end) / 24) AS daysLeft
+       FROM billing_accounts b
+       WHERE b.plan_status = 'active' AND b.current_period_end IS NOT NULL
+         AND b.current_period_end <= DATE_ADD(NOW(3), INTERVAL 7 DAY)
+         AND b.current_period_end > NOW(3)`,
+    );
+    let periodReminders = 0;
+    for (const row of endingRows as Array<{ account_id: number; current_period_end: string | Date; daysLeft: number }>) {
+      const periodEnd = new Date(row.current_period_end).toISOString().slice(0, 10);
+      const inserted = await enqueueBillingNotification({
+        accountId: row.account_id,
+        billingPeriod: periodEnd,
+        type: "period_ending",
+        threshold: Number(row.daysLeft) || 0,
+        subject: `[CoDelphi] 订阅将在 ${row.daysLeft} 天后到期`,
+        body: `当前计费周期将于 ${periodEnd} 结束。到期后账户进入只读宽限期（7 天），期间无法发起新分析；续费可延续周期并保留全部规格历史。`,
+      });
+      // owner 缺失/未发放不影响计数
+      void inserted;
+      periodReminders += 1;
+    }
+    void ownerEmailForAccount;
+    // 每日对账（只读 + 管理员告警邮件）
+    const reconcile = await runDailyReconcileOnce();
+    return {
+      executed: true,
+      detail: { periodReminders, reconcileFindings: reconcile.findings.length, reconcileHealthy: reconcile.healthy },
+    };
   });
 }

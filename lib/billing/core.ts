@@ -922,6 +922,17 @@ export async function enqueueRunWithReservation(input: EnqueueInput): Promise<En
   throw new BillingError("billing_state_conflict", `enqueue clash for repository ${input.repositoryId} sha ${input.afterSha} did not converge`);
 }
 
+/** 账户当前可用 SAU（trial+plan+gift+pack 有效钱包的 remaining-reserved 之和；§3.2 四条件简化读取）。 */
+export async function availableSau(accountId: number): Promise<number> {
+  const [rows] = await getDb().execute(
+    `SELECT COALESCE(SUM(remaining_sau - reserved_sau), 0) AS available
+     FROM billing_quota_wallets
+     WHERE account_id = ? AND status = 'active' AND (expires_at IS NULL OR expires_at > NOW(3))`,
+    [accountId],
+  );
+  return Number((rows as Array<{ available: number }>)[0]?.available ?? 0);
+}
+
 /** 执行入口预留检查（契约 §6.6/§9）：run 是否存在 active 预留。 */
 export async function hasActiveReservation(runId: number): Promise<boolean> {
   const [rows] = await getDb().execute(

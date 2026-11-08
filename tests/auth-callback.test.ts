@@ -15,7 +15,7 @@ vi.mock("@/lib/users", async (importOriginal) => ({
   findUserIdBySub: vi.fn(async () => 1),
 }));
 vi.mock("@/lib/session", () => ({ createSession: vi.fn() }));
-vi.mock("@/lib/users", () => ({ upsertCodelphiUser: vi.fn() }));
+vi.mock("@/lib/users", () => ({ upsertCodelphiUser: vi.fn(), findUserIdBySub: vi.fn(async () => 1) }));
 
 function callback(cookie = "") {
   return new NextRequest("https://codelphi.com/auth/callback?code=code&state=state", { headers: { cookie } });

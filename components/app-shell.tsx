@@ -14,6 +14,8 @@ export function AppShell({ user, organizationName, children }: { user: SessionUs
             <Link href="/organizations" className="nav-item"><span>◈</span>我的工作区</Link>
             <Link href="/admin/feedback" className="nav-item"><span>◌</span>反馈管理</Link>
             <Link href="/integrations" className="nav-item"><span>⌘</span>代码仓库</Link>
+            <Link href="/settings" className="nav-item"><span>⚙</span>设置</Link>
+            <Link href="/pricing" className="nav-item"><span>◇</span>套餐与定价</Link>
             <a href="https://app.chandler.work" className="nav-item" target="_blank" rel="noreferrer"><span>↗</span>Chandler</a>
           </nav>
           <div className="sidebar-note">CODE → CONTEXT<br />让每一次发布都有据可查</div>

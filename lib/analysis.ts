@@ -4,6 +4,7 @@ import { getDb } from "./db";
 import { analyzeWithAI, type AnalysisResult } from "./ai";
 import { capture, enqueueRunWithReservation, hasActiveReservation, heartbeat, release, reserveForNewRun } from "./billing/core";
 import { FIRST_RUN_UNITS, HEARTBEAT_INTERVAL_MS } from "./billing/constants";
+import { enqueueBillingNotification } from "./billing/notifications";
 import { resolveAnalysisTarget, type ChangeContext, type CodeHostingProvider } from "./code-hosting";
 import { analysisSliceBudgets, getRemoteAnalysisSources, parseSourceRoots } from "./remote-analysis";
 import { createSlicePlanner } from "./slice-planner";
@@ -304,7 +305,20 @@ async function runAnalysisBody(run: RunContext) {
   // 结算捕获（契约 §9/§6.4）：主事务已提交，捕获失败不得改写 run 分析状态（D15）——
   // 只告警，sweep 扫描二会按 run 级结算请求缺失恢复结算。
   try {
-    await capture(run.id, FIRST_RUN_UNITS);
+    await capture(run.id, FIRST_RUN_UNITS, {
+      notify: async (event) => {
+        if (run.accountId == null) return;
+        const type = event.type === "partially_settled" ? "settlement_partially_settled" : "settlement_unfunded";
+        await enqueueBillingNotification({
+          accountId: run.accountId,
+          billingPeriod: new Date().toISOString().slice(0, 10),
+          type,
+          threshold: run.id,
+          subject: `[CoDelphi] 分析已完成但额度结算不完整（缺少 ${event.unfundedUnits} SAU）`,
+          body: "本次分析结果已保留；缺少的额度结算记录已进入人工对账队列，稍后会有专人与你确认处理方式。",
+        });
+      },
+    });
   } catch (error) {
     console.error("[billing] capture failed; sweep will recover settlement", error);
   }

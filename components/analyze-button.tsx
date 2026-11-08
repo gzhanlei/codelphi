@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { requestAnalysis } from "@/lib/product-client";
@@ -28,12 +29,18 @@ export function AnalyzeButton({ slug }: { slug: string }) {
     }
   }
 
+  const quotaBlocked = message.includes("额度不足");
   return (
     <div className="analyze-control">
       <button className="primary-button" type="button" onClick={analyze} disabled={pending}>
         {analysisButtonLabel(pending)}
       </button>
       <InlineMessage message={message} />
+      {quotaBlocked ? (
+        <p className="quota-blocked-hint">
+          分析未执行、未计费。<Link href="/pricing">升级套餐或购买超额包 →</Link>
+        </p>
+      ) : null}
     </div>
   );
 }
