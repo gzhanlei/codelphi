@@ -5,6 +5,7 @@ import { getSessionUser } from "@/lib/session";
 import { requireProductAccess } from "@/lib/product-access";
 import { resolvePublicDemoProduct } from "@/lib/public-demo";
 import { loadAffectedScenarios } from "@/lib/spec-file-index";
+import { resolveFeatureByStableKey } from "@/lib/stable-links";
 
 const MAX_FILES = 50;
 
@@ -34,6 +35,13 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
   const repositoryId = Number((repoRows as Array<{ id: number }>)[0]?.id ?? 0);
   if (!repositoryId) return NextResponse.json({ error: "产品不存在或不属于当前工作区" }, { status: 404 });
 
-  const affected = await loadAffectedScenarios(repositoryId, parsed.data.files);
+  const raw = await loadAffectedScenarios(repositoryId, parsed.data.files);
+  // stable_key → 工作台层 feature id（M3 稳定引用同源通道）：结果链接必须落在规格页真实可打开的功能上，
+  // 版本层 spec_features.id 不是规格页的寻址空间；条目已退役时为 null，前端降级为无链接展示。
+  const affected = [];
+  for (const impact of raw) {
+    const featureId = impact.stableKey ? await resolveFeatureByStableKey(productId, impact.stableKey) : null;
+    affected.push({ featureId, feature: impact.feature, scenarios: impact.scenarios });
+  }
   return NextResponse.json({ files: parsed.data.files, affected });
 }

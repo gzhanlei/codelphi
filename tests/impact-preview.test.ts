@@ -1,13 +1,14 @@
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { dbExecute, loadImpact } = vi.hoisted(() => ({ dbExecute: vi.fn(), loadImpact: vi.fn() }));
+const { dbExecute, loadImpact, resolveStableKey } = vi.hoisted(() => ({ dbExecute: vi.fn(), loadImpact: vi.fn(), resolveStableKey: vi.fn() }));
 
 vi.mock("../lib/db", () => ({ getDb: () => ({ execute: dbExecute }) }));
 vi.mock("../lib/spec-file-index", async (importOriginal) => ({
   ...await importOriginal<typeof import("../lib/spec-file-index")>(),
   loadAffectedScenarios: loadImpact,
 }));
+vi.mock("../lib/stable-links", () => ({ resolveFeatureByStableKey: resolveStableKey }));
 vi.mock("../lib/session", () => ({ getSessionUser: vi.fn() }));
 vi.mock("../lib/product-access", () => ({ requireProductAccess: vi.fn() }));
 vi.mock("../lib/public-demo", async (importOriginal) => ({
@@ -49,6 +50,30 @@ describe("impact preview route (C2 spike)", () => {
     expect(payload.affected).toHaveLength(1);
     expect(payload.affected[0].feature).toBe("QA 回归清单");
     expect(payload.files).toEqual(["components/release-card.tsx", "app/globals.css"]);
+  });
+
+  it("resolves the live feature id through the stable-key channel for result links", async () => {
+    resolveStableKey.mockResolvedValue(400);
+    loadImpact.mockResolvedValue([
+      { feature: "AI 规格分析与发布变化", stableKey: "spec-feature:ai-analysis", scenarios: [
+        { reference: "EC-1", evidencePath: "instrumentation.ts", context: "服务重启导致分析中断", action: "应用启动", outcome: "恢复在途 run" },
+      ] },
+    ]);
+    const response = await GET(request("?files=instrumentation.ts"), { params: Promise.resolve({ slug: "codelphi" }) });
+    const payload = await response.json() as { affected: Array<{ featureId: number | null; scenarios: Array<{ context: string | null }> }> };
+    expect(resolveStableKey).toHaveBeenCalledWith(1, "spec-feature:ai-analysis");
+    expect(payload.affected[0].featureId).toBe(400);
+    expect(payload.affected[0].scenarios[0].context).toBe("服务重启导致分析中断");
+  });
+
+  it("degrades to a null feature id when the spec entry has retired from the live spec", async () => {
+    resolveStableKey.mockResolvedValue(null);
+    loadImpact.mockResolvedValue([
+      { feature: "已退役功能", stableKey: "spec-feature:gone", scenarios: [{ reference: "HP-1", evidencePath: "lib/gone.ts", context: null, action: null, outcome: null }] },
+    ]);
+    const response = await GET(request("?files=lib/gone.ts"), { params: Promise.resolve({ slug: "codelphi" }) });
+    const payload = await response.json() as { affected: Array<{ featureId: number | null }> };
+    expect(payload.affected[0].featureId).toBeNull();
   });
 
   it("rejects requests without file paths or over the batch limit", async () => {

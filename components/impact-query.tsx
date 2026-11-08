@@ -4,10 +4,32 @@ import { useState } from "react";
 import { featureHref } from "@/lib/spec-editor-ui";
 import { errorMessage } from "@/lib/error-message";
 
+export interface ImpactScenario {
+  reference: string | null;
+  evidencePath: string;
+  context: string | null;
+  action: string | null;
+  outcome: string | null;
+}
+
 export interface ImpactFeatureImpact {
-  featureId: number;
+  /** 工作台层 feature id（stable-links 已解析）；条目已从最新规格退役时为 null。 */
+  featureId: number | null;
   feature: string;
-  scenarios: Array<{ reference: string | null; evidencePath: string }>;
+  scenarios: ImpactScenario[];
+}
+
+function scenarioLine(scenario: ImpactScenario) {
+  const behavior = [scenario.context, scenario.action, scenario.outcome].filter(Boolean).join(" → ");
+  const evidence = <span className="impact-evidence">证据 {scenario.evidencePath}</span>;
+  if (!scenario.reference) return <span>整功能受影响（{evidence}）</span>;
+  return (
+    <>
+      <code className="impact-ref">{scenario.reference}</code>
+      {behavior ? ` ${behavior} ` : " "}
+      {evidence}
+    </>
+  );
 }
 
 /** 查询结果为纯渲染（SSR 可测）；交互状态由外层 SpecImpactQuery 持有。 */
@@ -18,15 +40,13 @@ export function ImpactResult({ slug, affected }: { slug: string; affected: Impac
   return (
     <div className="impact-result">
       {affected.map((impact) => (
-        <div className="impact-feature" key={impact.featureId}>
-          <a className="impact-feature-name" href={`/products/${slug}${featureHref(impact.featureId)}`}>{impact.feature}</a>
+        <div className="impact-feature" key={`${impact.feature}-${impact.featureId ?? "retired"}`}>
+          {impact.featureId
+            ? <a className="impact-feature-name" href={`/products/${slug}${featureHref(impact.featureId)}`}>{impact.feature}</a>
+            : <span className="impact-feature-name">{impact.feature}</span>}
           <ul>
             {impact.scenarios.map((scenario, index) => (
-              <li key={`${scenario.reference ?? "feature"}-${index}`}>
-                {scenario.reference
-                  ? <><code className="impact-ref">{scenario.reference}</code> {scenario.evidencePath}</>
-                  : <span>整功能受影响（证据路径命中）</span>}
-              </li>
+              <li key={`${scenario.reference ?? "feature"}-${index}`}>{scenarioLine(scenario)}</li>
             ))}
           </ul>
         </div>

@@ -67,11 +67,16 @@ export async function loadAffectedFeatureKeys(repositoryId: number, paths: strin
 export interface AffectedScenario {
   reference: string | null;
   evidencePath: string;
+  context: string | null;
+  action: string | null;
+  outcome: string | null;
 }
 
 export interface AffectedFeatureImpact {
   featureId: number;
   feature: string;
+  /** 版本层 stable_key，供 stable-links 解析到工作台层 feature（影响面结果链接用）。 */
+  stableKey: string;
   scenarios: AffectedScenario[];
 }
 
@@ -80,7 +85,8 @@ export async function loadAffectedScenarios(repositoryId: number, paths: string[
   if (paths.length === 0) return [];
   const placeholders = paths.map(() => "?").join(",");
   const result = await execute(
-    `SELECT sf.id AS featureId, sf.name AS feature, ss.reference AS reference, i.path AS evidencePath
+    `SELECT sf.id AS featureId, sf.name AS feature, sf.stable_key AS stableKey, ss.reference AS reference, i.path AS evidencePath,
+            ss.context AS context, ss.action AS action, ss.outcome AS outcome
      FROM spec_file_index i
      JOIN spec_features sf ON sf.id = i.spec_feature_id
      LEFT JOIN spec_scenarios ss ON ss.id = i.spec_scenario_id
@@ -89,15 +95,15 @@ export async function loadAffectedScenarios(repositoryId: number, paths: string[
     [repositoryId, ...paths],
   );
   const payload = Array.isArray(result) ? result[0] : [];
-  const rows = (Array.isArray(payload) ? payload : []) as Array<{ featureId: number; feature: string; reference: string | null; evidencePath: string }>;
+  const rows = (Array.isArray(payload) ? payload : []) as Array<{ featureId: number; feature: string; stableKey: string; reference: string | null; evidencePath: string; context: string | null; action: string | null; outcome: string | null }>;
   const byFeature = new Map<string, AffectedFeatureImpact>();
   for (const row of rows) {
     let impact = byFeature.get(row.feature);
     if (!impact) {
-      impact = { featureId: Number(row.featureId), feature: row.feature, scenarios: [] };
+      impact = { featureId: Number(row.featureId), feature: row.feature, stableKey: row.stableKey, scenarios: [] };
       byFeature.set(row.feature, impact);
     }
-    impact.scenarios.push({ reference: row.reference, evidencePath: row.evidencePath });
+    impact.scenarios.push({ reference: row.reference, evidencePath: row.evidencePath, context: row.context, action: row.action, outcome: row.outcome });
   }
   return [...byFeature.values()];
 }
