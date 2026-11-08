@@ -31,7 +31,7 @@ export function publicDemoSlugs() {
 }
 
 export function prPreviewEnabled() {
-  return process.env.PR_PREVIEW_ENABLED === "true";
+  return process.env.PR_PREVIEW_ENABLED !== "false";
 }
 
 export function incrementalShadowEnabled() {

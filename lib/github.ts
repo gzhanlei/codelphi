@@ -113,6 +113,18 @@ export async function upsertIssueComment(repo: GitHubRepository, number: number,
   return data.id;
 }
 
+const checkRunSchema = z.object({ id: z.number() });
+
+export type CheckConclusion = "success" | "neutral" | "failure";
+
+export async function createCheckRun(repo: GitHubRepository, sha: string, name: string, conclusion: CheckConclusion, title: string, summary: string, access: GitHubAccess = {}) {
+  const data = checkRunSchema.parse(await githubFetch(`/repos/${repo.owner}/${repo.name}/check-runs`, access, {
+    method: "POST",
+    body: JSON.stringify({ name, head_sha: sha, status: "completed", conclusion, output: { title, summary } }),
+  }));
+  return data.id;
+}
+
 export function verifyGitHubSignature(rawBody: string, signature: string | null, secret: string) {
   if (!signature?.startsWith("sha256=")) return false;
   const expected = `sha256=${createHmac("sha256", secret).update(rawBody).digest("hex")}`;

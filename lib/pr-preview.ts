@@ -29,6 +29,9 @@ function sortReferences(references: Set<string>) {
   });
 }
 
+/** PR 预演检查名：分支保护可用 Require status checks 要求它，实现「合并前预演必须生成」的完成门禁。 */
+export const prPreviewCheckName = "codelphi/behavior-preview";
+
 /** 渲染 PR 预演评论：按功能分组的场景编号与证据路径；marker 行用于原地更新去重。 */
 export function renderPrPreview(entries: AffectedSpecEntry[], fileCount: number, fullName: string, number: number): string {
   const byFeature = new Map<string, { references: Set<string>; paths: Set<string> }>();
@@ -85,9 +88,15 @@ async function loadAffectedEntries(repositoryId: number, paths: string[]): Promi
   return rows as AffectedSpecEntry[];
 }
 
+/** check run 摘要复用评论正文，去掉首行 marker。 */
+function previewSummary(body: string) {
+  return body.split("\n").slice(1).join("\n").trim();
+}
+
 /**
- * PR 预演：触碰文件 ∩ 规格索引 → 在 PR 里原地更新预演评论。
- * 全程吞错（after() 上下文里失败只记日志），未开启开关或无交集时静默。
+ * PR 预演：触碰文件 ∩ 规格索引 → 在 PR 里原地更新预演评论，并挂 `codelphi/behavior-preview` 检查。
+ * 检查是完成门禁而非正确性门禁：生成成功（含未命中规格）为 success，预演自身失败为 neutral，
+ * 是否要求该检查由仓库自行在分支保护里启用。全程吞错（after() 上下文里失败只记日志），开关关闭时静默。
  */
 export async function runPrPreview(job: PrPreviewJob) {
   if (!prPreviewEnabled()) return;
@@ -95,7 +104,7 @@ export async function runPrPreview(job: PrPreviewJob) {
     const target = await loadPreviewTarget(job.repositoryId);
     if (!target) return;
     const adapter = getCodeHostingAdapter(target.provider ?? "github");
-    if (!adapter.getPullRequestFiles || !adapter.listIssueComments || !adapter.upsertIssueComment) return;
+    if (!adapter.getPullRequestFiles) return;
 
     const repository: RepositoryRef = { owner: job.owner, name: job.name, defaultBranch: target.defaultBranch };
     const access: GitHubAccess = { connectionId: target.connectionId, organizationId: target.organizationId };
@@ -104,13 +113,60 @@ export async function runPrPreview(job: PrPreviewJob) {
     if (paths.length === 0) return;
 
     const affected = await loadAffectedEntries(job.repositoryId, paths);
-    if (affected.length === 0) return;
+
+    if (affected.length === 0) {
+      await adapter.createCheckRun?.(
+        repository,
+        job.sha,
+        prPreviewCheckName,
+        "success",
+        "行为预演：未命中已知规格",
+        "本次改动未命中规格索引中的已知功能或场景（基于最近一次成功分析的索引，非本 PR 合并结果）。",
+        access,
+      );
+      return;
+    }
 
     const body = renderPrPreview(affected, paths.length, `${job.owner}/${job.name}`, job.number);
-    const comments = await adapter.listIssueComments(repository, job.number, access);
-    const existing = comments.find((comment) => comment.body.includes(prPreviewCommentMarker(job.owner, job.name, job.number)));
-    await adapter.upsertIssueComment(repository, job.number, body, existing?.id ?? null, access);
+    if (adapter.listIssueComments && adapter.upsertIssueComment) {
+      const comments = await adapter.listIssueComments(repository, job.number, access);
+      const existing = comments.find((comment) => comment.body.includes(prPreviewCommentMarker(job.owner, job.name, job.number)));
+      await adapter.upsertIssueComment(repository, job.number, body, existing?.id ?? null, access);
+    }
+    const featureCount = new Set(affected.map((entry) => entry.featureName)).size;
+    await adapter.createCheckRun?.(
+      repository,
+      job.sha,
+      prPreviewCheckName,
+      "success",
+      `行为预演完成：${featureCount} 个功能受影响`,
+      `${previewSummary(body)}\n\n_此检查只表示行为预演已生成，不判断代码正确性；是否合并由人工判断。_`,
+      access,
+    );
   } catch (error) {
     console.error("[pr-preview] failed", error);
+    await emitNeutralCheck(job, error).catch((nested) => console.error("[pr-preview] failed to mark the check neutral", nested));
   }
+}
+
+/** 预演自身失败（权限/网络等）挂 neutral 检查：状态可见、不阻塞合并。 */
+async function emitNeutralCheck(job: PrPreviewJob, error: unknown) {
+  const target = await loadPreviewTarget(job.repositoryId);
+  if (!target) return;
+  const adapter = getCodeHostingAdapter(target.provider ?? "github");
+  if (!adapter.createCheckRun) return;
+  const message = error instanceof Error ? error.message : String(error);
+  const hint = message.includes("403")
+    ? "通常是 GitHub App 缺 Checks 写权限或安装方尚未重新批准。"
+    : "推送新提交或重新投递 webhook 后重试。";
+  const repository: RepositoryRef = { owner: job.owner, name: job.name, defaultBranch: target.defaultBranch };
+  await adapter.createCheckRun(
+    repository,
+    job.sha,
+    prPreviewCheckName,
+    "neutral",
+    "行为预演未完成",
+    `预演生成失败（${message}）。${hint} 此检查只表示预演是否生成，不判断代码正确性，不阻塞合并。`,
+    { connectionId: target.connectionId, organizationId: target.organizationId },
+  );
 }

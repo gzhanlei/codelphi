@@ -32,7 +32,7 @@ export function codelphiManifest(appUrl: string) {
     callback_urls: [redirectUrl],
     setup_url: `${appUrl}/integrations/github/setup`,
     ...webhookConfiguration(appUrl),
-    default_permissions: { contents: "read", metadata: "read", pull_requests: "write" },
+    default_permissions: { contents: "read", metadata: "read", pull_requests: "write", checks: "write" },
   };
 }
 

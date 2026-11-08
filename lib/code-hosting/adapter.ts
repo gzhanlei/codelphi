@@ -18,5 +18,6 @@ export interface CodeHostingAdapter {
   getPullRequestFiles?(repository: RepositoryRef, number: number, access: RepositoryAccess): Promise<ChangeFile[]>;
   listIssueComments?(repository: RepositoryRef, number: number, access: RepositoryAccess): Promise<IssueComment[]>;
   upsertIssueComment?(repository: RepositoryRef, number: number, body: string, commentId: number | null, access: RepositoryAccess): Promise<number>;
+  createCheckRun?(repository: RepositoryRef, sha: string, name: string, conclusion: "success" | "neutral" | "failure", title: string, summary: string, access: RepositoryAccess): Promise<number>;
   explainRegistrationError?(error: unknown, access: RepositoryAccess): Error | null;
 }

@@ -155,16 +155,18 @@ Secret: 与 GITHUB_WEBHOOK_SECRET 相同
 Events: Push events
 ```
 
-#### PR 预演权限升级（M5 上线时的一次性操作）
+#### PR 预演权限升级（一次性操作）
 
-PR 预演（`pull_request` 事件触发、在 PR 中评论受影响的规格）需要 App 具备写评论权限。新装的 App 已在 Manifest 中声明 `pull_requests: write` 与 `pull_request` 事件；**已有 App** 需要在 GitHub 网页补配：
+PR 预演（`pull_request` 事件触发，在 PR 中评论受影响的规格并挂 `codelphi/behavior-preview` 检查）需要 App 具备写评论与写 Checks 权限。新装的 App 已在 Manifest 中声明 `pull_requests: write`、`checks: write` 与 `pull_request` 事件；**已有 App** 需要在 GitHub 网页补配：
 
-1. **权限**（App 设置 → Permissions & events → Pull requests）：从 Repository permissions 里把 Pull requests 提升为 **Read and write**，Save changes。安装了该 App 的组织/账号需要在通知里重新批准权限。
+1. **权限**（App 设置 → Permissions & events）：把 Pull requests 与 Checks 都提升为 **Read and write**，Save changes。安装了该 App 的组织/账号需要在通知里重新批准权限。
 2. **事件订阅**（同页面 Subscribe to events）：勾选 **Pull request**，Save changes。与 push 迁移一样，只提权限不订阅事件不会有任何投递。
-3. **服务器开关**：在部署环境 `.env` 设置 `PR_PREVIEW_ENABLED=true` 并重启服务（`systemctl restart codelphi.service`）。开关默认关闭，权限升级期间预演静默失败不影响 push 分析主链路。
-4. **验证**：在一个已注册产品的仓库开测试 PR 改动某功能的证据文件，PR 应出现「CoDelphi 规格预演」评论；追加 commit 后同一评论被更新而非新建。若未出现：检查 Recent Deliveries 是否有 `pull_request` 投递（无 → 第 2 步遗漏）、服务器日志 `[pr-preview] failed`（有 → 通常是 installation token 权限尚未被重新批准）。
+3. **服务器开关**：`PR_PREVIEW_ENABLED` **默认开启**；如需关闭，在部署环境 `.env` 设为 `false` 并重启服务（`systemctl restart codelphi.service`）。权限升级期间预演失败只记日志并尝试把检查挂为 neutral，不影响 push 分析主链路。
+4. **验证**：在一个已注册产品的仓库开测试 PR 改动某功能的证据文件，PR 应出现「CoDelphi 规格预演」评论和 `codelphi/behavior-preview` 检查（挂在 head SHA 上）；追加 commit 后同一评论被更新而非新建、检查落到新 SHA。若未出现：检查 Recent Deliveries 是否有 `pull_request` 投递（无 → 第 2 步遗漏）、服务器日志 `[pr-preview] failed`（有 → 通常是 installation token 权限尚未被重新批准，此时检查应显示为 neutral「行为预演未完成」）。
 
 回滚：把 `PR_PREVIEW_ENABLED` 设为 `false` 重启即可，权限可以保留。
+
+**检查语义与阻断（可选，由仓库自选）**：检查是**完成门禁，不是正确性门禁**——预演生成成功（含未命中规格索引）为 `success`，预演自身失败（权限/网络）为 `neutral`。通过只表示「行为预演已生成」，不代表代码正确；是否合并由人工判断。仓库如需强制「合并前预演必须生成」，在分支保护规则里勾选 Require status checks 并添加 `codelphi/behavior-preview`；CoDelphi 从不强制任何仓库开启阻断。
 
 本地不需要 Webhook 即可验证分析：
 

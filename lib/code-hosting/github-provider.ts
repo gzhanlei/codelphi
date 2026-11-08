@@ -1,4 +1,4 @@
-import { getBranchHead, getChangeContext, getPullRequestFiles, getRepository, listIssueComments, parseRepository, upsertIssueComment } from "../github";
+import { createCheckRun, getBranchHead, getChangeContext, getPullRequestFiles, getRepository, listIssueComments, parseRepository, upsertIssueComment } from "../github";
 import { createGitHubSourceBackend } from "../remote-source-index/github-backend";
 import { listGitHubRepositories } from "../github-repositories";
 import type { CodeHostingAdapter } from "./adapter";
@@ -23,5 +23,6 @@ export const githubCodeHostingAdapter: CodeHostingAdapter = {
   getPullRequestFiles,
   listIssueComments,
   upsertIssueComment,
+  createCheckRun,
   explainRegistrationError: registrationError,
 };

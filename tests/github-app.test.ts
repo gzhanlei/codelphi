@@ -11,7 +11,7 @@ const app = { clientId: "Iv1.test", pem };
 describe("GitHub App boundaries", () => {
   it("requests read permissions plus PR comment write and uses local callback routes", () => {
     const manifest = codelphiManifest("http://localhost:3008");
-    expect(manifest.default_permissions).toEqual({ contents: "read", metadata: "read", pull_requests: "write" });
+    expect(manifest.default_permissions).toEqual({ contents: "read", metadata: "read", pull_requests: "write", checks: "write" });
     expect(manifest).not.toHaveProperty("default_permissions.administration");
     expect(manifest.redirect_url).toBe("http://localhost:3008/integrations/github/callback");
     expect(manifest.setup_url).toBe("http://localhost:3008/integrations/github/setup");
