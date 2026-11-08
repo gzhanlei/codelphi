@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { chatCompletionsUrl, gatewayContent } from "../lib/ai";
+import { chatCompletionsUrl, gatewayResponse } from "../lib/ai";
 
 describe("AI gateway compatibility", () => {
   afterEach(() => vi.unstubAllEnvs());
@@ -15,10 +15,26 @@ describe("AI gateway compatibility", () => {
     expect(chatCompletionsUrl()).toBe("http://127.0.0.1:4000/v1/chat/completions");
   });
 
-  it("extracts content and fails clearly for an empty gateway response", () => {
-    expect(gatewayContent({ choices: [{ message: { content: "{\"ok\":true}" } }] })).toBe("{\"ok\":true}");
-    expect(() => gatewayContent({ choices: [] })).toThrow("AI gateway returned empty content");
-    expect(() => gatewayContent({ choices: [{}] })).toThrow("AI gateway returned empty content");
-    expect(() => gatewayContent(null)).toThrow();
+  it("extracts content, usage and request id from a gateway response", () => {
+    const response = gatewayResponse({
+      id: "chatcmpl-1",
+      choices: [{ message: { content: "{\"ok\":true}" } }],
+      usage: { prompt_tokens: 10, completion_tokens: 5 },
+    });
+    expect(response.content).toBe("{\"ok\":true}");
+    expect(response.usage).toEqual({ prompt_tokens: 10, completion_tokens: 5 });
+    expect(response.requestId).toBe("chatcmpl-1");
+  });
+
+  it("normalizes numeric gateway ids and missing usage", () => {
+    const response = gatewayResponse({ id: 42, choices: [{ message: { content: "ok" } }] });
+    expect(response.requestId).toBe("42");
+    expect(response.usage).toBeNull();
+  });
+
+  it("fails clearly for an empty gateway response", () => {
+    expect(() => gatewayResponse({ choices: [] })).toThrow("AI gateway returned empty content");
+    expect(() => gatewayResponse({ choices: [{}] })).toThrow("AI gateway returned empty content");
+    expect(() => gatewayResponse(null)).toThrow();
   });
 });

@@ -1,0 +1,40 @@
+-- 账务流水（契约 §4.2，append-only）：额度变动的唯一事实来源，应用层无 UPDATE/DELETE 路径。
+-- 唯一约束（D3）：五元组含 wallet_id NOT NULL——多钱包分摊一次 reserve 产生多行同四元组流水；
+-- grant/refunded/adjustment 的 run_id/attempt 为 NULL（MySQL NULL 不参与唯一去重），其幂等靠 idempotency_key + source_key。
+-- units 恒正，方向由 action/direction 决定（契约 §2 重放方向表）；balance_after_* 为每行写入后的钱包即时快照。
+CREATE TABLE IF NOT EXISTS billing_ledger (
+  entry_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  account_id BIGINT UNSIGNED NOT NULL,
+  wallet_id BIGINT UNSIGNED NOT NULL,
+  run_id BIGINT UNSIGNED NULL,
+  idempotency_key VARCHAR(191) NOT NULL,
+  delivery_id VARCHAR(64) NULL,
+  reservation_attempt INT NULL,
+  action VARCHAR(16) NOT NULL,
+  quota_type VARCHAR(16) NOT NULL,
+  charge_component VARCHAR(16) NOT NULL DEFAULT 'main',
+  model VARCHAR(64) NULL,
+  units INT NOT NULL,
+  direction VARCHAR(8) NULL,
+  unit_price_amount DECIMAL(12,6) NULL,
+  amount DECIMAL(12,2) NULL,
+  currency CHAR(8) NOT NULL DEFAULT 'CNY',
+  plan_id VARCHAR(32) NULL,
+  period_id VARCHAR(64) NULL,
+  repository_id BIGINT UNSIGNED NULL,
+  commit_sha CHAR(40) NULL,
+  trigger_type VARCHAR(16) NULL,
+  expires_at DATETIME(3) NULL,
+  related_entry_id BIGINT UNSIGNED NULL,
+  reason VARCHAR(255) NULL,
+  balance_after_remaining INT NOT NULL DEFAULT 0,
+  balance_after_reserved INT NOT NULL DEFAULT 0,
+  metadata_json TEXT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UNIQUE KEY billing_ledger_idempotency_key_unique (idempotency_key),
+  UNIQUE KEY billing_ledger_run_action_unique (run_id, action, charge_component, reservation_attempt, wallet_id),
+  UNIQUE KEY billing_ledger_delivery_unique (delivery_id),
+  KEY billing_ledger_account_created_idx (account_id, created_at),
+  KEY billing_ledger_wallet_created_idx (wallet_id, created_at),
+  CONSTRAINT billing_ledger_units_positive_check CHECK (units > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

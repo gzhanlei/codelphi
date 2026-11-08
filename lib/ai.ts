@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { requiredEnv } from "./env";
 import type { SourceFile } from "./github";
+import { recordLlmCallReceipt, type ChargeComponent } from "./billing/cost-receipt";
 
 const evidenceSchema = z.object({
   path: z.string().min(1).max(500),
@@ -84,14 +85,27 @@ export function chatCompletionsUrl() {
 }
 
 const gatewayResponseSchema = z.object({
+  id: z.union([z.string(), z.number()]).optional(),
   choices: z.array(z.object({ message: z.object({ content: z.string().optional() }).optional() })),
+  usage: z.unknown().optional(),
 });
 
-export function gatewayContent(value: unknown) {
+export interface GatewayResponse {
+  content: string;
+  /** 网关原始 usage 对象（结构因 provider 而异，采集期只透传落库）；缺失时为 null。 */
+  usage: unknown | null;
+  requestId: string | null;
+}
+
+export function gatewayResponse(value: unknown): GatewayResponse {
   const data = gatewayResponseSchema.parse(value);
   const content = data.choices[0]?.message?.content;
   if (!content) throw new Error("AI gateway returned empty content");
-  return content;
+  return {
+    content,
+    usage: data.usage ?? null,
+    requestId: data.id === undefined ? null : String(data.id),
+  };
 }
 
 async function requireSuccessfulAIResponse(response: Response) {
@@ -164,7 +178,13 @@ export function incrementalScopeSection(affectedFeatureNames?: string[]) {
   ].join("\n");
 }
 
-export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext, context: { previousFeatureNames?: string[]; previousSpec?: SpecAnchorFeature[]; affectedFeatureNames?: string[] } = {}): Promise<AnalysisResult> {
+export interface LlmBillingContext {
+  runId: number;
+  accountId: number | null;
+  chargeComponent: ChargeComponent;
+}
+
+export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext, context: { previousFeatureNames?: string[]; previousSpec?: SpecAnchorFeature[]; affectedFeatureNames?: string[]; billing?: LlmBillingContext } = {}): Promise<AnalysisResult> {
   const anchor = specAnchoringSection(context.previousSpec);
   const continuity = anchor ? null : featureContinuitySection(context.previousFeatureNames);
   const scope = incrementalScopeSection(context.affectedFeatureNames);
@@ -185,26 +205,95 @@ export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext
     `\n【当前代码，带行号】\n${sources.map((file) => `\n--- ${file.path} ---\n${file.content}`).join("\n")}`,
   ].join("\n");
 
-  const response = await fetch(chatCompletionsUrl(), {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${requiredEnv("AI_API_KEY")}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: requiredEnv("AI_MODEL"),
-      messages: [
-        { role: "system", content: "你是严谨的代码分析器，只输出可验证的结构化事实。" },
-        { role: "user", content: prompt },
-      ],
-      temperature: 0,
-      max_tokens: 16_000,
-      stream: false,
-    }),
-    cache: "no-store",
-    signal: AbortSignal.timeout(Number(process.env.AI_TIMEOUT_MS ?? 180_000)),
-  });
-  await requireSuccessfulAIResponse(response);
-  const content = gatewayContent(await response.json());
+  const model = requiredEnv("AI_MODEL");
+  const billing = context.billing;
+
+  let response: Response;
+  try {
+    response = await fetch(chatCompletionsUrl(), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${requiredEnv("AI_API_KEY")}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: "你是严谨的代码分析器，只输出可验证的结构化事实。" },
+          { role: "user", content: prompt },
+        ],
+        temperature: 0,
+        max_tokens: 16_000,
+        stream: false,
+      }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(Number(process.env.AI_TIMEOUT_MS ?? 180_000)),
+    });
+  } catch (error) {
+    // 调用级回执即时写入（契约 M0-T2）：超时与失败都要落一条 unknown-usage 记录
+    if (billing) {
+      await recordLlmCallReceipt({
+        runId: billing.runId,
+        accountId: billing.accountId,
+        chargeComponent: billing.chargeComponent,
+        model,
+        outcome: isAbortTimeout(error) ? "timeout" : "failed",
+        usageRaw: null,
+        providerRequestId: null,
+      });
+    }
+    throw error;
+  }
+  if (!response.ok) {
+    if (billing) {
+      await recordLlmCallReceipt({
+        runId: billing.runId,
+        accountId: billing.accountId,
+        chargeComponent: billing.chargeComponent,
+        model,
+        outcome: "failed",
+        usageRaw: null,
+        providerRequestId: null,
+      });
+    }
+    await requireSuccessfulAIResponse(response);
+  }
+  const payload: unknown = await response.json();
+  let content: string;
+  let usage: unknown | null;
+  let requestId: string | null;
+  try {
+    ({ content, usage, requestId } = gatewayResponse(payload));
+  } catch (error) {
+    // 网关返回 2xx 但结构不可解析：usage 若存在仍要落库（成本已发生）
+    if (billing) {
+      const payloadRecord = payload as { usage?: unknown } | null;
+      await recordLlmCallReceipt({
+        runId: billing.runId,
+        accountId: billing.accountId,
+        chargeComponent: billing.chargeComponent,
+        model,
+        outcome: "failed",
+        usageRaw: payloadRecord?.usage ?? null,
+        providerRequestId: null,
+      });
+    }
+    throw error;
+  }
+  if (billing) {
+    await recordLlmCallReceipt({
+      runId: billing.runId,
+      accountId: billing.accountId,
+      chargeComponent: billing.chargeComponent,
+      model,
+      outcome: "success",
+      usageRaw: usage,
+      providerRequestId: requestId,
+    });
+  }
   return parseAnalysisContent(content);
+}
+
+function isAbortTimeout(error: unknown) {
+  return error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
 }

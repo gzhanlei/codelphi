@@ -28,6 +28,8 @@ export interface RunContext {
   organizationId: number;
   productSlug: string;
   productName: string;
+  /** 计费账户（= organization_id），run 创建时固化；结算禁止执行期读 cookie（契约 §4.8/B13）。 */
+  accountId?: number | null;
   analyzeMode?: "full" | "incremental";
 }
 
@@ -163,7 +165,9 @@ async function saveResult(run: RunContext, result: AnalysisResult, change: Chang
 }
 
 const ACTIVE_RUN_QUERY = "SELECT id FROM analysis_runs WHERE repository_id = ? AND after_sha = ? AND status IN ('queued', 'running') LIMIT 1";
-const INSERT_RUN_QUERY = "INSERT INTO analysis_runs (repository_id, trigger_type, before_sha, after_sha, status) VALUES (?, ?, ?, ?, 'queued')";
+// account_id 在创建时固化（入队子查询取 product → organization），结算与回执禁止执行期再读 cookie
+const INSERT_RUN_QUERY = `INSERT INTO analysis_runs (repository_id, trigger_type, before_sha, after_sha, status, account_id)
+VALUES (?, ?, ?, ?, 'queued', (SELECT p.organization_id FROM repositories repo JOIN products p ON p.id = repo.product_id WHERE repo.id = ?))`;
 
 function findActiveRun(db: Pick<ReturnType<typeof getDb>, "execute">, repositoryId: number, afterSha: string) {
   return db.execute(ACTIVE_RUN_QUERY, [repositoryId, afterSha]).then((result) => {
@@ -184,7 +188,7 @@ export async function queueAnalysis(repositoryId: number, beforeSha: string | nu
   // 并发同 sha 推送靠 020 迁移的唯一索引兜底：输家捕获重复键错误后复用赢家的 run。
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      const [result] = await db.execute(INSERT_RUN_QUERY, [repositoryId, trigger, beforeSha, afterSha]);
+      const [result] = await db.execute(INSERT_RUN_QUERY, [repositoryId, trigger, beforeSha, afterSha, repositoryId]);
       return Number((result as { insertId: number }).insertId);
     } catch (error) {
       if (!isDuplicateEntry(error)) throw error;
@@ -199,7 +203,7 @@ async function loadRun(runId: number) {
   const [rows] = await getDb().execute(
     `SELECT r.id, r.repository_id AS repositoryId, p.id AS productId, p.slug AS productSlug, p.name AS productName,
             repo.owner, repo.name, r.before_sha AS beforeSha, r.after_sha AS afterSha, repo.connection_id AS connectionId,
-            repo.provider, p.organization_id AS organizationId, p.analyze_mode AS analyzeMode
+            repo.provider, p.organization_id AS organizationId, r.account_id AS accountId, p.analyze_mode AS analyzeMode
      FROM analysis_runs r
      JOIN repositories repo ON repo.id = r.repository_id
      JOIN products p ON p.id = repo.product_id
@@ -260,7 +264,13 @@ async function performAnalysis(run: RunContext) {
       affectedFeatureNames = affected.names;
     }
   }
-  const result = await analyzeWithAI(sources, change, { previousFeatureNames, previousSpec: previousSpecText, affectedFeatureNames });
+  const result = await analyzeWithAI(sources, change, {
+    previousFeatureNames,
+    previousSpec: previousSpecText,
+    affectedFeatureNames,
+    // 调用级成本回执（契约 M0-T2）：usage 即时落库，平台 shadow 单独记账不计 SAU
+    billing: { runId: run.id, accountId: run.accountId ?? null, chargeComponent: "main" },
+  });
   assertEvidence(result, new Set([
     ...remote.slice.files.map((file) => file.path),
     ...change.files.map((file) => file.path),
@@ -277,7 +287,10 @@ async function performAnalysis(run: RunContext) {
   // 直接与全量输出比较会恒等失败（missingKeys = 全部未受影响功能）。
   if (affectedKeys && incrementalShadowEnabled()) {
     try {
-      const shadow = await analyzeWithAI(sources, change, { previousFeatureNames });
+      const shadow = await analyzeWithAI(sources, change, {
+        previousFeatureNames,
+        billing: { runId: run.id, accountId: run.accountId ?? null, chargeComponent: "platform_shadow" },
+      });
       if (process.env.INCREMENTAL_SHADOW_DEBUG === "true") {
         console.log("[incremental-shadow-debug]", JSON.stringify({
           changeFiles: change.files.map((file) => file.path),

@@ -101,7 +101,9 @@ describe("analysis orchestration", () => {
 
   it("inserts a new queued run", async () => {
     await expect(queueAnalysis(3, null, "sha-after", "manual")).resolves.toBe(55);
-    expect(execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO analysis_runs"), [3, "manual", null, "sha-after"]);
+    expect(execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO analysis_runs"), [3, "manual", null, "sha-after", 3]);
+    // account_id 在创建时固化（契约 §4.8/B13）：入队子查询取 product → organization
+    expect(execute).toHaveBeenCalledWith(expect.stringContaining("p.organization_id FROM repositories repo JOIN products p"), expect.anything());
   });
 
   it("returns the winning run when a concurrent queue inserts the same sha", async () => {
@@ -137,6 +139,7 @@ describe("analysis orchestration", () => {
       previousFeatureNames: ["统一登录", "支付", "规格导出"],
       previousSpec: [{ name: "统一登录", summary: "s", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy" }] }],
       affectedFeatureNames: undefined,
+      billing: { runId: 8, accountId: null, chargeComponent: "main" },
     });
     expect(connection.commit).toHaveBeenCalledOnce();
     expect(connection.release).toHaveBeenCalledOnce();
