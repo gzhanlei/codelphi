@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/session";
 import { getOrderWithReconcile } from "@/lib/pay-orders";
+import { findUserIdBySub } from "@/lib/users";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -10,7 +11,9 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ or
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { orderNo } = await context.params;
-  const order = await getOrderWithReconcile(orderNo, Number(user.sub));
+  const userId = await findUserIdBySub(user.sub);
+  if (userId === null) return NextResponse.json({ error: "user_not_found" }, { status: 401 });
+  const order = await getOrderWithReconcile(orderNo, userId);
   if (!order) return NextResponse.json({ error: "order_not_found" }, { status: 404 });
   return NextResponse.json(order);
 }

@@ -3,6 +3,9 @@ import { z } from "zod";
 import { getSessionUser } from "@/lib/session";
 import { requirePlatformAdmin } from "@/lib/platform-admin";
 import { currentOrganization } from "@/lib/organizations";
+import { findUserIdBySub } from "@/lib/users";
+import { ChandlerTokenError } from "@/lib/chandler-token";
+import { BillingError } from "@/lib/billing/core";
 import { createPaymentOrder } from "@/lib/pay-orders";
 
 export const runtime = "nodejs";
@@ -22,11 +25,30 @@ export async function POST(request: NextRequest) {
   }
   const parsed = schema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
-  const result = await createPaymentOrder({
-    accountId: organization.id,
-    userId: Number(user.sub),
-    kind: "test",
-    channel: parsed.data.channel,
-  });
-  return NextResponse.json(result, { status: 201 });
+  const userId = await findUserIdBySub(user.sub);
+  if (userId === null) return NextResponse.json({ error: "user_not_found" }, { status: 401 });
+  try {
+    const result = await createPaymentOrder({
+      accountId: organization.id,
+      userId,
+      kind: "test",
+      channel: parsed.data.channel,
+    });
+    return NextResponse.json(result, { status: 201 });
+  } catch (error) {
+    if (error instanceof ChandlerTokenError) {
+      // token 未绑定/失效：引导重新登录（OAuth 会同步落库）
+      return NextResponse.json({ error: "chandler_relogin_required", message: "支付凭证未同步，请退出后重新登录再试" }, { status: 409 });
+    }
+    if (error instanceof BillingError) {
+      return NextResponse.json({ error: error.code, message: error.message }, { status: billing_status(error.code) });
+    }
+    const chandlerStatus = (error as { chandlerStatus?: number }).chandlerStatus;
+    if (chandlerStatus === 409) return NextResponse.json({ error: "payment_unavailable", message: "支付通道暂未开放" }, { status: 409 });
+    throw error;
+  }
+}
+
+function billing_status(code: string) {
+  return code === "quota_exceeded" ? 402 : 409;
 }

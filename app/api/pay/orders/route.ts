@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/session";
 import { currentOrganization } from "@/lib/organizations";
+import { findUserIdBySub } from "@/lib/users";
 import { BillingError, billingHttpStatus } from "@/lib/billing/core";
 import { createPaymentOrder, getOrderWithReconcile } from "@/lib/pay-orders";
 
@@ -26,11 +27,13 @@ export async function POST(request: NextRequest) {
   if (!parsed.success) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   const organization = await currentOrganization(user);
   if (organization.role !== "owner") return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  const userId = await findUserIdBySub(user.sub);
+  if (userId === null) return NextResponse.json({ error: "user_not_found" }, { status: 401 });
 
   try {
     const result = await createPaymentOrder({
       accountId: organization.id,
-      userId: Number(user.sub),
+      userId,
       kind: parsed.data.kind,
       planId: parsed.data.planId,
       packSku: parsed.data.packSku,
