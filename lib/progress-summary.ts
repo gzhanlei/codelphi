@@ -1,11 +1,14 @@
 import { defaultExecute, type Execute } from "./db";
 
 /**
- * 措辞降噪/锚定口径的分界时刻：spec v80（run 110，2026-11-08T05:44Z）是首个锚定后分析。
+ * 措辞降噪/锚定口径的分界时刻：spec v80（run 110，UTC 2026-11-08T05:44:41Z）是首个锚定后分析。
  * 此前的分析为全量重建口径，历史行为变化计数含大量 LLM 同义改写噪音（严格等价守卫无法回溯剥离，
  * 见 wording_only 回填只标中 5% 的实测）。仅用于摘要口径注释，不参与任何计数排除。
+ * 注意：spec_versions.created_at 由 MySQL CURRENT_TIMESTAMP 生成，存的是会话时区（CST）墙钟；
+ * 应用连接以 timezone:"Z" 解析 DATETIME，在 JS 里比较会整体 +8h 偏移——分界必须在 SQL 侧
+ * 用同一墙钟字面量判定（13:44:00 CST = 05:44:00 UTC）。
  */
-const ANCHOR_REGIME_SINCE = new Date("2026-11-08T05:44:00Z");
+const ANCHOR_REGIME_SINCE_SQL = "2026-11-08 13:44:00";
 
 export interface ProgressRelease {
   id: number;
@@ -103,7 +106,8 @@ export function renderProgressSummary(input: { productName: string; days: number
 /** 窗口内的发布及其行为变化计数（spec_changes 按 spec 版本归属；regime 供摘要口径注释）。 */
 export async function loadRecentReleasesWithChanges(productId: number, days: number, execute: Execute = defaultExecute): Promise<ProgressRelease[]> {
   const [rows] = await execute(
-    `SELECT r.id, r.title, r.summary, r.sha, r.url, r.committed_at AS committedAt, sv.created_at AS specVersionAt,
+    `SELECT r.id, r.title, r.summary, r.sha, r.url, r.committed_at AS committedAt,
+            (sv.created_at IS NOT NULL AND sv.created_at >= '${ANCHOR_REGIME_SINCE_SQL}') AS anchored,
             COUNT(c.id) AS total,
             COALESCE(SUM(c.kind = 'added'), 0) AS added,
             COALESCE(SUM(c.kind = 'changed'), 0) AS changed,
@@ -114,7 +118,7 @@ export async function loadRecentReleasesWithChanges(productId: number, days: num
      WHERE r.product_id = ? AND r.committed_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
      GROUP BY r.id, sv.created_at ORDER BY r.committed_at DESC LIMIT 100`,
     [productId, days],
-  ) as [Array<{ id: number; title: string; summary: string; sha: string; url: string; committedAt: Date; specVersionAt: Date | null; total: number; added: number; changed: number; removed: number }>, unknown];
+  ) as [Array<{ id: number; title: string; summary: string; sha: string; url: string; committedAt: Date; anchored: number; total: number; added: number; changed: number; removed: number }>, unknown];
   return rows.map((row) => ({
     id: Number(row.id),
     title: row.title,
@@ -126,7 +130,7 @@ export async function loadRecentReleasesWithChanges(productId: number, days: num
     added: Number(row.added),
     changed: Number(row.changed),
     removed: Number(row.removed),
-    regime: row.specVersionAt !== null && new Date(row.specVersionAt) >= ANCHOR_REGIME_SINCE ? "anchored" : "rebuild",
+    regime: row.anchored ? "anchored" : "rebuild",
   }));
 }
 
