@@ -138,6 +138,40 @@ describe("spec wording equivalence (P0 noise collapse)", () => {
     expect(result.map((change) => `${change.kind}:${change.entityType}`)).toEqual(["changed:feature"]);
   });
 
+  it("folds an added feature whose evidence is exclusively tests and docs (tests-only gate)", () => {
+    const sdk: SpecFeature = {
+      name: "嵌入式 SDK",
+      summary: "Guest token refresh flow",
+      scenarios: [
+        { reference: "HP-1", context: "Host page", action: "Calls embedDashboard", outcome: "Loads the dashboard", category: "happy", evidence: [{ path: "sdk/src/index.ts", startLine: 1 }] },
+        { reference: "EC-1", context: "Token near expiry", action: "SDK schedules refresh", outcome: "Refreshes on interval", category: "edge", evidence: [{ path: "sdk/src/guestTokenRefresh.test.ts", startLine: 1 }] },
+      ],
+    };
+    // index.ts 在此构造里是真实实现路径——换成纯测试证据的场景组才触发门禁。
+    const pureTest: SpecFeature = {
+      ...sdk,
+      scenarios: sdk.scenarios.map((scenario) => ({ ...scenario, evidence: [{ path: `sdk/src/${scenario.reference.toLowerCase()}.test.ts`, startLine: 1 }] })),
+    };
+    const outcome = diffSpecWithFolded([], [pureTest]);
+    expect(outcome.changes).toEqual([]);
+    expect(outcome.folded).toHaveLength(1);
+    expect(outcome.folded[0]).toMatchObject({ reason: "tests-only", entityType: "feature", featureName: "嵌入式 SDK" });
+    expect(diffSpec([], [pureTest])).toEqual([]);
+  });
+
+  it("keeps an added feature with at least one implementation-backed scenario (known residual)", () => {
+    const sdk: SpecFeature = {
+      name: "嵌入式 SDK",
+      summary: "Guest token refresh flow",
+      scenarios: [
+        { reference: "HP-1", context: "Host page", action: "Calls embedDashboard", outcome: "Loads the dashboard", category: "happy", evidence: [{ path: "sdk/src/index.ts", startLine: 1 }] },
+        { reference: "EC-1", context: "Token near expiry", action: "SDK schedules refresh", outcome: "Refreshes on interval", category: "edge", evidence: [{ path: "sdk/src/guestTokenRefresh.test.ts", startLine: 1 }] },
+      ],
+    };
+    const result = diffSpec([], [sdk]);
+    expect(result.map((change) => `${change.kind}:${change.entityType}`)).toEqual(["added:feature"]);
+  });
+
   it("treats an absent parentKey as null instead of a reparenting (superset pilot noise mode)", () => {
     const before = structuredClone(authentication);
     before.parentKey = null;

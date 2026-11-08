@@ -82,7 +82,7 @@ export interface BehaviorChangeRow {
 
 /** 被等价判定折叠、未计入行为变化的差异（发布变化视图的审计展示；id 为负数合成键，不对应落库行）。 */
 export interface FoldedBehaviorChangeRow extends BehaviorChangeRow {
-  reason: "wording" | "renumber";
+  reason: "wording" | "renumber" | "tests-only";
 }
 
 export interface ChangeRow {

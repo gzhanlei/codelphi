@@ -80,6 +80,9 @@ function foldedSummary(folded: FoldedSpecChange) {
     const after = folded.after as SpecScenario;
     return `场景编号调整：${before.reference} → ${after.reference}（行为等价，未计入行为变化）`;
   }
+  if (folded.reason === "tests-only") {
+    return "新增功能的证据全部来自测试/文档，行为性证据不足（未计入行为变化）";
+  }
   return folded.entityType === "feature" ? "功能描述仅措辞调整（行为等价，未计入行为变化）" : "场景表述仅措辞差异（行为等价，未计入行为变化）";
 }
 

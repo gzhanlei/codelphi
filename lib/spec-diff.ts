@@ -1,3 +1,4 @@
+import { evidenceKind } from "./evidence";
 import type { Evidence } from "./types";
 
 export interface SpecScenario {
@@ -28,9 +29,9 @@ export interface SpecChange {
   after: SpecFeature | SpecScenario | null;
 }
 
-/** 被等价判定折叠的差异：wording=行为等价但原文不同；renumber=同功能内场景换编号。仅供审计展示，不落库。 */
+/** 被等价判定折叠的差异：wording=行为等价但原文不同；renumber=同功能内场景换编号；tests-only=新增功能的证据全部来自测试/文档（行为性证据不足）。仅供审计展示，不落库。 */
 export interface FoldedSpecChange {
-  reason: "wording" | "renumber";
+  reason: "wording" | "renumber" | "tests-only";
   entityType: "feature" | "scenario";
   featureName: string;
   scenarioReference: string | null;
@@ -216,6 +217,20 @@ function scenarioChanges(before: SpecFeature, after: SpecFeature, outcome: DiffO
 }
 
 /** 场景集（行为单元）差异：运行时折叠判定与历史回填共用同一口径。旧行 JSON 缺 scenarios 时按空集处理。 */
+/**
+ * 新增功能的证据门禁：所有场景的证据都只来自测试/文档（无任何实现代码证据）时，
+ * 「新增功能」没有行为性依据——测试描述的是预期，文档描述的是要求，都不是运行时行为
+ * （superset 盲评 #1009 的 EC-1 场景即直接引用 test 文件）。折叠供审计，不落行为变化。
+ * 注意残余：证据混合（部分实现代码）的功能不被此门禁覆盖——实现文件仅注释变动的
+ * 「覆盖补录型新增」需要 patch 级判断，当前版本如实保留为已知边界。
+ */
+function featureEvidenceNonBehavioral(feature: SpecFeature) {
+  if (feature.scenarios.length === 0) return false;
+  return feature.scenarios.every((scenario) =>
+    scenario.evidence.length > 0 && scenario.evidence.every((item) => evidenceKind(item.path) !== "implementation"),
+  );
+}
+
 function featureScenarioSetChanges(before: SpecFeature, after: SpecFeature): SpecChange[] {
   const outcome: DiffOutcome = { changes: [], folded: [] };
   scenarioChanges(
@@ -228,7 +243,11 @@ function featureScenarioSetChanges(before: SpecFeature, after: SpecFeature): Spe
 
 function diffFeature(previous: SpecFeature | undefined, current: SpecFeature | undefined, outcome: DiffOutcome) {
   if (!previous && current) {
-    outcome.changes.push(featureChange("added", current, null, current));
+    if (featureEvidenceNonBehavioral(current)) {
+      outcome.folded.push({ reason: "tests-only", entityType: "feature", featureName: current.name, scenarioReference: null, before: null, after: current });
+    } else {
+      outcome.changes.push(featureChange("added", current, null, current));
+    }
     return;
   }
   if (previous && !current) {
