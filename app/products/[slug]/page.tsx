@@ -16,6 +16,7 @@ import { getProductDetails } from "@/lib/product-details";
 import { listProductMembers } from "@/lib/product-members";
 import { isPublicDemo } from "@/lib/public-demo";
 import { featureIdFromParam } from "@/lib/spec-editor-client";
+import { driftTargetFeatureId, featureHref } from "@/lib/spec-editor-ui";
 import { buildProductOverview, type ProductOverviewData } from "@/lib/product-overview";
 import { getSessionUser } from "@/lib/session";
 import { requireProductAccess } from "@/lib/product-access";
@@ -38,6 +39,8 @@ function ProductPageBody({ slug, view, mode, featureId, details, overview, actio
   showSettings: boolean;
   settings?: ReactNode;
 }) {
+  // 漂移横幅直达第一个待核实条目所在功能；核实在规格工作台的功能详情页完成。
+  const driftFeatureId = details.driftCount > 0 ? driftTargetFeatureId(details.features, details.scenarios) : undefined;
   return (
     <>
       <div className="page-heading product-heading">
@@ -45,7 +48,7 @@ function ProductPageBody({ slug, view, mode, featureId, details, overview, actio
         <div className="page-actions">{actions}</div>
       </div>
       <RunStatus run={details.latestRun} />
-      {details.driftCount > 0 ? <div className="drift-banner" role="status">⚠️ {details.driftCount} 条人工规格可能已过时（最近一次分析的行为变化触及了这些功能）。逐一确认并重新保存后标记会消除。</div> : null}
+      {details.driftCount > 0 ? <div className="drift-banner" role="status">⚠️ {details.driftCount} 条人工规格可能已过时（最近一次分析的行为变化触及了这些功能）。逐条「标记已核实」后标记会消除。{driftFeatureId ? <Link className="drift-banner-link" href={featureHref(driftFeatureId)}>去核实 →</Link> : null}</div> : null}
       {showFeedback && details.latestRun?.status === "failed" ? <AnalysisFeedbackButton slug={details.product.slug} /> : null}
       <ProductTabs slug={slug} view={view} featureCount={details.features.length} releaseCount={details.releaseTotal} showSettings={showSettings} />
       {settings}

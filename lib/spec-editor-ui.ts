@@ -127,3 +127,8 @@ export function verificationState(item: { verifiedAt?: Date | string | null; sta
 export function verificationMatches(item: { verifiedAt?: Date | string | null; staleSince?: Date | string | null }, filter: string) {
   return filter === "all" || verificationState(item) === filter;
 }
+
+/** 漂移横幅的跳转目标：优先第一个过时功能，否则第一个过时场景所在的功能（核实入口在其详情页）。 */
+export function driftTargetFeatureId(features: FeatureRow[], scenarios: ScenarioRow[]) {
+  return features.find((feature) => feature.staleSince)?.id ?? scenarios.find((scenario) => scenario.staleSince)?.featureId;
+}
