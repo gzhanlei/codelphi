@@ -39,7 +39,7 @@ describe("ImpactResult", () => {
 
   it("shows scenario-less features without a fake reference", () => {
     const html = renderToStaticMarkup(createElement(ImpactResult, { slug: "codelphi", affected }));
-    expect(html).toContain("整功能受影响");
+    expect(html).toContain("整个功能与该文件相关");
     expect(html).toContain("证据 app/globals.css");
   });
 
@@ -50,6 +50,6 @@ describe("ImpactResult", () => {
 
   it("states when no spec entry matches the given files", () => {
     const html = renderToStaticMarkup(createElement(ImpactResult, { slug: "codelphi", affected: [] }));
-    expect(html).toContain("这些文件没有命中任何规格场景");
+    expect(html).toContain("没有关联到任何产品行为");
   });
 });
