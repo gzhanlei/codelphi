@@ -2,21 +2,30 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getProductDetails } from "@/lib/product-details";
 import { requireProductAccess } from "@/lib/product-access";
-import { requireSessionUser } from "@/lib/session";
+import { getSessionUser } from "@/lib/session";
+import { resolvePublicDemoProduct } from "@/lib/public-demo";
 import { toGherkin, toMarkdownChecklist } from "@/lib/scenario-export";
 
 const formats = z.enum(["gherkin", "markdown"]);
 
+/** 测试清单导出：登录成员按工作区读取；公开 demo 产品允许匿名只读（与页面 demo 视图同权）。 */
 export async function GET(request: NextRequest, context: { params: Promise<{ slug: string }> }) {
-  const user = await requireSessionUser();
   const { slug } = await context.params;
-  const access = await requireProductAccess(user, slug);
-  if (!access) return NextResponse.json({ error: "产品不存在或不属于当前工作区" }, { status: 404 });
+  const user = await getSessionUser();
+  const access = user ? await requireProductAccess(user, slug) : null;
+  let organizationId: number;
+  if (access) {
+    organizationId = access.product.organizationId;
+  } else {
+    const demo = await resolvePublicDemoProduct(slug);
+    if (!demo) return NextResponse.json({ error: user ? "产品不存在或不属于当前工作区" : "未登录" }, { status: user ? 404 : 401 });
+    organizationId = demo.organizationId;
+  }
 
   const format = formats.safeParse(request.nextUrl.searchParams.get("format") ?? "gherkin");
   if (!format.success) return NextResponse.json({ error: "format 仅支持 gherkin 或 markdown" }, { status: 400 });
 
-  const details = await getProductDetails(slug, access.product.organizationId);
+  const details = await getProductDetails(slug, organizationId);
   if (!details) return NextResponse.json({ error: "产品不存在或不属于当前工作区" }, { status: 404 });
 
   const extension = format.data === "gherkin" ? "feature" : "md";

@@ -3,9 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GET } from "../app/api/products/[slug]/spec.json/route";
 import { getProductDetails } from "../lib/product-details";
 
-vi.mock("../lib/session", () => ({
-  getSessionUser: vi.fn(async () => ({ sub: "user", email: "pm@example.com" })),
-}));
+const { getSessionUser, resolveDemo } = vi.hoisted(() => ({ getSessionUser: vi.fn(), resolveDemo: vi.fn() }));
+
+vi.mock("../lib/session", () => ({ getSessionUser }));
+vi.mock("../lib/public-demo", () => ({ resolvePublicDemoProduct: resolveDemo }));
 vi.mock("../lib/product-access", () => ({
   requireProductAccess: vi.fn(async () => ({
     product: { id: 1, slug: "radar", name: "Radar", description: "d", organizationId: 7 },
@@ -27,6 +28,8 @@ describe("spec.json export route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getProductDetails).mockResolvedValue(details as never);
+    getSessionUser.mockResolvedValue({ sub: "user", email: "pm@example.com" });
+    resolveDemo.mockResolvedValue(null);
   });
 
   it("serves the current snapshot with stable paths and evidence for machine readers", async () => {
@@ -46,10 +49,27 @@ describe("spec.json export route", () => {
   });
 
   it("returns 401 JSON instead of a login redirect so curl callers fail cleanly", async () => {
-    const { getSessionUser } = await import("../lib/session");
-    vi.mocked(getSessionUser).mockResolvedValueOnce(null);
+    getSessionUser.mockResolvedValue(null);
     const response = await GET(new NextRequest("https://radar.example/api/products/radar/spec.json"), context);
     expect(response.status).toBe(401);
     expect(await response.json()).toMatchObject({ error: "未登录" });
+  });
+
+  it("serves the public demo product to anonymous visitors without a session", async () => {
+    getSessionUser.mockResolvedValue(null);
+    resolveDemo.mockResolvedValue({ id: 9, slug: "radar", name: "Radar", organizationId: 7 });
+    const response = await GET(new NextRequest("https://radar.example/api/products/radar/spec.json"), context);
+    expect(response.status).toBe(200);
+    const payload = await response.json() as { scenarioCount: number };
+    expect(payload.scenarioCount).toBe(1);
+    expect(getProductDetails).toHaveBeenCalledWith("radar", 7);
+  });
+
+  it("returns 404 for logged-in users without access instead of leaking the demo fallback", async () => {
+    resolveDemo.mockResolvedValue(null);
+    const { requireProductAccess } = await import("../lib/product-access");
+    vi.mocked(requireProductAccess).mockResolvedValueOnce(null as never);
+    const response = await GET(new NextRequest("https://radar.example/api/products/radar/spec.json"), context);
+    expect(response.status).toBe(404);
   });
 });
