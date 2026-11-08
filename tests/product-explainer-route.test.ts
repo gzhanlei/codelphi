@@ -3,11 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GET } from "../app/api/products/[slug]/explainer/route";
 import { getProductDetails } from "../lib/product-details";
 import { buildProductOverview } from "../lib/product-overview";
-import { exportProductExplainer } from "../lib/explainer-export";
-import { ArchifyCommandError } from "../lib/archify-cli";
-import { readFile } from "node:fs/promises";
+import { renderProductExplainerHtml } from "../lib/product-explainer";
 
-vi.mock("node:fs/promises", () => ({ readFile: vi.fn() }));
 vi.mock("../lib/session", () => ({ getSessionUser: vi.fn(async () => ({ sub: "user" })), requireSessionUser: vi.fn(async () => ({ sub: "user" })) }));
 vi.mock("../lib/product-access", () => ({
   requireProductAccess: vi.fn(async () => ({
@@ -19,16 +16,8 @@ vi.mock("../lib/product-access", () => ({
 }));
 vi.mock("../lib/product-details", () => ({ getProductDetails: vi.fn() }));
 vi.mock("../lib/product-overview", () => ({ buildProductOverview: vi.fn() }));
-vi.mock("../lib/explainer-export", () => ({ exportProductExplainer: vi.fn() }));
-vi.mock("../lib/architecture-store", () => ({ safeArtifactAbsolutePath: vi.fn(() => "/tmp/explainer.html") }));
+vi.mock("../lib/product-explainer", () => ({ renderProductExplainerHtml: vi.fn() }));
 vi.mock("../lib/artifact-response", () => ({ artifactSandboxHeaders: vi.fn(() => ({ "Content-Security-Policy": "sandbox" })) }));
-vi.mock("../lib/archify-cli", () => ({
-  finalizeExplainer: vi.fn(),
-  ArchifyCommandError: class ArchifyCommandError extends Error {
-    receipt: { error?: string };
-    constructor(receipt: { error?: string }) { super(receipt.error ?? "Archify command failed"); this.receipt = receipt; }
-  },
-}));
 
 const request = new NextRequest("https://codelphi.com/api/products/radar/explainer");
 const context = { params: Promise.resolve({ slug: "radar" }) };
@@ -38,35 +27,27 @@ describe("product Explainer route", () => {
     vi.clearAllMocks();
     vi.mocked(getProductDetails).mockResolvedValue({ product: { id: 1, slug: "radar" } } as never);
     vi.mocked(buildProductOverview).mockReturnValue({ headline: "Radar" } as never);
-    vi.mocked(exportProductExplainer).mockResolvedValue({ artifactPath: "artifacts/products/radar/8/explainer.html" } as never);
-    vi.mocked(readFile).mockResolvedValue("<html>explainer</html>");
+    vi.mocked(renderProductExplainerHtml).mockReturnValue("<html>explainer</html>");
   });
 
   it("returns 404 for an unknown product", async () => {
     vi.mocked(getProductDetails).mockResolvedValue(null);
     const response = await GET(request, context);
     expect(response.status).toBe(404);
-    expect(exportProductExplainer).not.toHaveBeenCalled();
+    expect(renderProductExplainerHtml).not.toHaveBeenCalled();
   });
 
-  it("exports only product knowledge without architecture or repository evidence", async () => {
+  it("renders the explainer from the product overview without external engines", async () => {
     const response = await GET(request, context);
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("<html>explainer</html>");
-    expect(exportProductExplainer).toHaveBeenCalledWith({ productSlug: "radar", overview: { headline: "Radar" } }, expect.anything());
+    expect(renderProductExplainerHtml).toHaveBeenCalledWith({ headline: "Radar" });
   });
 
-  it("returns a safe export error", async () => {
-    vi.mocked(exportProductExplainer).mockRejectedValue(new Error("write failed"));
+  it("returns a safe render error", async () => {
+    vi.mocked(renderProductExplainerHtml).mockImplementation(() => { throw new Error("render failed"); });
     const response = await GET(request, context);
     expect(response.status).toBe(500);
-    expect(await response.json()).toEqual({ error: "write failed", receipt: undefined });
-  });
-
-  it("includes an Archify receipt when finalization fails", async () => {
-    vi.mocked(exportProductExplainer).mockRejectedValue(new ArchifyCommandError({ error: "finalize failed" } as never));
-    const response = await GET(request, context);
-    expect(response.status).toBe(500);
-    expect(await response.json()).toEqual({ error: "finalize failed", receipt: { error: "finalize failed" } });
+    expect(await response.json()).toEqual({ error: "render failed" });
   });
 });

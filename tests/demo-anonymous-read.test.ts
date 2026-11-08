@@ -1,11 +1,10 @@
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { dbExecute, searchSpec, exportExplainer, readExplainerHtml, resolveDemo } = vi.hoisted(() => ({
+const { dbExecute, searchSpec, renderExplainer, resolveDemo } = vi.hoisted(() => ({
   dbExecute: vi.fn(),
   searchSpec: vi.fn(),
-  exportExplainer: vi.fn(),
-  readExplainerHtml: vi.fn(),
+  renderExplainer: vi.fn(),
   resolveDemo: vi.fn(),
 }));
 
@@ -15,13 +14,10 @@ vi.mock("../lib/regression-tasks", () => ({
   loadRegressionTasks: vi.fn(async () => []),
   renderRegressionTaskMarkdown: vi.fn(() => "# regression markdown"),
 }));
-vi.mock("../lib/explainer-export", () => ({ exportProductExplainer: exportExplainer }));
+vi.mock("../lib/product-explainer", () => ({ renderProductExplainerHtml: renderExplainer }));
 vi.mock("../lib/product-details", () => ({ getProductDetails: vi.fn(async () => ({ product: { slug: "codelphi", name: "CoDelphi" } })) }));
 vi.mock("../lib/product-overview", () => ({ buildProductOverview: vi.fn(() => ({ title: "CoDelphi" })) }));
-vi.mock("../lib/archify-cli", () => ({ finalizeExplainer: vi.fn(), ArchifyCommandError: class ArchifyCommandError extends Error {} }));
-vi.mock("../lib/architecture-store", () => ({ safeArtifactAbsolutePath: (p: string) => p }));
 vi.mock("../lib/artifact-response", () => ({ artifactSandboxHeaders: () => ({}) }));
-vi.mock("node:fs/promises", () => ({ readFile: readExplainerHtml }));
 
 vi.mock("../lib/session", () => ({
   getSessionUser: vi.fn(),
@@ -127,8 +123,7 @@ describe("anonymous read-only access for the public demo product", () => {
   });
 
   it("serves the explainer export to anonymous visitors on the public demo product", async () => {
-    exportExplainer.mockResolvedValue({ artifactPath: "artifacts/x.html" });
-    readExplainerHtml.mockResolvedValue("<html>explainer</html>");
+    renderExplainer.mockReturnValue("<html>explainer</html>");
     const response = await explainerGET(explainerRequest(), { params: Promise.resolve({ slug: "codelphi" }) });
     expect(response.status).toBe(200);
     expect(await response.text()).toContain("explainer");

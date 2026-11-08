@@ -43,14 +43,6 @@ export function architectureArtifactPath(productSlug: string, specVersionId: num
   return `artifacts/products/${slugSchema.parse(productSlug)}/${specVersionId}/architecture.html`;
 }
 
-export function explainerSpecPath(productSlug: string, specVersionId: number) {
-  return `artifacts/products/${slugSchema.parse(productSlug)}/${specVersionId}/explainer.md`;
-}
-
-export function explainerArtifactPath(productSlug: string, specVersionId: number) {
-  return `artifacts/products/${slugSchema.parse(productSlug)}/${specVersionId}/explainer.html`;
-}
-
 export function productArchitecturePath(productSlug: string, id: number) {
   return `/products/${slugSchema.parse(productSlug)}/architecture/${id}`;
 }
