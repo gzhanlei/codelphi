@@ -52,10 +52,25 @@ describe("renderProgressSummary", () => {
       ],
     });
     expect(markdown).toContain("## 能力进展（按功能聚合）");
-    expect(markdown).toContain("- 规格导出：场景 +3 · 更新 2 · 移除 1，净 +2 个场景");
-    expect(markdown).toContain("- 统一登录：场景 +0 · 更新 4 · 移除 0");
+    expect(markdown).toContain("- 规格导出：新增 3 个场景，更新 2 个场景，移除 1 个场景，净 +2 个场景");
+    expect(markdown).toContain("- 统一登录：更新 4 个场景");
     expect(markdown).toContain("## 发布明细");
     expect(markdown).toContain("[11-07] [发布变化页的发布卡片可折叠]");
+  });
+
+  it("leads the capability line with the new scenario references and caps the list", () => {
+    const markdown = renderProgressSummary({
+      productName: "CoDelphi",
+      days: 30,
+      releases: [release()],
+      featureDeltas: [
+        { featureName: "规格导出", scenariosAdded: 3, scenariosChanged: 0, scenariosRemoved: 1, addedReferences: ["EC-1", "EC-2", "HP-4"] },
+        { featureName: "发布通知渠道", scenariosAdded: 5, scenariosChanged: 0, scenariosRemoved: 0, addedReferences: ["NT-1", "NT-1", "NT-2", "NT-3", "NT-4", "NT-5"] },
+      ],
+    });
+    expect(markdown).toContain("- 规格导出：新增场景 EC-1、EC-2、HP-4，移除 1 个场景，净 +2 个场景");
+    expect(markdown).toContain("- 发布通知渠道：新增场景 NT-1、NT-2、NT-3 等，净 +5 个场景");
+    expect(markdown).not.toContain("NT-4");
   });
 
   it("omits the aggregation section when deltas are absent or all-zero", () => {

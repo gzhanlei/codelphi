@@ -32,6 +32,24 @@ export interface ProgressFeatureDelta {
   scenariosAdded: number;
   scenariosChanged: number;
   scenariosRemoved: number;
+  /** 窗口内新增场景的引用（去重后），用于一句确定性的能力增量描述。 */
+  addedReferences?: string[];
+}
+
+/** 每项能力增量一句话：先说新增了哪些场景（能力增量），再补更新/移除，净变化收尾。全部由落库数据拼出，不经 LLM。 */
+function capabilitySentence(delta: ProgressFeatureDelta) {
+  const references = [...new Set(delta.addedReferences ?? [])];
+  const parts: string[] = [];
+  if (delta.scenariosAdded > 0) {
+    parts.push(references.length > 0
+      ? `新增场景 ${references.slice(0, 3).join("、")}${references.length > 3 ? " 等" : ""}`
+      : `新增 ${delta.scenariosAdded} 个场景`);
+  }
+  if (delta.scenariosChanged > 0) parts.push(`更新 ${delta.scenariosChanged} 个场景`);
+  if (delta.scenariosRemoved > 0) parts.push(`移除 ${delta.scenariosRemoved} 个场景`);
+  const net = delta.scenariosAdded - delta.scenariosRemoved;
+  const netLabel = net !== 0 ? `，净 ${net > 0 ? "+" : ""}${net} 个场景` : "";
+  return `${parts.join("，")}${netLabel}`;
 }
 
 /** CTO 进展摘要的纯渲染：窗口合计 + 能力增量聚合 + 每次发布一行（标题链接 + 首句摘要 + 计数）。 */
@@ -56,9 +74,7 @@ export function renderProgressSummary(input: { productName: string; days: number
     lines.push("", "## 能力进展（按功能聚合）", "");
     const visible = deltas.slice(0, 20);
     for (const delta of visible) {
-      const net = delta.scenariosAdded - delta.scenariosRemoved;
-      const netLabel = net !== 0 ? `，净 ${net > 0 ? "+" : ""}${net} 个场景` : "";
-      lines.push(`- ${delta.featureName}：场景 +${delta.scenariosAdded} · 更新 ${delta.scenariosChanged} · 移除 ${delta.scenariosRemoved}${netLabel}`);
+      lines.push(`- ${delta.featureName}：${capabilitySentence(delta)}`);
     }
     if (deltas.length > visible.length) lines.push(`-（其余 ${deltas.length - visible.length} 个功能有零星变化，详见下方发布明细）`);
     lines.push("", "## 发布明细", "");
@@ -99,24 +115,34 @@ export async function loadRecentReleasesWithChanges(productId: number, days: num
   }));
 }
 
-/** 能力增量聚合：窗口内按功能统计场景的新增/更新/移除（CTO 视角回答「能力进展了什么」）。 */
+/** 能力增量聚合：窗口内按功能统计场景的新增/更新/移除（CTO 视角回答「能力进展了什么」）。
+ *  功能改名后 spec_changes 仍存历史 feature_key，按 feature_aliases 显式归并到当前功能（不做自动合并）；
+ *  显示名优先取当前规格的功能名，别名行也能归到同一能力。 */
 export async function loadWindowFeatureDeltas(productId: number, days: number, execute: Execute = defaultExecute): Promise<ProgressFeatureDelta[]> {
   const [rows] = await execute(
-    `SELECT c.feature_name AS featureName,
+    `SELECT COALESCE(fa.canonical_key, c.feature_key) AS featureKey,
+            COALESCE(MAX(canon.name), MAX(c.feature_name)) AS featureName,
             COALESCE(SUM(c.entity_type = 'scenario' AND c.kind = 'added'), 0) AS scenariosAdded,
             COALESCE(SUM(c.entity_type = 'scenario' AND c.kind = 'changed'), 0) AS scenariosChanged,
-            COALESCE(SUM(c.entity_type = 'scenario' AND c.kind = 'removed'), 0) AS scenariosRemoved
+            COALESCE(SUM(c.entity_type = 'scenario' AND c.kind = 'removed'), 0) AS scenariosRemoved,
+            GROUP_CONCAT(DISTINCT CASE WHEN c.entity_type = 'scenario' AND c.kind = 'added' THEN c.scenario_reference END SEPARATOR '、') AS addedReferences
      FROM spec_changes c
      JOIN releases r ON r.spec_version_id = c.spec_version_id
+     JOIN spec_versions sv ON sv.id = c.spec_version_id
+     LEFT JOIN feature_aliases fa ON fa.product_id = sv.product_id AND fa.alias_key = c.feature_key
+     LEFT JOIN spec_features canon ON canon.spec_version_id = (
+       SELECT sv2.id FROM spec_versions sv2 WHERE sv2.product_id = sv.product_id ORDER BY sv2.id DESC LIMIT 1
+     ) AND canon.stable_key = COALESCE(fa.canonical_key, c.feature_key)
      WHERE r.product_id = ? AND r.committed_at >= DATE_SUB(NOW(), INTERVAL ? DAY) AND c.wording_only = 0
-     GROUP BY c.feature_name
+     GROUP BY COALESCE(fa.canonical_key, c.feature_key)
      ORDER BY scenariosAdded + scenariosChanged + scenariosRemoved DESC, featureName`,
     [productId, days],
-  ) as [Array<{ featureName: string; scenariosAdded: number; scenariosChanged: number; scenariosRemoved: number }>, unknown];
+  ) as [Array<{ featureName: string; scenariosAdded: number; scenariosChanged: number; scenariosRemoved: number; addedReferences: string | null }>, unknown];
   return rows.map((row) => ({
     featureName: row.featureName,
     scenariosAdded: Number(row.scenariosAdded),
     scenariosChanged: Number(row.scenariosChanged),
     scenariosRemoved: Number(row.scenariosRemoved),
+    addedReferences: row.addedReferences ? String(row.addedReferences).split("、").filter(Boolean) : [],
   }));
 }

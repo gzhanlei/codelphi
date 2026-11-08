@@ -43,4 +43,11 @@ describe("database migrations", () => {
     expect(sql).toContain("ADD COLUMN wording_only TINYINT(1) NOT NULL DEFAULT 0");
     expect(sql).toContain("ON DELETE CASCADE");
   });
+
+  it("adds explicit feature alias mapping keyed by normalized stable keys", () => {
+    const sql = readFileSync(new URL("../migrations/030_feature_aliases.sql", import.meta.url), "utf8");
+    expect(sql).toContain("UNIQUE KEY feature_aliases_product_alias_unique (product_id, alias_key)");
+    expect(sql).toContain("REFERENCES products(id) ON DELETE CASCADE");
+    expect(sql).toContain("SELECT id, '代码仓库连接管理', '代码仓库连接' FROM products WHERE slug = 'codelphi'");
+  });
 });
