@@ -262,3 +262,13 @@ p { line-height: 1.7; }
 .verification-badge.stale-verified { background: #fdf3e0; color: #b07d2b; }
 .verification-control { display: inline-flex; align-items: center; gap: 4px; }
 .verification-error { font-size: 11px; color: #c0392b; }
+
+/* 数据说明页 */
+.data-notice-page { min-height: 100vh; padding: 48px 24px; }
+.data-notice-body { max-width: 720px; margin: 0 auto; }
+.data-notice-body h1 { font-family: Georgia, "Songti SC", serif; font-size: 36px; font-weight: 500; letter-spacing: -1px; margin: 10px 0 8px; }
+.data-notice-meta { color: var(--muted); font-size: 13px; margin: 0 0 30px; }
+.data-notice-section { margin-top: 26px; }
+.data-notice-section h2 { font-size: 16px; font-weight: 650; margin: 0 0 10px; }
+.data-notice-section ul { margin: 0; padding-left: 20px; color: var(--ink); }
+.data-notice-section li { line-height: 1.8; font-size: 14px; color: var(--ink); }
