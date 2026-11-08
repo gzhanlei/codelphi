@@ -1,12 +1,13 @@
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { dbExecute, loadSummary } = vi.hoisted(() => ({ dbExecute: vi.fn(), loadSummary: vi.fn() }));
+const { dbExecute, loadSummary, loadDeltas } = vi.hoisted(() => ({ dbExecute: vi.fn(), loadSummary: vi.fn(), loadDeltas: vi.fn() }));
 
 vi.mock("../lib/db", () => ({ getDb: () => ({ execute: dbExecute }) }));
 vi.mock("../lib/progress-summary", async (importOriginal) => ({
   ...await importOriginal<typeof import("../lib/progress-summary")>(),
   loadRecentReleasesWithChanges: loadSummary,
+  loadWindowFeatureDeltas: loadDeltas,
 }));
 vi.mock("../lib/session", () => ({ getSessionUser: vi.fn() }));
 vi.mock("../lib/product-access", () => ({ requireProductAccess: vi.fn() }));
@@ -36,6 +37,7 @@ describe("progress summary route", () => {
     vi.clearAllMocks();
     vi.mocked(getSessionUser).mockResolvedValue(null);
     vi.mocked(requireProductAccess).mockResolvedValue(null);
+    loadDeltas.mockResolvedValue([]);
   });
 
   it("serves an anonymous markdown summary for the public demo product", async () => {

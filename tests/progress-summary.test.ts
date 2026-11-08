@@ -40,4 +40,35 @@ describe("renderProgressSummary", () => {
     const markdown = renderProgressSummary({ productName: "CoDelphi", days: 7, releases: [] });
     expect(markdown).toContain("统计窗口内没有发布");
   });
+
+  it("adds the capability-increment section when feature deltas are present", () => {
+    const markdown = renderProgressSummary({
+      productName: "CoDelphi",
+      days: 30,
+      releases: [release()],
+      featureDeltas: [
+        { featureName: "规格导出", scenariosAdded: 3, scenariosChanged: 2, scenariosRemoved: 1 },
+        { featureName: "统一登录", scenariosAdded: 0, scenariosChanged: 4, scenariosRemoved: 0 },
+      ],
+    });
+    expect(markdown).toContain("## 能力进展（按功能聚合）");
+    expect(markdown).toContain("- 规格导出：场景 +3 · 更新 2 · 移除 1，净 +2 个场景");
+    expect(markdown).toContain("- 统一登录：场景 +0 · 更新 4 · 移除 0");
+    expect(markdown).toContain("## 发布明细");
+    expect(markdown).toContain("[11-07] [发布变化页的发布卡片可折叠]");
+  });
+
+  it("omits the aggregation section when deltas are absent or all-zero", () => {
+    const withoutDeltas = renderProgressSummary({ productName: "CoDelphi", days: 7, releases: [release()] });
+    expect(withoutDeltas).not.toContain("能力进展");
+    const allZero = renderProgressSummary({ productName: "CoDelphi", days: 7, releases: [release()], featureDeltas: [{ featureName: "规格导出", scenariosAdded: 0, scenariosChanged: 0, scenariosRemoved: 0 }] });
+    expect(allZero).not.toContain("能力进展");
+  });
+
+  it("notes the overflow instead of listing every feature", () => {
+    const deltas = Array.from({ length: 25 }, (_, index) => ({ featureName: `功能${index}`, scenariosAdded: 1, scenariosChanged: 0, scenariosRemoved: 0 }));
+    const markdown = renderProgressSummary({ productName: "CoDelphi", days: 30, releases: [release()], featureDeltas: deltas });
+    expect(markdown).toContain("其余 5 个功能有零星变化");
+    expect(markdown).not.toContain("功能24：");
+  });
 });

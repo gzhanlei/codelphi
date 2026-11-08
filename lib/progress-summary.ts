@@ -27,8 +27,15 @@ function dayLabel(date: Date) {
   return date.toISOString().slice(5, 10);
 }
 
-/** CTO 进展摘要的纯渲染：窗口合计 + 每次发布一行（标题链接 + 首句摘要 + 计数）。 */
-export function renderProgressSummary(input: { productName: string; days: number; releases: ProgressRelease[] }) {
+export interface ProgressFeatureDelta {
+  featureName: string;
+  scenariosAdded: number;
+  scenariosChanged: number;
+  scenariosRemoved: number;
+}
+
+/** CTO 进展摘要的纯渲染：窗口合计 + 能力增量聚合 + 每次发布一行（标题链接 + 首句摘要 + 计数）。 */
+export function renderProgressSummary(input: { productName: string; days: number; releases: ProgressRelease[]; featureDeltas?: ProgressFeatureDelta[] }) {
   const { productName, days, releases } = input;
   const totals = releases.reduce(
     (acc, item) => ({ releases: acc.releases + 1, total: acc.total + item.total, added: acc.added + item.added, changed: acc.changed + item.changed, removed: acc.removed + item.removed }),
@@ -44,7 +51,20 @@ export function renderProgressSummary(input: { productName: string; days: number
     lines.push("", "统计窗口内没有发布。");
     return lines.join("\n");
   }
-  lines.push("");
+  const deltas = (input.featureDeltas ?? []).filter((delta) => delta.scenariosAdded + delta.scenariosChanged + delta.scenariosRemoved > 0);
+  if (deltas.length > 0) {
+    lines.push("", "## 能力进展（按功能聚合）", "");
+    const visible = deltas.slice(0, 20);
+    for (const delta of visible) {
+      const net = delta.scenariosAdded - delta.scenariosRemoved;
+      const netLabel = net !== 0 ? `，净 ${net > 0 ? "+" : ""}${net} 个场景` : "";
+      lines.push(`- ${delta.featureName}：场景 +${delta.scenariosAdded} · 更新 ${delta.scenariosChanged} · 移除 ${delta.scenariosRemoved}${netLabel}`);
+    }
+    if (deltas.length > visible.length) lines.push(`-（其余 ${deltas.length - visible.length} 个功能有零星变化，详见下方发布明细）`);
+    lines.push("", "## 发布明细", "");
+  } else {
+    lines.push("");
+  }
   for (const item of releases) {
     const counts = item.total > 0 ? `（行为变化 ${item.total} 条：新增 ${item.added} · 变化 ${item.changed} · 移除 ${item.removed}）` : "（无行为变化）";
     lines.push(`- [${dayLabel(item.committedAt)}] [${item.title}](${item.url}) — ${firstSentence(item.summary)}${counts}`);
@@ -76,5 +96,27 @@ export async function loadRecentReleasesWithChanges(productId: number, days: num
     added: Number(row.added),
     changed: Number(row.changed),
     removed: Number(row.removed),
+  }));
+}
+
+/** 能力增量聚合：窗口内按功能统计场景的新增/更新/移除（CTO 视角回答「能力进展了什么」）。 */
+export async function loadWindowFeatureDeltas(productId: number, days: number, execute: Execute = defaultExecute): Promise<ProgressFeatureDelta[]> {
+  const [rows] = await execute(
+    `SELECT c.feature_name AS featureName,
+            COALESCE(SUM(c.entity_type = 'scenario' AND c.kind = 'added'), 0) AS scenariosAdded,
+            COALESCE(SUM(c.entity_type = 'scenario' AND c.kind = 'changed'), 0) AS scenariosChanged,
+            COALESCE(SUM(c.entity_type = 'scenario' AND c.kind = 'removed'), 0) AS scenariosRemoved
+     FROM spec_changes c
+     JOIN releases r ON r.spec_version_id = c.spec_version_id
+     WHERE r.product_id = ? AND r.committed_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+     GROUP BY c.feature_name
+     ORDER BY scenariosAdded + scenariosChanged + scenariosRemoved DESC, featureName`,
+    [productId, days],
+  ) as [Array<{ featureName: string; scenariosAdded: number; scenariosChanged: number; scenariosRemoved: number }>, unknown];
+  return rows.map((row) => ({
+    featureName: row.featureName,
+    scenariosAdded: Number(row.scenariosAdded),
+    scenariosChanged: Number(row.scenariosChanged),
+    scenariosRemoved: Number(row.scenariosRemoved),
   }));
 }

@@ -234,6 +234,30 @@ describe("regression markdown export", () => {
     expect(markdown).toContain("影响面推荐");
   });
 
+  it("attaches the scenario behavior text so QA can verify without opening the spec page", () => {
+    const withBehavior = [{ ...changes[0], after: { reference: "HP-1", context: "已登录用户点击同步", action: "触发手动同步", outcome: "返回最新进度并刷新状态", category: "happy" } }];
+    const tasks: RegressionTaskView[] = [{
+      taskId: 12, releaseId: 7, subject: { kind: "change", changeId: 101 }, status: "pending", checkedBy: null, checkedAt: null,
+      skipReason: null, failureNote: null, featureName: "统一登录", reference: "HP-1", primaryChangeId: 101,
+      scenarioContext: null, scenarioAction: null, sources: [101],
+      reasons: [{ hitType: "behavior_change", matchedPath: null, featureId: 11, scenarioId: 501 }],
+    }];
+    const markdown = renderRegressionTaskMarkdown({ productName: "Radar", release, changes: withBehavior, tasks });
+    expect(markdown).toContain("情境：已登录用户点击同步｜操作：触发手动同步｜结果：返回最新进度并刷新状态");
+  });
+
+  it("keeps the previous behavior text for removed scenarios", () => {
+    const removed = [{ ...changes[0], kind: "removed" as const, before: { reference: "HP-1", context: "旧情境", action: "旧操作", outcome: "旧结果", category: "happy" }, after: null }];
+    const tasks: RegressionTaskView[] = [{
+      taskId: 13, releaseId: 7, subject: { kind: "change", changeId: 101 }, status: "pending", checkedBy: null, checkedAt: null,
+      skipReason: null, failureNote: null, featureName: "统一登录", reference: "HP-1", primaryChangeId: 101,
+      scenarioContext: null, scenarioAction: null, sources: [101],
+      reasons: [{ hitType: "behavior_change", matchedPath: null, featureId: 11, scenarioId: 501 }],
+    }];
+    const markdown = renderRegressionTaskMarkdown({ productName: "Radar", release, changes: removed, tasks });
+    expect(markdown).toContain("情境：旧情境｜操作：旧操作｜结果：旧结果");
+  });
+
   it("renders a slimmed-down regression suggestion when no tasks exist", () => {
     const markdown = renderRegressionTaskMarkdown({ productName: "Radar", release, changes: [], tasks: [] });
     expect(markdown).toContain("未发现规格行为变化");

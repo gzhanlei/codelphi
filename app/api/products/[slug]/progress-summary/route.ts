@@ -3,7 +3,7 @@ import { z } from "zod";
 import { getSessionUser } from "@/lib/session";
 import { requireProductAccess } from "@/lib/product-access";
 import { resolvePublicDemoProduct } from "@/lib/public-demo";
-import { loadRecentReleasesWithChanges, renderProgressSummary } from "@/lib/progress-summary";
+import { loadRecentReleasesWithChanges, loadWindowFeatureDeltas, renderProgressSummary } from "@/lib/progress-summary";
 
 const querySchema = z.object({
   days: z.coerce.number().int().min(1).max(90).default(7),
@@ -27,8 +27,11 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
     product = demo;
   }
 
-  const releases = await loadRecentReleasesWithChanges(product.id, days);
-  const markdown = renderProgressSummary({ productName: product.name, days, releases });
+  const [releases, featureDeltas] = await Promise.all([
+    loadRecentReleasesWithChanges(product.id, days),
+    loadWindowFeatureDeltas(product.id, days),
+  ]);
+  const markdown = renderProgressSummary({ productName: product.name, days, releases, featureDeltas });
   return new NextResponse(markdown, {
     headers: {
       "Content-Type": "text/markdown; charset=utf-8",

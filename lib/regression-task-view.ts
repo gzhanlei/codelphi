@@ -182,6 +182,25 @@ function statusSuffix(task: RegressionTaskView) {
   return `（${label}${who}）`;
 }
 
+/** P1：行为变化任务附上场景的情境/操作/结果（移除场景取变化前文本），QA 无需回规格页即可执行验证。 */
+function scenarioBehaviorText(task: RegressionTaskView, changeById: Map<number, BehaviorChangeRow>) {
+  if (task.primaryChangeId === null) return "";
+  const change = changeById.get(task.primaryChangeId);
+  if (!change || change.entityType !== "scenario") return "";
+  const subject = change.kind === "removed" ? change.before : change.after;
+  if (typeof subject !== "object" || subject === null) return "";
+  const scenario = subject as { context?: unknown; action?: unknown; outcome?: unknown };
+  const context = typeof scenario.context === "string" ? flatten(scenario.context) : "";
+  const action = typeof scenario.action === "string" ? flatten(scenario.action) : "";
+  const outcome = typeof scenario.outcome === "string" ? flatten(scenario.outcome) : "";
+  if (!context && !action && !outcome) return "";
+  return [
+    context ? `情境：${context}` : "",
+    action ? `操作：${action}` : "",
+    outcome ? `结果：${outcome}` : "",
+  ].filter(Boolean).join("｜");
+}
+
 /** 发布回归清单的 Markdown 导出：场景级任务、理由与来源、四态勾选。 */
 export function renderRegressionTaskMarkdown(input: { productName: string; release: ReleaseRow; changes: BehaviorChangeRow[]; tasks: RegressionTaskView[] }) {
   const { productName, release, changes, tasks } = input;
@@ -209,6 +228,8 @@ export function renderRegressionTaskMarkdown(input: { productName: string; relea
     for (const task of featureTasks) {
       const checked = task.status === "passed" ? "x" : " ";
       lines.push(`- [${checked}] ${taskSubjectText(task, changeById)}${reasonSuffix(task)}${statusSuffix(task)}`);
+      const behavior = scenarioBehaviorText(task, changeById);
+      if (behavior) lines.push(`  ${behavior}`);
     }
     lines.push("");
   }
