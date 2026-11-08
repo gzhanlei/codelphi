@@ -13,6 +13,7 @@ export function AppShell({ user, organizationName, children }: { user: SessionUs
             <Link href="/" className="nav-item active"><span>⌁</span>产品总览</Link>
             <Link href="/organizations" className="nav-item"><span>◈</span>我的工作区</Link>
             <Link href="/admin/feedback" className="nav-item"><span>◌</span>反馈管理</Link>
+            <Link href="/admin/pay" className="nav-item"><span>¥</span>支付管理</Link>
             <Link href="/integrations" className="nav-item"><span>⌘</span>代码仓库</Link>
             <Link href="/settings" className="nav-item"><span>⚙</span>设置</Link>
             <Link href="/pricing" className="nav-item"><span>◇</span>套餐与定价</Link>
