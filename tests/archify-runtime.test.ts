@@ -2,8 +2,8 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync } from 
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
-import { prepareArchify, readArchifyRelease, verifyArchifyArchive } from "../lib/archify-runtime";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { archifyRoot, prepareArchify, readArchifyRelease, verifyArchifyArchive } from "../lib/archify-runtime";
 
 function fixture(license = "MIT") {
   const root = mkdtempSync(join(tmpdir(), "radar-archify-"));
@@ -73,5 +73,22 @@ describe("Archify runtime", () => {
   it("fails when extraction does not provide the CLI binary", async () => {
     const { root } = fixture();
     await expect(prepareArchify(root, async () => ({ stdout: "", stderr: "" }))).rejects.toThrow("missing bin/archify.mjs");
+  });
+
+  it("resolves the runtime root from CODELPHI_HOME with ARCHIFY_HOME as the legacy fallback", () => {
+    const previousHome = process.env.CODELPHI_HOME;
+    const previousLegacy = process.env.ARCHIFY_HOME;
+    try {
+      delete process.env.CODELPHI_HOME;
+      delete process.env.ARCHIFY_HOME;
+      expect(archifyRoot()).toBe(join(process.cwd(), "vendor", "archify"));
+      process.env.ARCHIFY_HOME = "/legacy/archify-home";
+      expect(archifyRoot()).toBe("/legacy/archify-home");
+      process.env.CODELPHI_HOME = "/new/codelphi-home";
+      expect(archifyRoot()).toBe("/new/codelphi-home");
+    } finally {
+      if (previousHome === undefined) delete process.env.CODELPHI_HOME;else process.env.CODELPHI_HOME = previousHome;
+      if (previousLegacy === undefined) delete process.env.ARCHIFY_HOME;else process.env.ARCHIFY_HOME = previousLegacy;
+    }
   });
 });

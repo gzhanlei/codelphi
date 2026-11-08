@@ -15,8 +15,10 @@ const releaseSchema = z.object({
 
 export type ArchifyRelease = z.infer<typeof releaseSchema>;
 
+/** 固定运行时目录：CODELPHI_HOME 主名（ARCHIFY_HOME 为改名前兼容别名），默认 vendor/archify。 */
 export function archifyRoot() {
-  return process.env.ARCHIFY_HOME ? resolve(process.env.ARCHIFY_HOME) : join(process.cwd(), "vendor", "archify");
+  const override = process.env.CODELPHI_HOME ?? process.env.ARCHIFY_HOME;
+  return override ? resolve(override) : join(process.cwd(), "vendor", "archify");
 }
 
 export function readArchifyRelease(root = archifyRoot()): ArchifyRelease {
