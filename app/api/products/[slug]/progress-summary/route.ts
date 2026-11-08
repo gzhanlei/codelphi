@@ -4,6 +4,7 @@ import { getSessionUser } from "@/lib/session";
 import { requireProductAccess } from "@/lib/product-access";
 import { resolvePublicDemoProduct } from "@/lib/public-demo";
 import { loadRecentReleasesWithChanges, loadWindowFeatureDeltas, renderProgressSummary } from "@/lib/progress-summary";
+import { enforceExportRateLimit } from "@/lib/rate-limit";
 
 const querySchema = z.object({
   days: z.coerce.number().int().min(1).max(90).default(7),
@@ -17,6 +18,8 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
   const { days } = parsed.data;
 
   const user = await getSessionUser();
+  const limited = await enforceExportRateLimit(request, user?.sub ?? null, { anonymous: 10, user: 60 });
+  if (limited) return limited;
   const access = user ? await requireProductAccess(user, slug) : null;
   let product: { id: number; name: string };
   if (access) {

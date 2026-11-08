@@ -4,12 +4,15 @@ import { loadRegressionTasks, renderRegressionTaskMarkdown } from "@/lib/regress
 import { getSessionUser } from "@/lib/session";
 import { requireProductAccess } from "@/lib/product-access";
 import { resolvePublicDemoProduct } from "@/lib/public-demo";
+import { enforceExportRateLimit } from "@/lib/rate-limit";
 import type { BehaviorChangeRow, ReleaseRow } from "@/lib/types";
 
 /** 回归清单导出：登录成员按工作区读取；公开 demo 产品允许匿名只读（与页面 demo 视图同权）。 */
-export async function GET(_request: NextRequest, context: { params: Promise<{ slug: string; id: string }> }) {
+export async function GET(request: NextRequest, context: { params: Promise<{ slug: string; id: string }> }) {
   const { slug, id } = await context.params;
   const user = await getSessionUser();
+  const limited = await enforceExportRateLimit(request, user?.sub ?? null, { anonymous: 10, user: 60 });
+  if (limited) return limited;
   const access = user ? await requireProductAccess(user, slug) : null;
   let product: { id: number; name: string };
   if (access) {

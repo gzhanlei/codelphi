@@ -4,11 +4,14 @@ import { specFeatureKey } from "@/lib/spec-diff";
 import { getSessionUser } from "@/lib/session";
 import { requireProductAccess } from "@/lib/product-access";
 import { resolvePublicDemoProduct } from "@/lib/public-demo";
+import { enforceExportRateLimit } from "@/lib/rate-limit";
 
 /** M3 机器可读导出：当前规格快照 + 证据，M10 MCP 与外部自动化同源使用；公开 demo 产品允许匿名只读（与页面 demo 视图同权）。 */
-export async function GET(_request: NextRequest, context: { params: Promise<{ slug: string }> }) {
+export async function GET(request: NextRequest, context: { params: Promise<{ slug: string }> }) {
   const { slug } = await context.params;
   const user = await getSessionUser();
+  const limited = await enforceExportRateLimit(request, user?.sub ?? null, { anonymous: 10, user: 60 });
+  if (limited) return limited;
   const access = user ? await requireProductAccess(user, slug) : null;
   let organizationId: number;
   if (access) {

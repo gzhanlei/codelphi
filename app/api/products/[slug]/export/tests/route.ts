@@ -5,6 +5,7 @@ import { requireProductAccess } from "@/lib/product-access";
 import { getSessionUser } from "@/lib/session";
 import { resolvePublicDemoProduct } from "@/lib/public-demo";
 import { toGherkin, toMarkdownChecklist } from "@/lib/scenario-export";
+import { enforceExportRateLimit } from "@/lib/rate-limit";
 
 const formats = z.enum(["gherkin", "markdown"]);
 
@@ -12,6 +13,8 @@ const formats = z.enum(["gherkin", "markdown"]);
 export async function GET(request: NextRequest, context: { params: Promise<{ slug: string }> }) {
   const { slug } = await context.params;
   const user = await getSessionUser();
+  const limited = await enforceExportRateLimit(request, user?.sub ?? null, { anonymous: 10, user: 60 });
+  if (limited) return limited;
   const access = user ? await requireProductAccess(user, slug) : null;
   let organizationId: number;
   if (access) {
