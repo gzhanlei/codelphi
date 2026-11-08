@@ -1,6 +1,10 @@
 import type { PoolConnection } from "mysql2/promise";
 import { getDb } from "../db";
 import { capture, expireStaleReservationsOnce } from "./core";
+import { markPaidAndFulfill, getOrderWithReconcile } from "../pay-orders";
+import { confirmRefundFromRemote, reclaimWalletIfSettled } from "../pay-refunds";
+import { getValidUserToken } from "../chandler-token";
+import { queryChandlerOrder } from "../chandler-pay";
 import { DEADLOCK_RETRIES, FIRST_RUN_UNITS, HEARTBEAT_FRESH_WINDOW_MINUTES, RESERVATION_TTL_MINUTES, SWEEP_RESERVATION_INTERVAL_MS } from "./constants";
 
 /**
@@ -122,6 +126,7 @@ export function startBillingSweeps() {
   if (process.env.BILLING_SWEEP_ENABLED === "false") return { started: false };
   if (startedJobs.size > 0) return { started: false };
   scheduleJob("reservation-ttl", SWEEP_RESERVATION_INTERVAL_MS, runReservationSweepOnce);
+  scheduleJob("payment-reconcile", 60 * 1_000, runPaymentReconcileOnce);
   scheduleJob("rate-limit-cleanup", 60 * 60 * 1_000, () => runRateLimitCleanupOnce(3600));
   return { started: true, jobs: [...startedJobs] };
 }
@@ -133,4 +138,109 @@ function scheduleJob(name: string, intervalMs: number, job: () => Promise<JobRes
     job().catch((error) => console.error(`[billing] sweep job ${name} failed`, error));
   }, intervalMs);
   timer.unref?.();
+}
+
+
+/**
+ * 支付对账作业（M3-T4，契约 §6 三重对账矩阵的 sweep 侧）：
+ * - pending > 30 分钟：有平台单号先查单（paid → 履约，防 webhook 丢失误关已支付单）后关单；无平台单号直接关；
+ * - paid 未 fulfilled（履约失败残留）：恢复履约；
+ * - refund_submitted > 5 分钟：查单推进（refunded → 确认回收；明确 failed → refund_failed）；
+ * - reclaiming 钱包：重试回收前置校验（reserved = 0 才执行 refunded 冲正）。
+ */
+export async function runPaymentReconcileOnce(): Promise<JobResult> {
+  return withSweepLock("payment-reconcile", async (conn) => {
+    const detail: Record<string, unknown> = {};
+    // 1) 超时 pending 关单（先查单；同一连接开事务逐单处理）
+    const [pendingRows] = await conn.execute(
+      `SELECT order_no, platform_order_no, user_id FROM payment_orders
+       WHERE status = 'pending' AND created_at < DATE_SUB(NOW(3), INTERVAL 30 MINUTE)
+       ORDER BY created_at ASC LIMIT 100`,
+    );
+    let closed = 0;
+    let paidRecovered = 0;
+    for (const row of pendingRows as Array<{ order_no: string; platform_order_no: string | null; user_id: number }>) {
+      if (row.platform_order_no) {
+        try {
+          const userToken = await getValidUserToken(Number(row.user_id));
+          const remote = await queryChandlerOrder(row.platform_order_no, userToken);
+          if (remote.status === "paid") {
+            await markPaidAndFulfill(row.order_no);
+            paidRecovered += 1;
+            continue;
+          }
+        } catch (error) {
+          // Chandler 不可达：跳过等下一轮；单龄 >24h 由止损规则在下方处理
+          console.warn("[billing] pending sweep reconcile failed; will retry", { orderNo: row.order_no, error });
+          continue;
+        }
+      }
+      await conn.execute(`UPDATE payment_orders SET status = 'closed' WHERE order_no = ? AND status = 'pending'`, [row.order_no]);
+      closed += 1;
+    }
+    detail.pendingClosed = closed;
+    detail.pendingPaidRecovered = paidRecovered;
+
+    // 2) paid 未 fulfilled 恢复（履约事务失败残留）
+    const [paidRows] = await conn.execute(
+      `SELECT order_no FROM payment_orders
+       WHERE status = 'paid' AND fulfilled_at IS NULL AND paid_at < DATE_SUB(NOW(3), INTERVAL 5 MINUTE)
+       LIMIT 50`,
+    );
+    let fulfilledRecovered = 0;
+    for (const row of paidRows as Array<{ order_no: string }>) {
+      try {
+        await markPaidAndFulfill(row.order_no);
+        fulfilledRecovered += 1;
+      } catch (error) {
+        console.error("[billing] paid order fulfillment recovery failed", { orderNo: row.order_no, error });
+      }
+    }
+    detail.paidFulfilledRecovered = fulfilledRecovered;
+
+    // 3) refund_submitted 超 5 分钟推进（查单；refunded → 确认回收，明确 failed → refund_failed）
+    const [refundRows] = await conn.execute(
+      `SELECT order_no, platform_order_no, user_id, updated_at FROM payment_orders
+       WHERE refund_status = 'refund_submitted' AND updated_at < DATE_SUB(NOW(3), INTERVAL 5 MINUTE)
+       ORDER BY updated_at ASC LIMIT 50`,
+    );
+    let refundsConfirmed = 0;
+    let refundsFailed = 0;
+    for (const row of refundRows as Array<{ order_no: string; platform_order_no: string; user_id: number }>) {
+      try {
+        const userToken = await getValidUserToken(Number(row.user_id));
+        const remote = await queryChandlerOrder(row.platform_order_no, userToken);
+        if (remote.status === "refunded") {
+          await confirmRefundFromRemote(row.order_no);
+          refundsConfirmed += 1;
+        } else if (remote.status === "failed" || remote.status === "closed") {
+          await conn.execute(
+            `UPDATE payment_orders SET refund_status = 'refund_failed' WHERE order_no = ? AND refund_status = 'refund_submitted'`,
+            [row.order_no],
+          );
+          refundsFailed += 1;
+        }
+      } catch (error) {
+        console.warn("[billing] refund sweep reconcile failed; will retry", { orderNo: row.order_no, error });
+      }
+    }
+    detail.refundsConfirmed = refundsConfirmed;
+    detail.refundsFailed = refundsFailed;
+
+    // 4) reclaiming 钱包回收重试（reserved 结清后执行 refunded 冲正）
+    const [reclaimRows] = await conn.execute(
+      `SELECT wallet_id FROM billing_quota_wallets WHERE status = 'reclaiming' LIMIT 50`,
+    );
+    let reclaimed = 0;
+    for (const row of reclaimRows as Array<{ wallet_id: number }>) {
+      try {
+        const { reclaimWalletIfSettled } = await import("../pay-refunds");
+        if (await reclaimWalletIfSettled(row.wallet_id)) reclaimed += 1;
+      } catch (error) {
+        console.warn("[billing] reclaim retry failed; will retry next round", { walletId: row.wallet_id, error });
+      }
+    }
+    detail.reclaimed = reclaimed;
+    return detail;
+  });
 }
