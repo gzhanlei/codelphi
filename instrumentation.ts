@@ -11,4 +11,15 @@ export async function register() {
   } catch (error) {
     console.error("[analysis-recovery] startup recovery skipped", error);
   }
+
+  // 账务 sweep（M1-T6）：预留 TTL 清理（五行处置 + 扫描二结算恢复，D15）+
+  // 限流过期行清理；GET_LOCK 互斥防重叠，BILLING_SWEEP_ENABLED=false 关闭；
+  // M3-T4 复用同一骨架扩展支付 job。
+  try {
+    const { startBillingSweeps } = await import("./lib/billing/sweep");
+    const sweep = startBillingSweeps();
+    if (sweep.started) console.log(`[billing] sweeps started: ${(sweep.jobs ?? []).join(", ")}`);
+  } catch (error) {
+    console.error("[billing] sweeps failed to start", error);
+  }
 }

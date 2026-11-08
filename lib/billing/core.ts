@@ -650,6 +650,186 @@ export async function grantTrialQuota(input: { userId: number; accountId: number
   }
 }
 
+// ── 预留 TTL 清理（契约 §6.5，M1-T6）：处置核心在 core（账务写唯一入口），调度骨架在 sweep.ts ──
+
+export interface StaleReservationSweepResult {
+  renewed: number;
+  expired: number;
+  released: number;
+  /** 处置中遇到账面不一致（如钱包不变式违反）的行数——已写 inconsistent exception，待人工对账。 */
+  errored: number;
+  /** succeeded 且缺 run 级结算请求的 run——由调用方（sweep）逐个触发 capture 恢复结算（D15：不释放其预留）。 */
+  recoveryRunIds: number[];
+}
+
+interface StaleCandidateRow {
+  reservation_id: number;
+  run_id: number;
+  reservation_attempt: number;
+  account_id: number;
+  wallet_id: number;
+  units: number;
+}
+
+/**
+ * 过期预留处置（契约 §6.5 五行处置表）。调用方持有 GET_LOCK 的连接（B6：锁与语句同连接）；
+ * 逐候选先锁 run 再锁 reservation（锁序），reservation 重读非 active 即跳过（与 release/sweep 收敛）。
+ * succeeded 分支不在此处置（扫描二由调用方触发 capture 恢复结算，D15）。
+ */
+export async function expireStaleReservationsOnce(
+  conn: PoolConnection,
+  options: { freshWindowMinutes: number; ttlMinutes: number; limit?: number },
+): Promise<StaleReservationSweepResult> {
+  const result: StaleReservationSweepResult = { renewed: 0, expired: 0, released: 0, errored: 0, recoveryRunIds: [] };
+  const [candidates] = await conn.execute(
+    `SELECT r.reservation_id, r.run_id, r.reservation_attempt, r.account_id, r.wallet_id, r.units
+     FROM billing_reservations r
+     WHERE r.status = 'active' AND r.expires_at <= NOW(3)
+     ORDER BY r.reservation_id ASC
+     LIMIT ?`,
+    [options.limit ?? 200],
+  );
+  for (const candidate of candidates as StaleCandidateRow[]) {
+    try {
+    // 锁序：先 run 后 reservation（契约 §6 全局锁序）；心跳新鲜度在锁内用 SQL 墙钟判定（时区坑规避）
+    const [runRows] = await conn.execute(
+      `SELECT id, status, (last_heartbeat_at IS NOT NULL AND last_heartbeat_at >= DATE_SUB(NOW(3), INTERVAL ? MINUTE)) AS heartbeatFresh
+       FROM analysis_runs WHERE id = ? FOR UPDATE`,
+      [options.freshWindowMinutes, candidate.run_id],
+    );
+    const run = (runRows as Array<{ id: number; status: string; heartbeatFresh: number }>)[0] ?? null;
+    if (!run) continue;
+    const [resRows] = await conn.execute(
+      `SELECT reservation_id, wallet_id, units, status FROM billing_reservations WHERE reservation_id = ? FOR UPDATE`,
+      [candidate.reservation_id],
+    );
+    const reservation = (resRows as Array<{ reservation_id: number; wallet_id: number; units: number; status: string }>)[0];
+    if (!reservation || reservation.status !== "active") continue; // 与 release/sweep 收敛：已被结清
+
+    if (run.status === "succeeded") {
+      // 扫描二（D15）：成功 run 的结算恢复走 capture，不在此释放
+      if (!result.recoveryRunIds.includes(Number(run.id))) result.recoveryRunIds.push(Number(run.id));
+      continue;
+    }
+
+    if (run.status === "running") {
+      if (Number(run.heartbeatFresh) === 1) {
+        // 心跳新鲜：续期跳过（只延 expires_at，不写 ledger、不动钱包）
+        await conn.execute(
+          `UPDATE billing_reservations SET expires_at = DATE_ADD(NOW(3), INTERVAL ? MINUTE) WHERE reservation_id = ?`,
+          [options.ttlMinutes, reservation.reservation_id],
+        );
+        result.renewed += 1;
+        continue;
+      }
+      // 心跳过期：释放预留（run 保持 running，交超时/恢复机制终态；其 capture/release 遇非 active 行幂等收敛）
+      await expireReservationRow(conn, {
+        runId: candidate.run_id,
+        attempt: candidate.reservation_attempt,
+        reservationId: reservation.reservation_id,
+        accountId: candidate.account_id,
+        walletId: reservation.wallet_id,
+        units: reservation.units,
+        requestMirror: "expired",
+        reason: "ttl_expired",
+      });
+      result.expired += 1;
+      continue;
+    }
+
+    if (run.status === "failed" || run.status === "canceled") {
+      // 失败路径 release 未达（崩溃/竞态）→ 此处置收敛（与失败路径 release 行锁先到先得）
+      await expireReservationRow(conn, {
+        runId: candidate.run_id,
+        attempt: candidate.reservation_attempt,
+        reservationId: reservation.reservation_id,
+        accountId: candidate.account_id,
+        walletId: reservation.wallet_id,
+        units: reservation.units,
+        requestMirror: "released",
+        reason: "analysis_failed",
+      });
+      result.released += 1;
+      continue;
+    }
+
+    // queued 悬挂（无 running 无心跳）：同 running 过期行处置
+    await expireReservationRow(conn, {
+      runId: candidate.run_id,
+      attempt: candidate.reservation_attempt,
+      reservationId: reservation.reservation_id,
+      accountId: candidate.account_id,
+      walletId: reservation.wallet_id,
+      units: reservation.units,
+      requestMirror: "expired",
+      reason: "ttl_expired",
+    });
+    result.expired += 1;
+    } catch (error) {
+      // 单行处置失败（如账面不变式违反）：写 inconsistent exception + 计数告警，继续下一行——
+      // 不静默平账（契约 §11.2 第 4 条），不阻断整批
+      console.error("[billing] sweep disposal failed for reservation", { reservationId: candidate.reservation_id, error });
+      try {
+        await insertSettlementException(conn, {
+          runId: candidate.run_id,
+          attempt: candidate.reservation_attempt,
+          accountId: candidate.account_id,
+          type: "inconsistent_reservation",
+          actual: candidate.units,
+          captured: 0,
+          unfunded: candidate.units,
+        });
+      } catch {
+        /* exception 写失败也要继续 */
+      }
+      result.errored += 1;
+    }
+  }
+  return result;
+}
+
+/** 过期/悬挂预留的释放写入：ledger released + 钱包绝对值回减 + reservation 终态 + 请求行状态镜像。 */
+async function expireReservationRow(
+  conn: PoolConnection,
+  input: {
+    runId: number;
+    attempt: number;
+    reservationId: number;
+    accountId: number;
+    walletId: number;
+    units: number;
+    requestMirror: "expired" | "released";
+    reason: string;
+  },
+) {
+  const [walletRows] = await conn.execute(
+    `SELECT remaining_sau AS remainingSau, reserved_sau AS reservedSau, quota_type FROM billing_quota_wallets WHERE wallet_id = ? FOR UPDATE`,
+    [input.walletId],
+  );
+  const wallet = (walletRows as Array<{ remainingSau: number; reservedSau: number; quota_type: string }>)[0];
+  if (!wallet) return;
+  const newReserved = wallet.reservedSau - input.units;
+  await insertLedgerEntry(conn, {
+    accountId: input.accountId,
+    walletId: input.walletId,
+    runId: input.runId,
+    idempotencyKey: `rel:${input.runId}:${input.attempt}:${input.walletId}:${input.reason}`,
+    reservationAttempt: input.attempt,
+    action: "released",
+    quotaType: wallet.quota_type,
+    units: input.units,
+    reason: input.reason,
+    balanceAfterRemaining: wallet.remainingSau,
+    balanceAfterReserved: newReserved,
+  });
+  await conn.execute(
+    `UPDATE billing_quota_wallets SET reserved_sau = ?, balance_after_remaining = ?, balance_after_reserved = ? WHERE wallet_id = ?`,
+    [newReserved, wallet.remainingSau, newReserved, input.walletId],
+  );
+  await conn.execute(`UPDATE billing_reservations SET status = 'expired' WHERE reservation_id = ?`, [input.reservationId]);
+  await conn.execute(`UPDATE billing_reserve_requests SET status = ? WHERE run_id = ? AND reservation_attempt = ?`, [input.requestMirror, input.runId, input.attempt]);
+}
+
 // ── 入队组合（契约 §9：锁 account → INSERT run（attempt=0）→ reserveForNewRun，同一事务）──
 
 export interface EnqueueInput {
