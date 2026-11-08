@@ -255,3 +255,8 @@ p { line-height: 1.7; }
 .impact-ref { color: var(--green); }
 .impact-evidence { color: #94a19c; font-size: 11px; }
 .impact-evidence::before { content: "·"; margin: 0 4px; color: #ccd8d1; }
+.verification-badge { font-size: 11px; border-radius: 4px; padding: 2px 7px; background: #f0f4f1; color: #94a19c; }
+.verification-badge.verified { background: #e6f2ea; color: var(--green); }
+.verification-badge.stale-verified { background: #fdf3e0; color: #b07d2b; }
+.verification-control { display: inline-flex; align-items: center; gap: 4px; }
+.verification-error { font-size: 11px; color: #c0392b; }

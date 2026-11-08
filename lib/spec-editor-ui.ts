@@ -113,3 +113,17 @@ export function scenarioFilterCount(scenarios: ScenarioRow[], category?: Scenari
 export function featureSourceLabel(source: "generated" | "manual") {
   return source === "manual" ? "人工维护" : "代码生成";
 }
+
+// P1 核实状态：由 verified_at × stale_since 推导（不存状态列，见 docs/spec-verification-lifecycle-design.md）。
+export type VerificationState = "unverified" | "verified" | "stale-verified";
+
+export const verificationLabels: Record<VerificationState, string> = { unverified: "未核实", verified: "已核实", "stale-verified": "待重新核实" };
+
+export function verificationState(item: { verifiedAt?: Date | string | null; staleSince?: Date | string | null }): VerificationState {
+  if (!item.verifiedAt) return "unverified";
+  return item.staleSince ? "stale-verified" : "verified";
+}
+
+export function verificationMatches(item: { verifiedAt?: Date | string | null; staleSince?: Date | string | null }, filter: string) {
+  return filter === "all" || verificationState(item) === filter;
+}

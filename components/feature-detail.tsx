@@ -4,6 +4,7 @@ import { aggregateImplementationFiles } from "@/lib/feature-implementation";
 import { specFeatureKey } from "@/lib/spec-diff";
 import { FeatureFlow } from "./feature-flow";
 import { canCreateChild, featureHref, featureSourceLabel, featureTabClass } from "@/lib/spec-editor-ui";
+import { VerifySpecButton } from "./verify-spec-button";
 import { ScenarioWorkspace } from "./scenario-workspace";
 import { FormError } from "./form-feedback";
 
@@ -32,7 +33,7 @@ function FeatureDetailHeader({ slug, feature, onEdit, onDelete }: { slug: string
       <div><h2>{feature.name}{feature.staleSince ? <span className="drift-badge">可能过时</span> : null}</h2><p>{feature.summary}</p><span className="feature-source">{featureSourceLabel(feature.source)}</span>
         <Link className="stable-link" href={`/products/${slug}/spec/feature/${encodeURIComponent(specFeatureKey(feature.name))}`} title="始终解析到最新规格的稳定链接">稳定链接 <code>{specFeatureKey(feature.name)}</code></Link>
       </div>
-      <div className="feature-actions"><button className="text-button" type="button" onClick={onEdit}>编辑</button><button className="text-button danger-link" type="button" onClick={onDelete}>删除</button></div>
+      <div className="feature-actions"><VerifySpecButton slug={slug} entityType="feature" entityId={feature.id} item={feature} /><button className="text-button" type="button" onClick={onEdit}>编辑</button><button className="text-button danger-link" type="button" onClick={onDelete}>删除</button></div>
     </div>
   );
 }
@@ -50,7 +51,7 @@ export function FeatureDetail({ slug, feature, scenarios, implementationScenario
       <ImplementationFiles scenarios={implementationScenarios} />
       <nav className="feature-view-tabs" aria-label="功能视图"><Link className={featureTabClass(mode, "spec")} href={featureHref(feature.id)}>场景 <span>{scenarios.length}</span></Link><Link className={featureTabClass(mode, "flow")} href={featureHref(feature.id, "flow")}>流程图</Link></nav>
       <FormError message={error} />
-      {mode === "flow" ? <FeatureFlow featureName={feature.name} scenarios={scenarios} /> : <ScenarioWorkspace key={feature.id} featureId={feature.id} scenarios={scenarios} />}
+      {mode === "flow" ? <FeatureFlow featureName={feature.name} scenarios={scenarios} /> : <ScenarioWorkspace key={feature.id} slug={slug} featureId={feature.id} scenarios={scenarios} />}
     </>
   );
 }

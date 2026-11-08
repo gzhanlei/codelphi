@@ -36,6 +36,8 @@ export interface FeatureRow {
   source: "generated" | "manual";
   staleSince?: Date | string | null;
   staleChangeId?: number | null;
+  verifiedAt?: Date | string | null;
+  verifiedBy?: string | null;
 }
 
 export interface ScenarioRow {
@@ -50,6 +52,8 @@ export interface ScenarioRow {
   evidence: unknown;
   staleSince?: Date | string | null;
   staleChangeId?: number | null;
+  verifiedAt?: Date | string | null;
+  verifiedBy?: string | null;
 }
 
 export interface ReleaseRow {
