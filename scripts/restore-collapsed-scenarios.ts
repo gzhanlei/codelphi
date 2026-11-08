@@ -141,9 +141,13 @@ async function main() {
            VALUES (?, ?, ?, ?, ?, ?, 'generated', ?)`,
           [specFeatureId, item.reference, ...payload],
         );
+        // 工作台唯一键含非活跃行（upsertGeneratedSpec 每轮下线不删行）：同引用旧行 = 被
+        // 下线的历史条目，直接复活并写入恢复内容；活跃行冲突不会到达此处（已按快照引用重编号）。
         await db.execute(
           `INSERT INTO scenarios (feature_id, reference, context, action, outcome, category, source, active, evidence)
-           VALUES (?, ?, ?, ?, ?, ?, 'generated', 1, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, 'generated', 1, ?)
+           ON DUPLICATE KEY UPDATE context = VALUES(context), action = VALUES(action), outcome = VALUES(outcome),
+             category = VALUES(category), evidence = VALUES(evidence), active = 1`,
           [workbenchFeatureId, item.reference, ...payload],
         );
       }
