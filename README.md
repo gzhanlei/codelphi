@@ -16,7 +16,7 @@
 - 🏗️ **真实可用**：CoDelphi 在生产环境持续分析自身仓库等多个真实产品，本项目本身就是它的第一个分析对象。
 
 ## 与本仓库实时同步的Demo
-https://codelphi.com/products/reporadar  无需注册登录也可只读查看。Demo 由产品的「设置」页里的公开演示开关控制（数据库 `products.is_public_demo`；`PUBLIC_DEMO_SLUGS` 环境变量仍作过渡兜底）。
+https://codelphi.com/products/codelphi  无需注册登录也可只读查看。Demo 由产品的「设置」页里的公开演示开关控制（数据库 `products.is_public_demo`；`PUBLIC_DEMO_SLUGS` 环境变量仍作过渡兜底）。
 
 ## 懒得自托管，用我搭好的免费云服务
 https://codelphi.com
@@ -214,6 +214,6 @@ curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3008/login
 
 - 服务器建议通过只读的 GitHub deploy key 拉取代码。
 - 数据库迁移未纳入部署流程，schema 变更需在服务器上手动执行 `npm run db:migrate`。
-- Explainer 导出需要 Chrome/Chromium，通过环境变量 `ARCHIFY_CHROME` 指定可执行文件路径；常规产品分析不依赖它。
+- Explainer 导出需要 Chrome/Chromium（常规产品分析不依赖它）：服务器安装 `chromium` 后，Archify 运行时会自动发现标准路径下的 `chromium-browser`/`chrome`；也可通过 Archify 运行时认读的环境变量 `ARCHIFY_CHROME` 显式指定可执行文件路径。注意只装 `chromium-headless` 子包（二进制名不匹配）不会被自动发现。
 
 
