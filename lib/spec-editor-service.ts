@@ -107,7 +107,9 @@ export async function updateFeature(id: number, value: unknown, organizationId?:
     assertNameChangeAllowed(feature, input.name);
     assertFeatureParent(features, id, input.parentId);
     const [result] = await connection.execute(
-      "UPDATE features SET name = ?, summary = ?, parent_id = ?, source = 'manual', stale_since = NULL, stale_change_id = NULL WHERE id = ? AND active = 1",
+      // P1：修订 ≠ 核实——编辑只清确认状态（产生新内容），不再清除漂移标记；
+      // stale 只能由核实动作或重新分析合并清除（见 docs/spec-verification-lifecycle-design.md 转换 3）。
+      "UPDATE features SET name = ?, summary = ?, parent_id = ?, source = 'manual', verified_at = NULL, verified_by = NULL WHERE id = ? AND active = 1",
       [input.name, input.summary, input.parentId, id],
     );
     if ((result as { affectedRows: number }).affectedRows === 0) throw new SpecEditorError(404, "功能不存在或已删除");
@@ -161,7 +163,8 @@ export async function updateScenario(id: number, value: unknown, organizationId?
   const input = scenarioInputSchema.parse(value);
   await requireScenario(id, organizationId);
   const [result] = await getDb().execute(
-    "UPDATE scenarios SET context = ?, action = ?, outcome = ?, category = ?, source = 'manual', stale_since = NULL, stale_change_id = NULL WHERE id = ? AND active = 1",
+    // P1：修订 ≠ 核实（同 updateFeature 注释）。
+    "UPDATE scenarios SET context = ?, action = ?, outcome = ?, category = ?, source = 'manual', verified_at = NULL, verified_by = NULL WHERE id = ? AND active = 1",
     [input.context, input.action, input.outcome, input.category, id],
   );
   if ((result as { affectedRows: number }).affectedRows === 0) throw new SpecEditorError(404, "场景不存在或已删除");

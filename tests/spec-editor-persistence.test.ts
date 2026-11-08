@@ -38,7 +38,7 @@ describe("spec editor persistence", () => {
       return [{}];
     });
     await expect(updateFeature(1, { name: "Root", summary: "Updated", parentId: 4 })).resolves.toMatchObject({ id: 1, parentId: 4, source: "manual" });
-    expect(execute).toHaveBeenCalledWith("UPDATE features SET name = ?, summary = ?, parent_id = ?, source = 'manual', stale_since = NULL, stale_change_id = NULL WHERE id = ? AND active = 1", ["Root", "Updated", 4, 1]);
+    expect(execute).toHaveBeenCalledWith("UPDATE features SET name = ?, summary = ?, parent_id = ?, source = 'manual', verified_at = NULL, verified_by = NULL WHERE id = ? AND active = 1", ["Root", "Updated", 4, 1]);
     expect(execute).toHaveBeenCalledWith("SELECT id, parent_id AS parentId FROM features WHERE product_id = ? AND active = 1 FOR UPDATE", [2]);
     expect(connection.commit).toHaveBeenCalledOnce();
   });
@@ -105,7 +105,7 @@ describe("spec editor persistence", () => {
     expect(execute).not.toHaveBeenCalledWith(expect.stringContaining("UPDATE scenarios SET"), expect.anything());
   });
 
-  it("clears stale provenance when a scenario is saved manually", async () => {
+  it("keeps staleness but clears verification when a scenario is saved manually (P1: 修订 ≠ 核实)", async () => {
     execute.mockImplementation(async (sql: string) => {
       if (sql.includes("SELECT id FROM scenarios")) return [[{ id: 8 }]];
       if (sql.includes("UPDATE scenarios")) return [{ affectedRows: 1 }];
@@ -113,7 +113,7 @@ describe("spec editor persistence", () => {
     });
     await expect(updateScenario(8, { context: "User", action: "Acts", outcome: "Done", category: "happy" })).resolves.toMatchObject({ id: 8, source: "manual" });
     expect(execute).toHaveBeenCalledWith(
-      "UPDATE scenarios SET context = ?, action = ?, outcome = ?, category = ?, source = 'manual', stale_since = NULL, stale_change_id = NULL WHERE id = ? AND active = 1",
+      "UPDATE scenarios SET context = ?, action = ?, outcome = ?, category = ?, source = 'manual', verified_at = NULL, verified_by = NULL WHERE id = ? AND active = 1",
       ["User", "Acts", "Done", "happy", 8],
     );
   });

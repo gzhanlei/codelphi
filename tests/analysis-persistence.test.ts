@@ -77,6 +77,26 @@ describe("analysis persistence guards", () => {
     expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("regression_task_reasons"), expect.anything());
   });
 
+  it("clears verification only when regenerated content actually changed (P1 transitions 1/2)", async () => {
+    const connection = { execute: vi.fn(async () => [{}]) } as unknown as PoolConnection;
+    await upsertGeneratedSpec(connection, run, [
+      { name: "Auth", summary: "Auth", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy", evidence: [] }] },
+      { name: "Carried", summary: "Same", scenarios: [] },
+    ]);
+    // 场景 upsert 带 source='generated' 守卫 + 内容比对：内容相同（carry-forward）不清核实。
+    expect(connection.execute).toHaveBeenCalledWith(
+      expect.stringContaining("verified_at = IF(source = 'generated' AND (context <> VALUES(context)"),
+      expect.anything(),
+    );
+    // 功能 upsert 同样按 summary 内容比对。
+    expect(connection.execute).toHaveBeenCalledWith(
+      expect.stringContaining("verified_at = IF(source = 'generated' AND summary <> VALUES(summary)"),
+      expect.anything(),
+    );
+    // 编辑路径不得出现「清 stale」：P1 解耦后 stale 只由核实动作或重新分析清除。
+    expect(connection.execute).not.toHaveBeenCalledWith(expect.stringContaining("stale_since = NULL"), expect.anything());
+  });
+
   it("moves an existing release to the latest spec version for the same SHA", async () => {
     const connection = connectionWithCount(0);
     await upsertRelease(connection, run, result, change);

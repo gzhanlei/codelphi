@@ -57,6 +57,8 @@ async function upsertFeature(connection: PoolConnection, run: RunContext, featur
      ON DUPLICATE KEY UPDATE
        id = LAST_INSERT_ID(id),
        summary = IF(source = 'generated', VALUES(summary), summary),
+       verified_at = IF(source = 'generated' AND summary <> VALUES(summary), NULL, verified_at),
+       verified_by = IF(source = 'generated' AND summary <> VALUES(summary), NULL, verified_by),
        active = IF(source = 'generated', 1, active)`,
     [run.productId, feature.name, feature.summary],
   );
@@ -72,6 +74,8 @@ async function upsertFeature(connection: PoolConnection, run: RunContext, featur
          outcome = IF(source = 'generated', VALUES(outcome), outcome),
          category = IF(source = 'generated', VALUES(category), category),
          evidence = IF(source = 'generated', VALUES(evidence), evidence),
+         verified_at = IF(source = 'generated' AND (context <> VALUES(context) OR action <> VALUES(action) OR outcome <> VALUES(outcome) OR category <> VALUES(category)), NULL, verified_at),
+         verified_by = IF(source = 'generated' AND (context <> VALUES(context) OR action <> VALUES(action) OR outcome <> VALUES(outcome) OR category <> VALUES(category)), NULL, verified_by),
          active = IF(source = 'generated', 1, active)`,
       [featureId, scenario.reference, scenario.context, scenario.action, scenario.outcome, scenario.category, JSON.stringify(scenario.evidence)],
     );
