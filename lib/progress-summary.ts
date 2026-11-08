@@ -80,7 +80,7 @@ export async function loadRecentReleasesWithChanges(productId: number, days: num
             COALESCE(SUM(c.kind = 'added'), 0) AS added,
             COALESCE(SUM(c.kind = 'changed'), 0) AS changed,
             COALESCE(SUM(c.kind = 'removed'), 0) AS removed
-     FROM releases r LEFT JOIN spec_changes c ON c.spec_version_id = r.spec_version_id
+     FROM releases r LEFT JOIN spec_changes c ON c.spec_version_id = r.spec_version_id AND c.wording_only = 0
      WHERE r.product_id = ? AND r.committed_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
      GROUP BY r.id ORDER BY r.committed_at DESC LIMIT 100`,
     [productId, days],
@@ -108,7 +108,7 @@ export async function loadWindowFeatureDeltas(productId: number, days: number, e
             COALESCE(SUM(c.entity_type = 'scenario' AND c.kind = 'removed'), 0) AS scenariosRemoved
      FROM spec_changes c
      JOIN releases r ON r.spec_version_id = c.spec_version_id
-     WHERE r.product_id = ? AND r.committed_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+     WHERE r.product_id = ? AND r.committed_at >= DATE_SUB(NOW(), INTERVAL ? DAY) AND c.wording_only = 0
      GROUP BY c.feature_name
      ORDER BY scenariosAdded + scenariosChanged + scenariosRemoved DESC, featureName`,
     [productId, days],

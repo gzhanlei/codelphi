@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diffSpec, mergeSpecSources, normalizeSpecText, specFeatureKey, specScenarioKey, specTextEquivalent, type SpecFeature } from "../lib/spec-diff";
+import { diffSpec, mergeSpecSources, normalizeSpecText, specChangeWordingOnly, specFeatureKey, specScenarioKey, specTextEquivalent, type SpecFeature } from "../lib/spec-diff";
 
 const authentication: SpecFeature = {
   name: "Authentication",
@@ -146,6 +146,34 @@ describe("spec wording equivalence (P0 noise collapse)", () => {
       { reference: "HP-6", context: "任务不存在", action: "查询详情", outcome: "返回 404", category: "error", evidence: [] },
     );
     expect(diffSpec([before], [after])).toEqual([]);
+  });
+});
+
+describe("specChangeWordingOnly (历史回填判定)", () => {
+  const scenario = { reference: "HP-1", context: "提交的任务不属于当前产品", action: "查询任务详情", outcome: "返回 404。", category: "error" as const };
+
+  it("marks a changed scenario row wording-only when behavior fields are equivalent", () => {
+    const reworded = { ...scenario, context: "提交的任务不属于该产品", outcome: "返回 404" };
+    expect(specChangeWordingOnly(scenario, reworded)).toBe(true);
+  });
+
+  it("keeps real scenario flips as behavior changes", () => {
+    expect(specChangeWordingOnly(scenario, { ...scenario, outcome: "返回 400" })).toBe(false);
+    expect(specChangeWordingOnly(scenario, { ...scenario, outcome: "不可以重试" })).toBe(false);
+    expect(specChangeWordingOnly(scenario, { ...scenario, outcome: "恢复成功并通知成员", category: "happy" as const })).toBe(false);
+  });
+
+  it("never marks added/removed rows (missing counterpart) or cross-shape rows", () => {
+    expect(specChangeWordingOnly(scenario, null)).toBe(false);
+    expect(specChangeWordingOnly(null, scenario)).toBe(false);
+    expect(specChangeWordingOnly(scenario, { name: "X", summary: "Y" })).toBe(false);
+  });
+
+  it("marks a changed feature row wording-only on summary rewording but not rename or reparenting", () => {
+    const feature = { name: "统一登录与会话", summary: "使用 Chandler 账号登录并保持会话。", parentKey: null };
+    expect(specChangeWordingOnly(feature, { ...feature, summary: "使用 Chandler 账号登录，并保持会话状态。" })).toBe(true);
+    expect(specChangeWordingOnly(feature, { ...feature, name: "Chandler 统一登录与会话" })).toBe(false);
+    expect(specChangeWordingOnly(feature, { ...feature, parentKey: "工作区" })).toBe(false);
   });
 });
 

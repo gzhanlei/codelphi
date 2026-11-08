@@ -114,11 +114,40 @@ function featureChange(kind: "added" | "removed" | "changed", feature: SpecFeatu
   return { kind, entityType: "feature", featureName: feature.name, scenarioReference: null, summary: changeSummary(kind, "feature", feature.name, null), before, after };
 }
 
-function scenarioBehaviorEqual(previous: SpecScenario, current: SpecScenario) {
+export function scenarioBehaviorEqual(previous: SpecScenario, current: SpecScenario) {
   return previous.category === current.category
     && specTextEquivalent(previous.context, current.context)
     && specTextEquivalent(previous.action, current.action)
     && specTextEquivalent(previous.outcome, current.outcome);
+}
+
+function isScenarioShape(value: unknown): value is SpecScenario {
+  return typeof value === "object" && value !== null
+    && typeof (value as SpecScenario).context === "string"
+    && typeof (value as SpecScenario).action === "string"
+    && typeof (value as SpecScenario).outcome === "string";
+}
+
+function isFeatureShape(value: unknown): value is SpecFeature {
+  return typeof value === "object" && value !== null
+    && typeof (value as SpecFeature).name === "string"
+    && typeof (value as SpecFeature).summary === "string";
+}
+
+/**
+ * 落库行级的仅措辞判定（历史回填用，与 diffSpec 的分析时判定同口径）：
+ * 对 spec_changes 的 before_json/after_json 主体按行为字段做等价判定。
+ * added/removed 行没有对侧主体，恒为 false——换编号抖动的配对由回填脚本另行处理。
+ */
+export function specChangeWordingOnly(before: unknown, after: unknown) {
+  if (!before || !after) return false;
+  if (isScenarioShape(before) && isScenarioShape(after)) return scenarioBehaviorEqual(before, after);
+  if (isFeatureShape(before) && isFeatureShape(after)) {
+    return before.name === after.name
+      && (before.parentKey ?? null) === (after.parentKey ?? null)
+      && specTextEquivalent(before.summary, after.summary);
+  }
+  return false;
 }
 
 function scenarioChanges(before: SpecFeature, after: SpecFeature): SpecChange[] {

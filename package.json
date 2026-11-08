@@ -10,6 +10,7 @@
     "test": "vitest run",
     "db:create": "tsx scripts/create-database.ts",
     "db:migrate": "tsx scripts/migrate.ts",
+    "db:backfill-wording": "tsx scripts/backfill-wording-only.ts",
     "db:seed": "tsx scripts/seed.ts",
     "analyze": "tsx scripts/analyze.ts",
     "archify:prepare": "tsx scripts/prepare-archify.ts",

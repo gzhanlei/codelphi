@@ -36,4 +36,11 @@ describe("database migrations", () => {
     const sql = readFileSync(new URL("../migrations/025_product_public_demo.sql", import.meta.url), "utf8");
     expect(sql).toContain("ALTER TABLE products ADD COLUMN is_public_demo TINYINT(1) NOT NULL DEFAULT 0");
   });
+
+  it("marks historical wording-only spec changes without deleting rows", () => {
+    const sql = readFileSync(new URL("../migrations/029_wording_only.sql", import.meta.url), "utf8");
+    expect(sql).toContain("ALTER TABLE spec_changes");
+    expect(sql).toContain("ADD COLUMN wording_only TINYINT(1) NOT NULL DEFAULT 0");
+    expect(sql).toContain("ON DELETE CASCADE");
+  });
 });

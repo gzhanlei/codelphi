@@ -146,7 +146,7 @@ export async function loadRegressionTasks(productId: number, execute: Execute = 
             COALESCE(sf.name, c.feature_name) AS featureName,
             ss.context AS scenarioContext, ss.action AS scenarioAction,
             (SELECT s.spec_change_id FROM regression_task_sources s
-             JOIN spec_changes pc ON pc.id = s.spec_change_id AND pc.entity_type = 'scenario' AND pc.kind <> 'removed'
+             JOIN spec_changes pc ON pc.id = s.spec_change_id AND pc.entity_type = 'scenario' AND pc.kind <> 'removed' AND pc.wording_only = 0
              WHERE s.task_id = t.id LIMIT 1) AS primaryChangeId
      FROM regression_tasks t
      JOIN releases r ON r.id = t.release_id
@@ -154,6 +154,12 @@ export async function loadRegressionTasks(productId: number, execute: Execute = 
      LEFT JOIN spec_features sf ON sf.id = ss.spec_feature_id
      LEFT JOIN spec_changes c ON c.id = t.spec_change_id
      WHERE r.product_id = ?
+       -- 措辞噪音任务不进清单：没有文件命中理由（影响面证据），且所有行为变化来源都是仅措辞行。
+       -- 文件命中是独立证据，带命中理由的任务一律保留。
+       AND (EXISTS (SELECT 1 FROM regression_task_reasons rr WHERE rr.task_id = t.id AND rr.hit_type <> 'behavior_change')
+            OR EXISTS (SELECT 1 FROM regression_task_sources s2
+                       JOIN spec_changes pc2 ON pc2.id = s2.spec_change_id AND pc2.wording_only = 0
+                       WHERE s2.task_id = t.id))
      ORDER BY r.committed_at DESC, sf.name, ss.reference, t.id`,
     [productId],
   ) as [Array<{ taskId: number; releaseId: number; status: RegressionTaskStatus; checkedBy: string | null; checkedAt: Date | null; skipReason: string | null; failureNote: string | null; specScenarioId: number | null; specChangeId: number | null; reference: string | null; featureName: string | null; scenarioContext: string | null; scenarioAction: string | null; primaryChangeId: number | null }>, unknown];
@@ -161,6 +167,7 @@ export async function loadRegressionTasks(productId: number, execute: Execute = 
   const [sourceRows] = await execute(
     `SELECT s.task_id AS taskId, s.spec_change_id AS changeId FROM regression_task_sources s
      JOIN regression_tasks t ON t.id = s.task_id JOIN releases r ON r.id = t.release_id
+     JOIN spec_changes pc ON pc.id = s.spec_change_id AND pc.wording_only = 0
      WHERE r.product_id = ? ORDER BY s.spec_change_id`,
     [productId],
   ) as [Array<{ taskId: number; changeId: number }>, unknown];

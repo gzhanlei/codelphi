@@ -55,7 +55,7 @@ async function loadBehaviorChanges(releases: ReleaseRow[]) {
             c.feature_name AS featureName, c.scenario_reference AS scenarioReference,
             c.summary, c.before_json AS beforeJson, c.after_json AS afterJson
      FROM spec_changes c JOIN releases r ON r.spec_version_id = c.spec_version_id
-     WHERE r.id IN (${placeholders}) ORDER BY c.id`,
+     WHERE r.id IN (${placeholders}) AND c.wording_only = 0 ORDER BY c.id`,
     ids,
   );
   return (rows as Array<Omit<BehaviorChangeRow, "before" | "after"> & { beforeJson: unknown; afterJson: unknown }>).map((row) => ({
