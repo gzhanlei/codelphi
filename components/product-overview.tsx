@@ -8,7 +8,7 @@ function OverviewHero({ data, canEdit }: { data: ProductOverviewData; canEdit: b
       <span className="eyebrow">PRODUCT OVERVIEW</span>
       <h2>{data.headline}{canEdit ? <EditDescriptionButton slug={data.slug} description={data.description} /> : null}</h2>
       <div className="overview-meta"><span>{data.freshness}</span><span>{data.analysisLabel}</span>{data.headlineSource === "generated" ? <span>代码生成 · {data.headlineEvidence.length} 个证据文件</span> : null}</div>
-      <div className="overview-actions"><Link className="primary-button" href="?view=spec">查看产品规格</Link><Link className="secondary-button" href="?view=changes">查看最近变化</Link><a className="explainer-link" href={`/api/products/${data.slug}/explainer`} target="_blank" rel="noreferrer">导出 Explainer ↗</a></div>
+      <div className="overview-actions"><Link className="primary-button" href="?view=spec">查看产品规格</Link><Link className="secondary-button" href="?view=changes">查看最近变化</Link><a className="explainer-link" href={`/api/products/${data.slug}/spec.json`} target="_blank" rel="noreferrer">导出 spec.json ↗</a><a className="explainer-link" href={`/api/products/${data.slug}/export/tests?format=gherkin`}>导出 Gherkin ↓</a><a className="explainer-link" href={`/api/products/${data.slug}/export/tests?format=markdown`}>导出 Markdown ↓</a><a className="explainer-link" href={`/api/products/${data.slug}/explainer`} target="_blank" rel="noreferrer">导出 Explainer ↗</a></div>
     </section>
   );
 }

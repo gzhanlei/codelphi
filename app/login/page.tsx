@@ -1,11 +1,31 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { LoginError } from "@/components/login-error";
+import { loadPublicDemoProduct } from "@/lib/public-demo";
 import { getSessionUser } from "@/lib/session";
+
+/** 公开演示的五个匿名导出入口，与产品页的导出能力一一对应。 */
+function DemoExports({ slug }: { slug: string }) {
+  const exports: Array<[string, string, boolean]> = [
+    ["规格清单（spec.json）", `/api/products/${slug}/spec.json`, true],
+    ["Gherkin 回归用例", `/api/products/${slug}/export/tests?format=gherkin`, false],
+    ["Markdown 规格书", `/api/products/${slug}/export/tests?format=markdown`, false],
+    ["进展摘要（30 天）", `/api/products/${slug}/progress-summary?days=30`, false],
+    ["Explainer 一页说明", `/api/products/${slug}/explainer`, true],
+  ];
+  return (
+    <ul className="demo-entry-exports">
+      {exports.map(([label, href, opensInTab]) => (
+        <li key={href}><a href={href} {...(opensInTab ? { target: "_blank", rel: "noreferrer" } : {})}>{label} {opensInTab ? "↗" : "↓"}</a></li>
+      ))}
+    </ul>
+  );
+}
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
   if (await getSessionUser()) redirect("/");
   const { error } = await searchParams;
+  const demo = await loadPublicDemoProduct();
   return (
     <main className="auth-page">
       <section className="auth-visual">
@@ -25,6 +45,14 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           <LoginError error={error} />
           <Link className="login-button" href="/auth/login">使用 Chandler 登录 <span>→</span></Link>
           <small>所有 Chandler 用户均可登录，自动创建个人工作区</small>
+          {demo ? (
+            <div className="demo-entry">
+              <strong>不想登录？先看公开演示</strong>
+              <p>{demo.name} 的规格、回归清单与进展摘要全部匿名只读开放。</p>
+              <Link className="secondary-button" href={`/products/${demo.slug}`}>进入在线演示 →</Link>
+              <DemoExports slug={demo.slug} />
+            </div>
+          ) : null}
         </div>
       </section>
     </main>
