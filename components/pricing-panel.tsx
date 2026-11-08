@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import QRCode from "qrcode";
 
 /**
  * 套餐购买面板（M4-T2）：POST /api/pay/orders 建单 → 展示渠道支付参数 → 轮询查单至终态。
@@ -36,7 +37,17 @@ export function PricingPanel() {
   const [order, setOrder] = useState<OrderState | null>(null);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    const codeUrl = order?.prepay?.codeUrl;
+    if (!codeUrl || order?.status !== "pending") {
+      setQrDataUrl(null);
+      return;
+    }
+    QRCode.toDataURL(codeUrl, { width: 440, margin: 1 }).then(setQrDataUrl).catch(() => setQrDataUrl(null));
+  }, [order?.prepay?.codeUrl, order?.status]);
 
   useEffect(() => {
     fetch("/api/pay/pricing")

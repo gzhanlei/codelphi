@@ -2,7 +2,8 @@
 
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import QRCode from "qrcode";
 
 export interface AdminOrderRow {
   order_no: string;
@@ -36,6 +37,21 @@ const REFUND_LABEL: Record<string, string> = {
 };
 
 /** 超管支付操作面板：测试单创建、订单台账、退款（动作走既有 API，状态机语义在服务端）。 */
+function PayQrCode({ codeUrl }: { codeUrl: string }) {
+  const [dataUrl, setDataUrl] = useState<string | null>(null);
+  useEffect(() => {
+    QRCode.toDataURL(codeUrl, { width: 440, margin: 1 }).then(setDataUrl).catch(() => setDataUrl(null));
+  }, [codeUrl]);
+  if (!dataUrl) return <p>二维码生成中…</p>;
+  return (
+    <p style={{ textAlign: "center" }}>
+      微信扫码支付
+      <br />
+      <img src={dataUrl} alt="微信支付二维码" width={220} height={220} style={{ border: "1px solid #ddd", borderRadius: 8 }} />
+    </p>
+  );
+}
+
 export function AdminPayOrders({ orders }: { orders: AdminOrderRow[] }) {
   const router = useRouter();
   const [pending, setPending] = useState<string | null>(null);
@@ -100,7 +116,7 @@ export function AdminPayOrders({ orders }: { orders: AdminOrderRow[] }) {
         </button>
         {prepay ? (
           <div>
-            {prepay.codeUrl ? <p>微信扫码支付（code_url）：<code className="pay-code">{prepay.codeUrl}</code></p> : null}
+            {prepay.codeUrl ? <PayQrCode codeUrl={prepay.codeUrl} /> : null}
             {prepay.h5Url ? <p><a href={prepay.h5Url} target="_blank" rel="noreferrer">微信 H5 收银台 →</a></p> : null}
             {prepay.payUrl ? <p><a href={prepay.payUrl} target="_blank" rel="noreferrer">支付宝 →</a></p> : null}
           </div>
