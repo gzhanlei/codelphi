@@ -63,7 +63,7 @@ CoDelphi 不负责宣称自己理解了整个软件系统，而是负责让团�
 | GitHub App / webhook / 仓库连接 | ✅ 已实现 | `lib/github-app.ts`、`lib/github-webhook.ts`、`lib/github-connections.ts`、migrations `003`/`012`/`013` |
 | 公开只读 demo 页（匿名可用性收敛） | ✅ 已实现 | `lib/public-demo.ts`、migration `025_product_public_demo.sql`、`tests/demo-guard.test.ts`（B3，f12699c） |
 | 影响面 → 回归范围联动（P0） | ✅ 已实现并经生产端到端验收（2026-11-08） | 场景级回归任务：`lib/regression-tasks.ts` + `lib/regression-task-view.ts`、migration `027_regression_tasks.sql`（任务 (release, scenario) 唯一、来源多对多、三类推荐理由、四态验证）、分析事务内生成（`lib/analysis.ts` `ensureRegressionTasks` + `release_files`）、规格页与 Markdown 导出（`components/release-card.tsx`）；行为证据：`tests/regression-tasks.test.ts` 等。生产验收（release 71 / run 100）：4 个改动文件落库、20 条任务分析时生成、5 条 evidence_path 命中精确对应被触碰文件与场景、导出含合并理由 |
-| 规格确认状态（人工核实 ≠ 人工编辑） | ⚠️ 部分实现 | `source`（来源）与 `stale_since`（时效）已有；**无**独立 `verification_status`/`verified_at`/`verified_by`；且现语义为「编辑即清除 stale」（`spec-editor-service.ts:110,164`），编辑与核实混同 |
+| 规格确认状态（人工核实 ≠ 人工编辑，P1） | ✅ 已实现（2026-11-08） | migration `028_spec_verification.sql`（`verified_at`/`verified_by` + append-only `spec_verifications` 双版本历史）；状态由 `verified_at × stale_since` 推导（不存状态列）；核实动作 `POST /spec/verify`（editor）+ `lib/spec-verification.ts`；编辑清 stale 语义已移除，核实是唯一清 stale 的人工动作；UI：场景卡/功能头三态徽章 + 核实按钮 + 场景工具栏核实筛选；行为证据：`tests/spec-verification.test.ts` 等 8 项。**线上端到端验证待部署后执行** |
 | 知识健康视图（stale 分布 / 验证覆盖 / 维护分布） | ⚠️ 部分实现 | 可冷启动数据：`stale_since`（`product-details.ts:42,91` 已透出）、`regression_items.checked_by`（验证人，`checked_at`）。**缺口（2026-11-08 代码核实）：规格编辑归因未持久化**——`spec-editor-service.ts` 的全部 INSERT/UPDATE 均不记录编辑人，migrations 无归因列；「维护分布」维度缺数据基础（见 P2） |
 | 多代码托管（M12） | ⚠️ 部分实现 | adapter 抽象已建：`lib/code-hosting/`（`adapter.ts`/`registry.ts`）；仅 `github-provider.ts`，Gitee/GitLab 未实现 |
 | MCP server（M10） | ❌ 未实现 | — |
@@ -158,7 +158,7 @@ stateDiagram-v2
 - 相关代码变化后，受影响的已核实条目自动回到待核实；无关条目不受影响。
 - 规格页可按核实状态筛选。
 
-> 实施前置：本项暂不直接进入编码，先完成**状态转换表 + 历史核实记录数据模型设计**（评审结论）。设计已完成：[spec-verification-lifecycle-design.md](spec-verification-lifecycle-design.md)（2026-11-08），待拍板其遗留决策后实施。
+> **状态：已实现（2026-11-08）。** 设计 [spec-verification-lifecycle-design.md](spec-verification-lifecycle-design.md) 的状态转换表 6 条转换全部落地（转换 3 的「编辑清 stale」语义已移除；转换 1/2 用 SQL 内容比对实现），核实状态筛选在场景工具栏。剩余：部署后线上端到端验证（核实 → 徽章变化 → 代码变化后转待重新核实）。
 
 ## P2 · 组织知识健康（从查询走向主动发现）
 

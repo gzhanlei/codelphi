@@ -76,7 +76,9 @@ CREATE TABLE spec_verifications (
 2. 核实动作 API + 状态推导查询 + 规格页徽章与筛选，含测试。
 3. 基线文档对账更新。
 
-## 6. 遗留决策（实施前需拍板）
+## 6. 决策记录（2026-11-08 实施时落定）
 
-- 条目内容变化检测粒度：转换 1 的「更新了内容」在 `upsertGeneratedSpec` 中按 AI 输出包含该条目判定（与现有 context/action/outcome 比对一致），无需内容哈希；若实施时发现比对缺口，再加内容哈希列。
-- 核实是否要求附证据核对记录（如勾选「已逐场景对照代码」）：第一版不做，保持动作轻。
+- 条目内容变化检测粒度：采用 **SQL 内容比对**（`summary <> VALUES(summary)` / 场景四字段比对，带 `source = 'generated'` 守卫）——严格优于「AI 输出包含即视为更新」：carry-forward 条目内容相同时天然不清核实，转换 2 无需额外判断；无需内容哈希列。
+- 核实不要求附证据核对记录，保持动作轻（按设计默认实施）。
+
+**状态：已实现（2026-11-08）。** migration 028 + `lib/spec-verification.ts`（双版本历史 + 范围校验更新）+ `POST /api/products/[slug]/spec/verify` + 场景卡/功能头核实徽章与动作 + 场景工具栏核实状态筛选；编辑清 stale 语义已移除（`spec-editor-service.ts`）。
