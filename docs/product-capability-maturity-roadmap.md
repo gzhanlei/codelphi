@@ -50,7 +50,7 @@ CoDelphi 不负责宣称自己理解了整个软件系统，而是负责让团�
 | 规格版本链 + 行为 diff | ✅ 已实现 | `lib/spec-versions.ts`、`lib/spec-diff.ts`、`lib/spec-change-view.ts`、migration `002_spec_versions.sql` |
 | 人工修订规格 + manual 保护（自动分析不覆盖） | ✅ 已实现 | `lib/spec-editor-service.ts`（`source='manual'` 语义）、`lib/spec-editor-ui.ts`；行为证据：`tests/spec-editor-persistence.test.ts`、`tests/spec-editor-errors.test.ts`；红线写入 AGENTS.md |
 | 规格漂移追踪（M8） | ✅ 已实现 | `lib/spec-drift.ts`、migration `018_spec_drift.sql`（`stale_since`/`stale_change_id`）；行为证据：`tests/spec-drift.test.ts` |
-| 影响面查询（文件路径 → 受影响功能/场景，事前影响，规格页入口） | ✅ 已实现 | `lib/spec-file-index.ts`、`app/api/products/[slug]/impact/route.ts`、`components/impact-query.tsx`（C2，commit 70ba11b + ec37f45）；行为证据：`tests/impact-query.test.ts`、`tests/impact-preview.test.ts`、`tests/spec-file-index.test.ts` |
+| 影响面查询（文件路径 → 受影响功能/场景，事前影响，规格页入口；UI 已更名「行为查询」——它交付的是文件实现了哪些产品行为，精确影响由 PR 预演与发布回归任务在知道改动内容后给出） | ✅ 已实现 | `lib/spec-file-index.ts`、`app/api/products/[slug]/impact/route.ts`、`components/impact-query.tsx`（C2，commit 70ba11b + ec37f45；结果可读化 + stable-key 链接修复 af67e94）；行为证据：`tests/impact-query.test.ts`、`tests/impact-preview.test.ts`、`tests/spec-file-index.test.ts` |
 | PR 预演（受影响规格评论到 PR） | ✅ 已实现 | `lib/pr-preview.ts`（`AffectedSpecEntry`、issue comment upsert）；行为证据：`tests/pr-preview.test.ts` |
 | QA 回归清单（逐条勾选 + 标记人 + Markdown 导出） | ✅ 已实现 | 已并入场景级回归任务（见上）；原 `022_regression_items.sql` 变更级清单由 migration 027 迁移并下线（f7b0289 的标记人展示保留于任务模型） |
 | 行为变化通知分发（Slack / 通用 webhook / email 偏好） | ✅ 已实现 | `lib/notifications.ts`、`lib/notification-client.ts`、migrations `021_notification_channels`/`023_user_email_prefs` |
