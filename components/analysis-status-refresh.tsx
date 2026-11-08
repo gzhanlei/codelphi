@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 
+/** 分析未结束（排队/运行中）时每 3 秒刷新一次服务端组件；结束后停止轮询（返回 null）。 */
 export function analysisRefreshDelay(status: string) {
   return status === "queued" || status === "running" ? 3_000 : null;
 }
