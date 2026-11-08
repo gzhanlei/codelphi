@@ -22,3 +22,6 @@ export const DEADLOCK_RETRIES = positiveNumber("BILLING_DEADLOCK_RETRIES", 3);
 
 /** 首发标准分析 SAU：单模型单调用，预估 = 实际恒等（契约 §6.1 差额结算契约）。 */
 export const FIRST_RUN_UNITS = 1;
+
+/** Trial 累计额度（契约 §4/§6.1：不按周期重置；发放口径见 M1-T4 归属冻结）。 */
+export const TRIAL_UNITS = positiveNumber("BILLING_TRIAL_UNITS", 5);

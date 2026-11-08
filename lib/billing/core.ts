@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { PoolConnection } from "mysql2/promise";
 import { getDb } from "../db";
-import { RESERVATION_TTL_MINUTES, DEADLOCK_RETRIES, FIRST_RUN_UNITS } from "./constants";
+import { RESERVATION_TTL_MINUTES, DEADLOCK_RETRIES, FIRST_RUN_UNITS, TRIAL_UNITS } from "./constants";
 
 /**
  * 额度账务核心（契约 docs/codelphi-billing-ledger-contract.md v1.5 冻结版，M1-T2）。
@@ -597,6 +597,57 @@ async function reserveSettlementTopUp(
     via: purpose,
   });
   return { ok: true, attempt };
+}
+
+// ── Trial 授权（契约 M1-T4）：发放 = trial_grants 行 + Trial 钱包 + granted 流水，同一事务；──
+// 并发幂等靠 trial_grants.user_id 主键 + 钱包 source_key 唯一双保险；归属冻结见契约 P1-3
+// （仅个人工作区创建触发；owner 转移不迁移；授权永久保留原 user_id + account_id）。
+
+export interface TrialGrantResult {
+  granted: boolean;
+}
+
+/** 幂等哨兵：授权行已存在 → 事务回滚（无任何写入）后按 granted:false 返回。 */
+class TrialAlreadyGranted extends Error {}
+
+export async function grantTrialQuota(input: { userId: number; accountId: number; source: "workspace_creation" | "backfill"; units?: number }): Promise<TrialGrantResult> {
+  const units = input.units ?? TRIAL_UNITS;
+  try {
+    return await runInBillingTransaction(async (conn) => {
+      try {
+        await conn.execute(
+          `INSERT INTO trial_grants (user_id, account_id, granted_units, source) VALUES (?, ?, ?, ?)`,
+          [input.userId, input.accountId, units, input.source],
+        );
+      } catch (error) {
+        if ((error as { code?: string } | null)?.code === "ER_DUP_ENTRY") throw new TrialAlreadyGranted();
+        throw error;
+      }
+      const sourceKey = `trial:${input.userId}`;
+      const [walletRows] = await conn.execute(
+        `INSERT INTO billing_quota_wallets (account_id, quota_type, remaining_sau, reserved_sau, source_key, status, balance_after_remaining, balance_after_reserved)
+         VALUES (?, 'trial', ?, 0, ?, 'active', ?, 0)`,
+        [input.accountId, units, sourceKey, units],
+      );
+      const walletId = Number((walletRows as { insertId: number }).insertId);
+      await insertLedgerEntry(conn, {
+        accountId: input.accountId,
+        walletId,
+        runId: null,
+        idempotencyKey: `grt:trial:${input.userId}:trial`,
+        reservationAttempt: null,
+        action: "granted",
+        quotaType: "trial",
+        units,
+        balanceAfterRemaining: units,
+        balanceAfterReserved: 0,
+      });
+      return { granted: true };
+    });
+  } catch (error) {
+    if (error instanceof TrialAlreadyGranted) return { granted: false };
+    throw error;
+  }
 }
 
 // ── 入队组合（契约 §9：锁 account → INSERT run（attempt=0）→ reserveForNewRun，同一事务）──

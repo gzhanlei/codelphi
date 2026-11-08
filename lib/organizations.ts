@@ -1,9 +1,10 @@
 import { cookies } from "next/headers";
 import { defaultExecute, type Execute } from "./db";
-import { upsertCodelphiUser } from "./users";
+import { upsertCodelphiUser, findUserIdBySub } from "./users";
 import { requiredEnv } from "./env";
 import { claimOrganizationInvitations } from "./organization-invitations";
 import { claimProductInvitations } from "./product-members";
+import { grantTrialQuota } from "./billing/core";
 import type { SessionUser } from "./types";
 
 export type OrganizationRole = "owner" | "editor" | "viewer";
@@ -41,7 +42,11 @@ export async function ensureUserWorkspace(profile: SessionUser, execute: Execute
      JOIN users u ON u.id = m.user_id WHERE u.chandler_sub = ? AND o.slug = ?`,
     [profile.sub, defaultOrg.slug],
   );
-  if (existing[0]) return existing[0];
+  if (existing[0]) {
+    // Trial 授权幂等重试：发放失败（如瞬时故障）的用户在下次登录自动补齐（契约 M1-T4）
+    await grantTrialToWorkspace(profile, existing[0].id, execute);
+    return existing[0];
+  }
   await execute(
     "INSERT INTO organizations (slug, name) VALUES (?, ?) ON DUPLICATE KEY UPDATE name = VALUES(name), updated_at = CURRENT_TIMESTAMP(3)",
     [defaultOrg.slug, defaultOrg.name],
@@ -58,7 +63,24 @@ export async function ensureUserWorkspace(profile: SessionUser, execute: Execute
     [profile.sub, defaultOrg.slug],
   );
   if (!rows[0]) throw new Error("Workspace bootstrap failed");
+  await grantTrialToWorkspace(profile, rows[0].id, execute);
   return rows[0];
+}
+
+/**
+ * 个人工作区 Trial 授权（契约 M1-T4，P1-3 归属冻结）：归属主体 = 工作区创建者；
+ * 仅 `u-<sub>` 个人工作区触发（加入他人组织不触发/不转移）；幂等（trial_grants.user_id 主键 +
+ * 钱包 source_key 双保险），失败 best-effort——下次登录重试，不阻断工作区创建。
+ */
+async function grantTrialToWorkspace(profile: SessionUser, organizationId: number, execute: Execute) {
+  try {
+    const userId = await findUserIdBySub(profile.sub, execute);
+    if (userId === null) return;
+    const result = await grantTrialQuota({ userId, accountId: organizationId, source: "workspace_creation" });
+    if (result.granted) console.log(`[billing] trial quota granted (user ${userId} → account ${organizationId})`);
+  } catch (error) {
+    console.warn("[billing] trial grant failed; will retry on next login", error);
+  }
 }
 
 export async function listUserOrganizations(profile: SessionUser, execute: Execute = defaultExecute) {
