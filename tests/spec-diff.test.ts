@@ -112,6 +112,43 @@ describe("spec wording equivalence (P0 noise collapse)", () => {
     expect(diffSpec([authentication], [renamed])).toHaveLength(2);
   });
 
+  it("folds a wholesale feature-summary rewrite when the scenario set is unchanged (pilot noise mode)", () => {
+    const after = structuredClone(authentication);
+    after.summary = "统一的账号体系入口，负责处理会话建立、多因素校验与凭证找回的完整流程";
+    const outcome = diffSpecWithFolded([authentication], [after]);
+    expect(outcome.changes).toEqual([]);
+    expect(outcome.folded).toHaveLength(1);
+    expect(outcome.folded[0]).toMatchObject({ reason: "wording", entityType: "feature", featureName: "Authentication" });
+    expect(diffSpec([authentication], [after])).toEqual([]);
+  });
+
+  it("still reports a feature change when a summary rewrite accompanies real scenario changes", () => {
+    const after = structuredClone(authentication);
+    after.summary = "统一的账号体系入口，负责处理会话建立、多因素校验与凭证找回的完整流程";
+    after.scenarios.push({ ...authentication.scenarios[0], reference: "ER-1", category: "error", outcome: "Rejects the request" });
+    const result = diffSpec([authentication], [after]);
+    expect(result.map((change) => `${change.kind}:${change.entityType}`)).toContain("changed:feature");
+  });
+
+  it("still reports a feature change when the summary rewrite accompanies reparenting", () => {
+    const after = structuredClone(authentication);
+    after.summary = "统一的账号体系入口，负责处理会话建立、多因素校验与凭证找回的完整流程";
+    after.parentKey = "平台基础";
+    const result = diffSpec([authentication], [after]);
+    expect(result.map((change) => `${change.kind}:${change.entityType}`)).toEqual(["changed:feature"]);
+  });
+
+  it("treats an absent parentKey as null instead of a reparenting (superset pilot noise mode)", () => {
+    const before = structuredClone(authentication);
+    before.parentKey = null;
+    const after = structuredClone(authentication);
+    delete (after as { parentKey?: string | null }).parentKey;
+    expect(diffSpec([before], [after])).toEqual([]);
+    const mirrored = structuredClone(after);
+    mirrored.parentKey = null;
+    expect(diffSpec([mirrored], [before])).toEqual([]);
+  });
+
   it("still reports category flips as behavior changes", () => {
     const changed = structuredClone(authentication);
     changed.scenarios[0].category = "error";
@@ -174,6 +211,23 @@ describe("specChangeWordingOnly (历史回填判定)", () => {
     expect(specChangeWordingOnly(feature, { ...feature, summary: "使用 Chandler 账号登录，并保持会话状态。" })).toBe(true);
     expect(specChangeWordingOnly(feature, { ...feature, name: "Chandler 统一登录与会话" })).toBe(false);
     expect(specChangeWordingOnly(feature, { ...feature, parentKey: "工作区" })).toBe(false);
+  });
+
+  it("marks a feature row wording-only on a wholesale summary rewrite when the scenario set is equivalent", () => {
+    // superset 盲评 #1000-#1017 的模式：token 签名完全不同的整段重写，场景一个没动。
+    const feature = { name: "统一登录与会话", summary: "使用 Chandler 账号登录并保持会话。", parentKey: null, scenarios: [scenario] };
+    const rewritten = { ...feature, summary: "覆盖注册、登录、会话恢复与多端登出的完整账号生命周期管理能力。" };
+    expect(specChangeWordingOnly(feature, rewritten)).toBe(true);
+  });
+
+  it("keeps a feature row as a behavior change when its scenario set really changes", () => {
+    const feature = { name: "统一登录与会话", summary: "使用 Chandler 账号登录并保持会话。", parentKey: null, scenarios: [scenario] };
+    const rewritten = {
+      ...feature,
+      summary: "覆盖注册、登录、会话恢复与多端登出的完整账号生命周期管理能力。",
+      scenarios: [...feature.scenarios, { reference: "ER-2", context: "凭证过期", action: "刷新会话", outcome: "返回 401 并引导重新登录", category: "error" as const }],
+    };
+    expect(specChangeWordingOnly(feature, rewritten)).toBe(false);
   });
 });
 

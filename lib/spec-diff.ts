@@ -97,7 +97,11 @@ export function specTextEquivalent(before: string, after: string) {
 }
 
 function featureBehaviorChanged(before: SpecFeature, after: SpecFeature) {
-  return before.name !== after.name || before.parentKey !== after.parentKey || !specTextEquivalent(before.summary, after.summary);
+  // parentKey 必须 ?? null 归一化：AI 输出的树上字段缺失是 undefined，落库/回放树上是 null，
+  // 严格 !== 会把 null !== undefined 判成身份变化——superset 盲评 12/13 误报即此一处比较。
+  return before.name !== after.name
+    || (before.parentKey ?? null) !== (after.parentKey ?? null)
+    || !specTextEquivalent(before.summary, after.summary);
 }
 
 function scenarioBehaviorChanged(before: SpecScenario, after: SpecScenario) {
@@ -153,9 +157,10 @@ export function specChangeWordingOnly(before: unknown, after: unknown) {
   if (!before || !after) return false;
   if (isScenarioShape(before) && isScenarioShape(after)) return scenarioBehaviorEqual(before, after);
   if (isFeatureShape(before) && isFeatureShape(after)) {
-    return before.name === after.name
-      && (before.parentKey ?? null) === (after.parentKey ?? null)
-      && specTextEquivalent(before.summary, after.summary);
+    if (before.name !== after.name || (before.parentKey ?? null) !== (after.parentKey ?? null)) return false;
+    if (specTextEquivalent(before.summary, after.summary)) return true;
+    // 身份未变且场景集（行为单元）等价时，整段摘要重写同样仅措辞——与运行时 diffFeature 折叠同口径。
+    return featureScenarioSetChanges(before, after).length === 0;
   }
   return false;
 }
@@ -210,6 +215,17 @@ function scenarioChanges(before: SpecFeature, after: SpecFeature, outcome: DiffO
   for (const [index, change] of changes.entries()) if (!droppedIndexes.has(index)) outcome.changes.push(change);
 }
 
+/** 场景集（行为单元）差异：运行时折叠判定与历史回填共用同一口径。旧行 JSON 缺 scenarios 时按空集处理。 */
+function featureScenarioSetChanges(before: SpecFeature, after: SpecFeature): SpecChange[] {
+  const outcome: DiffOutcome = { changes: [], folded: [] };
+  scenarioChanges(
+    { ...before, scenarios: before.scenarios ?? [] },
+    { ...after, scenarios: after.scenarios ?? [] },
+    outcome,
+  );
+  return outcome.changes;
+}
+
 function diffFeature(previous: SpecFeature | undefined, current: SpecFeature | undefined, outcome: DiffOutcome) {
   if (!previous && current) {
     outcome.changes.push(featureChange("added", current, null, current));
@@ -221,12 +237,24 @@ function diffFeature(previous: SpecFeature | undefined, current: SpecFeature | u
   }
   if (!previous || !current) return;
 
+  const scenarioOutcome: DiffOutcome = { changes: [], folded: [] };
+  scenarioChanges(previous, current, scenarioOutcome);
+
   if (featureBehaviorChanged(previous, current)) {
-    outcome.changes.push({ kind: "changed", entityType: "feature", featureName: current.name, scenarioReference: null, summary: changeSummary("changed", "feature", current.name, null), before: previous, after: current });
+    const identityChanged = previous.name !== current.name || (previous.parentKey ?? null) !== (current.parentKey ?? null);
+    if (!identityChanged && scenarioOutcome.changes.length === 0) {
+      // 行为单元（场景集）与身份均未变：摘要被整段重写只是同一行为面的表述漂移，不构成行为变化
+      // （superset 第三方盲评 12/13 误报即此模式——token 签名完全不同的重写过不了 specTextEquivalent，
+      // 但场景一个没动）。折叠供审计，落库文本仍采用新版。
+      outcome.folded.push({ reason: "wording", entityType: "feature", featureName: current.name, scenarioReference: null, before: previous, after: current });
+    } else {
+      outcome.changes.push({ kind: "changed", entityType: "feature", featureName: current.name, scenarioReference: null, summary: changeSummary("changed", "feature", current.name, null), before: previous, after: current });
+    }
   } else if (previous.summary !== current.summary) {
     outcome.folded.push({ reason: "wording", entityType: "feature", featureName: current.name, scenarioReference: null, before: previous, after: current });
   }
-  scenarioChanges(previous, current, outcome);
+  outcome.changes.push(...scenarioOutcome.changes);
+  outcome.folded.push(...scenarioOutcome.folded);
 }
 
 export function diffSpec(before: SpecFeature[] | null, after: SpecFeature[]): SpecChange[] {
