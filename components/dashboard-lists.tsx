@@ -25,6 +25,13 @@ export function isDashboardProductPending(product: DashboardProduct) {
   return product.analysisStatus === "queued" || product.analysisStatus === "running";
 }
 
+/** 时间线日期：当年发布只显示月日，跨年的发布补年份（否则「11月8日」有歧义）。 */
+export function timelineDate(committedAt: Date) {
+  const date = new Date(committedAt);
+  const sameYear = date.getFullYear() === new Date().getFullYear();
+  return new Intl.DateTimeFormat("zh-CN", sameYear ? { month: "short", day: "numeric" } : { year: "numeric", month: "short", day: "numeric" }).format(date);
+}
+
 function ProductCardContent({ product, pending }: { product: DashboardProduct; pending: boolean }) {
   return <>
     <div className="product-icon">{product.name.slice(0, 1)}</div>
@@ -64,7 +71,7 @@ export function ReleaseTimeline({ releases }: { releases: DashboardRelease[] }) 
         <Link href={`/products/${release.productSlug}?view=changes`} className="timeline-item" key={release.id}>
           <span className="timeline-dot" />
           <div><div className="timeline-title"><span className="product-tag">{release.productName}</span><h3>{release.title}</h3></div><p>{release.summary}</p></div>
-          <time>{new Intl.DateTimeFormat("zh-CN", { month: "short", day: "numeric" }).format(new Date(release.committedAt))}</time>
+          <time>{timelineDate(release.committedAt)}</time>
         </Link>
       ))}
     </div>

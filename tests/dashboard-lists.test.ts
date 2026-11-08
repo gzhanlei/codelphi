@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { isDashboardProductPending, ProductGrid, ReleaseTimeline, type DashboardProduct } from "../components/dashboard-lists";
+import { isDashboardProductPending, ProductGrid, ReleaseTimeline, timelineDate, type DashboardProduct } from "../components/dashboard-lists";
 
 vi.mock("../components/analysis-status-refresh", async (importOriginal) => ({
   ...await importOriginal<typeof import("../components/analysis-status-refresh")>(),
@@ -58,5 +58,13 @@ describe("dashboard product readiness", () => {
   it("renders useful empty states", () => {
     expect(renderToStaticMarkup(createElement(ProductGrid, { products: [] }))).toContain("还没有接入产品");
     expect(renderToStaticMarkup(createElement(ReleaseTimeline, { releases: [] }))).toContain("完成第一次代码分析后");
+  });
+});
+
+describe("timeline dates", () => {
+  it("shows the year only for releases outside the current year", () => {
+    const now = new Date();
+    expect(timelineDate(new Date(now.getFullYear(), 0, 9))).not.toContain("2024");
+    expect(timelineDate(new Date(2024, 10, 8))).toContain("2024年");
   });
 });
