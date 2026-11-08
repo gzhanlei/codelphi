@@ -206,7 +206,7 @@ async function insertChanges(connection: PoolConnection, versionId: number, base
   }
 }
 
-export async function insertSpecVersion(connection: PoolConnection, run: RunContext, result: AnalysisResult, options: { affectedKeys?: ReadonlySet<string>; behavioralChangePaths?: ReadonlySet<string> } = {}): Promise<{ specVersionId: number; features: ReturnType<typeof mergeSpecSources> }> {
+export async function insertSpecVersion(connection: PoolConnection, run: RunContext, result: AnalysisResult, options: { affectedKeys?: ReadonlySet<string>; behavioralChangePaths?: ReadonlySet<string> } = {}): Promise<{ specVersionId: number; features: ReturnType<typeof mergeSpecSources>; collapse: SpecVersionCollapse | null }> {
   const [previous, manual, tombstones] = await Promise.all([loadPreviousSpec(connection, run), loadManualSpec(connection, run.productId), loadManualTombstones(connection, run.productId)]);
   // M9 增量模式：受影响集之外的 generated 条目原样沿用上一版（三分合并：carried 种子 < AI < manual）。
   const affectedKeys = options.affectedKeys;
@@ -215,6 +215,7 @@ export async function insertSpecVersion(connection: PoolConnection, run: RunCont
     : [];
   const features = mergeSpecSources(result.features, manual, tombstones, carried);
   const changes = diffSpec(previous === null ? null : previous.features, features, options.behavioralChangePaths ? { behavioralChangePaths: options.behavioralChangePaths } : undefined);
+  const collapse = detectSpecCollapse(previous, features);
   const [versionResult] = await connection.execute(
     "INSERT INTO spec_versions (product_id, repository_id, analysis_run_id, sha) VALUES (?, ?, ?, ?)",
     [run.productId, run.repositoryId, run.id, run.afterSha],
@@ -223,7 +224,31 @@ export async function insertSpecVersion(connection: PoolConnection, run: RunCont
   await insertFeatures(connection, versionId, features);
   await insertChanges(connection, versionId, previous === null ? null : previous.id, changes);
   // 合并后的完整 spec 一并返回：M9 影子对比必须以 carry-forward 之后的规格为对象。
-  return { specVersionId: versionId, features };
+  return { specVersionId: versionId, features, collapse };
+}
+
+/** 规格坍缩（护栏）：新版场景数较上一版骤降超过阈值。生产 v95（2026-11-08）178→83 即此形态。 */
+export interface SpecVersionCollapse {
+  previousScenarios: number;
+  currentScenarios: number;
+}
+
+export const SPEC_COLLAPSE_RATIO = 0.7;
+/** 低于该规模的新版不做坍缩判定，避免小规格的正常增删触发误报。 */
+export const SPEC_COLLAPSE_MIN_PREVIOUS = 20;
+
+function countScenarios(features: SpecFeature[]) {
+  return features.reduce((total, feature) => total + feature.scenarios.length, 0);
+}
+
+/** 坍缩纯判定，导出供测试复用；insertSpecVersion 落库前调用。 */
+export function detectSpecCollapse(previous: { features: SpecFeature[] } | null, features: SpecFeature[]): SpecVersionCollapse | null {
+  if (!previous) return null;
+  const before = countScenarios(previous.features);
+  const after = countScenarios(features);
+  if (before < SPEC_COLLAPSE_MIN_PREVIOUS) return null;
+  if (after >= before * SPEC_COLLAPSE_RATIO) return null;
+  return { previousScenarios: before, currentScenarios: after };
 }
 
 /** B：读取最新 spec 版本的功能名清单（分析前调用，供 prompt 命名连续性约束）。 */

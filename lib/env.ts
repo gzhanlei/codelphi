@@ -37,3 +37,9 @@ export function prPreviewEnabled() {
 export function incrementalShadowEnabled() {
   return process.env.INCREMENTAL_SHADOW === "true";
 }
+
+/** AI 上下文窗口预算覆盖（字节）。一次性定向重分析用：塌缩恢复需要比日常 160KB 更大的窗口。 */
+export function analysisAiContextBudgetOverride() {
+  const raw = Number(process.env.ANALYSIS_AI_CONTEXT_BUDGET_BYTES ?? "");
+  return Number.isInteger(raw) && raw > 0 ? raw : null;
+}

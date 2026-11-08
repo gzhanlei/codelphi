@@ -65,6 +65,16 @@ describe("notification rendering", () => {
     expect(text).toContain("证据: https://github.com/gzhanlei/radar/blob/abc/lib/auth.ts#L20");
   });
 
+  it("prepends a collapse warning when the guardrail detects a scenario collapse", () => {
+    const text = renderNotificationText("Radar", "https://codelphi.com/commit/abc", changes, [[], []], { previousScenarios: 178, currentScenarios: 83 });
+    expect(text).toContain("⚠️ 疑似规格坍缩：场景数 178 → 83");
+  });
+
+  it("omits the collapse warning when no collapse is passed", () => {
+    const text = renderNotificationText("Radar", "https://codelphi.com/commit/abc", changes, [[], []], null);
+    expect(text).not.toContain("坍缩");
+  });
+
   it("returns null when there is nothing to notify about", () => {
     expect(renderNotificationText("Radar", "https://codelphi.com/commit/abc", [], [])).toBeNull();
   });
@@ -126,10 +136,11 @@ describe("analysis notification delivery", () => {
       if (sql.includes("FROM spec_changes")) return [changes];
       return [{ affectedRows: 1 }];
     });
-    await deliverAnalysisNotifications({ run, releaseUrl: "https://codelphi.com/commit/abc", specVersionId: 44 }, { execute, post });
+    await deliverAnalysisNotifications({ run, releaseUrl: "https://codelphi.com/commit/abc", specVersionId: 44, collapse: { previousScenarios: 178, currentScenarios: 83 } }, { execute, post });
     const payload = JSON.parse(post.mock.calls[0][1]);
     expect(payload.product).toEqual({ slug: "radar", name: "Radar" });
     expect(payload.releaseUrl).toBe("https://codelphi.com/commit/abc");
+    expect(payload.collapse).toEqual({ previousScenarios: 178, currentScenarios: 83 });
     expect(payload.changes).toHaveLength(2);
     expect(payload.changes[0]).toMatchObject({ kind: "changed", featureName: "统一登录", scenarioReference: "HP-1" });
     expect(payload.changes[0].evidenceUrls).toEqual(["https://github.com/gzhanlei/radar/blob/abc1234def5678/lib/auth.ts#L20"]);

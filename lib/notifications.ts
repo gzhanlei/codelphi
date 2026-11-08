@@ -88,9 +88,12 @@ function changeEvidence(change: NotificationChange): Evidence[] {
 }
 
 /** 通知消息与发布页 behavior-change-item 同构：功能/场景 + 变化类型 + 摘要 + 证据链接。 */
-export function renderNotificationText(productName: string, releaseUrl: string, changes: readonly NotificationChange[], evidenceUrls: ReadonlyArray<ReadonlyArray<string | null>>): string | null {
+export function renderNotificationText(productName: string, releaseUrl: string, changes: readonly NotificationChange[], evidenceUrls: ReadonlyArray<ReadonlyArray<string | null>>, collapse?: { previousScenarios: number; currentScenarios: number } | null): string | null {
   if (changes.length === 0) return null;
   const lines = [`【CoDelphi】${productName} 检测到 ${changes.length} 条规格行为变化`, releaseUrl];
+  if (collapse) {
+    lines.push(`⚠️ 疑似规格坍缩：场景数 ${collapse.previousScenarios} → ${collapse.currentScenarios}（降幅超 30%）。请核实发布页变化明细，必要时回溯上一版规格。`);
+  }
   changes.forEach((change, index) => {
     const subject = change.entityType === "scenario" && change.scenarioReference
       ? `${change.featureName} · ${change.scenarioReference}`
@@ -106,6 +109,8 @@ export interface AnalysisNotificationInput {
   run: Pick<RunContext, "id" | "productId" | "productName" | "productSlug" | "owner" | "name" | "afterSha">;
   releaseUrl: string;
   specVersionId: number | null;
+  /** 坍缩护栏检测结果（lib/spec-versions detectSpecCollapse）；非空时通知正文与 payload 带警告。 */
+  collapse?: { previousScenarios: number; currentScenarios: number } | null;
 }
 
 export interface NotificationDependencies {
@@ -159,7 +164,7 @@ export async function deliverAnalysisNotifications(input: AnalysisNotificationIn
   const evidenceUrls = changes.map((change) =>
     changeEvidence(change).slice(0, maxEvidenceLinksPerChange).map((item) => evidenceUrl(run, run.afterSha, item)),
   );
-  const text = renderNotificationText(run.productName, releaseUrl, changes, evidenceUrls);
+  const text = renderNotificationText(run.productName, releaseUrl, changes, evidenceUrls, input.collapse);
   if (text === null) return;
 
   const secret = notificationSecret();
@@ -167,6 +172,7 @@ export async function deliverAnalysisNotifications(input: AnalysisNotificationIn
     product: { slug: run.productSlug, name: run.productName },
     releaseUrl,
     specVersionId,
+    collapse: input.collapse ?? null,
     changes: changes.map((change, index) => ({
       kind: change.kind,
       entityType: change.entityType,
@@ -198,7 +204,7 @@ export async function deliverAnalysisNotifications(input: AnalysisNotificationIn
     [run.productId],
   ) as [Array<{ userId: number; email: string }>, unknown];
   const sendEmail = dependencies.sendEmail ?? sendEmailNotification;
-  const subject = `【CoDelphi】${run.productName} 检测到 ${changes.length} 条规格行为变化`;
+  const subject = `【CoDelphi】${run.productName} 检测到 ${changes.length} 条规格行为变化${input.collapse ? "（⚠️ 疑似规格坍缩）" : ""}`;
   for (const pref of prefRows) {
     try {
       await sendEmail(pref.email, subject, text);

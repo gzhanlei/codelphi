@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { analysisAiContextBudgetOverride } from "./env";
 import { createRemoteSourceIndex, type OpenedRemoteSourceRevision, type RemoteSourceBudgets, type SourceRevisionRef, type SourceScopeRoot } from "./remote-source-index";
 import { createSlicePlanner, type SliceBudgets, type SlicePlanner, type SourceSlice } from "./slice-planner";
 import type { CodeHostingProvider, RepositoryAccess, SourceFile } from "./code-hosting/types";
@@ -30,7 +31,7 @@ export const analysisSliceBudgets: SliceBudgets = {
   maxSelectedFiles: 80,
   maxSelectedLineRanges: 600,
   maxPlannerContentBytes: 160_000,
-  maxAiContextSourceBytes: 160_000,
+  maxAiContextSourceBytes: analysisAiContextBudgetOverride() ?? 160_000,
   maxAiReadCalls: 20,
   maxComponents: 12,
   maxConnections: 24,

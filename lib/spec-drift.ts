@@ -2,7 +2,10 @@ import type { PoolConnection } from "mysql2/promise";
 import { specFeatureKey } from "./spec-diff";
 
 /**
- * 规格漂移标记：本次分析的行为变化触及了哪些功能/场景，其 manual 内容可能已过时。
+ * 规格漂移标记：本次分析的行为变化触及了哪些条目，其 manual 内容可能已过时。
+ * 打点粒度 = 变化粒度：feature 级变化（身份/摘要）打点 manual 功能；scenario 级变化
+ * 只打点 manual 场景——generated 场景的提取抖动不牵连同功能的 manual 条目
+ * （generated 内容由 AI 维护、下轮自愈，与人工规格是否过时无关）。
  * 只打元数据（stale_since/stale_change_id），不改变 source，不参与覆盖判定。
  * 必须在 saveResult 事务内 insertSpecVersion 之后调用。
  */
@@ -28,7 +31,7 @@ export async function markSpecDrift(connection: PoolConnection, productId: numbe
   for (const change of changes) {
     const feature = featureIdByKey.get(change.featureKey);
     if (!feature) continue;
-    if (feature.source === "manual") {
+    if (feature.source === "manual" && change.entityType === "feature") {
       await connection.execute(
         "UPDATE features SET stale_since = CURRENT_TIMESTAMP(3), stale_change_id = ? WHERE id = ? AND source = 'manual'",
         [change.id, feature.id],

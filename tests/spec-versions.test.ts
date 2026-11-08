@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { PoolConnection } from "mysql2/promise";
 import type { AnalysisResult } from "../lib/ai";
 import type { RunContext } from "../lib/analysis";
-import { featureParentKey, insertSpecVersion, loadPreviousFeatureNames } from "../lib/spec-versions";
+import { detectSpecCollapse, featureParentKey, insertSpecVersion, loadPreviousFeatureNames } from "../lib/spec-versions";
 
 const run: RunContext = { id: 8, repositoryId: 3, productId: 4, owner: "gzhanlei", name: "radar", beforeSha: "a", afterSha: "b", connectionId: null, provider: "github", organizationId: 1, productSlug: "radar", productName: "Radar" };
 const scenario = { reference: "HP-1", context: "Visitor", action: "Signs in", outcome: "Dashboard", category: "happy" as const, evidence: [] };
@@ -107,6 +107,31 @@ describe("spec version persistence", () => {
     expect(db.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO spec_features"), expect.arrayContaining(["Authentication"]));
     expect(db.execute).not.toHaveBeenCalledWith(expect.stringContaining("INSERT INTO spec_features"), expect.arrayContaining(["New feature"]));
     expect(db.execute).not.toHaveBeenCalledWith(expect.stringContaining("INSERT INTO spec_scenarios"), expect.arrayContaining(["HP-1"]));
+  });
+
+  it("returns collapse: null for ordinary versions", async () => {
+    const db = connection([{ id: 11 }]);
+    const { collapse } = await insertSpecVersion(db, run, result);
+    expect(collapse).toBeNull();
+  });
+});
+
+describe("detectSpecCollapse (护栏)", () => {
+  const scenario = { reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy" as const, evidence: [] };
+  const featuresWithScenarios = (count: number) => [{ name: "功能", summary: "s", scenarios: Array.from({ length: count }, () => ({ ...scenario })) }];
+
+  it("flags a version whose scenario count drops past the threshold (生产 v95 形态：178→83)", () => {
+    expect(detectSpecCollapse({ features: featuresWithScenarios(178) }, featuresWithScenarios(83))).toEqual({ previousScenarios: 178, currentScenarios: 83 });
+  });
+
+  it("passes versions within the threshold", () => {
+    expect(detectSpecCollapse({ features: featuresWithScenarios(100) }, featuresWithScenarios(70))).toBeNull();
+    expect(detectSpecCollapse({ features: featuresWithScenarios(100) }, featuresWithScenarios(120))).toBeNull();
+  });
+
+  it("ignores small specs and first versions", () => {
+    expect(detectSpecCollapse({ features: featuresWithScenarios(19) }, featuresWithScenarios(0))).toBeNull();
+    expect(detectSpecCollapse(null, featuresWithScenarios(0))).toBeNull();
   });
 });
 

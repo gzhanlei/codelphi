@@ -46,6 +46,23 @@ describe("markSpecDrift", () => {
     expect(scenarioUpdate?.[1]).toEqual([102, 11]);
   });
 
+  it("does not stale a manual feature from scenario-level churn on generated scenarios", async () => {
+    // 生产事故 2026-11-08：manual 功能「产品总览与产品页」的场景全为 generated，
+    // AI 提取抖动（场景增删）反复打点人工条目，用户核实 6 次仍复现。
+    // 打点粒度 = 变化粒度：scenario 级变化只打 manual 场景，不牵连 manual 功能。
+    const { connection, execute } = connectionWith({
+      "FROM spec_changes": [{ id: 104, entityType: "scenario", featureKey: "登录", scenarioReference: "HP-1" }],
+      "FROM features WHERE product_id": features,
+      "JOIN features f": scenarios,
+    });
+    await markSpecDrift(connection, 7, 900);
+    const calls = execute.mock.calls as Array<[string, unknown[]]>;
+    expect(calls.some(([sql]) => sql.includes("UPDATE features SET stale_since"))).toBe(false);
+    // generated 场景 HP-1（id 12）也不打点
+    const scenarioUpdate = calls.find(([sql]) => sql.includes("UPDATE scenarios SET stale_since"));
+    expect(scenarioUpdate).toBeUndefined();
+  });
+
   it("skips generated rows and unknown feature keys without writing", async () => {
     const { connection, execute } = connectionWith({
       "FROM spec_changes": [{ id: 103, entityType: "feature", featureKey: "不存在的功能", scenarioReference: "" }],

@@ -158,7 +158,7 @@ async function saveResult(run: RunContext, result: AnalysisResult, change: Chang
       [result.product.description, JSON.stringify(result.product.evidence), run.productId],
     );
     const behavioralPaths = behavioralChangePaths(change.files);
-    const { specVersionId, features: mergedFeatures } = await insertSpecVersion(connection, run, result, { ...(affectedKeys ? { affectedKeys } : {}), behavioralChangePaths: behavioralPaths });
+    const { specVersionId, features: mergedFeatures, collapse } = await insertSpecVersion(connection, run, result, { ...(affectedKeys ? { affectedKeys } : {}), behavioralChangePaths: behavioralPaths });
     await rebuildSpecFileIndex(connection, run.repositoryId, specVersionId);
     await markSpecDrift(connection, run.productId, specVersionId);
     // P0(I1):下线基准必须是 carry-forward 合并后的完整规格——用 AI 原始输出会让
@@ -167,7 +167,7 @@ async function saveResult(run: RunContext, result: AnalysisResult, change: Chang
     await upsertRelease(connection, run, result, change, specVersionId);
     await connection.execute("UPDATE analysis_runs SET status = 'succeeded', finished_at = CURRENT_TIMESTAMP(3) WHERE id = ?", [run.id]);
     await connection.commit();
-    return { specVersionId, features: mergedFeatures };
+    return { specVersionId, features: mergedFeatures, collapse };
   } catch (error) {
     await connection.rollback();
     throw error;
@@ -288,6 +288,16 @@ async function runAnalysisBody(run: RunContext) {
     if (resolved === "incremental") {
       affectedKeys = affected.keys;
       affectedFeatureNames = affected.names;
+    } else if (previousFeatureNames.length > 0) {
+      // RC2（生产 run 125，2026-11-08）：全量回退不再裸跑——按行为变更集（patch-scan）
+      // 重新算受影响面，证据文件本次无行为性行变更的既有功能原样沿用，只重提取行为性
+      // 触及的功能。宽 diff 下 160KB 窗口丢场景曾致 v95 规格坍缩（178→83）。
+      // 行为集为空或未命中任何既有功能时保持全量：可能是索引未覆盖的新功能，需 AI 看新代码。
+      const behavioral = await loadAffectedFeatureKeys(run.repositoryId, [...behavioralChangePaths(change.files)], executeWrapper);
+      if (behavioral.names.length > 0) {
+        affectedKeys = behavioral.keys;
+        affectedFeatureNames = behavioral.names;
+      }
     }
   }
   const result = await analyzeWithAI(sources, change, {
@@ -301,7 +311,11 @@ async function runAnalysisBody(run: RunContext) {
     ...remote.slice.files.map((file) => file.path),
     ...change.files.map((file) => file.path),
   ]));
-  const { specVersionId, features: mergedFeatures } = await saveResult(run, result, change, affectedKeys);
+  const { specVersionId, features: mergedFeatures, collapse } = await saveResult(run, result, change, affectedKeys);
+  // 坍缩护栏：新版场景数骤降只告警不阻断（版本 append-only，可回溯）；通知带警告供人工核实。
+  if (collapse) {
+    console.error("[spec] suspected spec collapse", { runId: run.id, specVersionId, ...collapse });
+  }
   // 结算捕获（契约 §9/§6.4）：主事务已提交，捕获失败不得改写 run 分析状态（D15）——
   // 只告警，sweep 扫描二会按 run 级结算请求缺失恢复结算。
   try {
@@ -324,7 +338,7 @@ async function runAnalysisBody(run: RunContext) {
   }
   // M1 通知分发：分析事务提交后 best-effort 投递；失败只记日志，不影响分析结果。
   try {
-    await deliverAnalysisNotifications({ run, releaseUrl: change.url, specVersionId });
+    await deliverAnalysisNotifications({ run, releaseUrl: change.url, specVersionId, collapse });
   } catch (error) {
     console.error("[notifications] delivery failed", error);
   }

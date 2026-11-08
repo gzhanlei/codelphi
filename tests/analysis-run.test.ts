@@ -3,6 +3,7 @@ import { queueAnalysis, runAnalysis } from "../lib/analysis";
 import { analyzeWithAI } from "../lib/ai";
 import { getRemoteAnalysisSources } from "../lib/remote-analysis";
 import { generateRepositoryArchitectureVersion } from "../lib/architecture-version";
+import { insertSpecVersion } from "../lib/spec-versions";
 import { enqueueRunWithReservation, hasActiveReservation, heartbeat, capture, release, reserveForNewRun } from "../lib/billing/core";
 
 const execute = vi.fn();
@@ -220,6 +221,70 @@ describe("analysis orchestration", () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+
+  it("falls back to behavioral-set carry-forward when incremental resolution rejects (RC2)", async () => {
+    // 生产 run 125（2026-11-08）：宽 diff 受影响占比超 60% 回退全量，160KB 窗口丢场景致规格坍缩 178→83。
+    // 回退时按行为变更集（patch-scan）重算受影响面：证据文件无行为性行变更的功能原样沿用。
+    runRows = [{ ...run, analyzeMode: "incremental" }];
+    execute.mockImplementation(async (sql: string, parameters: unknown[] = []) => {
+      if (sql.includes("JOIN repositories repo")) return [runRows];
+      if (sql.includes("source_roots")) return [[]];
+      if (sql.includes("SELECT id FROM analysis_runs WHERE repository_id = ? AND after_sha = ?")) return [existingRunRows];
+      if (sql.includes("INSERT INTO analysis_runs")) return [{ insertId: 55 }];
+      if (sql.includes("SELECT sf.name FROM spec_features")) return [[{ name: "统一登录" }], [{ name: "支付" }], [{ name: "规格导出" }]];
+      if (sql.includes("FROM spec_file_index i")) {
+        // 第一次调用 = 全部 diff 文件（含 docs/tests）→ 命中 2/3 功能，超 60% 阈值被拒；
+        // 第二次调用 = 行为变更集（仅 lib/auth.ts）→ 只命中统一登录。
+        const allPaths = (parameters as unknown[]).includes("docs/readme.md");
+        return [allPaths
+          ? [{ stableKey: "统一登录", name: "统一登录" }, { stableKey: "支付", name: "支付" }]
+          : [{ stableKey: "统一登录", name: "统一登录" }]];
+      }
+      return [{}];
+    });
+    adapter.getChangeContext.mockResolvedValue({
+      message: "change",
+      committedAt: "2026-11-01T00:00:00Z",
+      url: "",
+      files: [
+        { path: "lib/auth.ts", status: "modified", patch: "+ const token = sign(payload);" },
+        { path: "docs/readme.md", status: "modified", patch: "+ updated docs" },
+        { path: "tests/auth.test.ts", status: "modified", patch: "+ it('works')" },
+      ],
+    });
+    await runAnalysis(8);
+    // AI 只重提取行为性触及的功能
+    const scopeCall = vi.mocked(analyzeWithAI).mock.calls[0][2] as { affectedFeatureNames?: string[] };
+    expect(scopeCall.affectedFeatureNames).toEqual(["统一登录"]);
+    // 落库按行为受影响集 carry-forward
+    const saved = vi.mocked(insertSpecVersion).mock.calls[0][3] as { affectedKeys?: Set<string> };
+    expect(saved.affectedKeys).toEqual(new Set(["统一登录"]));
+    expect(connection.commit).toHaveBeenCalledOnce();
+  });
+
+  it("keeps true full mode when the behavioral set maps to no known feature (likely new features)", async () => {
+    runRows = [{ ...run, analyzeMode: "incremental" }];
+    execute.mockImplementation(async (sql: string, parameters: unknown[] = []) => {
+      if (sql.includes("JOIN repositories repo")) return [runRows];
+      if (sql.includes("source_roots")) return [[]];
+      if (sql.includes("SELECT id FROM analysis_runs WHERE repository_id = ? AND after_sha = ?")) return [existingRunRows];
+      if (sql.includes("INSERT INTO analysis_runs")) return [{ insertId: 55 }];
+      if (sql.includes("SELECT sf.name FROM spec_features")) return [[{ name: "统一登录" }]];
+      if (sql.includes("FROM spec_file_index i")) return [[]];
+      return [{}];
+    });
+    adapter.getChangeContext.mockResolvedValue({
+      message: "change",
+      committedAt: "2026-11-01T00:00:00Z",
+      url: "",
+      files: [{ path: "lib/new-module.ts", status: "added", patch: "+ export const fresh = true;" }],
+    });
+    await runAnalysis(8);
+    const scopeCall = vi.mocked(analyzeWithAI).mock.calls[0][2] as { affectedFeatureNames?: string[] };
+    expect(scopeCall.affectedFeatureNames).toBeUndefined();
+    const saved = vi.mocked(insertSpecVersion).mock.calls[0][3] as { affectedKeys?: Set<string> };
+    expect(saved.affectedKeys).toBeUndefined();
   });
 
   it("records a readable failure when loading the run fails", async () => {
