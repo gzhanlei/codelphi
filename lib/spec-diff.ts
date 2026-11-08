@@ -32,12 +32,69 @@ export function specFeatureKey(name: string) {
   return name.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+/** 规格文本归一化：NFKC（全半角/标点宽度）+ 空白折叠。仅用于变化判定，不改写落库文本。 */
+export function normalizeSpecText(text: string) {
+  return text.normalize("NFKC").replace(/\s+/g, " ").trim();
+}
+
+/** 比较用内容串：去掉空白与标点，只留承载语义的字符（比较用途，不影响落库）。 */
+function specContent(text: string) {
+  return normalizeSpecText(text).replace(/[\p{P}\p{S}\s]/gu, "");
+}
+
+function tokenSignature(text: string) {
+  return [...text.toLowerCase().matchAll(/[a-z0-9]+/g)].map((match) => match[0]).sort().join(",");
+}
+
+function negationCount(text: string) {
+  return (text.match(/[不无没未非莫勿]/g) ?? []).length;
+}
+
+function editDistance(left: string, right: string) {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (const [leftIndex, leftChar] of [...left].entries()) {
+    let diagonal = previous[0];
+    previous[0] = leftIndex + 1;
+    for (const [rightIndex, rightChar] of [...right].entries()) {
+      const above = previous[rightIndex + 1];
+      previous[rightIndex + 1] = Math.min(above + 1, previous[rightIndex] + 1, diagonal + (leftChar === rightChar ? 0 : 1));
+      diagonal = above;
+    }
+  }
+  return previous[right.length];
+}
+
+/**
+ * 规格文本等价判定：全量重建时 LLM 的措辞漂移（同义改写、标点/空白/全半角差异）不应被计为行为变化。
+ * 保守设计（同 spec-rename 的 C-lite 哲学），三重守护，任一不过即视为行为变化：
+ * 1. 数字与英文词 token 必须完全一致——「返回 404」≠「返回 400」、「邀请 A」≠「邀请 B」；
+ * 2. 否定词（不/无/没/未/非…）计数必须一致——「可以重试」≠「不可以重试」；
+ * 3. 长度归一化编辑距离：短文本（<10 字）阈值 0.85、其余 0.8——「返回列表」→「返回空列表」
+ *    （0.8 < 0.85）不被折叠，而「…当前产品」→「…该产品」（0.83，12 字）被折叠。
+ * 真实中文行为变化通常替换关键字符（成功→失败 0.5、允许→禁止 0.33），远低于阈值。
+ */
+export function specTextEquivalent(before: string, after: string) {
+  const left = specContent(before);
+  const right = specContent(after);
+  if (left === right) return true;
+  if (left === "" || right === "") return false;
+  if (tokenSignature(left) !== tokenSignature(right)) return false;
+  if (negationCount(left) !== negationCount(right)) return false;
+  const distance = editDistance(left, right);
+  const longest = Math.max(left.length, right.length);
+  const similarity = 1 - distance / longest;
+  return similarity >= (longest < 10 ? 0.85 : 0.8);
+}
+
 function featureBehaviorChanged(before: SpecFeature, after: SpecFeature) {
-  return before.name !== after.name || before.summary !== after.summary || before.parentKey !== after.parentKey;
+  return before.name !== after.name || before.parentKey !== after.parentKey || !specTextEquivalent(before.summary, after.summary);
 }
 
 function scenarioBehaviorChanged(before: SpecScenario, after: SpecScenario) {
-  return before.context !== after.context || before.action !== after.action || before.outcome !== after.outcome || before.category !== after.category;
+  return before.category !== after.category
+    || !specTextEquivalent(before.context, after.context)
+    || !specTextEquivalent(before.action, after.action)
+    || !specTextEquivalent(before.outcome, after.outcome);
 }
 
 function scenarioMap(feature: SpecFeature) {
@@ -55,6 +112,13 @@ function changeSummary(kind: SpecChange["kind"], entityType: SpecChange["entityT
 
 function featureChange(kind: "added" | "removed" | "changed", feature: SpecFeature, before: SpecFeature | null, after: SpecFeature | null): SpecChange {
   return { kind, entityType: "feature", featureName: feature.name, scenarioReference: null, summary: changeSummary(kind, "feature", feature.name, null), before, after };
+}
+
+function scenarioBehaviorEqual(previous: SpecScenario, current: SpecScenario) {
+  return previous.category === current.category
+    && specTextEquivalent(previous.context, current.context)
+    && specTextEquivalent(previous.action, current.action)
+    && specTextEquivalent(previous.outcome, current.outcome);
 }
 
 function scenarioChanges(before: SpecFeature, after: SpecFeature): SpecChange[] {
@@ -77,7 +141,22 @@ function scenarioChanges(before: SpecFeature, after: SpecFeature): SpecChange[] 
       after: current === undefined ? null : current,
     });
   }
-  return changes;
+
+  // 边界抖动折叠：同功能内 removed↔added 且行为字段逐项等价 → 同一行为换了编号，不产生变化行。
+  const droppedIndexes = new Set<number>();
+  for (const [removedIndex, removed] of changes.entries()) {
+    if (removed.kind !== "removed") continue;
+    for (const [addedIndex, added] of changes.entries()) {
+      if (added.kind !== "added" || droppedIndexes.has(addedIndex)) continue;
+      const previous = removed.before as SpecScenario;
+      const current = added.after as SpecScenario;
+      if (!scenarioBehaviorEqual(previous, current)) continue;
+      droppedIndexes.add(removedIndex);
+      droppedIndexes.add(addedIndex);
+      break;
+    }
+  }
+  return changes.filter((_, index) => !droppedIndexes.has(index));
 }
 
 function diffFeature(previous: SpecFeature | undefined, current: SpecFeature | undefined): SpecChange[] {

@@ -110,6 +110,47 @@ export function featureContinuitySection(previousFeatureNames?: string[]) {
   ].join("\n");
 }
 
+export interface SpecAnchorScenario {
+  reference: string;
+  context: string;
+  action: string;
+  outcome: string;
+  category: string;
+}
+
+export interface SpecAnchorFeature {
+  name: string;
+  summary: string;
+  scenarios: SpecAnchorScenario[];
+}
+
+/** P0 措辞锚定：上一版规格的场景级文本，未变行为要求逐字沿用，消除全量重建的改写噪音。 */
+export function specAnchoringSection(previousSpec?: SpecAnchorFeature[], maxChars = 24_000) {
+  const features = (previousSpec ?? []).filter((feature) => feature.name.trim() && feature.scenarios.length > 0);
+  if (features.length === 0) return null;
+  const lines: string[] = ["【上一版规格全文——行为未变的条目必须逐字沿用】"];
+  let used = 0;
+  let truncated = false;
+  for (const feature of features) {
+    const head = `功能：${feature.name}（简介：${feature.summary}）`;
+    const scenarioLines = feature.scenarios.map((scenario) =>
+      `- ${scenario.reference}｜${scenario.category}｜情境：${scenario.context}｜操作：${scenario.action}｜结果：${scenario.outcome}`,
+    );
+    const block = [head, ...scenarioLines].join("\n");
+    if (used + block.length > maxChars) {
+      truncated = true;
+      break;
+    }
+    lines.push(block);
+    used += block.length + 1;
+  }
+  return [
+    ...lines,
+    ...(truncated ? ["（上一版规格过长已截断，未列出的功能按原命名约束处理）"] : []),
+    "逐字沿用规则：行为未变的场景必须原样复用上一版的编号与情境/操作/结果文字，同义改写、调整语序、增删标点都算违规；场景文字只能因本次代码确实改变了行为而修改，只能因行为确属新增/消失而增加/删除。",
+  ].join("\n");
+}
+
 /** M9 增量模式：约束 AI 只输出被触及的功能，其余由系统沿用上一版。 */
 export function incrementalScopeSection(affectedFeatureNames?: string[]) {
   if (!affectedFeatureNames || affectedFeatureNames.length === 0) return null;
@@ -123,8 +164,9 @@ export function incrementalScopeSection(affectedFeatureNames?: string[]) {
   ].join("\n");
 }
 
-export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext, context: { previousFeatureNames?: string[]; affectedFeatureNames?: string[] } = {}): Promise<AnalysisResult> {
-  const continuity = featureContinuitySection(context.previousFeatureNames);
+export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext, context: { previousFeatureNames?: string[]; previousSpec?: SpecAnchorFeature[]; affectedFeatureNames?: string[] } = {}): Promise<AnalysisResult> {
+  const anchor = specAnchoringSection(context.previousSpec);
+  const continuity = anchor ? null : featureContinuitySection(context.previousFeatureNames);
   const scope = incrementalScopeSection(context.affectedFeatureNames);
   const prompt = [
     "你在维护一个产品知识库。仅根据给定代码和 diff 输出事实，不要补充猜测。",
@@ -136,6 +178,7 @@ export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext
     "每个场景、变化和产品简介必须给 evidence；path 必须来自输入文件，startLine 使用输入的行号。没有用户变化的发布只生成 reviewed 项。",
     "只返回 JSON，不要 Markdown。结构：",
     '{"product":{"description":"","evidence":[{"path":"","startLine":1}]},"release":{"title":"","summary":""},"changes":[{"featureName":"","kind":"added|changed|removed|fixed|reviewed","description":"","userImpact":"","evidence":[{"path":"","startLine":1}]}],"features":[{"name":"","summary":"","scenarios":[{"reference":"HP-1","context":"","action":"","outcome":"","category":"happy","evidence":[{"path":"","startLine":1}]}]}]}',
+    ...(anchor ? [anchor] : []),
     ...(continuity ? [continuity] : []),
     ...(scope ? [scope] : []),
     `\n【本次提交】\n${change.message}\n\n【文件变化】\n${JSON.stringify(change.files)}`,

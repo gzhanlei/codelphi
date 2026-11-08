@@ -4,12 +4,13 @@ import { analyzeWithAI, type AnalysisResult } from "./ai";
 import { resolveAnalysisTarget, type ChangeContext, type CodeHostingProvider } from "./code-hosting";
 import { analysisSliceBudgets, getRemoteAnalysisSources, parseSourceRoots } from "./remote-analysis";
 import { createSlicePlanner } from "./slice-planner";
-import { insertSpecVersion, loadPreviousFeatureNames } from "./spec-versions";
+import { insertSpecVersion, loadPreviousFeatureNames, loadPreviousSpecText } from "./spec-versions";
 import { loadAffectedFeatureKeys, rebuildSpecFileIndex } from "./spec-file-index";
 import { resolveAnalysisMode } from "./incremental";
 import { compareIncrementalShadow } from "./incremental-shadow";
 import { incrementalShadowEnabled } from "./env";
 import type { SpecFeature } from "./spec-diff";
+import type { SpecAnchorFeature } from "./spec-versions";
 import { markSpecDrift } from "./spec-drift";
 import { deliverAnalysisNotifications } from "./notifications";
 import { ensureRegressionTasks } from "./regression-tasks";
@@ -234,6 +235,14 @@ async function performAnalysis(run: RunContext) {
   const sources = remote.sources;
   const executeWrapper = (statement: string, parameters: Array<string | number | null>) => getDb().execute(statement, parameters);
   const previousFeatureNames = await loadPreviousFeatureNames(run.repositoryId, executeWrapper);
+  // P0 措辞锚定：把上一版场景全文喂给 prompt，未变行为逐字沿用；加载失败降级为仅命名约束，不阻塞分析。
+  let previousSpecText: SpecAnchorFeature[];
+  try {
+    previousSpecText = await loadPreviousSpecText(run.repositoryId, executeWrapper);
+  } catch (error) {
+    console.error("[analysis] load previous spec text failed; anchoring disabled for this run", error);
+    previousSpecText = [];
+  }
   // M9：增量模式下计算受影响集并做保守放行判定；任一条件不满足即回退全量。
   let affectedKeys: ReadonlySet<string> | null = null;
   let affectedFeatureNames: string[] | undefined;
@@ -251,7 +260,7 @@ async function performAnalysis(run: RunContext) {
       affectedFeatureNames = affected.names;
     }
   }
-  const result = await analyzeWithAI(sources, change, { previousFeatureNames, affectedFeatureNames });
+  const result = await analyzeWithAI(sources, change, { previousFeatureNames, previousSpec: previousSpecText, affectedFeatureNames });
   assertEvidence(result, new Set([
     ...remote.slice.files.map((file) => file.path),
     ...change.files.map((file) => file.path),

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { analyzeWithAI, capEvidence, featureContinuitySection, incrementalScopeSection, parseAnalysisContent } from "../lib/ai";
+import { analyzeWithAI, capEvidence, featureContinuitySection, incrementalScopeSection, parseAnalysisContent, specAnchoringSection } from "../lib/ai";
 
 const result = {
   product: { description: "统一认证与产品知识中心。", evidence: [{ path: "app/auth/login/route.ts", startLine: 1 }] },
@@ -115,6 +115,65 @@ describe("feature naming continuity", () => {
     await analyzeWithAI([{ path: "lib/a.ts", content: "1: x" }], { message: "m", files: [] });
     expect(bodies[0].messages[1].content).not.toContain("【上一版规格的功能清单");
     expect(bodies[0].messages[1].content).not.toContain("【增量分析模式】");
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("spec wording anchoring (P0 noise control)", () => {
+  const anchored = [{
+    name: "统一登录",
+    summary: "使用 Chandler OAuth",
+    scenarios: [
+      { reference: "HP-1", context: "未登录用户", action: "点击登录", outcome: "进入 Chandler 授权", category: "happy" },
+      { reference: "ER-1", context: "state 校验失败", action: "回调处理", outcome: "跳转登录错误页", category: "error" },
+    ],
+  }];
+
+  it("renders the previous spec text with verbatim-reuse rules", () => {
+    const section = specAnchoringSection(anchored);
+    expect(section).toContain("【上一版规格全文——行为未变的条目必须逐字沿用】");
+    expect(section).toContain("功能：统一登录（简介：使用 Chandler OAuth）");
+    expect(section).toContain("- HP-1｜happy｜情境：未登录用户｜操作：点击登录｜结果：进入 Chandler 授权");
+    expect(section).toContain("同义改写、调整语序、增删标点都算违规");
+  });
+
+  it("returns null without usable previous spec content", () => {
+    expect(specAnchoringSection(undefined)).toBeNull();
+    expect(specAnchoringSection([])).toBeNull();
+    expect(specAnchoringSection([{ name: "空功能", summary: "s", scenarios: [] }])).toBeNull();
+  });
+
+  it("truncates oversized spec text within the character budget", () => {
+    const huge = Array.from({ length: 400 }, (_, index) => ({
+      name: `功能${index}`,
+      summary: "s",
+      scenarios: Array.from({ length: 5 }, (_, scenarioIndex) => ({
+        reference: `HP-${scenarioIndex + 1}`,
+        context: "很长的情境描述".repeat(30),
+        action: "很长的操作描述".repeat(30),
+        outcome: "很长的结果描述".repeat(30),
+        category: "happy",
+      })),
+    }));
+    const section = specAnchoringSection(huge, 24_000)!;
+    expect(section.length).toBeLessThan(30_000);
+    expect(section).toContain("已截断");
+    expect(section).toContain("逐字沿用规则");
+  });
+
+  it("sends the anchoring section instead of the names-only continuity section", async () => {
+    vi.stubEnv("AI_API_KEY", "key");
+    vi.stubEnv("AI_MODEL", "test-model");
+    const bodies: Array<{ messages: Array<{ role: string; content: string }> }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      bodies.push(JSON.parse(String(init.body)));
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(result) } }] }), { status: 200 });
+    }));
+    await analyzeWithAI([{ path: "lib/a.ts", content: "1: x" }], { message: "m", files: [] }, { previousFeatureNames: ["登录"], previousSpec: anchored });
+    const userMessage = bodies[0].messages.find((message) => message.role === "user")?.content ?? "";
+    expect(userMessage).toContain("【上一版规格全文——行为未变的条目必须逐字沿用】");
+    expect(userMessage).toContain("- HP-1｜happy｜情境：未登录用户");
+    expect(userMessage).not.toContain("【上一版规格的功能清单");
     vi.unstubAllGlobals();
   });
 });

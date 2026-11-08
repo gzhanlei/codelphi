@@ -1,5 +1,5 @@
 import type { PoolConnection } from "mysql2/promise";
-import type { AnalysisResult } from "./ai";
+import type { AnalysisResult, SpecAnchorFeature } from "./ai";
 import type { RunContext } from "./analysis";
 import { defaultExecute, type Execute } from "./db";
 import { evidenceItems } from "./evidence";
@@ -190,4 +190,43 @@ export async function loadPreviousFeatureNames(repositoryId: number, execute: Ex
   const payload = Array.isArray(result) ? result[0] : [];
   const rows = (Array.isArray(payload) ? payload : []) as Array<{ name: string }>;
   return rows.map((row) => row.name);
+}
+
+export type { SpecAnchorFeature };
+
+/** P0 措辞锚定：读取最新 spec 版本的场景级全文（分析前调用，未变行为要求 AI 逐字沿用）。加载失败由调用方降级处理。 */
+export async function loadPreviousSpecText(repositoryId: number, execute: Execute = defaultExecute): Promise<SpecAnchorFeature[]> {
+  const versionResult = await execute(
+    "SELECT id FROM spec_versions WHERE repository_id = ? ORDER BY id DESC LIMIT 1",
+    [repositoryId],
+  );
+  const versionPayload = Array.isArray(versionResult) ? versionResult[0] : [];
+  const version = (Array.isArray(versionPayload) ? versionPayload : [])[0] as { id: number } | undefined;
+  if (!version) return [];
+
+  const featureResult = await execute(
+    "SELECT id, name, summary FROM spec_features WHERE spec_version_id = ? ORDER BY position",
+    [version.id],
+  );
+  const featurePayload = Array.isArray(featureResult) ? featureResult[0] : [];
+  const featureRows = (Array.isArray(featurePayload) ? featurePayload : []) as Array<{ id: number; name: string; summary: string }>;
+  if (featureRows.length === 0) return [];
+
+  const ids = featureRows.map((feature) => feature.id);
+  const placeholders = ids.map(() => "?").join(",");
+  const scenarioResult = await execute(
+    `SELECT spec_feature_id AS featureId, reference, context, action, outcome, category
+     FROM spec_scenarios WHERE spec_feature_id IN (${placeholders})`,
+    ids,
+  );
+  const scenarioPayload = Array.isArray(scenarioResult) ? scenarioResult[0] : [];
+  const scenarioRows = (Array.isArray(scenarioPayload) ? scenarioPayload : []) as Array<{ featureId: number; reference: string; context: string; action: string; outcome: string; category: string }>;
+
+  return featureRows.map((feature) => ({
+    name: feature.name,
+    summary: feature.summary,
+    scenarios: scenarioRows
+      .filter((scenario) => scenario.featureId === feature.id)
+      .map((scenario) => ({ reference: scenario.reference, context: scenario.context, action: scenario.action, outcome: scenario.outcome, category: scenario.category })),
+  }));
 }

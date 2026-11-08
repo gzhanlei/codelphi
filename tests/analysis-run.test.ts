@@ -35,7 +35,7 @@ vi.mock("../lib/notifications", () => ({ deliverAnalysisNotifications: vi.fn(asy
 const { compareIncrementalShadow } = vi.hoisted(() => ({ compareIncrementalShadow: vi.fn((incremental: { features: Array<{ name: string }>; changes: unknown[] }, _full: unknown) => ({ consistent: true, missingKeys: [] as string[], extraKeys: [] as string[], scenarioDiffs: [] as string[] })) }));
 vi.mock("../lib/incremental-shadow", () => ({ compareIncrementalShadow }));
 vi.mock("../lib/remote-analysis", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/remote-analysis")>(), getRemoteAnalysisSources: vi.fn() }));
-vi.mock("../lib/spec-versions", () => ({ insertSpecVersion: vi.fn(async () => ({ specVersionId: 44, features: [{ name: "统一登录", summary: "s", scenarios: [] }] })), loadPreviousFeatureNames: vi.fn(async () => ["统一登录", "支付", "规格导出"]) }));
+vi.mock("../lib/spec-versions", () => ({ insertSpecVersion: vi.fn(async () => ({ specVersionId: 44, features: [{ name: "统一登录", summary: "s", scenarios: [] }] })), loadPreviousFeatureNames: vi.fn(async () => ["统一登录", "支付", "规格导出"]), loadPreviousSpecText: vi.fn(async () => [{ name: "统一登录", summary: "s", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy" }] }]) }));
 vi.mock("../lib/architecture-version", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/architecture-version")>(), generateRepositoryArchitectureVersion: vi.fn(async () => ({ status: "accepted", errorMessage: null })) }));
 
 const run = {
@@ -133,7 +133,11 @@ describe("analysis orchestration", () => {
       access: { connectionId: 42, organizationId: 7 },
       scopeRoots: [{ path: "", role: "shared" }],
     }), expect.anything());
-    expect(vi.mocked(analyzeWithAI).mock.calls[0][2]).toEqual({ previousFeatureNames: ["统一登录", "支付", "规格导出"], affectedFeatureNames: undefined });
+    expect(vi.mocked(analyzeWithAI).mock.calls[0][2]).toEqual({
+      previousFeatureNames: ["统一登录", "支付", "规格导出"],
+      previousSpec: [{ name: "统一登录", summary: "s", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy" }] }],
+      affectedFeatureNames: undefined,
+    });
     expect(connection.commit).toHaveBeenCalledOnce();
     expect(connection.release).toHaveBeenCalledOnce();
     expect(execute).not.toHaveBeenCalledWith(expect.stringContaining("status = 'failed'"), expect.anything());

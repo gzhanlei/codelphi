@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diffSpec, mergeSpecSources, specFeatureKey, specScenarioKey, type SpecFeature } from "../lib/spec-diff";
+import { diffSpec, mergeSpecSources, normalizeSpecText, specFeatureKey, specScenarioKey, specTextEquivalent, type SpecFeature } from "../lib/spec-diff";
 
 const authentication: SpecFeature = {
   name: "Authentication",
@@ -64,6 +64,88 @@ describe("spec behavior diff", () => {
 
     const removedScenario = diffSpec([changed], [authentication]);
     expect(removedScenario.map((change) => `${change.kind}:${change.entityType}`)).toEqual(["changed:feature", "removed:scenario"]);
+  });
+});
+
+describe("spec wording equivalence (P0 noise collapse)", () => {
+  it("collapses same-meaning rewording of a scenario without emitting a change", () => {
+    const reworded = structuredClone(authentication);
+    reworded.scenarios[0].context = "提交的任务不属于当前产品";
+    const current = structuredClone(authentication);
+    current.scenarios[0].context = "提交的任务不属于该产品";
+    expect(diffSpec([reworded], [current])).toEqual([]);
+  });
+
+  it("treats whitespace, punctuation-width and full/half-width variants as unchanged", () => {
+    expect(specTextEquivalent("返回 404。", "返回404")).toBe(true);
+    expect(specTextEquivalent("（未登录）时拒绝", "(未登录)时拒绝")).toBe(true);
+    expect(normalizeSpecText("４０４　错误")).toBe("404 错误");
+  });
+
+  it("never collapses changes that flip digits or latin tokens", () => {
+    expect(specTextEquivalent("返回 404", "返回 400")).toBe(false);
+    expect(specTextEquivalent("仅接受 admin@example.com 的邀请", "仅接受 user@example.com 的邀请")).toBe(false);
+    expect(specTextEquivalent("Opens the dashboard", "Opens onboarding")).toBe(false);
+  });
+
+  it("keeps semantic Chinese flips detectable even at high character overlap", () => {
+    expect(specTextEquivalent("邀请成功", "邀请失败")).toBe(false);
+    expect(specTextEquivalent("允许访问", "禁止访问")).toBe(false);
+    expect(specTextEquivalent("可以重试", "不可以重试")).toBe(false);
+    expect(specTextEquivalent("返回空列表", "返回 404")).toBe(false);
+  });
+
+  it("does not collapse against empty text", () => {
+    expect(specTextEquivalent("", "返回 404")).toBe(false);
+    expect(specTextEquivalent("返回 404", "")).toBe(false);
+  });
+
+  it("collapses a feature summary rewording but keeps name and parent changes", () => {
+    const before = structuredClone(authentication);
+    before.summary = "登录与账号找回";
+    const after = structuredClone(authentication);
+    after.summary = "登录和账号找回";
+    expect(diffSpec([before], [after])).toEqual([]);
+
+    const renamed = structuredClone(authentication);
+    renamed.name = "Auth";
+    expect(diffSpec([authentication], [renamed])).toHaveLength(2);
+  });
+
+  it("still reports category flips as behavior changes", () => {
+    const changed = structuredClone(authentication);
+    changed.scenarios[0].category = "error";
+    expect(diffSpec([authentication], [changed])).toHaveLength(1);
+  });
+
+  it("collapses a renumbered scenario whose behavior fields are all equivalent", () => {
+    const before = structuredClone(authentication);
+    before.scenarios.push({ reference: "HP-2", context: "提交的任务不属于当前产品", action: "查询任务详情", outcome: "返回 404。", category: "error", evidence: [] });
+    const after = structuredClone(authentication);
+    after.scenarios.push({ reference: "HP-6", context: "提交的任务不属于该产品", action: "查询任务详情", outcome: "返回 404", category: "error", evidence: [] });
+    expect(diffSpec([before], [after])).toEqual([]);
+  });
+
+  it("keeps removed/added pairs when the behavior really differs", () => {
+    const before = structuredClone(authentication);
+    before.scenarios.push({ reference: "HP-2", context: "任务不存在", action: "查询任务详情", outcome: "返回 404", category: "error", evidence: [] });
+    const after = structuredClone(authentication);
+    after.scenarios.push({ reference: "HP-6", context: "任务已被删除", action: "恢复任务", outcome: "恢复成功并通知成员", category: "happy", evidence: [] });
+    expect(diffSpec([before], [after]).map((change) => change.kind)).toEqual(["removed", "added"]);
+  });
+
+  it("pairs renumbered scenarios greedily without reusing the same added row", () => {
+    const before = structuredClone(authentication);
+    before.scenarios.push(
+      { reference: "HP-2", context: "任务不存在", action: "查询详情", outcome: "返回 404", category: "error", evidence: [] },
+      { reference: "HP-3", context: "任务不存在", action: "查询列表", outcome: "返回 404", category: "error", evidence: [] },
+    );
+    const after = structuredClone(authentication);
+    after.scenarios.push(
+      { reference: "HP-5", context: "任务不存在", action: "查询列表", outcome: "返回 404", category: "error", evidence: [] },
+      { reference: "HP-6", context: "任务不存在", action: "查询详情", outcome: "返回 404", category: "error", evidence: [] },
+    );
+    expect(diffSpec([before], [after])).toEqual([]);
   });
 });
 

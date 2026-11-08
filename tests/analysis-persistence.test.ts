@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import type { PoolConnection } from "mysql2/promise";
 import type { AnalysisResult } from "../lib/ai";
+import type { Execute } from "../lib/db";
 import { assertLatestRun, upsertGeneratedSpec, upsertRelease, type RunContext } from "../lib/analysis";
+import { loadPreviousSpecText } from "../lib/spec-versions";
 
 const run: RunContext = { id: 2, repositoryId: 3, productId: 4, owner: "gzhanlei", name: "radar", beforeSha: null, afterSha: "sha-2", connectionId: null, provider: "github", organizationId: 1, productSlug: "radar", productName: "Radar" };
 const result: AnalysisResult = {
@@ -123,5 +125,37 @@ describe("analysis persistence guards", () => {
     const upserts = (connection.execute as ReturnType<typeof vi.fn>).mock.calls.filter((call: unknown[]) => String(call[0]).includes("INSERT INTO features"));
     const names = upserts.map((call: unknown[]) => (call[1] as unknown[])[1]);
     expect(names).toEqual(["Auth", "Legacy", "Manual feature"]);
+  });
+});
+
+describe("loadPreviousSpecText (P0 anchoring loader)", () => {
+  function executeWith(version: unknown[], features: unknown[], scenarios: unknown[]): Execute {
+    return vi.fn(async (sql: string) => {
+      if (sql.includes("FROM spec_versions")) return [version];
+      if (sql.includes("FROM spec_features")) return [features];
+      if (sql.includes("FROM spec_scenarios")) return [scenarios];
+      return [[]];
+    }) as unknown as Execute;
+  }
+
+  it("loads the latest version's scenario-level text grouped by feature", async () => {
+    const execute = executeWith(
+      [{ id: 77 }],
+      [{ id: 1, name: "统一登录", summary: "OAuth" }, { id: 2, name: "规格导出", summary: "JSON" }],
+      [
+        { featureId: 1, reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy" },
+        { featureId: 2, reference: "ER-1", context: "x", action: "y", outcome: "z", category: "error" },
+      ],
+    );
+    const spec = await loadPreviousSpecText(3, execute);
+    expect(spec).toEqual([
+      { name: "统一登录", summary: "OAuth", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy" }] },
+      { name: "规格导出", summary: "JSON", scenarios: [{ reference: "ER-1", context: "x", action: "y", outcome: "z", category: "error" }] },
+    ]);
+  });
+
+  it("returns empty without a previous version or features", async () => {
+    expect(await loadPreviousSpecText(3, executeWith([], [], []))).toEqual([]);
+    expect(await loadPreviousSpecText(3, executeWith([{ id: 77 }], [], []))).toEqual([]);
   });
 });
