@@ -2,7 +2,11 @@ import { z } from "zod";
 import { chandlerBaseUrl, requiredEnv } from "./env";
 import type { SessionUser } from "./types";
 
-const tokenSchema = z.object({ access_token: z.string().min(1) });
+const tokenSchema = z.object({
+  access_token: z.string().min(1),
+  refresh_token: z.string().min(1).optional(),
+  expires_in: z.number().optional(),
+});
 const profileSchema = z.object({
   sub: z.string().min(1),
   email: z.string().max(320).optional().nullable(),
@@ -34,7 +38,18 @@ export function assertChandlerAllowed(email: string | undefined, allowlist: Set<
   if (!isChandlerEmailAllowed(email, allowlist)) throw new Error("forbidden");
 }
 
-export async function completeChandlerOAuth(input: OAuthInput, fetcher: Fetcher = fetch): Promise<SessionUser> {
+export interface ChandlerTokenPayload {
+  accessToken: string;
+  refreshToken?: string;
+  expiresIn?: number;
+}
+
+export interface ChandlerAuthResult {
+  profile: SessionUser;
+  tokens: ChandlerTokenPayload;
+}
+
+export async function completeChandlerOAuth(input: OAuthInput, fetcher: Fetcher = fetch): Promise<ChandlerAuthResult> {
   const tokenResponse = await fetcher(`${chandlerBaseUrl()}/v1/oauth/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -61,9 +76,16 @@ export async function completeChandlerOAuth(input: OAuthInput, fetcher: Fetcher 
   const profile = profileSchema.parse(unwrap(await userInfoResponse.json()));
   const email = profile.email?.trim() ? profile.email.trim().toLowerCase() : undefined;
   return {
-    sub: profile.sub,
-    email,
-    name: profile.name ?? undefined,
-    picture: profile.picture ?? undefined,
+    profile: {
+      sub: profile.sub,
+      email,
+      name: profile.name ?? undefined,
+      picture: profile.picture ?? undefined,
+    },
+    tokens: {
+      accessToken: token.access_token,
+      refreshToken: token.refresh_token,
+      expiresIn: token.expires_in,
+    },
   };
 }

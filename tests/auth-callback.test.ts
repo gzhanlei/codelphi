@@ -5,7 +5,15 @@ import { completeChandlerOAuth } from "@/lib/chandler";
 import { createSession } from "@/lib/session";
 import { upsertCodelphiUser } from "@/lib/users";
 
-vi.mock("@/lib/chandler", () => ({ completeChandlerOAuth: vi.fn(), assertChandlerAllowed: vi.fn() }));
+vi.mock("@/lib/chandler", () => ({
+  completeChandlerOAuth: vi.fn(),
+  assertChandlerAllowed: vi.fn(),
+}));
+vi.mock("@/lib/chandler-token", () => ({ storeChandlerTokens: vi.fn(async () => undefined) }));
+vi.mock("@/lib/users", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../lib/users")>(),
+  findUserIdBySub: vi.fn(async () => 1),
+}));
 vi.mock("@/lib/session", () => ({ createSession: vi.fn() }));
 vi.mock("@/lib/users", () => ({ upsertCodelphiUser: vi.fn() }));
 
@@ -22,7 +30,10 @@ describe("Chandler OAuth callback", () => {
 
   it("creates a session and uses the safe default next path when the optional cookie is absent", async () => {
     const profile = { sub: "user-1", email: "person@example.com" };
-    vi.mocked(completeChandlerOAuth).mockResolvedValue(profile);
+    vi.mocked(completeChandlerOAuth).mockResolvedValue({
+    profile,
+    tokens: { accessToken: "at", refreshToken: "rt", expiresIn: 3600 },
+  });
     const response = await GET(callback("codelphi_oauth_state=state; codelphi_oauth_verifier=verifier"));
     expect(response.headers.get("location")).toBe("https://codelphi.com/");
     expect(upsertCodelphiUser).toHaveBeenCalledWith(profile);

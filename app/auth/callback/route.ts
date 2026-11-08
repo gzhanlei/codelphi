@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { assertChandlerAllowed, completeChandlerOAuth } from "@/lib/chandler";
+import { storeChandlerTokens } from "@/lib/chandler-token";
 import { allowedEmails, appUrl } from "@/lib/env";
 import { oauthFailurePath, requireOAuthCallback } from "@/lib/oauth-request";
 import { createSession } from "@/lib/session";
-import { upsertCodelphiUser } from "@/lib/users";
+import { findUserIdBySub, upsertCodelphiUser } from "@/lib/users";
 
 function redirectWithClearedOAuth(path: string) {
   const response = NextResponse.redirect(new URL(path, appUrl()));
@@ -25,9 +26,9 @@ async function authenticate(request: NextRequest) {
     verifier: oauthCookie(request, "codelphi_oauth_verifier"),
     next: oauthCookie(request, "codelphi_oauth_next"),
   });
-  const profile = await completeChandlerOAuth({ code: input.code, verifier: input.verifier, redirectUri: `${appUrl()}/auth/callback` });
+  const { profile, tokens } = await completeChandlerOAuth({ code: input.code, verifier: input.verifier, redirectUri: `${appUrl()}/auth/callback` });
   assertChandlerAllowed(profile.email, allowedEmails());
-  return { input, profile };
+  return { input, profile, tokens };
 }
 
 export async function GET(request: NextRequest) {
@@ -39,6 +40,13 @@ export async function GET(request: NextRequest) {
   }
 
   await upsertCodelphiUser(authentication.profile);
+  // Chandler token 加密落库（M3-T1）：支付 prepay/查单需要用户 token；失败不阻断登录（可重新登录补齐）
+  try {
+    const userId = await findUserIdBySub(authentication.profile.sub);
+    if (userId !== null) await storeChandlerTokens(userId, authentication.tokens);
+  } catch (error) {
+    console.warn("[billing] chandler token store failed; payments may require re-login", error);
+  }
   await createSession(authentication.profile);
   return redirectWithClearedOAuth(authentication.input.next);
 }
