@@ -1,5 +1,12 @@
 import { defaultExecute, type Execute } from "./db";
 
+/**
+ * 措辞降噪/锚定口径的分界时刻：spec v80（run 110，2026-11-08T05:44Z）是首个锚定后分析。
+ * 此前的分析为全量重建口径，历史行为变化计数含大量 LLM 同义改写噪音（严格等价守卫无法回溯剥离，
+ * 见 wording_only 回填只标中 5% 的实测）。仅用于摘要口径注释，不参与任何计数排除。
+ */
+const ANCHOR_REGIME_SINCE = new Date("2026-11-08T05:44:00Z");
+
 export interface ProgressRelease {
   id: number;
   title: string;
@@ -11,6 +18,8 @@ export interface ProgressRelease {
   added: number;
   changed: number;
   removed: number;
+  /** 重建口径（锚定上线前的分析）计「rebuild」；无 spec 版本或未知归「rebuild」（保守计入注释）。 */
+  regime: "anchored" | "rebuild";
 }
 
 function flatten(text: string) {
@@ -56,8 +65,8 @@ function capabilitySentence(delta: ProgressFeatureDelta) {
 export function renderProgressSummary(input: { productName: string; days: number; releases: ProgressRelease[]; featureDeltas?: ProgressFeatureDelta[] }) {
   const { productName, days, releases } = input;
   const totals = releases.reduce(
-    (acc, item) => ({ releases: acc.releases + 1, total: acc.total + item.total, added: acc.added + item.added, changed: acc.changed + item.changed, removed: acc.removed + item.removed }),
-    { releases: 0, total: 0, added: 0, changed: 0, removed: 0 },
+    (acc, item) => ({ releases: acc.releases + 1, total: acc.total + item.total, added: acc.added + item.added, changed: acc.changed + item.changed, removed: acc.removed + item.removed, rebuildTotal: acc.rebuildTotal + (item.regime === "rebuild" ? item.total : 0) }),
+    { releases: 0, total: 0, added: 0, changed: 0, removed: 0, rebuildTotal: 0 },
   );
   const lines = [
     `# 进展摘要 · ${productName}`,
@@ -65,6 +74,9 @@ export function renderProgressSummary(input: { productName: string; days: number
     `- 统计窗口：最近 ${days} 天`,
     `- 发布 ${totals.releases} 次 · 行为变化 ${totals.total} 条（新增 ${totals.added} · 变化 ${totals.changed} · 移除 ${totals.removed}）`,
   ];
+  if (totals.rebuildTotal > 0) {
+    lines.push(`- 口径注释：其中 ${totals.rebuildTotal} 条来自 2026-11-08 措辞降噪上线前的全量重建口径（含大量同义改写噪音）；此后单次发布的行为变化通常为个位数`);
+  }
   if (releases.length === 0) {
     lines.push("", "统计窗口内没有发布。");
     return lines.join("\n");
@@ -88,19 +100,21 @@ export function renderProgressSummary(input: { productName: string; days: number
   return lines.join("\n");
 }
 
-/** 窗口内的发布及其行为变化计数（spec_changes 按 spec 版本归属）。 */
+/** 窗口内的发布及其行为变化计数（spec_changes 按 spec 版本归属；regime 供摘要口径注释）。 */
 export async function loadRecentReleasesWithChanges(productId: number, days: number, execute: Execute = defaultExecute): Promise<ProgressRelease[]> {
   const [rows] = await execute(
-    `SELECT r.id, r.title, r.summary, r.sha, r.url, r.committed_at AS committedAt,
+    `SELECT r.id, r.title, r.summary, r.sha, r.url, r.committed_at AS committedAt, sv.created_at AS specVersionAt,
             COUNT(c.id) AS total,
             COALESCE(SUM(c.kind = 'added'), 0) AS added,
             COALESCE(SUM(c.kind = 'changed'), 0) AS changed,
             COALESCE(SUM(c.kind = 'removed'), 0) AS removed
-     FROM releases r LEFT JOIN spec_changes c ON c.spec_version_id = r.spec_version_id AND c.wording_only = 0
+     FROM releases r
+     LEFT JOIN spec_changes c ON c.spec_version_id = r.spec_version_id AND c.wording_only = 0
+     LEFT JOIN spec_versions sv ON sv.id = r.spec_version_id
      WHERE r.product_id = ? AND r.committed_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
-     GROUP BY r.id ORDER BY r.committed_at DESC LIMIT 100`,
+     GROUP BY r.id, sv.created_at ORDER BY r.committed_at DESC LIMIT 100`,
     [productId, days],
-  ) as [Array<{ id: number; title: string; summary: string; sha: string; url: string; committedAt: Date; total: number; added: number; changed: number; removed: number }>, unknown];
+  ) as [Array<{ id: number; title: string; summary: string; sha: string; url: string; committedAt: Date; specVersionAt: Date | null; total: number; added: number; changed: number; removed: number }>, unknown];
   return rows.map((row) => ({
     id: Number(row.id),
     title: row.title,
@@ -112,6 +126,7 @@ export async function loadRecentReleasesWithChanges(productId: number, days: num
     added: Number(row.added),
     changed: Number(row.changed),
     removed: Number(row.removed),
+    regime: row.specVersionAt !== null && new Date(row.specVersionAt) >= ANCHOR_REGIME_SINCE ? "anchored" : "rebuild",
   }));
 }
 

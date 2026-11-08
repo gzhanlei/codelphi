@@ -12,6 +12,7 @@ function release(overrides: Partial<ProgressRelease> = {}): ProgressRelease {
     url: "https://github.com/o/r/commit/0273df8abc",
     committedAt: new Date("2026-11-07T08:30:00Z"),
     ...base,
+    regime: "anchored",
     ...overrides,
   };
 }
@@ -85,5 +86,19 @@ describe("renderProgressSummary", () => {
     const markdown = renderProgressSummary({ productName: "CoDelphi", days: 30, releases: [release()], featureDeltas: deltas });
     expect(markdown).toContain("其余 5 个功能有零星变化");
     expect(markdown).not.toContain("功能24：");
+  });
+
+  it("adds the regime annotation when pre-anchor rebuild counts dominate the window", () => {
+    const markdown = renderProgressSummary({
+      productName: "CoDelphi",
+      days: 7,
+      releases: [release({ total: 77, added: 8, changed: 63, removed: 6, regime: "rebuild" }), release({ id: 2, title: "降噪后的干净发布", total: 2, added: 1, changed: 1, removed: 0, regime: "anchored", committedAt: new Date("2026-11-08T06:30:00Z"), sha: "5b18c75abc", url: "https://github.com/o/r/commit/5b18c75abc" })],
+    });
+    expect(markdown).toContain("其中 77 条来自 2026-11-08 措辞降噪上线前的全量重建口径");
+  });
+
+  it("omits the regime annotation when the window only has anchored releases", () => {
+    const markdown = renderProgressSummary({ productName: "CoDelphi", days: 7, releases: [release()] });
+    expect(markdown).not.toContain("口径注释");
   });
 });
