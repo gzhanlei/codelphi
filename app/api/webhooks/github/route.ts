@@ -12,12 +12,14 @@ export async function POST(request: NextRequest) {
     event: request.headers.get("x-github-event"),
     signature: request.headers.get("x-hub-signature-256"),
     secret: await resolveGitHubWebhookSecrets(),
+    deliveryId: request.headers.get("x-github-delivery"),
   });
   if (result.preview) {
     const preview = result.preview;
     after(() => runPrPreview(preview));
-  } else if (result.runId) {
-    after(() => runAnalysis(result.runId));
+  } else if (typeof result.runId === "number") {
+    const runId = result.runId;
+    after(() => runAnalysis(runId));
   }
   return NextResponse.json(result.body, { status: result.status });
 }

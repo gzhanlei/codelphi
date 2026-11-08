@@ -3,6 +3,7 @@ import { queueAnalysis, runAnalysis } from "../lib/analysis";
 import { analyzeWithAI } from "../lib/ai";
 import { getRemoteAnalysisSources } from "../lib/remote-analysis";
 import { generateRepositoryArchitectureVersion } from "../lib/architecture-version";
+import { enqueueRunWithReservation, hasActiveReservation, heartbeat, capture, release, reserveForNewRun } from "../lib/billing/core";
 
 const execute = vi.fn();
 const readLines = vi.fn();
@@ -22,6 +23,14 @@ const adapter = {
 };
 
 vi.mock("../lib/db", () => ({ getDb: () => ({ execute, getConnection: async () => connection }) }));
+vi.mock("../lib/billing/core", () => ({
+  enqueueRunWithReservation: vi.fn(async (input: { requestId: string }) => ({ runId: 55, attempt: 1, allocations: [], reused: false, requestId: input.requestId })),
+  hasActiveReservation: vi.fn(async () => true),
+  heartbeat: vi.fn(async () => ({ renewed: true })),
+  capture: vi.fn(async () => ({ runSettlementStatus: "fully_settled" })),
+  release: vi.fn(async () => ({ released: true })),
+  reserveForNewRun: vi.fn(async () => ({ attempt: 1, allocations: [], reused: false })),
+}));
 vi.mock("../lib/code-hosting", async (importOriginal) => ({
   ...await importOriginal<typeof import("../lib/code-hosting")>(),
   resolveAnalysisTarget: vi.fn((run) => ({
@@ -93,32 +102,26 @@ describe("analysis orchestration", () => {
     vi.mocked(analyzeWithAI).mockResolvedValue({ product: { description: "代码驱动的产品知识与变更中心。", evidence: [{ path: "lib/db.ts", startLine: 1 }] }, release: { title: "v1", summary: "summary" }, features: [], changes: [] });
   });
 
-  it("reuses an existing queued run", async () => {
+  it("reuses an existing queued run via the enqueue combinator", async () => {
     existingRunRows = [{ id: 12 }];
+    vi.mocked(enqueueRunWithReservation).mockResolvedValueOnce({ runId: 12, attempt: null, allocations: [], reused: true });
     await expect(queueAnalysis(3, null, "sha-after", "manual")).resolves.toBe(12);
-    expect(execute).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(enqueueRunWithReservation)).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledTimes(0);
   });
 
-  it("inserts a new queued run", async () => {
+  it("enqueues with a fresh reserve request identity and lands the gate in the billing core (contract §9)", async () => {
     await expect(queueAnalysis(3, null, "sha-after", "manual")).resolves.toBe(55);
-    expect(execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO analysis_runs"), [3, "manual", null, "sha-after", 3]);
-    // account_id 在创建时固化（契约 §4.8/B13）：入队子查询取 product → organization
-    expect(execute).toHaveBeenCalledWith(expect.stringContaining("p.organization_id FROM repositories repo JOIN products p"), expect.anything());
-  });
-
-  it("returns the winning run when a concurrent queue inserts the same sha", async () => {
-    let selectCount = 0;
-    execute.mockImplementation(async (sql: string) => {
-      if (sql.includes("SELECT id FROM analysis_runs WHERE repository_id = ? AND after_sha = ?")) {
-        selectCount += 1;
-        return selectCount === 1 ? [[]] : [[{ id: 77 }]];
-      }
-      if (sql.includes("INSERT INTO analysis_runs")) {
-        throw Object.assign(new Error("Duplicate entry '3-sha-after-1' for key 'analysis_runs_active_unique'"), { code: "ER_DUP_ENTRY" });
-      }
-      return [{}];
-    });
-    await expect(queueAnalysis(3, null, "sha-after", "manual")).resolves.toBe(77);
+    const input = vi.mocked(enqueueRunWithReservation).mock.calls[0][0];
+    expect(input).toMatchObject({ repositoryId: 3, beforeSha: null, afterSha: "sha-after", trigger: "manual" });
+    expect(typeof input.requestId).toBe("string");
+    expect(input.requestId.length).toBeGreaterThan(0);
+    // 同请求重试复用同一身份；每次新入队生成新 UUID（D13）
+    await queueAnalysis(3, null, "sha-after", "manual");
+    const second = vi.mocked(enqueueRunWithReservation).mock.calls[1][0];
+    expect(second.requestId).not.toBe(input.requestId);
+    // run INSERT / 竞争收敛已下沉 billing core（020 + D19），analysis 层不再手写 SQL
+    expect(execute).not.toHaveBeenCalledWith(expect.stringContaining("INSERT INTO analysis_runs"), expect.anything());
   });
 
   it("ignores an analysis run that no longer needs work", async () => {
@@ -144,6 +147,26 @@ describe("analysis orchestration", () => {
     expect(connection.commit).toHaveBeenCalledOnce();
     expect(connection.release).toHaveBeenCalledOnce();
     expect(execute).not.toHaveBeenCalledWith(expect.stringContaining("status = 'failed'"), expect.anything());
+  });
+
+  it("re-reserves on entry when no active reservation exists (failed-run retry, contract §6.6)", async () => {
+    runRows = [{ ...run, accountId: 7 }];
+    vi.mocked(hasActiveReservation).mockResolvedValueOnce(false);
+    await runAnalysis(8);
+    expect(reserveForNewRun).toHaveBeenCalledWith(8, 7, 1, expect.any(String));
+    expect(vi.mocked(capture)).toHaveBeenCalled();
+  });
+
+  it("skips reservation when the run has no settled account ownership (defensive path)", async () => {
+    runRows = [{ ...run, accountId: null }];
+    vi.mocked(hasActiveReservation).mockResolvedValueOnce(false);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      await runAnalysis(8);
+      expect(reserveForNewRun).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it("uses persisted source roots when present", async () => {
@@ -204,6 +227,8 @@ describe("analysis orchestration", () => {
     await runAnalysis(8);
     const [stored] = execute.mock.calls.find(([sql]) => String(sql).includes("status = 'failed'"))?.[1] as unknown[];
     expect(String(stored).startsWith("load failed\n")).toBe(true);
+    // 失败释放（契约 §6.6）：置 failed 后独立调用 release，失败由 sweep 兜底
+    expect(vi.mocked(release)).toHaveBeenCalledWith(8, "analysis_failed");
   });
 
   it("records a fallback failure for non-Error rejections", async () => {

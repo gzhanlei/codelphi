@@ -2,6 +2,7 @@ import { ZodError, type z } from "zod";
 import { queueAnalysis } from "./analysis";
 import { getDb } from "./db";
 import { getCodeHostingAdapter, type CodeHostingAdapter, type HostedRepository } from "./code-hosting";
+import { BillingError } from "./billing/core";
 import type { productInputSchema } from "./product-input";
 
 type ProductInput = z.infer<typeof productInputSchema>;
@@ -63,6 +64,17 @@ export function registrationError(error: unknown) {
   }
   if (typeof error === "object" && error !== null && "code" in error && error.code === "ER_DUP_ENTRY") {
     return { status: 409, message: "产品 Slug 或代码仓库已经注册" };
+  }
+  // 首次分析入队的额度闸门拒绝（契约 §12.2）：映射为可理解的额度语义
+  if (error instanceof BillingError) {
+    const messages: Record<string, string> = {
+      quota_exceeded: "额度不足：首次分析未入队，请升级套餐或购买超额包后重试",
+      reconciliation_hold: "账户对账中，暂时无法发起新分析",
+    };
+    return {
+      status: error.code === "quota_exceeded" ? 402 : 409,
+      message: messages[error.code] ?? `当前账户状态无法发起新分析（${error.code}）`,
+    };
   }
   return {
     status: 400,

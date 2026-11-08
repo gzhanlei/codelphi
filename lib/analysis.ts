@@ -1,6 +1,9 @@
+import { randomUUID } from "node:crypto";
 import type { PoolConnection } from "mysql2/promise";
 import { getDb } from "./db";
 import { analyzeWithAI, type AnalysisResult } from "./ai";
+import { capture, enqueueRunWithReservation, hasActiveReservation, heartbeat, release, reserveForNewRun } from "./billing/core";
+import { FIRST_RUN_UNITS, HEARTBEAT_INTERVAL_MS } from "./billing/constants";
 import { resolveAnalysisTarget, type ChangeContext, type CodeHostingProvider } from "./code-hosting";
 import { analysisSliceBudgets, getRemoteAnalysisSources, parseSourceRoots } from "./remote-analysis";
 import { createSlicePlanner } from "./slice-planner";
@@ -165,38 +168,21 @@ async function saveResult(run: RunContext, result: AnalysisResult, change: Chang
 }
 
 const ACTIVE_RUN_QUERY = "SELECT id FROM analysis_runs WHERE repository_id = ? AND after_sha = ? AND status IN ('queued', 'running') LIMIT 1";
-// account_id 在创建时固化（入队子查询取 product → organization），结算与回执禁止执行期再读 cookie
-const INSERT_RUN_QUERY = `INSERT INTO analysis_runs (repository_id, trigger_type, before_sha, after_sha, status, account_id)
-VALUES (?, ?, ?, ?, 'queued', (SELECT p.organization_id FROM repositories repo JOIN products p ON p.id = repo.product_id WHERE repo.id = ?))`;
 
-function findActiveRun(db: Pick<ReturnType<typeof getDb>, "execute">, repositoryId: number, afterSha: string) {
-  return db.execute(ACTIVE_RUN_QUERY, [repositoryId, afterSha]).then((result) => {
-    const rows = (result as [Array<{ id: number }>, unknown])[0];
-    return rows[0] ? Number(rows[0].id) : null;
-  });
-}
-
-function isDuplicateEntry(error: unknown) {
-  return typeof error === "object" && error !== null && (error as { code?: string }).code === "ER_DUP_ENTRY";
-}
-
+/**
+ * 入队（契约 §9 组合）：单事务「锁 account → INSERT run（account_id 固化）→ 预留」；
+ * 闸门拒绝抛 BillingError（quota_exceeded / billing_state_conflict / reconciliation_hold），
+ * 由路由层映射 402/409；非阻塞复用（同 sha 活跃 run）返回既有 runId。
+ */
 export async function queueAnalysis(repositoryId: number, beforeSha: string | null, afterSha: string, trigger: "manual" | "push") {
-  const db = getDb();
-  const existing = await findActiveRun(db, repositoryId, afterSha);
-  if (existing !== null) return existing;
-
-  // 并发同 sha 推送靠 020 迁移的唯一索引兜底：输家捕获重复键错误后复用赢家的 run。
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      const [result] = await db.execute(INSERT_RUN_QUERY, [repositoryId, trigger, beforeSha, afterSha, repositoryId]);
-      return Number((result as { insertId: number }).insertId);
-    } catch (error) {
-      if (!isDuplicateEntry(error)) throw error;
-      const winner = await findActiveRun(db, repositoryId, afterSha);
-      if (winner !== null) return winner;
-    }
-  }
-  throw new Error(`queueAnalysis lost the race twice for repository ${repositoryId} sha ${afterSha}`);
+  const result = await enqueueRunWithReservation({
+    repositoryId,
+    beforeSha,
+    afterSha,
+    trigger,
+    requestId: randomUUID(),
+  });
+  return result.runId;
 }
 
 async function loadRun(runId: number) {
@@ -221,6 +207,37 @@ async function loadSourceRoots(productId: number) {
 
 async function performAnalysis(run: RunContext) {
   await getDb().execute("UPDATE analysis_runs SET status = 'running', started_at = CURRENT_TIMESTAMP(3), error_message = NULL WHERE id = ?", [run.id]);
+  // 执行入口预留检查（契约 §6.6/§9）：failed run 重试 / 恢复重派发时无 active 预留 → 重新预留
+  // （封死免费重试漏洞）；有则沿用原预留。额度被拒的 BillingError 冒泡为失败原因。
+  await ensureReservation(run);
+  const stopHeartbeat = startHeartbeat(run.id);
+  try {
+    await runAnalysisBody(run);
+  } finally {
+    stopHeartbeat();
+  }
+}
+
+/** 执行入口预留检查：无 active 预留 → reserveForNewRun（新 requestId = 新 attempt，完整闸门）。 */
+async function ensureReservation(run: RunContext) {
+  if (run.accountId == null) {
+    // 防御路径：归属已由 031 回填，此处兜底不预留（契约遗留数据策略）
+    console.warn("[billing] run has no account ownership; skipping reservation", { runId: run.id });
+    return;
+  }
+  if (await hasActiveReservation(run.id)) return; // B5：恢复沿用原预留
+  await reserveForNewRun(run.id, run.accountId, FIRST_RUN_UNITS, randomUUID());
+}
+
+/** 心跳（契约 §6.3）：执行期间每 60s 续期预留；finally 由调用方清除。 */
+function startHeartbeat(runId: number) {
+  const timer = setInterval(() => {
+    heartbeat(runId).catch((error) => console.error("[billing] heartbeat failed", error));
+  }, HEARTBEAT_INTERVAL_MS);
+  return () => clearInterval(timer);
+}
+
+async function runAnalysisBody(run: RunContext) {
   const target = resolveAnalysisTarget(run);
   const repo = await target.adapter.getRepository({ owner: run.owner, name: run.name, defaultBranch: "main" }, target.access);
   const [change, sourceRoots] = await Promise.all([
@@ -276,6 +293,13 @@ async function performAnalysis(run: RunContext) {
     ...change.files.map((file) => file.path),
   ]));
   const { specVersionId, features: mergedFeatures } = await saveResult(run, result, change, affectedKeys);
+  // 结算捕获（契约 §9/§6.4）：主事务已提交，捕获失败不得改写 run 分析状态（D15）——
+  // 只告警，sweep 扫描二会按 run 级结算请求缺失恢复结算。
+  try {
+    await capture(run.id, FIRST_RUN_UNITS);
+  } catch (error) {
+    console.error("[billing] capture failed; sweep will recover settlement", error);
+  }
   // M1 通知分发：分析事务提交后 best-effort 投递；失败只记日志，不影响分析结果。
   try {
     await deliverAnalysisNotifications({ run, releaseUrl: change.url, specVersionId });
@@ -322,5 +346,11 @@ export async function runAnalysis(runId: number) {
       "UPDATE analysis_runs SET status = 'failed', error_message = ?, finished_at = CURRENT_TIMESTAMP(3) WHERE id = ?",
       [message, runId],
     );
+    // 失败释放（契约 §6.6）：独立短事务置 failed 后调用；释放失败由 M1-T6 sweep 兜底。
+    try {
+      await release(runId, "analysis_failed");
+    } catch (billingError) {
+      console.error("[billing] release failed; sweep will recover the reservation", billingError);
+    }
   });
 }

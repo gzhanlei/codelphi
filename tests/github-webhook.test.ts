@@ -8,6 +8,7 @@ function dependencies() {
     verify: vi.fn((_rawBody: string, _signature: string | null, _secret: string) => true),
     findRepository: vi.fn(async (): Promise<{ id: number; defaultBranch: string } | undefined> => ({ id: 9, defaultBranch: "main" })),
     queue: vi.fn(async () => 42),
+    enqueue: vi.fn(async () => ({ runId: 42, reused: false })),
   };
 }
 

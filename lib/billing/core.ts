@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { PoolConnection } from "mysql2/promise";
 import { getDb } from "../db";
-import { RESERVATION_TTL_MINUTES, DEADLOCK_RETRIES } from "./constants";
+import { RESERVATION_TTL_MINUTES, DEADLOCK_RETRIES, FIRST_RUN_UNITS } from "./constants";
 
 /**
  * 额度账务核心（契约 docs/codelphi-billing-ledger-contract.md v1.5 冻结版，M1-T2）。
@@ -448,7 +448,7 @@ export async function reserveForNewRun(
   options: ReserveOptions = {},
 ): Promise<ReserveResult> {
   try {
-    return await runInBillingTransaction((conn) => reserveForNewRunOnce(conn, runId, accountId, units, requestId, options));
+    return await runInBillingTransaction((conn) => reserveForNewRunInTransaction(conn, runId, accountId, units, requestId, options));
   } catch (error) {
     if ((error as { code?: string } | null)?.code !== "ER_DUP_ENTRY") throw error;
     // D19 收敛：唯一键冲突的写入已随事务回滚；在全新事务中重读持久记录并按指纹收敛
@@ -469,13 +469,17 @@ export async function reserveForNewRun(
   }
 }
 
-async function reserveForNewRunOnce(
+/**
+ * 事务内新任务预留（供入队组合使用）：调用方持有事务与 account/run 锁序；
+ * 本函数不做死锁重试（外层事务负责），异常随外层事务回滚。
+ */
+export async function reserveForNewRunInTransaction(
   conn: PoolConnection,
   runId: number,
   accountId: number,
   units: number,
   requestId: string,
-  options: ReserveOptions,
+  options: ReserveOptions = {},
 ): Promise<ReserveResult> {
   {
     const account = await lockAccountForUpdate(conn, accountId);
@@ -593,6 +597,121 @@ async function reserveSettlementTopUp(
     via: purpose,
   });
   return { ok: true, attempt };
+}
+
+// ── 入队组合（契约 §9：锁 account → INSERT run（attempt=0）→ reserveForNewRun，同一事务）──
+
+export interface EnqueueInput {
+  repositoryId: number;
+  beforeSha: string | null;
+  afterSha: string;
+  trigger: "manual" | "push";
+  /** reserve 请求身份：每次入队调用生成新 UUID（同请求网络重试才复用同 ID）。 */
+  requestId: string;
+  gate?: ReserveOptions["gate"];
+}
+
+export interface EnqueueResult {
+  runId: number;
+  attempt: number | null;
+  allocations: AllocationSnapshot[];
+  /** true = 复用既有活跃 run（同 sha）或并发竞争收敛到赢家，本次未创建新 run/预留。 */
+  reused: boolean;
+}
+
+async function resolveRunOwnership(conn: PoolConnection, repositoryId: number): Promise<number> {
+  const [rows] = await conn.execute(
+    `SELECT p.organization_id AS organizationId
+     FROM repositories repo JOIN products p ON p.id = repo.product_id
+     WHERE repo.id = ?`,
+    [repositoryId],
+  );
+  const row = (rows as Array<{ organizationId: number | null }>)[0];
+  if (!row?.organizationId) throw new BillingError("billing_state_conflict", `repository ${repositoryId} has no owning organization`);
+  return Number(row.organizationId);
+}
+
+async function findActiveRunRow(conn: PoolConnection, repositoryId: number, afterSha: string): Promise<number | null> {
+  const [rows] = await conn.execute(
+    `SELECT id FROM analysis_runs WHERE repository_id = ? AND after_sha = ? AND status IN ('queued', 'running') LIMIT 1`,
+    [repositoryId, afterSha],
+  );
+  const row = (rows as Array<{ id: number }>)[0];
+  return row ? Number(row.id) : null;
+}
+
+/** 事务内入队全流程（供两阶段投递的持有事务方调用）；调用方负责死锁重试与 D19/020 冲突收敛。 */
+export async function enqueueRunWithReservationInTransaction(conn: PoolConnection, input: EnqueueInput): Promise<EnqueueResult> {
+  const accountId = await resolveRunOwnership(conn, input.repositoryId);
+  const account = await lockAccountForUpdate(conn, accountId);
+  const existingRunId = await findActiveRunRow(conn, input.repositoryId, input.afterSha);
+  if (existingRunId !== null) return { runId: existingRunId, attempt: null, allocations: [], reused: true };
+
+  const [insertResult] = await conn.execute(
+    `INSERT INTO analysis_runs (repository_id, trigger_type, before_sha, after_sha, status, account_id)
+     VALUES (?, ?, ?, ?, 'queued', ?)`,
+    [input.repositoryId, input.trigger, input.beforeSha, input.afterSha, accountId],
+  );
+  const runId = Number((insertResult as { insertId: number }).insertId);
+  const reserve = await reserveForNewRunInTransaction(conn, runId, accountId, FIRST_RUN_UNITS, input.requestId, { gate: input.gate });
+  return { runId, attempt: reserve.attempt, allocations: reserve.allocations, reused: false };
+}
+
+/**
+ * 入队组合（契约 §9）：单事务完成「锁 account → INSERT run → 预留」；
+ * 收敛两条唯一键竞争——run 表 020 活跃唯一（回滚后复用赢家）与 reserve_requests 主键（D19 指纹收敛）；
+ * 非唯一键冲突原样上抛（死锁重试由事务执行器自理）。
+ */
+export async function enqueueRunWithReservation(input: EnqueueInput): Promise<EnqueueResult> {
+  for (let round = 1; round <= DEADLOCK_RETRIES; round += 1) {
+    try {
+      return await runInBillingTransaction((conn) => enqueueRunWithReservationInTransaction(conn, input));
+    } catch (error) {
+      if ((error as { code?: string } | null)?.code !== "ER_DUP_ENTRY" || round >= DEADLOCK_RETRIES) throw error;
+      // 已回滚：全新事务收敛（D19：先指纹读请求记录；020：再找活跃赢家）；都未命中则重试完整流程
+      const converged = await runInBillingTransaction(async (conn) => {
+        const accountId = await resolveRunOwnership(conn, input.repositoryId);
+        const existing = await selectReserveRequest(conn, input.requestId);
+        if (existing && existing.run_id && existing.account_id === accountId) {
+          let allocations: AllocationSnapshot[] = [];
+          try {
+            allocations = existing.allocation_snapshot ? (JSON.parse(existing.allocation_snapshot) as AllocationSnapshot[]) : [];
+          } catch {
+            allocations = [];
+          }
+          return { runId: Number(existing.run_id), attempt: existing.reservation_attempt, allocations, reused: true };
+        }
+        const winner = await findActiveRunRow(conn, input.repositoryId, input.afterSha);
+        if (winner !== null) return { runId: winner, attempt: null, allocations: [], reused: true };
+        return null;
+      });
+      if (converged) return converged;
+    }
+  }
+  throw new BillingError("billing_state_conflict", `enqueue clash for repository ${input.repositoryId} sha ${input.afterSha} did not converge`);
+}
+
+/** 执行入口预留检查（契约 §6.6/§9）：run 是否存在 active 预留。 */
+export async function hasActiveReservation(runId: number): Promise<boolean> {
+  const [rows] = await getDb().execute(
+    `SELECT reservation_id FROM billing_reservations WHERE run_id = ? AND status = 'active' LIMIT 1`,
+    [runId],
+  );
+  return (rows as unknown[]).length > 0;
+}
+
+/** 契约 §5 错误码 → HTTP 状态映射（路由层使用）。 */
+export function billingHttpStatus(code: BillingErrorCode): number {
+  switch (code) {
+    case "quota_exceeded":
+      return 402;
+    case "reconciliation_hold":
+    case "billing_state_conflict":
+    case "idempotency_conflict":
+      return 409;
+    default:
+      return 409;
+  }
 }
 
 /**
