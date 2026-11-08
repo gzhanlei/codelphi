@@ -16,3 +16,9 @@ artifacts/legacy-v2.16/
 artifacts/products/
 .DS_Store
 .zcode/
+
+# Proprietary pricing and billing material
+/docs/codelphi-pricing-and-billing.md
+/docs/codelphi-billing-dev-plan.md
+/docs/codelphi-billing-ledger-contract.md
+/docs/codelphi-pay-state-machines.md
