@@ -64,7 +64,7 @@ function capabilitySentence(delta: ProgressFeatureDelta) {
   return `${parts.join("，")}${netLabel}`;
 }
 
-/** CTO 进展摘要的纯渲染：窗口合计 + 能力增量聚合 + 每次发布一行（标题链接 + 首句摘要 + 计数）。 */
+/** 30 天变更索引的纯渲染：窗口合计 + 能力增量聚合 + 每次发布一行（标题链接 + 首句摘要 + 计数）。 */
 export function renderProgressSummary(input: { productName: string; days: number; releases: ProgressRelease[]; featureDeltas?: ProgressFeatureDelta[] }) {
   const { productName, days, releases } = input;
   const totals = releases.reduce(
@@ -72,7 +72,7 @@ export function renderProgressSummary(input: { productName: string; days: number
     { releases: 0, total: 0, added: 0, changed: 0, removed: 0, rebuildTotal: 0 },
   );
   const lines = [
-    `# 进展摘要 · ${productName}`,
+    `# 30 天变更索引 · ${productName}`,
     "",
     `- 统计窗口：最近 ${days} 天`,
     `- 发布 ${totals.releases} 次 · 行为变化 ${totals.total} 条（新增 ${totals.added} · 变化 ${totals.changed} · 移除 ${totals.removed}）`,

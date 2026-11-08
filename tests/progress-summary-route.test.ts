@@ -47,7 +47,7 @@ describe("progress summary route", () => {
     const response = await GET(request("?days=7"), { params: Promise.resolve({ slug: "codelphi" }) });
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Type")).toContain("text/markdown");
-    expect(await response.text()).toContain("# 进展摘要 · CoDelphi");
+    expect(await response.text()).toContain("# 30 天变更索引 · CoDelphi");
     expect(loadSummary).toHaveBeenCalledWith(1, 7);
   });
 

@@ -9,7 +9,7 @@ const querySchema = z.object({
   days: z.coerce.number().int().min(1).max(90).default(7),
 });
 
-/** CTO 进展摘要导出：登录成员按工作区读取；公开 demo 产品允许匿名只读（与页面 demo 视图同权）。 */
+/** 30 天变更索引导出：登录成员按工作区读取；公开 demo 产品允许匿名只读（与页面 demo 视图同权）。 */
 export async function GET(request: NextRequest, context: { params: Promise<{ slug: string }> }) {
   const { slug } = await context.params;
   const parsed = querySchema.safeParse(Object.fromEntries(request.nextUrl.searchParams));

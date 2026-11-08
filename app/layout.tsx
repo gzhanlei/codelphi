@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: { default: "CoDelphi", template: "%s · CoDelphi" },
-  description: "从 GitHub 代码维护可追溯的产品规格与变更知识",
+  description: "把 GitHub 代码变更翻译成带证据的发布说明与回归范围，采纳前经人工核实",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

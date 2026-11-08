@@ -43,6 +43,7 @@ body { margin: 0; background: var(--soft); color: var(--ink); font: 16px/1.7 "Pi
 .answer-scope { color: var(--muted); font-size: 13px; margin: 0 0 16px; }
 .answer ul { margin: 0; padding-left: 20px; }
 .answer li { margin: 6px 0; }
+.trust-note { color: var(--muted); font-size: 13px; margin: 12px 0 0; }
 section.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 22px 24px; margin-top: 22px; }
 section.panel h2 { font-size: 17px; margin: 0 0 14px; }
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
@@ -119,8 +120,9 @@ export function renderProductExplainerHtml(data: ProductOverviewData) {
 ${data.changes.length > 0 ? `<table><thead><tr><th>类型</th><th>功能 / 场景</th><th>行为变化</th></tr></thead><tbody>${changeRows(data)}</tbody></table>` : `<p class="empty">本次分析未发现规格行为变化。</p>`}
 </section>
 <section class="panel" id="trust">
-<h2>规格可信度</h2>
+<h2>证据覆盖率</h2>
 <table><tbody>${trustRows(data)}</tbody></table>
+<p class="trust-note">证据覆盖率描述证据范围，不表示结论正确；采纳前应经人工核实。</p>
 </section>
 </main>
 <footer class="colophon">

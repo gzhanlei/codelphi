@@ -23,7 +23,7 @@ describe("renderProductExplainerHtml", () => {
     expect(html).toContain("<title>产品知识中心 · CoDelphi</title>");
     expect(html).toContain("当前核心能力");
     expect(html).toContain("最近改变了什么");
-    expect(html).toContain("规格可信度");
+    expect(html).toContain("证据覆盖率");
     expect(html).toContain("结果更明确");
     expect(html).toContain("人工维护 1 个功能和 2 个场景");
     expect(html).toContain("读懂每一次产品变化。");

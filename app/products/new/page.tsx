@@ -17,7 +17,7 @@ export default async function NewProductPage() {
     <AppShell user={user} organizationName={organization.name}>
       <Link href="/" className="back-link">← 所有产品</Link>
       <div className="page-heading">
-        <div><span className="eyebrow">NEW PRODUCT SPACE</span><h1>添加产品</h1><p>接入一个 GitHub 仓库，开始维护可追溯的产品知识。</p></div>
+        <div><span className="eyebrow">NEW PRODUCT SPACE</span><h1>添加产品</h1><p>接入一个 GitHub 仓库，生成带代码证据的功能清单与变更翻译。</p></div>
       </div>
       <NewProductContent connections={connections} hasServerToken={hasServerToken} />
     </AppShell>

@@ -49,7 +49,7 @@ export function ProductChanges({ slug, releases: initialReleases, changes: initi
   return (
     <div className="release-list">
       <div className="release-list-head">
-        <a className="overview-text-link" href={`/api/products/${slug}/progress-summary?days=30`}>导出进展摘要（30 天）↓</a>
+        <a className="overview-text-link" href={`/api/products/${slug}/progress-summary?days=30`}>导出 30 天变更索引 ↓</a>
       </div>
       {releases.map((release, index) => <ReleaseCard slug={slug} release={release} changes={changes} behaviorChanges={behaviorChanges} foldedChanges={foldedChanges} tasks={regressionTasks} canEdit={canEdit} defaultOpen={index === 0} key={release.id} />)}
       {hasMore ? (

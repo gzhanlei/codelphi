@@ -71,8 +71,8 @@ function TrustPanel({ data }: { data: ProductOverviewData }) {
   const { trust } = data;
   return (
     <section className="overview-panel trust-panel">
-      <div className="overview-panel-heading"><span>03</span><h2>规格可信度</h2></div>
-      <p>所有结论都关联当前规格版本、代码证据和人工修订。</p>
+      <div className="overview-panel-heading"><span>03</span><h2>证据覆盖率</h2></div>
+      <p>每条结论都关联规格版本、代码证据与人工修订；证据覆盖描述证据范围，不等于结论正确，采纳前应经人工核实。</p>
       <dl className="trust-grid"><div><dt>功能 / 场景</dt><dd>{trust.featureCount} / {trust.scenarioCount}</dd></div><div><dt>人工功能 / 场景</dt><dd>{trust.manualFeatureCount} / {trust.manualScenarioCount}</dd></div><div><dt>证据文件</dt><dd>{trust.evidencePathCount}</dd></div><div><dt>规格版本</dt><dd>{trust.specVersionId === null ? "未生成" : trust.specVersionId}</dd></div></dl>
     </section>
   );

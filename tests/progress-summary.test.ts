@@ -24,7 +24,7 @@ describe("renderProgressSummary", () => {
       days: 7,
       releases: [release(), release({ id: 2, title: "窄推送回归验证注释", total: 1, added: 0, changed: 0, removed: 1, committedAt: new Date("2026-11-05T10:00:00Z"), sha: "20930c3abc", url: "https://github.com/o/r/commit/20930c3abc" })],
     });
-    expect(markdown).toContain("# 进展摘要 · CoDelphi");
+    expect(markdown).toContain("# 30 天变更索引 · CoDelphi");
     expect(markdown).toContain("统计窗口：最近 7 天");
     expect(markdown).toContain("发布 2 次 · 行为变化 4 条（新增 1 · 变化 2 · 移除 1）");
     expect(markdown).toContain("[11-07] [发布变化页的发布卡片可折叠]");
