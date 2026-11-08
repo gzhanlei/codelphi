@@ -33,8 +33,10 @@ describe("Chandler OAuth boundary", () => {
       return new Response(JSON.stringify({ data: { sub: "usr_1", email: " PERSON@example.com ", name: null, picture: null } }), { status: 200 });
     });
 
-    const profile = await completeChandlerOAuth({ code: "auth-code", verifier: "pkce-verifier", redirectUri: "http://localhost:3008/auth/callback" }, fetcher);
+    const { profile, tokens } = await completeChandlerOAuth({ code: "auth-code", verifier: "pkce-verifier", redirectUri: "http://localhost:3008/auth/callback" }, fetcher);
     expect(profile).toEqual({ sub: "usr_1", email: "person@example.com", name: undefined, picture: undefined });
+    // refresh_token / expires_in 随 token 响应透传（M3-T1：加密落库由 chandler-token 负责）
+    expect(tokens).toEqual({ accessToken: "access-token" });
     expect(calls).toHaveLength(2);
     expect(calls[0].url).toBe("https://api.chandler.work/v1/oauth/token");
     expect(calls[0].init?.body).toBeInstanceOf(URLSearchParams);
@@ -46,7 +48,7 @@ describe("Chandler OAuth boundary", () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "a" }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ sub: "usr_2", name: "", picture: "" }), { status: 200 }));
-    await expect(completeChandlerOAuth({ code: "code", verifier: "v", redirectUri: "http://localhost/cb" }, fetcher)).resolves.toEqual({ sub: "usr_2", email: undefined, name: "", picture: "" });
+    await expect(completeChandlerOAuth({ code: "code", verifier: "v", redirectUri: "http://localhost/cb" }, fetcher)).resolves.toEqual({ profile: { sub: "usr_2", email: undefined, name: "", picture: "" }, tokens: { accessToken: "a" } });
   });
 
   it("surfaces token and userinfo failures with stable error codes", async () => {
