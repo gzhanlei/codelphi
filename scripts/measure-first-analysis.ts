@@ -163,11 +163,41 @@ async function measure(repoFullName: string, access: { token?: string }): Promis
   return computeMetrics({ repo: repoFullName, head, tree: treePayload.tree, treeTruncated: treePayload.truncated === true, sourcePaths: allSources.map((source) => source.path), windowBytes, partitions: partitions.length, result });
 }
 
+interface UsageSample { model: string; promptTokens: number; completionTokens: number }
+const usageSamples: UsageSample[] = [];
+
+/** 拦截网关响应捕获 usage（仅测量用；不写任何收据，价格由网关计划单价套算）。 */
+function installUsageCapture() {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: unknown, init?: unknown) => {
+    const response = await (originalFetch as (input: unknown, init?: unknown) => Promise<Response>)(input, init);
+    try {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : String((input as { url?: string }).url ?? "");
+      if (url.includes("chat/completions")) {
+        const payload = await response.clone().json() as { model?: string; usage?: { prompt_tokens?: number; completion_tokens?: number } } | null;
+        if (payload?.usage) {
+          usageSamples.push({ model: payload.model ?? "unknown", promptTokens: payload.usage.prompt_tokens ?? 0, completionTokens: payload.usage.completion_tokens ?? 0 });
+        }
+      }
+    } catch {
+      // 观测失败不影响测量
+    }
+    return response;
+  }) as typeof fetch;
+}
+
+function usageSummary() {
+  const promptTokens = usageSamples.reduce((total, sample) => total + sample.promptTokens, 0);
+  const completionTokens = usageSamples.reduce((total, sample) => total + sample.completionTokens, 0);
+  return { calls: usageSamples.length, promptTokens, completionTokens, perPass: usageSamples.map((sample) => `${sample.promptTokens}/${sample.completionTokens}`) };
+}
+
 async function main() {
   const selectionOnly = process.argv.includes("--selection-only");
   const repos = process.argv.slice(2).filter((arg) => arg.includes("/"));
   const targets = repos.length > 0 ? repos : DEFAULT_REPOS;
   const access = { token: process.env.GITHUB_TOKEN };
+  installUsageCapture();
   if (selectionOnly) {
     // 责任划分探针：只跑规划器，打印供给清单（不调 AI、不写任何东西）
     for (const repoFullName of targets) {
@@ -199,7 +229,11 @@ async function main() {
       console.error(`[fail] ${repo}: ${message.slice(0, 300)}`);
     }
   }
-  console.log("\n=== 汇总 ===");
+  const usage = usageSummary();
+  console.log(`\n=== 成本观测 ===`);
+  console.log(`AI 调用 ${usage.calls} 次 / 输入 ${usage.promptTokens} tokens / 输出 ${usage.completionTokens} tokens（价格按网关计划单价套算；模型 ${usageSamples[0]?.model ?? "n/a"}）`);
+  console.log(`逐趟 输入/输出: ${usage.perPass.join(", ")}`);
+  console.log(`\n=== 汇总 ===`);
   for (const metric of metrics) {
     if (metric.error) {
       console.log(`${metric.repo}: FAILED — ${metric.error}`);
