@@ -22,6 +22,26 @@ describe("AI analysis output", () => {
     expect(parseAnalysisContent(JSON.stringify(oversized)).features[0].scenarios[0].evidence).toHaveLength(5);
   });
 
+  it("promotes the result alias to outcome when the model drops the canonical key", () => {
+    // 生产事故复刻（run 174–179）：模型把「结果」直译为 result 键，49/49 场景缺 outcome
+    const drifted = structuredClone(result) as { features: Array<{ scenarios: Array<Record<string, unknown>> }> };
+    const scenario = drifted.features[0].scenarios[0];
+    delete scenario.outcome;
+    scenario.result = "进入 Chandler 授权";
+    const parsed = parseAnalysisContent(JSON.stringify(drifted));
+    expect(parsed.features[0].scenarios[0].outcome).toBe("进入 Chandler 授权");
+    expect((parsed.features[0].scenarios[0] as unknown as Record<string, unknown>).result).toBeUndefined();
+  });
+
+  it("keeps an explicit outcome over the result alias and still rejects scenarios missing both", () => {
+    const both = structuredClone(result) as { features: Array<{ scenarios: Array<Record<string, unknown>> }> };
+    both.features[0].scenarios[0].result = "别名不应覆盖显式字段";
+    expect(parseAnalysisContent(JSON.stringify(both)).features[0].scenarios[0].outcome).toBe("进入 Chandler 授权");
+    const neither = structuredClone(result) as { features: Array<{ scenarios: Array<Record<string, unknown>> }> };
+    delete neither.features[0].scenarios[0].outcome;
+    expect(() => parseAnalysisContent(JSON.stringify(neither))).toThrow();
+  });
+
   it("tolerates missing optional collections while capping evidence", () => {
     const empty = capEvidence({}) as { changes?: unknown; features?: unknown };
     expect(empty.changes).toBeUndefined();

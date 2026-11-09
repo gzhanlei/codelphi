@@ -62,6 +62,27 @@ export function capEvidence(value: unknown) {
   };
 }
 
+/**
+ * 场景字段别名归一：生产实测（2026-11-10 run 174–179，复现于同提示重建）模型会把
+ * 提示语里的「结果」直译成 result 键——模板已声明 outcome 仍系统性漂移，zod 对多余
+ * 键静默放行、对缺失的 outcome 报 invalid_type，整趟分析作废。解析层在 schema 校验前
+ * 把 result 升格为 outcome（显式 outcome 优先），未变证据校验口径。
+ */
+export function normalizeScenarioAliases(value: unknown) {
+  const input = value as { features?: Array<{ scenarios?: Array<Record<string, unknown>> }> };
+  return {
+    ...input,
+    features: input.features?.map((feature) => ({
+      ...feature,
+      scenarios: feature.scenarios?.map((scenario) => {
+        if (scenario.outcome !== undefined || typeof scenario.result !== "string") return scenario;
+        const { result, ...rest } = scenario;
+        return { ...rest, outcome: result };
+      }),
+    })),
+  };
+}
+
 export function parseAnalysisContent(content: string): AnalysisResult {
   const trimmed = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
   const start = trimmed.indexOf("{");
@@ -69,7 +90,7 @@ export function parseAnalysisContent(content: string): AnalysisResult {
   if (start < 0) throw new Error("AI response did not contain a JSON object");
   const json = trimmed.slice(start, end + 1);
   if (!json.endsWith("}")) throw new Error("AI response did not contain a JSON object");
-  return analysisSchema.parse(capEvidence(JSON.parse(json)));
+  return analysisSchema.parse(capEvidence(normalizeScenarioAliases(JSON.parse(json))));
 }
 
 interface ChangeContext {
@@ -200,7 +221,7 @@ export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext
     "你在维护一个产品知识库。仅根据给定代码和 diff 输出事实，不要补充猜测。",
     "用简体中文生成：1) 产品简介；2) 当前产品功能规格；3) 本次发布的用户可感知变化。",
     "产品简介用一到两句话说明服务对象和核心能力，不超过 200 字，必须概括整个代码库而不是本次提交，并给出输入文件中的 evidence；不要只写产品名或营销词。",
-    "规格按功能组织，每个场景包含情境、操作、结果，分类为 happy/edge/error，reference 使用 HP-n/EC-n/ER-n。",
+    "规格按功能组织，每个场景包含情境、操作、结果，分类为 happy/edge/error，reference 使用 HP-n/EC-n/ER-n。JSON 字段名必须与下方模板逐字一致：情境=context、操作=action、结果=outcome，禁止用 result 等同义键名。",
     coverageMandate,
     "优先保证功能覆盖，每个功能保留最关键的 1-5 个场景；不要因单个功能场景过多而遗漏其他功能。",
     "每个场景、变化和产品简介必须给 evidence；path 必须来自输入文件，startLine 使用输入的行号。没有用户变化的发布只生成 reviewed 项。",
