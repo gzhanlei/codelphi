@@ -9,6 +9,7 @@ import { getValidUserToken } from "../chandler-token";
 import { queryChandlerOrder } from "../chandler-pay";
 import { deliverPendingBillingNotifications, enqueueBillingNotification, ownerEmailForAccount } from "./notifications";
 import { runDailyReconcileOnce } from "./reconcile";
+import { runAnalysisTriggerSweepOnce } from "../analysis-trigger";
 import { DEADLOCK_RETRIES, FIRST_RUN_UNITS, HEARTBEAT_FRESH_WINDOW_MINUTES, RESERVATION_TTL_MINUTES, SWEEP_RESERVATION_INTERVAL_MS } from "./constants";
 
 /**
@@ -134,6 +135,16 @@ export async function runQueuedRunRecoveryOnce(): Promise<JobResult> {
   return withSweepLock("queued-run-recovery", async () => dispatchStuckQueuedRuns(runAnalysis));
 }
 
+/**
+ * 触发模式兜底作业（每小时运行，仓库按 analysis_trigger_hour 匹配小时）：daily/push_count
+ * 模式当天仍有未处理 push 的仓库，排队一次累计分析（before=成功水位 / after=当前 HEAD）。
+ * 排队后的派发由 queued-run-recovery 接手；额度闸门拒绝时 pending 保留、下小时重试。
+ */
+export async function runAnalysisTriggerSweepJob(): Promise<JobResult> {
+  const outcome = await runAnalysisTriggerSweepOnce();
+  return { executed: true, detail: { ...outcome } };
+}
+
 /** 调度入口（instrumentation.ts 调用一次）：幂等启动，重复调用直接返回。 */
 export function startBillingSweeps() {
   if (process.env.BILLING_SWEEP_ENABLED === "false") return { started: false };
@@ -144,6 +155,7 @@ export function startBillingSweeps() {
   scheduleJob("billing-daily", 24 * 60 * 60 * 1_000, runBillingDailyOnce);
   scheduleJob("rate-limit-cleanup", 60 * 60 * 1_000, () => runRateLimitCleanupOnce(3600));
   scheduleJob("queued-run-recovery", 60 * 1_000, runQueuedRunRecoveryOnce);
+  scheduleJob("analysis-trigger", 60 * 60 * 1_000, runAnalysisTriggerSweepJob);
   return { started: true, jobs: [...startedJobs] };
 }
 

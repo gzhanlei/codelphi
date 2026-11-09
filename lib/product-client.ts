@@ -102,3 +102,15 @@ export async function requestAnalysis(slug: string, fetcher: Fetcher = fetch) {
   if (data.message) throw new Error(data.message);
   return data.runId;
 }
+
+/** 按仓库设置分析触发模式（每次 push / 每天低峰一次 / 每 N 次 push + 当天兜底）。 */
+export async function updateRepositoryTrigger(slug: string, repositoryId: number, input: { trigger: string; n?: number; hour?: number }, fetcher: Fetcher = fetch) {
+  const response = await fetcher(`/api/products/${slug}/repositories/${repositoryId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = await productResponse<{ status?: string; error?: string }>(response, "保存分析触发设置失败");
+  if (data.status !== "updated") throw new Error(data.error ?? "保存分析触发设置失败");
+  return "updated" as const;
+}

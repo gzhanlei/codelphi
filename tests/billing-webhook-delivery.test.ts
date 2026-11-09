@@ -18,7 +18,9 @@ function deliveryHarness() {
   }
   const deliveries = new Map<string, Row>();
   const skipped: Array<{ repository_id: number; sha: string; reason: string; delivery_id: string }> = [];
+  const repoUpdates: Array<{ sql: string; pending: number | null }> = [];
   const conns: Array<{ commit: ReturnType<typeof vi.fn>; rollback: ReturnType<typeof vi.fn> }> = [];
+  const triggerState = { mode: "push", n: 5, pending: 0 };
   const db = {
     execute: vi.fn(),
     getConnection: vi.fn(async () => {
@@ -52,6 +54,15 @@ function deliveryHarness() {
             skipped.push({ repository_id: Number(params[0]), sha: String(params[1]), reason: String(params[2]), delivery_id: String(params[3]) });
             return [{}];
           }
+          if (sql.includes("FROM repositories r WHERE r.id = ?") && sql.includes("analysis_trigger")) {
+            return [[{ mode: triggerState.mode, triggerN: triggerState.n, pendingPushCount: triggerState.pending, hasSucceededAnalysis: 1 }], []];
+          }
+          if (sql.includes("UPDATE repositories SET pending_push_count")) {
+            const next = sql.includes("pending_push_count + 1") ? triggerState.pending + 1 : 0;
+            triggerState.pending = next;
+            repoUpdates.push({ sql, pending: next });
+            return [{ affectedRows: 1 }];
+          }
           return [[], []];
         }),
         beginTransaction: vi.fn(async () => undefined),
@@ -66,6 +77,8 @@ function deliveryHarness() {
   return {
     deliveries,
     skipped,
+    repoUpdates,
+    triggerState,
     conns,
     db,
     row(id: string) {
@@ -202,5 +215,35 @@ describe("staged push delivery (contract P0-4)", () => {
     expect(result.body).toEqual({ accepted: true, runId: 42 });
     expect(queue).toHaveBeenCalledWith(9, "before", "after-sha");
     expect(h.deliveries.size).toBe(0);
+  });
+});
+
+describe("per-repo analysis trigger modes", () => {
+  it("defers daily-mode pushes: counter incremented, delivery skipped, no enqueue", async () => {
+    const h = deliveryHarness();
+    h.triggerState.mode = "daily";
+    h.triggerState.pending = 2;
+    vi.mocked(getDb).mockReturnValue(h.db as never);
+    const enqueue = vi.fn(async () => ({ runId: 80, reused: false }));
+    const result = await processGitHubWebhook(pushInput("D6"), baseDependencies(enqueue));
+    expect(result.status).toBe(202);
+    expect(result.body).toEqual({ accepted: false, skipped: true, reason: "deferred_trigger" });
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(h.skipped).toEqual([{ repository_id: 9, sha: "after-sha", reason: "deferred_trigger", delivery_id: "D6" }]);
+    expect(h.triggerState.pending).toBe(3);
+  });
+
+  it("triggers immediately when push_count reaches N and resets the counter", async () => {
+    const h = deliveryHarness();
+    h.triggerState.mode = "push_count";
+    h.triggerState.n = 3;
+    h.triggerState.pending = 2; // 本 push 到达后达到 3
+    vi.mocked(getDb).mockReturnValue(h.db as never);
+    const enqueue = vi.fn(async () => ({ runId: 81, reused: false }));
+    const result = await processGitHubWebhook(pushInput("D7"), baseDependencies(enqueue));
+    expect(result.status).toBe(202);
+    expect(result.body).toEqual({ accepted: true, runId: 81 });
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    expect(h.triggerState.pending).toBe(0);
   });
 });

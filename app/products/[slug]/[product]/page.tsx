@@ -11,6 +11,8 @@ import { ProductMembersSettings } from "@/components/product-members-settings";
 import { ProductTabs, ProductView, RepositoryLink, RunStatus } from "@/components/product-navigation";
 import { PublicDemoSettings } from "@/components/public-demo-settings";
 import { RemoveProductButton } from "@/components/remove-product-button";
+import { RepositoryTriggerSettings } from "@/components/repository-trigger-settings";
+import { listProductRepositoryTriggers } from "@/lib/analysis-trigger";
 import { defaultExecute } from "@/lib/db";
 import { getProductDetails } from "@/lib/product-details";
 import { productBasePath } from "@/lib/product-links";
@@ -111,6 +113,12 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
       />
 
       <NotificationSettings slug={details.product.slug} canEditChannels={access.role !== "viewer"} />
+
+      <RepositoryTriggerSettings
+        slug={details.product.slug}
+        repos={await listProductRepositoryTriggers(details.product.id, defaultExecute)}
+        canEdit={access.role !== "viewer"}
+      />
     </>
   ) : null;
 

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { PoolConnection } from "mysql2/promise";
+import { DEFAULT_TRIGGER_N, resolvePushTriggerAction, type AnalysisTriggerMode } from "./analysis-trigger";
 import { queueAnalysis } from "./analysis";
 import { getDb } from "./db";
 import { verifyGitHubSignature } from "./github";
@@ -203,6 +204,45 @@ async function deliverStagedPush(
       return { status: 202, body, runId: row.run_id ?? undefined };
     }
     await conn.execute(`UPDATE github_webhook_deliveries SET status = 'processing' WHERE delivery_id = ?`, [input.deliveryId]);
+
+    // 触发模式判定（同事务）：首分析例外立即派发；daily/push_count 未达阈值 → 计数 +1 并
+    // 标记 deferred_trigger（当天兜底 sweep 会以 before=成功水位 / after=最新 HEAD 补一次累计分析）。
+    const [triggerRows] = await conn.execute(
+      `SELECT r.analysis_trigger AS mode, COALESCE(r.analysis_trigger_n, ?) AS triggerN, r.pending_push_count AS pendingPushCount,
+              EXISTS(SELECT 1 FROM analysis_runs ar WHERE ar.repository_id = r.id AND ar.status = 'succeeded') AS hasSucceededAnalysis
+       FROM repositories r WHERE r.id = ? LIMIT 1`,
+      [DEFAULT_TRIGGER_N, input.repositoryId],
+    );
+    const triggerState = (triggerRows as Array<{ mode: string; triggerN: number; pendingPushCount: number; hasSucceededAnalysis: number }>)[0];
+    if (triggerState) {
+      const action = resolvePushTriggerAction({
+        mode: triggerState.mode as AnalysisTriggerMode,
+        pendingPushCount: Number(triggerState.pendingPushCount),
+        hasSucceededAnalysis: Number(triggerState.hasSucceededAnalysis) === 1,
+        triggerN: triggerState.triggerN === null ? null : Number(triggerState.triggerN),
+      });
+      if (action === "defer") {
+        await conn.execute(`UPDATE repositories SET pending_push_count = pending_push_count + 1 WHERE id = ?`, [input.repositoryId]);
+        const reason = "deferred_trigger";
+        await conn.execute(
+          `INSERT INTO skipped_pushes (repository_id, sha, reason, delivery_id) VALUES (?, ?, ?, ?)`,
+          [input.repositoryId, input.after, reason, input.deliveryId],
+        );
+        const body = { accepted: false, skipped: true, reason };
+        await conn.execute(
+          `UPDATE github_webhook_deliveries SET status = 'skipped', result_json = ? WHERE delivery_id = ?`,
+          [JSON.stringify(body), input.deliveryId],
+        );
+        await conn.commit();
+        conn.release();
+        return { status: 202, body };
+      }
+      if (triggerState.mode !== "push") {
+        // 阈值触发或首分析：本 push 立即派发并清零计数（窗口内此前未处理的 push 由
+        // before=成功水位的累计分析一并覆盖）
+        await conn.execute(`UPDATE repositories SET pending_push_count = 0 WHERE id = ?`, [input.repositoryId]);
+      }
+    }
 
     try {
       const result = await dependencies.enqueue({
