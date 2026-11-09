@@ -71,19 +71,21 @@ export function RepositoryTriggerSettings({ slug, repos, canEdit }: { slug: stri
         return (
           <div key={repo.id} className="settings-form" style={{ marginBottom: 16 }}>
             <p className="overview-note" style={{ fontWeight: 600 }}>{repo.owner}/{repo.name}</p>
-            <label className="field">
-              <span>触发模式</span>
-              <select
-                aria-label={`分析触发模式 ${repo.name}`}
-                value={draft.trigger}
-                disabled={pendingId === repo.id}
-                onChange={(event) => updateDraft(repo.id, { trigger: event.target.value as AnalysisTriggerMode })}
-              >
-                {(Object.keys(MODE_LABELS) as AnalysisTriggerMode[]).map((mode) => (
-                  <option key={mode} value={mode}>{MODE_LABELS[mode]}</option>
-                ))}
-              </select>
-            </label>
+            <div role="radiogroup" aria-label={`分析触发模式 ${repo.name}`} style={{ margin: "0 0 12px" }}>
+              {(Object.keys(MODE_LABELS) as AnalysisTriggerMode[]).map((mode) => (
+                <label key={mode} style={{ display: "flex", alignItems: "center", gap: 8, margin: "6px 0", cursor: pendingId === repo.id ? "wait" : "pointer" }}>
+                  <input
+                    type="radio"
+                    name={`repository-trigger-${repo.id}`}
+                    value={mode}
+                    checked={draft.trigger === mode}
+                    disabled={pendingId === repo.id}
+                    onChange={() => updateDraft(repo.id, { trigger: mode })}
+                  />
+                  <span style={{ fontSize: 14 }}>{MODE_LABELS[mode]}</span>
+                </label>
+              ))}
+            </div>
             {draft.trigger === "push_count" ? (
               <label className="field">
                 <span>每 N 次推送</span>
