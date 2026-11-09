@@ -13,8 +13,9 @@ vi.mock("../lib/session", () => ({ getSessionUser: vi.fn() }));
 vi.mock("../lib/product-access", () => ({ requireProductAccess: vi.fn() }));
 vi.mock("../lib/public-demo", async (importOriginal) => ({
   ...await importOriginal<typeof import("../lib/public-demo")>(),
-  resolvePublicDemoProduct: vi.fn(async (slug: string) =>
-    slug === "codelphi" ? { id: 1, slug, name: "CoDelphi", organizationId: 7 } : null),
+  // 单 slug 的 API 路径没有 org 段，匿名兜底走 legacy 解析；canonical 页面才用 resolvePublicDemoProduct(orgSlug, slug)。
+  resolveLegacyPublicDemoProduct: vi.fn(async (slug: string) =>
+    slug === "codelphi" ? { id: 1, slug, name: "CoDelphi", organizationId: 7, organizationSlug: "team" } : null),
 }));
 
 import { GET } from "../app/api/products/[slug]/impact/route";
