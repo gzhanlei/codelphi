@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { SpecAnswer } from "@/lib/spec-ask";
 import { featureHref } from "@/lib/spec-editor-ui";
+import { EvidenceLinks } from "./evidence-links";
 
 /**
  * B2.1 检索式问答：一次问句 → 一组规格原文卡片。
@@ -25,7 +26,7 @@ export function SpecAsk({ slug, productBase }: { slug: string; productBase: stri
       if (!response.ok) throw new Error(`ask failed: ${response.status}`);
       setAnswer(await response.json() as SpecAnswer);
     } catch {
-      // 匿名 demo 下接口可能不可用：给出可见失败态，而不是静默无结果。
+      // 匿名 demo 已由 spec-read-access 放行；网络或服务端异常仍要给可见失败态，不静默无结果。
       setFailed(true);
     } finally {
       setPending(false);
@@ -54,14 +55,20 @@ export function SpecAsk({ slug, productBase }: { slug: string; productBase: stri
           {answer.status === "matched" ? (
             <div className="spec-ask-cards">
               {answer.features.map((feature) => (
-                <a className="spec-search-hit" href={`${productBase}${featureHref(feature.id)}`} key={`f${feature.id}`}>
-                  <span className="spec-search-kind">功能</span><strong>{feature.name}</strong><p>{feature.summary}</p>
-                </a>
+                <div className="spec-search-hit" key={`f${feature.id}`}>
+                  <span className="spec-search-kind">功能</span>
+                  <strong><a className="spec-ask-hit-link" href={`${productBase}${featureHref(feature.id)}`}>{feature.name}</a></strong>
+                  <p>{feature.summary}</p>
+                </div>
               ))}
               {answer.scenarios.map((scenario) => (
-                <a className="spec-search-hit" href={`${productBase}${featureHref(scenario.featureId)}`} key={`s${scenario.id}`}>
-                  <span className="spec-search-kind">场景</span><strong>{scenario.featureName} · {scenario.reference}</strong><p>{scenario.context} → {scenario.action} → {scenario.outcome}</p>
-                </a>
+                // 卡片不能整体包 <a>：证据里的 blob 链接也是 <a>，嵌套链接是无效 HTML。
+                <div className="spec-search-hit" key={`s${scenario.id}`}>
+                  <span className="spec-search-kind">场景</span>
+                  <strong><a className="spec-ask-hit-link" href={`${productBase}${featureHref(scenario.featureId)}`}>{scenario.featureName} · {scenario.reference}</a></strong>
+                  <p>{scenario.context} → {scenario.action} → {scenario.outcome}</p>
+                  <div className="spec-ask-evidence"><EvidenceLinks value={scenario.evidence} /></div>
+                </div>
               ))}
             </div>
           ) : null}

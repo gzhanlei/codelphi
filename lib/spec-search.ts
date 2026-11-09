@@ -1,8 +1,10 @@
 import { defaultExecute, type Execute } from "./db";
+import { evidenceItems } from "./evidence";
+import type { Evidence } from "./types";
 
 export interface SpecSearchResult {
   features: Array<{ id: number; name: string; summary: string }>;
-  scenarios: Array<{ id: number; featureId: number; featureName: string; reference: string; context: string; action: string; outcome: string }>;
+  scenarios: Array<{ id: number; featureId: number; featureName: string; reference: string; context: string; action: string; outcome: string; evidence: Evidence[] }>;
 }
 
 function likePattern(query: string) {
@@ -20,13 +22,15 @@ export async function searchSpec(productId: number, query: string, execute: Exec
      ORDER BY f.name LIMIT 20`,
     [productId, pattern, pattern],
   ) as [SpecSearchResult["features"], unknown];
+  type ScenarioSource = Omit<SpecSearchResult["scenarios"][number], "evidence"> & { evidence: unknown };
   const [scenarioRows] = await execute(
-    `SELECT s.id, f.id AS featureId, f.name AS featureName, s.reference, s.context, s.action, s.outcome
+    `SELECT s.id, f.id AS featureId, f.name AS featureName, s.reference, s.context, s.action, s.outcome, s.evidence
      FROM scenarios s JOIN features f ON f.id = s.feature_id
      WHERE f.product_id = ? AND f.active = 1 AND s.active = 1
        AND (s.reference LIKE ? OR s.context LIKE ? OR s.action LIKE ? OR s.outcome LIKE ? OR s.evidence LIKE ?)
      ORDER BY f.name, s.reference LIMIT 30`,
     [productId, pattern, pattern, pattern, pattern, pattern],
-  ) as [SpecSearchResult["scenarios"], unknown];
-  return { features: featureRows, scenarios: scenarioRows };
+  ) as [ScenarioSource[], unknown];
+  // evidence 在 DB 是 JSON 列：在这里一次性解析，调用方（搜索 / 检索式问答 / 未来的 MCP）拿到的都是结构化证据。
+  return { features: featureRows, scenarios: scenarioRows.map((row) => ({ ...row, evidence: evidenceItems(row.evidence) })) };
 }
