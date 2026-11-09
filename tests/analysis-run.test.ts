@@ -235,6 +235,57 @@ describe("analysis orchestration", () => {
     }
   });
 
+  it("runs the incremental path through the same partitioned extraction as full mode (W0-6)", async () => {
+    // W0-6：增量 / RC2-carry 不再单窗——按实现面分片，affectedKeys 语义不变
+    runRows = [{ ...run, analyzeMode: "incremental" }];
+    partitionedSourcesMock.mockResolvedValue({
+      partitions: [
+        { slice: { files: [{ path: "lib/auth.ts" }] }, sources: [{ path: "lib/auth.ts", content: "1: auth" }] },
+        { slice: { files: [{ path: "lib/export.ts" }] }, sources: [{ path: "lib/export.ts", content: "1: export" }] },
+      ],
+      index: { readLines, listDir },
+    });
+    execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("JOIN repositories repo")) return [runRows];
+      if (sql.includes("source_roots")) return [[]];
+      if (sql.includes("SELECT id FROM analysis_runs WHERE repository_id = ? AND after_sha = ?")) return [existingRunRows];
+      if (sql.includes("INSERT INTO analysis_runs")) return [{ insertId: 55 }];
+      if (sql.includes("SELECT sf.name FROM spec_features")) return [[{ name: "统一登录" }]];
+      if (sql.includes("FROM spec_file_index i")) return [[{ stableKey: "统一登录", name: "统一登录" }]];
+      return [{}];
+    });
+    adapter.getChangeContext.mockResolvedValue({ message: "change", committedAt: "2026-11-01T00:00:00Z", url: "", files: [{ path: "lib/auth.ts", status: "modified", patch: "+ const token = sign(payload);" }] });
+    vi.stubEnv("INCREMENTAL_SHADOW", "true");
+    try {
+      vi.mocked(analyzeWithAI)
+        .mockResolvedValueOnce({ product: { description: "d", evidence: [{ path: "lib/auth.ts", startLine: 1 }] }, release: { title: "v1", summary: "s" }, changes: [], features: [{ name: "统一登录", summary: "s1", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy", evidence: [{ path: "lib/auth.ts", startLine: 1 }] }] }] } as never)
+        .mockResolvedValueOnce({ product: { description: "d2", evidence: [{ path: "lib/export.ts", startLine: 1 }] }, release: { title: "v2", summary: "s2" }, changes: [], features: [] } as never);
+      await runAnalysis(8);
+      // 逐趟透传受影响功能集；跨趟命名连续性第二趟看到第一趟产出
+      const firstCall = vi.mocked(analyzeWithAI).mock.calls[0][2] as { affectedFeatureNames?: string[]; partition?: { index: number; total: number }; previousFeatureNames?: string[] };
+      const secondCall = vi.mocked(analyzeWithAI).mock.calls[1][2] as { affectedFeatureNames?: string[]; partition?: { index: number; total: number }; previousFeatureNames?: string[] };
+      expect(firstCall.partition).toEqual({ index: 1, total: 2 });
+      expect(firstCall.affectedFeatureNames).toEqual(["统一登录"]);
+      expect(secondCall.partition).toEqual({ index: 2, total: 2 });
+      expect(secondCall.affectedFeatureNames).toEqual(["统一登录"]);
+      expect(secondCall.previousFeatureNames).toContain("统一登录");
+      // 合并层产出完整规格，affectedKeys 语义不变（carry-forward 沿用未受影响功能）
+      const saved = vi.mocked(insertSpecVersion).mock.calls[0][3] as { affectedKeys?: Set<string> };
+      expect(saved.affectedKeys).toEqual(new Set(["统一登录"]));
+      const savedResult = vi.mocked(insertSpecVersion).mock.calls[0][2] as AnalysisResult;
+      expect(savedResult.features.map((feature) => feature.name)).toEqual(["统一登录"]);
+      // 影子对比保持单窗口径：增量多趟后显式取一份单窗切片，不静默用空输入
+      expect(getRemoteAnalysisSources).toHaveBeenCalledTimes(1);
+      expect(analyzeWithAI).toHaveBeenCalledTimes(3);
+      const shadowOptions = vi.mocked(analyzeWithAI).mock.calls[2][2] as { billing?: { chargeComponent?: string }; partition?: unknown };
+      expect(shadowOptions.billing?.chargeComponent).toBe("platform_shadow");
+      expect(shadowOptions.partition).toBeUndefined();
+      expect(connection.commit).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("extracts per partition and merges chunk results on the true-full path", async () => {
     // 分区 >1：每趟独立提取（分区上下文 i/N + 跨趟累计命名连续性），合并层出完整规格
     runRows = [run];

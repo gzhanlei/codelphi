@@ -308,54 +308,40 @@ async function runAnalysisBody(run: RunContext) {
       }
     }
   }
-  // 多趟提取（真全量路径）：实现面超出单窗口时按分区逐趟提取后确定性合并。
-  // 增量与 RC2-carry 路径（affectedKeys 非空）保持单窗；SAU 结算仍为每 run 一次，
-  // 各趟成本经 llm_call_receipts（同 runId 多行，契约 M0-T2）如实记账。
+  // 多趟提取：实现面超出单窗口时按分区逐趟提取后确定性合并，全量与增量 / RC2-carry
+  // 同一提取层（W0-6：按实现面而非运行模式决定是否分片；单窗仓库仍返回 1 个分区，
+  // 行为与旧单窗路径一致）。SAU 结算仍为每 run 一次，各趟成本经 llm_call_receipts
+  // （同 runId 多行，契约 M0-T2）如实记账。
   let result: AnalysisResult;
   let singleWindowSources: AnalysisPartition["sources"] | null = null;
-  if (affectedKeys === null) {
-    const { partitions } = await getPartitionedAnalysisSources(remoteAnalysisRequest, { planner, budgets: analysisSliceBudgets }, { maxPartitions: analysisMaxPartitions() });
-    console.log("[analysis] partitioned extraction", { runId: run.id, partitions: partitions.length });
-    if (partitions.length === 1) {
-      const single = partitions[0];
-      singleWindowSources = single.sources;
-      result = await analyzeWithAI(single.sources, change, {
-        previousFeatureNames,
-        previousSpec: previousSpecText,
-        billing: { runId: run.id, accountId: run.accountId ?? null, chargeComponent: "main" },
-      });
-      assertEvidence(result, evidenceAllowSet(single, change));
-    } else {
-      const chunks: ExtractionChunk[] = [];
-      const knownFeatureNames = new Set(previousFeatureNames);
-      for (const [index, partition] of partitions.entries()) {
-        const chunkResult = await analyzeWithAI(partition.sources, change, {
-          previousFeatureNames: [...knownFeatureNames],
-          previousSpec: previousSpecText,
-          partition: { index: index + 1, total: partitions.length },
-          billing: { runId: run.id, accountId: run.accountId ?? null, chargeComponent: "main" },
-        });
-        assertEvidence(chunkResult, evidenceAllowSet(partition, change));
-        for (const feature of chunkResult.features) knownFeatureNames.add(feature.name);
-        chunks.push({ result: chunkResult });
-      }
-      result = mergeChunkResults(chunks);
-    }
-  } else {
-    const remote = await getRemoteAnalysisSources(remoteAnalysisRequest, { planner, budgets: analysisSliceBudgets });
-    const sources = remote.sources;
-    singleWindowSources = sources;
-    result = await analyzeWithAI(sources, change, {
+  const { partitions } = await getPartitionedAnalysisSources(remoteAnalysisRequest, { planner, budgets: analysisSliceBudgets }, { maxPartitions: analysisMaxPartitions() });
+  console.log("[analysis] partitioned extraction", { runId: run.id, partitions: partitions.length, mode: affectedKeys === null ? "full" : "incremental-carry" });
+  if (partitions.length === 1) {
+    const single = partitions[0];
+    singleWindowSources = single.sources;
+    result = await analyzeWithAI(single.sources, change, {
       previousFeatureNames,
       previousSpec: previousSpecText,
-      affectedFeatureNames,
-      // 调用级成本回执（契约 M0-T2）：usage 即时落库，平台 shadow 单独记账不计 SAU
+      ...(affectedKeys !== null ? { affectedFeatureNames } : {}),
       billing: { runId: run.id, accountId: run.accountId ?? null, chargeComponent: "main" },
     });
-    assertEvidence(result, new Set([
-      ...remote.slice.files.map((file) => file.path),
-      ...change.files.map((file) => file.path),
-    ]));
+    assertEvidence(result, evidenceAllowSet(single, change));
+  } else {
+    const chunks: ExtractionChunk[] = [];
+    const knownFeatureNames = new Set(previousFeatureNames);
+    for (const [index, partition] of partitions.entries()) {
+      const chunkResult = await analyzeWithAI(partition.sources, change, {
+        previousFeatureNames: [...knownFeatureNames],
+        previousSpec: previousSpecText,
+        ...(affectedKeys !== null ? { affectedFeatureNames } : {}),
+        partition: { index: index + 1, total: partitions.length },
+        billing: { runId: run.id, accountId: run.accountId ?? null, chargeComponent: "main" },
+      });
+      assertEvidence(chunkResult, evidenceAllowSet(partition, change));
+      for (const feature of chunkResult.features) knownFeatureNames.add(feature.name);
+      chunks.push({ result: chunkResult });
+    }
+    result = mergeChunkResults(chunks);
   }
   const { specVersionId, features: mergedFeatures, collapse } = await saveResult(run, result, change, affectedKeys);
   // 坍缩护栏：新版场景数骤降只告警不阻断（版本 append-only，可回溯）；通知带警告供人工核实。
@@ -393,7 +379,15 @@ async function runAnalysisBody(run: RunContext) {
   // 直接与全量输出比较会恒等失败（missingKeys = 全部未受影响功能）。
   if (affectedKeys && incrementalShadowEnabled()) {
     try {
-      const shadow = await analyzeWithAI(singleWindowSources ?? [], change, {
+      // 影子对比保持单窗口径（W0-6 要点 5）：单窗 run 直接复用提取时的窗口；
+      // 增量多趟 run 没有单一窗口，显式另取一份单窗切片，不得静默用空输入。
+      let shadowSources = singleWindowSources;
+      if (!shadowSources) {
+        const shadowWindow = await getRemoteAnalysisSources(remoteAnalysisRequest, { planner, budgets: analysisSliceBudgets });
+        shadowSources = shadowWindow.sources;
+        console.log("[incremental-shadow] multi-pass run; shadow uses a separate single-window slice");
+      }
+      const shadow = await analyzeWithAI(shadowSources, change, {
         previousFeatureNames,
         billing: { runId: run.id, accountId: run.accountId ?? null, chargeComponent: "platform_shadow" },
       });
