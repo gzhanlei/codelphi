@@ -38,7 +38,12 @@ describe("code hosting provider registry", () => {
     expect(backend.kind).toBe("github_api");
   });
 
-  it.each(["gitee", "gitlab", "gitea"])("keeps %s as an explicit future extension", (provider) => {
+  it("exposes a GitLab source backend through the provider contract (C2 接入层)", () => {
+    const backend = getCodeHostingAdapter("gitlab").createSourceBackend({ token: "glpat-test" });
+    expect(backend.kind).toBe("gitlab_api");
+  });
+
+  it.each(["gitee", "gitea"])("keeps %s as an explicit future extension", (provider) => {
     expect(() => getCodeHostingAdapter(provider)).toThrow(`${provider} 的分析适配尚未开放`);
   });
 

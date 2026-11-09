@@ -9,7 +9,7 @@ export type SourceEntryType = "blob" | "tree" | "commit";
 
 export type SourceIndexStatus = "indexed" | "partial" | "failed";
 
-export type SourceBackendKind = "github_api" | "blobless_git";
+export type SourceBackendKind = "github_api" | "gitlab_api" | "blobless_git";
 
 export type SourceSignal =
   | "manifest"
