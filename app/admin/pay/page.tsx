@@ -1,5 +1,6 @@
 import { AppShell } from "@/components/app-shell";
 import { AdminPayOrders } from "@/components/admin-pay-orders";
+import { AdminBillingGrant } from "@/components/admin-billing-grant";
 import { getDb } from "@/lib/db";
 import { currentOrganization } from "@/lib/organizations";
 import { requirePlatformAdmin } from "@/lib/platform-admin";
@@ -37,6 +38,7 @@ export default async function PayAdminPage() {
       <div className="page-heading">
         <div><span className="eyebrow">PAY ADMIN</span><h1>支付管理</h1><p>0.01 元联调测试单、订单台账与管理员退款（超时停 refund_submitted，由对账自动推进确认）。</p></div>
       </div>
+      <AdminBillingGrant />
       <AdminPayOrders
         orders={orders.map((order) => ({
           ...order,
