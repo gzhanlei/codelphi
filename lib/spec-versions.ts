@@ -4,6 +4,7 @@ import type { RunContext } from "./analysis";
 import { defaultExecute, type Execute } from "./db";
 import { evidenceItems } from "./evidence";
 import { diffSpec, mergeSpecSources, specFeatureKey, specScenarioKey, type SpecChange, type SpecFeature, type SpecScenario, type SpecTombstones } from "./spec-diff";
+import { classifySpecHighlight } from "./spec-highlights";
 
 interface FeatureRow {
   id: number;
@@ -185,11 +186,13 @@ async function insertFeatures(connection: PoolConnection, versionId: number, fea
 
 async function insertChanges(connection: PoolConnection, versionId: number, baseVersionId: number | null, changes: SpecChange[]) {
   for (const change of changes) {
+    // A3 Highlight：确定性规则打标（零 AI 成本），绝大多数 change 为 NULL 不强标
+    const highlight = classifySpecHighlight(change);
     await connection.execute(
       `INSERT INTO spec_changes
         (spec_version_id, base_spec_version_id, entity_type, kind, feature_key, feature_name,
-         scenario_reference, summary, before_json, after_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         scenario_reference, summary, highlight_type, highlight_reason, before_json, after_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         versionId,
         baseVersionId,
@@ -199,6 +202,8 @@ async function insertChanges(connection: PoolConnection, versionId: number, base
         change.featureName,
         change.scenarioReference === null ? "" : change.scenarioReference,
         change.summary,
+        highlight?.type ?? null,
+        highlight?.reason ?? null,
         change.before ? JSON.stringify(change.before) : null,
         change.after ? JSON.stringify(change.after) : null,
       ],

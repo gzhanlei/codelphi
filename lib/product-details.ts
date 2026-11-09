@@ -55,7 +55,8 @@ async function loadBehaviorChanges(releases: ReleaseRow[]) {
   const [rows] = await getDb().execute(
     `SELECT c.id, r.id AS releaseId, c.kind, c.entity_type AS entityType,
             c.feature_name AS featureName, c.scenario_reference AS scenarioReference,
-            c.summary, c.before_json AS beforeJson, c.after_json AS afterJson
+            c.summary, c.highlight_type AS highlightType, c.highlight_reason AS highlightReason,
+            c.before_json AS beforeJson, c.after_json AS afterJson
      FROM spec_changes c JOIN releases r ON r.spec_version_id = c.spec_version_id
      WHERE r.id IN (${placeholders}) AND c.wording_only = 0 ORDER BY c.id`,
     ids,
@@ -68,6 +69,8 @@ async function loadBehaviorChanges(releases: ReleaseRow[]) {
     featureName: row.featureName,
     scenarioReference: row.scenarioReference,
     summary: row.summary,
+    highlightType: row.highlightType,
+    highlightReason: row.highlightReason,
     before: parseJsonValue(row.beforeJson),
     after: parseJsonValue(row.afterJson),
   }));

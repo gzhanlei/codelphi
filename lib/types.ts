@@ -74,6 +74,9 @@ export interface BehaviorChangeRow {
   featureName: string;
   scenarioReference: string;
   summary: string;
+  /** A3 Highlight 九类分类（确定性规则打标，绝大多数 change 为 NULL）。 */
+  highlightType?: string | null;
+  highlightReason?: string | null;
   before: unknown;
   after: unknown;
   /** C-lite 展示信号：与本条构成疑似改名的对侧功能名（不改数据）。 */
