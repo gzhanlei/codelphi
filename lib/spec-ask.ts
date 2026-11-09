@@ -114,9 +114,13 @@ export interface SpecAnswerContext {
 
 export type DecoratedSpecAnswer = SpecAnswer & { specVersionId: number | null };
 
-/** IO：答案所属的规格版本，以及把证据变成 blob 链接所需的仓库坐标。 */
-export async function loadSpecAnswerContext(productId: number, execute: Execute = defaultExecute): Promise<SpecAnswerContext> {
-  const spec = await loadLatestVerificationSpec(productId, execute);
+/** IO：答案所属的规格版本，以及把证据变成 blob 链接所需的仓库坐标。verification loader 可注入，便于在隔离环境中测试。 */
+export async function loadSpecAnswerContext(
+  productId: number,
+  execute: Execute = defaultExecute,
+  loadVerification: typeof loadLatestVerificationSpec = loadLatestVerificationSpec,
+): Promise<SpecAnswerContext> {
+  const spec = await loadVerification(productId, execute);
   const [rows] = await execute(
     "SELECT owner, name FROM repositories WHERE product_id = ? LIMIT 1",
     [productId],

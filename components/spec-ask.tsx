@@ -49,30 +49,35 @@ export function SpecAsk({ slug, productBase }: { slug: string; productBase: stri
         </button>
       </div>
       {failed ? <p className="spec-search-hint" role="alert">查询暂时不可用，请稍后重试。</p> : null}
-      {answer ? (
-        <div className="spec-ask-answer">
-          <p className={answer.status === "uncovered" ? "spec-ask-uncovered" : "spec-ask-notice"}>{answer.notice}</p>
-          {answer.specVersionId !== null ? <p className="spec-ask-version">基于规格版本 #{answer.specVersionId}；未覆盖结论仅对该版本有效。</p> : null}
-          {answer.status === "matched" ? (
-            <div className="spec-ask-cards">
-              {answer.features.map((feature) => (
-                <div className="spec-search-hit" key={`f${feature.id}`}>
-                  <span className="spec-search-kind">功能</span>
-                  <strong><a className="spec-ask-hit-link" href={`${productBase}${featureHref(feature.id)}`}>{feature.name}</a></strong>
-                  <p>{feature.summary}</p>
-                </div>
-              ))}
-              {answer.scenarios.map((scenario) => (
-                // 卡片不能整体包 <a>：证据里的 blob 链接也是 <a>，嵌套链接是无效 HTML。
-                <div className="spec-search-hit" key={`s${scenario.id}`}>
-                  <span className="spec-search-kind">场景</span>
-                  <strong><a className="spec-ask-hit-link" href={`${productBase}${featureHref(scenario.featureId)}`}>{scenario.featureName} · {scenario.reference}</a></strong>
-                  <p>{scenario.context} → {scenario.action} → {scenario.outcome}</p>
-                  <div className="spec-ask-evidence"><EvidenceLinks value={scenario.evidence} /></div>
-                </div>
-              ))}
+      {answer ? <SpecAnswerView answer={answer} productBase={productBase} /> : null}
+    </div>
+  );
+}
+
+/** 纯展示：把一次检索答案渲染成规格原文卡片。无 hooks、无 fetch，可在 node 环境用 renderToStaticMarkup 测试。 */
+export function SpecAnswerView({ answer, productBase }: { answer: DecoratedSpecAnswer; productBase: string }) {
+  return (
+    <div className="spec-ask-answer">
+      <p className={answer.status === "uncovered" ? "spec-ask-uncovered" : "spec-ask-notice"}>{answer.notice}</p>
+      {answer.specVersionId !== null ? <p className="spec-ask-version">基于规格版本 #{answer.specVersionId}；未覆盖结论仅对该版本有效。</p> : null}
+      {answer.status === "matched" ? (
+        <div className="spec-ask-cards">
+          {answer.features.map((feature) => (
+            <div className="spec-search-hit" key={`f${feature.id}`}>
+              <span className="spec-search-kind">功能</span>
+              <strong><a className="spec-ask-hit-link" href={`${productBase}${featureHref(feature.id)}`}>{feature.name}</a></strong>
+              <p>{feature.summary}</p>
             </div>
-          ) : null}
+          ))}
+          {answer.scenarios.map((scenario) => (
+            // 卡片不能整体包 <a>：证据里的 blob 链接也是 <a>，嵌套链接是无效 HTML。
+            <div className="spec-search-hit" key={`s${scenario.id}`}>
+              <span className="spec-search-kind">场景</span>
+              <strong><a className="spec-ask-hit-link" href={`${productBase}${featureHref(scenario.featureId)}`}>{scenario.featureName} · {scenario.reference}</a></strong>
+              <p>{scenario.context} → {scenario.action} → {scenario.outcome}</p>
+              <div className="spec-ask-evidence"><EvidenceLinks value={scenario.evidence} /></div>
+            </div>
+          ))}
         </div>
       ) : null}
     </div>
