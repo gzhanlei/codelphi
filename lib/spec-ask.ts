@@ -1,5 +1,8 @@
 import { defaultExecute, type Execute } from "./db";
+import { evidenceUrl } from "./evidence-url";
 import { searchSpec, type SpecSearchResult } from "./spec-search";
+import { loadLatestVerificationSpec } from "./spec-verification";
+import type { Evidence } from "./types";
 
 /** B2.1：答案就是规格原文。未覆盖状态在类型上不可能携带结果。 */
 export type SpecAnswer =
@@ -101,4 +104,37 @@ export async function answerSpecQuestion(productId: number, question: string, ex
     return { status: "uncovered", question: normalized, terms: labels, features: [], scenarios: [], notice: NOT_COVERED_NOTICE };
   }
   return { status: "matched", question: normalized, terms: labels, features: matchedFeatures, scenarios: matchedScenarios, notice: MATCHED_NOTICE };
+}
+
+export interface SpecAnswerContext {
+  specVersionId: number | null;
+  repo: { owner: string; name: string } | null;
+  sha: string | null;
+}
+
+export type DecoratedSpecAnswer = SpecAnswer & { specVersionId: number | null };
+
+/** IO：答案所属的规格版本，以及把证据变成 blob 链接所需的仓库坐标。 */
+export async function loadSpecAnswerContext(productId: number, execute: Execute = defaultExecute): Promise<SpecAnswerContext> {
+  const spec = await loadLatestVerificationSpec(productId, execute);
+  const [rows] = await execute(
+    "SELECT owner, name FROM repositories WHERE product_id = ? LIMIT 1",
+    [productId],
+  ) as [Array<{ owner: string; name: string }>, unknown];
+  return { specVersionId: spec?.specVersionId ?? null, repo: rows[0] ?? null, sha: spec?.sha ?? null };
+}
+
+/** 纯函数：标注规格版本，并给证据补可点击的源码链接（AI 已给 url 的不覆盖）。 */
+export function decorateSpecAnswer(answer: SpecAnswer, decoration: SpecAnswerContext): DecoratedSpecAnswer {
+  if (answer.status === "uncovered") return { ...answer, specVersionId: decoration.specVersionId };
+  const { repo, sha } = decoration;
+  if (!repo || !sha) return { ...answer, specVersionId: decoration.specVersionId };
+  return {
+    ...answer,
+    specVersionId: decoration.specVersionId,
+    scenarios: answer.scenarios.map((scenario) => ({
+      ...scenario,
+      evidence: scenario.evidence.map((item: Evidence) => ({ ...item, url: item.url ?? evidenceUrl(repo, sha, item) ?? undefined })),
+    })),
+  };
 }

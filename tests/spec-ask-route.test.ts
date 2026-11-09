@@ -1,18 +1,25 @@
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GET } from "../app/api/products/[slug]/spec/ask/route";
-import { answerSpecQuestion, type SpecAnswer } from "../lib/spec-ask";
+import { answerSpecQuestion, loadSpecAnswerContext, type SpecAnswer } from "../lib/spec-ask";
 
-const { getSessionUser, resolveDemo, requireAccess } = vi.hoisted(() => ({
+const { getSessionUser, resolveDemo, requireAccess, answer, loadContext } = vi.hoisted(() => ({
   getSessionUser: vi.fn(),
   resolveDemo: vi.fn(),
   requireAccess: vi.fn(),
+  answer: vi.fn(),
+  loadContext: vi.fn(),
 }));
 
 vi.mock("../lib/session", () => ({ getSessionUser }));
 vi.mock("../lib/public-demo", () => ({ resolveLegacyPublicDemoProduct: resolveDemo }));
 vi.mock("../lib/product-access", () => ({ requireProductAccess: requireAccess }));
-vi.mock("../lib/spec-ask", () => ({ answerSpecQuestion: vi.fn() }));
+// 只替换两个 IO 函数；decorateSpecAnswer 用真实实现，这样测试覆盖的是版本/链接装饰行为。
+vi.mock("../lib/spec-ask", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../lib/spec-ask")>(),
+  answerSpecQuestion: answer,
+  loadSpecAnswerContext: loadContext,
+}));
 
 const MATCHED = {
   status: "matched" as const,
@@ -39,6 +46,7 @@ describe("spec ask route (B2.1)", () => {
     requireAccess.mockResolvedValue({ product: { id: 3 } });
     resolveDemo.mockResolvedValue(null);
     vi.mocked(answerSpecQuestion).mockResolvedValue(MATCHED);
+    vi.mocked(loadSpecAnswerContext).mockResolvedValue({ specVersionId: 7, repo: { owner: "acme", name: "radar" }, sha: "abc1234" });
   });
 
   it("answers a natural-language question with the spec's own wording", async () => {
@@ -49,6 +57,13 @@ describe("spec ask route (B2.1)", () => {
     expect(payload.scenarios[0].outcome).toBe("系统接受并进入上传队列");
     expect(payload.notice).toContain("规格原文");
     expect(answerSpecQuestion).toHaveBeenCalledWith(3, "上传文件最多几个？");
+  });
+
+  it("marks the answer with its spec version and links evidence to the source blob", async () => {
+    const response = await GET(new NextRequest("https://radar.example/api/products/radar/spec/ask?q=%E4%B8%8A%E4%BC%A0"), context);
+    const payload = await response.json() as { specVersionId: number | null; scenarios: Array<{ evidence: Array<{ url?: string }> }> };
+    expect(payload.specVersionId).toBe(7);
+    expect(payload.scenarios[0].evidence[0].url).toBe("https://github.com/acme/radar/blob/abc1234/src/upload.ts#L42");
   });
 
   it("returns 401 JSON for an anonymous visitor on a non-demo product", async () => {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { SpecAnswer } from "@/lib/spec-ask";
+import type { DecoratedSpecAnswer } from "@/lib/spec-ask";
 import { featureHref } from "@/lib/spec-editor-ui";
 import { EvidenceLinks } from "./evidence-links";
 
@@ -12,7 +12,7 @@ import { EvidenceLinks } from "./evidence-links";
  */
 export function SpecAsk({ slug, productBase }: { slug: string; productBase: string }) {
   const [question, setQuestion] = useState("");
-  const [answer, setAnswer] = useState<SpecAnswer | null>(null);
+  const [answer, setAnswer] = useState<DecoratedSpecAnswer | null>(null);
   const [pending, setPending] = useState(false);
   const [failed, setFailed] = useState(false);
 
@@ -24,7 +24,7 @@ export function SpecAsk({ slug, productBase }: { slug: string; productBase: stri
     try {
       const response = await fetch(`/api/products/${slug}/spec/ask?q=${encodeURIComponent(trimmed)}`, { cache: "no-store" });
       if (!response.ok) throw new Error(`ask failed: ${response.status}`);
-      setAnswer(await response.json() as SpecAnswer);
+      setAnswer(await response.json() as DecoratedSpecAnswer);
     } catch {
       // 匿名 demo 已由 spec-read-access 放行；网络或服务端异常仍要给可见失败态，不静默无结果。
       setFailed(true);
@@ -52,6 +52,7 @@ export function SpecAsk({ slug, productBase }: { slug: string; productBase: stri
       {answer ? (
         <div className="spec-ask-answer">
           <p className={answer.status === "uncovered" ? "spec-ask-uncovered" : "spec-ask-notice"}>{answer.notice}</p>
+          {answer.specVersionId !== null ? <p className="spec-ask-version">基于规格版本 #{answer.specVersionId}；未覆盖结论仅对该版本有效。</p> : null}
           {answer.status === "matched" ? (
             <div className="spec-ask-cards">
               {answer.features.map((feature) => (

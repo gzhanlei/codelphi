@@ -238,6 +238,7 @@ p { line-height: 1.7; }
 .spec-ask-answer { margin-top: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
 .spec-ask-notice { margin: 0; color: var(--muted); font-size: 12px; }
 .spec-ask-uncovered { margin: 0; color: #9a5b13; font-size: 12px; font-weight: 600; }
+.spec-ask-version { margin: 4px 0 0; color: #94a19c; font-size: 11px; }
 .spec-ask-cards { display: grid; gap: 4px; margin-top: 8px; }
 .spec-ask-cards .spec-search-hit p { white-space: normal; overflow: visible; }
 .spec-ask-hit-link { color: inherit; text-decoration: none; }
