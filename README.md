@@ -221,3 +221,7 @@ curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3008/login
 - Explainer 导出需要 Chrome/Chromium（常规产品分析不依赖它）：服务器安装 `chromium` 后，Archify 运行时会自动发现标准路径下的 `chromium-browser`/`chrome`；也可通过 Archify 运行时认读的环境变量 `ARCHIFY_CHROME` 显式指定可执行文件路径。注意只装 `chromium-headless` 子包（二进制名不匹配）不会被自动发现。
 
 
+
+## 分析触发模式
+
+仓库接入后默认「每次 push 都立即分析」。高频仓库可在产品设置页切换为「每天低峰期一次」或「每 N 次推送 + 当天兜底」，以控制每月分析单元（SAU）消耗；所有模式都会把自上次成功分析以来的全部提交合并进同一次分析。
