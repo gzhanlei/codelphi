@@ -231,6 +231,15 @@ p { line-height: 1.7; }
 .spec-search-hit:hover { background: var(--green-light); }
 .spec-search-kind { font-size: 10px; font-weight: 700; color: var(--green); letter-spacing: 1px; }
 .spec-search-hit p { grid-column: 2; margin: 0; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.spec-ask { margin-top: 8px; }
+.spec-ask-bar { display: flex; gap: 8px; }
+.spec-ask-bar input { flex: 1; min-width: 0; height: 36px; border: 1px solid #ccd8d1; border-radius: 8px; background: #fbfcfb; padding: 0 12px; font: inherit; font-size: 12px; box-sizing: border-box; }
+.spec-ask-bar input:focus { border-color: var(--green); outline: none; background: #fff; }
+.spec-ask-answer { margin-top: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.spec-ask-notice { margin: 0; color: var(--muted); font-size: 12px; }
+.spec-ask-uncovered { margin: 0; color: #9a5b13; font-size: 12px; font-weight: 600; }
+.spec-ask-cards { display: grid; gap: 4px; margin-top: 8px; }
+.spec-ask-cards .spec-search-hit p { white-space: normal; overflow: visible; }
 .stable-link { display: inline-flex; gap: 6px; align-items: baseline; margin-top: 6px; font-size: 11px; color: var(--muted); text-decoration: none; }
 .stable-link:hover { color: var(--green); }
 .stable-link code { font-size: 11px; }

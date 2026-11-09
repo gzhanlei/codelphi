@@ -9,6 +9,7 @@ import { errorMessage } from "@/lib/error-message";
 import { entityId, featureHref, scenariosForFeature, scenariosForFeatureTree } from "@/lib/spec-editor-ui";
 import { FeatureTree } from "./feature-tree";
 import { SpecSearch } from "./spec-search";
+import { SpecAsk } from "./spec-ask";
 import { SpecImpactQuery } from "./impact-query";
 import { useDemoGuard } from "./demo-mode";
 import { FeatureEditor, SpecDetail, type FeatureEditorMode } from "./spec-workspace-content";
@@ -41,6 +42,7 @@ export function SpecWorkspace({ slug, productBase, tree, feature, scenarios, mod
       <div className="spec-search-bar">
         <SpecSearch slug={slug} productBase={productBase} />
         <SpecImpactQuery slug={slug} productBase={productBase} />
+        <SpecAsk slug={slug} productBase={productBase} />
       </div>
       <FeatureTree slug={slug} items={tree} selectedId={entityId(feature)} onCreateRoot={() => openEditor("root")} />
       <div className="spec-detail">
