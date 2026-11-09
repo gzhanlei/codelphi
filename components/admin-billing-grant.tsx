@@ -8,7 +8,7 @@ export function AdminBillingGrant() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [units, setUnits] = useState("100");
-  const [reason, setReason] = useState("");
+  const [reason, setReason] = useState(`manual-topup-${new Date().toISOString().slice(0, 10)}`);
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState("");
 
@@ -38,6 +38,11 @@ export function AdminBillingGrant() {
   }
 
   const valid = email.includes("@") && Number(units) > 0 && reason.trim().length >= 4;
+  const missing = [
+    !email.includes("@") ? "用户邮箱" : null,
+    !(Number(units) > 0) ? "SAU 数量（≥1）" : null,
+    reason.trim().length < 4 ? "原因（至少 4 个字符）" : null,
+  ].filter((item): item is string => item !== null);
 
   return (
     <div className="panel">
@@ -59,6 +64,7 @@ export function AdminBillingGrant() {
         <button className="primary-button" type="button" disabled={pending || !valid} onClick={grant}>
           {pending ? "发放中…" : "发放"}
         </button>
+        {!valid && missing.length > 0 ? <p className="overview-note" style={{ margin: 0 }}>待填写：{missing.join("、")}，填写后「发放」按钮可用。</p> : null}
       </div>
       {result ? <p className="success-text">{result}</p> : null}
     </div>
