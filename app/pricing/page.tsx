@@ -14,6 +14,7 @@ export default function PricingPage() {
       </div>
       <PricingPanel />
       <p className="sidebar-note">价格与配额以实测成本校准后公布（当前为占位展示，不构成价格承诺）；退款、发票条款以正式服务条款为准。</p>
+      <p><Link href="/terms" className="text-button">服务条款与数据处理 →</Link></p>
       <p><Link href="/" className="text-button">← 返回产品总览</Link></p>
     </main>
   );
