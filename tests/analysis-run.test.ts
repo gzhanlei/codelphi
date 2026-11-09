@@ -5,6 +5,7 @@ import { getPartitionedAnalysisSources, getRemoteAnalysisSources } from "../lib/
 import { generateRepositoryArchitectureVersion } from "../lib/architecture-version";
 import { insertSpecVersion } from "../lib/spec-versions";
 import { BillingError, enqueueRunWithReservation, hasActiveReservation, heartbeat, capture, release, reserveForNewRun } from "../lib/billing/core";
+import { specFeatureKey } from "../lib/spec-diff";
 
 const execute = vi.fn();
 const readLines = vi.fn();
@@ -283,6 +284,90 @@ describe("analysis orchestration", () => {
       expect(connection.commit).toHaveBeenCalledOnce();
     } finally {
       vi.unstubAllEnvs();
+    }
+  });
+
+  // W0-3 / I1 常驻回归（docs/m9-workbench-carry-forward-handoff.md §3）：
+  // 工作台层（features active=1 的 upsert 集）必须与版本层（insertSpecVersion 返回的
+  // 合并规格）集合等价——下线基准是合并结果而非 AI 原始输出，窄推送不得收缩工作台。
+  const previousFeatures = [
+    { name: "统一登录", summary: "s", scenarios: [] as never[] },
+    { name: "规格导出", summary: "s", scenarios: [] as never[] },
+    { name: "人工报告", summary: "s", scenarios: [] as never[] },
+  ];
+  // 按真实 carry-forward 语义（lib/spec-versions.ts mergeSpecSources）出版本层合并结果：
+  // AI 输出 ∪ 上一版中未受影响的功能
+  const insertSpecVersionWithCarry = () => {
+    const mergedCalls: AnalysisResult["features"][] = [];
+    vi.mocked(insertSpecVersion).mockImplementation(async (_connection, _run, result, options) => {
+      const affected = options?.affectedKeys;
+      const merged = [...result.features];
+      for (const feature of previousFeatures) {
+        const key = specFeatureKey(feature.name);
+        if (affected?.has(key)) continue;
+        if (merged.some((item) => specFeatureKey(item.name) === key)) continue;
+        merged.push({ ...feature });
+      }
+      mergedCalls.push(merged);
+      return { specVersionId: 44, features: merged, collapse: null };
+    });
+    return mergedCalls;
+  };
+  const workbenchUpsertNames = () => (connection.execute as ReturnType<typeof vi.fn>).mock.calls
+    .filter((call: unknown[]) => String(call[0]).includes("INSERT INTO features"))
+    .map((call: unknown[]) => (call[1] as unknown[])[1] as string);
+
+  const incrementalSetup = () => {
+    runRows = [{ ...run, analyzeMode: "incremental" }];
+    execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("JOIN repositories repo")) return [runRows];
+      if (sql.includes("source_roots")) return [[]];
+      if (sql.includes("SELECT id FROM analysis_runs WHERE repository_id = ? AND after_sha = ?")) return [existingRunRows];
+      if (sql.includes("INSERT INTO analysis_runs")) return [{ insertId: 55 }];
+      if (sql.includes("SELECT sf.name FROM spec_features")) return [previousFeatures.map(({ name }) => ({ name }))];
+      if (sql.includes("FROM spec_file_index i")) return [[{ stableKey: specFeatureKey("统一登录"), name: "统一登录" }]];
+      return [{}];
+    });
+  };
+
+  it("keeps the workbench layer equivalent to the version layer through multi-pass carry-forward (W0-3, I1)", async () => {
+    incrementalSetup();
+    partitionedSourcesMock.mockResolvedValue({
+      partitions: [
+        { slice: { files: [{ path: "lib/auth.ts" }] }, sources: [{ path: "lib/auth.ts", content: "1: auth" }] },
+        { slice: { files: [{ path: "lib/export.ts" }] }, sources: [{ path: "lib/export.ts", content: "1: export" }] },
+      ],
+      index: { readLines, listDir },
+    });
+    adapter.getChangeContext.mockResolvedValue({ message: "change", committedAt: "2026-11-01T00:00:00Z", url: "", files: [{ path: "lib/auth.ts", status: "modified", patch: "+ const token = sign(payload);" }] });
+    vi.mocked(analyzeWithAI)
+      .mockResolvedValueOnce({ product: { description: "d", evidence: [{ path: "lib/auth.ts", startLine: 1 }] }, release: { title: "v1", summary: "s" }, changes: [], features: [{ name: "统一登录", summary: "s1", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy", evidence: [{ path: "lib/auth.ts", startLine: 1 }] }] }] } as never)
+      .mockResolvedValueOnce({ product: { description: "d2", evidence: [{ path: "lib/export.ts", startLine: 1 }] }, release: { title: "v2", summary: "s2" }, changes: [], features: [{ name: "规格导出", summary: "s2", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o2", category: "happy", evidence: [{ path: "lib/export.ts", startLine: 1 }] }] }] } as never);
+    const mergedCalls = insertSpecVersionWithCarry();
+    await runAnalysis(8);
+    // 版本层：合并结果 = 两趟 AI 输出 + carry 的未受影响功能（人工报告）
+    const versionFeatures = mergedCalls[0];
+    expect(versionFeatures.map((feature) => feature.name)).toEqual(["统一登录", "规格导出", "人工报告"]);
+    // 两层等价：工作台 upsert 集合 == 版本层合并集合，而非收缩为 AI 原始输出
+    const names = workbenchUpsertNames();
+    expect(new Set(names)).toEqual(new Set(versionFeatures.map((feature) => specFeatureKey(feature.name))));
+    // 防命名 churn：不产生重复功能行
+    expect(names.length).toBe(new Set(names).size);
+  });
+
+  it("does not shrink the workbench when a narrow push follows a wide baseline (W0-3)", async () => {
+    // 交接文档 §3 场景：连续多次小步 push，每次只触及同一模块——工作台功能数不得低于基线
+    incrementalSetup();
+    adapter.getChangeContext.mockResolvedValue({ message: "change", committedAt: "2026-11-01T00:00:00Z", url: "", files: [{ path: "lib/auth.ts", status: "modified", patch: "+ const token = sign(payload);" }] });
+    vi.mocked(analyzeWithAI).mockResolvedValue({ product: { description: "d", evidence: [{ path: "lib/auth.ts", startLine: 1 }] }, release: { title: "v1", summary: "s" }, changes: [], features: [{ name: "统一登录", summary: "s1", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy", evidence: [{ path: "lib/auth.ts", startLine: 1 }] }] }] } as never);
+    insertSpecVersionWithCarry();
+    for (let push = 0; push < 5; push += 1) {
+      (connection.execute as ReturnType<typeof vi.fn>).mockClear();
+      await runAnalysis(8);
+      const names = workbenchUpsertNames();
+      // 每次窄推送后，工作台仍 upsert 基线全部 3 个功能（1 个受影响 + 2 个 carry）
+      expect(new Set(names)).toEqual(new Set(["统一登录", "规格导出", "人工报告"].map(specFeatureKey)));
+      expect(names.length).toBe(3);
     }
   });
 
