@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GET } from "../app/api/products/[slug]/spec/ask/route";
 import { answerSpecQuestion, loadSpecAnswerContext, type SpecAnswer } from "../lib/spec-ask";
+import { resolveSpecReadProductId } from "../lib/spec-read-access";
 
 const { getSessionUser, resolveDemo, requireAccess, answer, loadContext } = vi.hoisted(() => ({
   getSessionUser: vi.fn(),
@@ -97,5 +98,38 @@ describe("spec ask route (B2.1)", () => {
     expect(payload.status).toBe("uncovered");
     expect(payload.notice).toContain("未覆盖");
     expect(answerSpecQuestion).toHaveBeenCalledWith(3, "");
+  });
+});
+
+describe("resolveSpecReadProductId (B2.1 read-gate)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getSessionUser.mockResolvedValue({ sub: "user", email: "pm@example.com" });
+    requireAccess.mockResolvedValue({ product: { id: 3 } });
+    resolveDemo.mockResolvedValue(null);
+  });
+
+  it("returns the workspace product id for a logged-in member with access", async () => {
+    const result = await resolveSpecReadProductId("radar");
+    expect(result).toEqual({ ok: true, productId: 3 });
+  });
+
+  it("falls back to 404 for a logged-in member without access when no demo exists", async () => {
+    requireAccess.mockResolvedValue(null);
+    const result = await resolveSpecReadProductId("radar");
+    expect(result).toEqual({ ok: false, status: 404, error: "产品不存在或不属于当前工作区" });
+  });
+
+  it("returns 401 for an anonymous visitor when no demo exists", async () => {
+    getSessionUser.mockResolvedValue(null);
+    const result = await resolveSpecReadProductId("radar");
+    expect(result).toEqual({ ok: false, status: 401, error: "未登录" });
+  });
+
+  it("serves the public demo product id to anyone when it exists", async () => {
+    getSessionUser.mockResolvedValue(null);
+    resolveDemo.mockResolvedValue({ id: 9, slug: "radar", name: "Radar", organizationId: 7, organizationSlug: "team" });
+    const result = await resolveSpecReadProductId("radar");
+    expect(result).toEqual({ ok: true, productId: 9 });
   });
 });
