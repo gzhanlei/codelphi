@@ -28,14 +28,25 @@ async function insertRegistration(input: ProductInput & { organizationId?: numbe
   const connection = await getDb().getConnection();
   try {
     await connection.beginTransaction();
+    const organizationId = input.organizationId ?? 1;
     const [productResult] = await connection.execute(
       "INSERT INTO products (slug, name, description, organization_id) VALUES (?, ?, ?, ?)",
-      [input.slug, input.name, input.description, input.organizationId ?? 1],
+      [input.slug, input.name, input.description, organizationId],
     );
     const productId = Number((productResult as { insertId: number }).insertId);
+    // 新仓库继承工作区默认触发模式（051）：push 为 schema 默认，非 push 时写入三列
+    const [defaultRows] = await connection.execute(
+      `SELECT default_analysis_trigger AS triggerMode, default_analysis_trigger_n AS triggerN, default_analysis_trigger_hour AS triggerHour
+       FROM organizations WHERE id = ? LIMIT 1`,
+      [organizationId],
+    );
+    const workspaceDefault = (defaultRows as Array<{ triggerMode: string; triggerN: number | null; triggerHour: number | null }>)[0];
+    const trigger = workspaceDefault?.triggerMode ?? "push";
+    const triggerColumns = trigger === "push" ? "" : ", analysis_trigger, analysis_trigger_n, analysis_trigger_hour";
+    const triggerValues = trigger === "push" ? [] : [trigger, workspaceDefault?.triggerN ?? null, workspaceDefault?.triggerHour ?? null];
     const [repositoryResult] = await connection.execute(
-      "INSERT INTO repositories (product_id, provider, owner, name, default_branch, connection_id) VALUES (?, ?, ?, ?, ?, ?)",
-      [productId, repository.provider, repository.owner, repository.name, defaultBranch, input.connectionId],
+      `INSERT INTO repositories (product_id, provider, owner, name, default_branch, connection_id${triggerColumns}) VALUES (?, ?, ?, ?, ?, ?${trigger === "push" ? "" : ", ?, ?, ?"})`,
+      [productId, repository.provider, repository.owner, repository.name, defaultBranch, input.connectionId, ...triggerValues],
     );
     await connection.commit();
     return Number((repositoryResult as { insertId: number }).insertId);

@@ -285,3 +285,17 @@ p { line-height: 1.7; }
 .data-notice-section h2 { font-size: 16px; font-weight: 650; margin: 0 0 10px; }
 .data-notice-section ul { margin: 0; padding-left: 20px; color: var(--ink); }
 .data-notice-section li { line-height: 1.8; font-size: 14px; color: var(--ink); }
+
+/* /settings 账户页与 admin 表格：此前 data-table/panel 无规则（浏览器默认渲染，样式破相） */
+.panel { min-width: 0; padding: 24px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+.panel h2 { margin: 0 0 14px; font-size: 18px; }
+.panel > p { margin: 0 0 12px; color: var(--muted); font-size: 13px; }
+.panel .error-text { margin: 0 0 12px; color: #9b4237; font-size: 13px; }
+.data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.data-table th { padding: 8px 10px; border-bottom: 2px solid var(--line); text-align: left; color: var(--muted); font-size: 12px; font-weight: 650; }
+.data-table td { padding: 9px 10px; border-bottom: 1px solid var(--line); }
+.data-table tr:last-child td { border-bottom: 0; }
+.quota-bar { height: 10px; margin: 10px 0 14px; border-radius: 6px; background: var(--line); overflow: hidden; }
+.quota-bar > span { display: block; height: 100%; border-radius: 6px; background: var(--green); }
+.error-text { color: #9b4237; font-size: 13px; }
+.success-text { color: var(--green); font-size: 13px; }

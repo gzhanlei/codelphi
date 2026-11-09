@@ -45,6 +45,16 @@ describe("product registration persistence", () => {
     expect(connection.release).toHaveBeenCalledOnce();
   });
 
+  it("applies the workspace default trigger mode to the new repository", async () => {
+    connection.execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("FROM organizations")) return [[{ triggerMode: "daily", triggerN: null, triggerHour: 4 }]];
+      return [{ insertId: sql.includes("INSERT INTO products") ? 4 : 9 }];
+    });
+    await registerProduct({ ...input, organizationId: 7 });
+    const insert = connection.execute.mock.calls.find((call) => String(call[0]).includes("INSERT INTO repositories"));
+    expect(insert?.[1]).toEqual([4, "github", "gzhanlei", "codelphi", "main", 42, "daily", null, 4]);
+  });
+
   it("rolls back and releases the connection when persistence fails", async () => {
     connection.execute.mockRejectedValue(new Error("write failed"));
     await expect(registerProduct({ ...input, organizationId: 7 })).rejects.toThrow("write failed");

@@ -118,3 +118,27 @@ export async function listProductRepositoryTriggers(productId: number, execute: 
   ) as [Array<{ id: number; owner: string; name: string; trigger: AnalysisTriggerMode; n: number | null; hour: number | null; pendingPushCount: number }>, unknown];
   return rows;
 }
+
+/** 工作区默认触发模式（migration 051）：新接入的仓库继承。 */
+export interface WorkspaceTriggerDefault {
+  trigger: AnalysisTriggerMode;
+  n: number | null;
+  hour: number | null;
+}
+
+export async function getWorkspaceTriggerDefault(organizationId: number, execute: Execute = defaultExecute): Promise<WorkspaceTriggerDefault> {
+  const [rows] = await execute(
+    `SELECT default_analysis_trigger AS triggerMode, default_analysis_trigger_n AS n, default_analysis_trigger_hour AS hour
+     FROM organizations WHERE id = ? LIMIT 1`,
+    [organizationId],
+  ) as [Array<{ triggerMode: AnalysisTriggerMode; n: number | null; hour: number | null }>, unknown];
+  const row = rows[0];
+  return { trigger: row?.triggerMode ?? "push", n: row?.n ?? null, hour: row?.hour ?? null };
+}
+
+export async function updateWorkspaceTriggerDefault(organizationId: number, input: WorkspaceTriggerDefault, execute: Execute = defaultExecute) {
+  await execute(
+    `UPDATE organizations SET default_analysis_trigger = ?, default_analysis_trigger_n = ?, default_analysis_trigger_hour = ? WHERE id = ?`,
+    [input.trigger, input.trigger === "push_count" ? input.n : null, input.trigger === "push" ? null : input.hour, organizationId],
+  );
+}
