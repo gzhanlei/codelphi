@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { existsSync } from "node:fs";
 import { getDb } from "../lib/db";
+import { nextReference } from "../lib/extraction-merge";
 import { loadVersionFeatureMap } from "../lib/spec-versions";
 import { specChangeWordingOnly, specFeatureKey, type SpecFeature, type SpecScenario } from "../lib/spec-diff";
 
@@ -23,19 +24,6 @@ const BASELINE_WINDOW = 12;
 interface RestorePlan {
   featureName: string;
   scenarios: Array<{ reference: string; scenario: SpecScenario; sourceVersionId: number }>;
-}
-
-/** 前缀重编号：取同前缀现有最大序号 +1（HP-1/EC-2/ER-3 → HP-4 这类）。 */
-export function nextReference(used: string[], reference: string) {
-  const match = reference.match(/^([A-Za-z]+)-(\d+)$/);
-  if (!match) return reference;
-  const [, prefix] = match;
-  let max = 0;
-  for (const item of used) {
-    const itemMatch = item.match(new RegExp(`^${prefix}-(\\d+)$`));
-    if (itemMatch) max = Math.max(max, Number(itemMatch[1]));
-  }
-  return `${prefix}-${max + 1}`;
 }
 
 export function planRestores(

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { nextReference } from "../lib/extraction-merge";
 import type { SpecFeature, SpecScenario } from "../lib/spec-diff";
-import { nextReference, planRestores } from "../scripts/restore-collapsed-scenarios";
+import { planRestores } from "../scripts/restore-collapsed-scenarios";
 
 const scenario = (reference: string, outcome: string): SpecScenario => ({
   reference,

@@ -1,7 +1,9 @@
 import "dotenv/config";
-import { getRemoteAnalysisSources, analysisSliceBudgets } from "../lib/remote-analysis";
+import { getPartitionedAnalysisSources, getRemoteAnalysisSources, analysisSliceBudgets } from "../lib/remote-analysis";
 import { createSlicePlanner } from "../lib/slice-planner";
 import { analyzeWithAI, type AnalysisResult } from "../lib/ai";
+import { mergeChunkResults, type ExtractionChunk } from "../lib/extraction-merge";
+import { analysisMaxPartitions } from "../lib/env";
 import { evidenceKind } from "../lib/evidence";
 import { getBranchHead, getRepository, githubFetch, parseRepository } from "../lib/github";
 import type { Evidence } from "../lib/types";
@@ -38,6 +40,7 @@ interface RepoMetrics {
   head: string;
   groundTruth: GroundTruth;
   window: { selectedFiles: number; windowBytes: number; windowLimitBytes: number; selectedCodeFiles: number; codeOfferedRatio: number };
+  partitions: number;
   spec: { features: number; scenarios: number };
   coverage: {
     citedImplFiles: number;
@@ -70,6 +73,7 @@ export function computeMetrics(input: {
   treeTruncated: boolean;
   sourcePaths: string[];
   windowBytes: number;
+  partitions: number;
   result: AnalysisResult;
 }): RepoMetrics {
   const blobs = input.tree.filter((entry) => entry.type === "blob");
@@ -107,6 +111,7 @@ export function computeMetrics(input: {
       // 规划器供给率：窗口内代码文件 / 全仓代码文件——AI 看不到的文件不可能被引用
       codeOfferedRatio: code.length === 0 ? 0 : [...selectedCodeSet].filter((path) => sizeByPath.has(path)).length / code.length,
     },
+    partitions: input.partitions,
     spec: { features: input.result.features.length, scenarios },
     coverage: {
       citedImplFiles: citedImpl.length,
@@ -132,21 +137,30 @@ async function measure(repoFullName: string, access: { token?: string }): Promis
   const head = await getBranchHead(full, access);
   const treePayload = await githubFetch(`/repos/${repo.owner}/${repo.name}/git/trees/${head}?recursive=1`, access) as { tree: TreeEntry[]; truncated?: boolean };
 
-  const remote = await getRemoteAnalysisSources({
+  const { partitions } = await getPartitionedAnalysisSources({
     product: { id: 0, slug: "measure", name: "measure" },
     repository: { owner: repo.owner, repo: repo.name, revision: head },
     access,
     provider: "github",
     scopeRoots: [{ path: "", role: "shared" as const }],
-  }, { planner: createSlicePlanner({ now: () => Date.now() }), budgets: analysisSliceBudgets });
-  const windowBytes = remote.sources.reduce((total, source) => total + Buffer.byteLength(source.content, "utf8"), 0);
+  }, { planner: createSlicePlanner({ now: () => Date.now() }), budgets: analysisSliceBudgets }, { maxPartitions: analysisMaxPartitions() });
+  const allSources = partitions.flatMap((partition) => partition.sources);
+  const windowBytes = allSources.reduce((total, source) => total + Buffer.byteLength(source.content, "utf8"), 0);
 
-  const result = await analyzeWithAI(remote.sources, {
-    message: "首次分析覆盖率测量（无 diff）",
-    files: [],
-  });
+  // 生产同款多趟提取：分区上下文 + 跨趟命名连续性，确定性合并出完整规格
+  const chunks: ExtractionChunk[] = [];
+  const knownFeatureNames = new Set<string>();
+  for (const [index, partition] of partitions.entries()) {
+    const chunkResult = await analyzeWithAI(partition.sources, {
+      message: "首次分析覆盖率测量（无 diff）",
+      files: [],
+    }, { partition: { index: index + 1, total: partitions.length }, previousFeatureNames: [...knownFeatureNames] });
+    for (const feature of chunkResult.features) knownFeatureNames.add(feature.name);
+    chunks.push({ result: chunkResult });
+  }
+  const result = mergeChunkResults(chunks);
   // 测量语境不中断：越界引用以 invalidCitedPaths 指标呈现（产品内由 assertEvidence 强制为 0）
-  return computeMetrics({ repo: repoFullName, head, tree: treePayload.tree, treeTruncated: treePayload.truncated === true, sourcePaths: remote.sources.map((source) => source.path), windowBytes, result });
+  return computeMetrics({ repo: repoFullName, head, tree: treePayload.tree, treeTruncated: treePayload.truncated === true, sourcePaths: allSources.map((source) => source.path), windowBytes, partitions: partitions.length, result });
 }
 
 async function main() {
@@ -181,7 +195,7 @@ async function main() {
       console.log(`[ok] ${repo} (${Math.round((Date.now() - startedAt) / 1000)}s)`, JSON.stringify(metric));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      metrics.push({ repo, head: "", groundTruth: { implFiles: 0, implBytes: 0, codeFiles: 0, codeBytes: 0, truncated: false }, window: { selectedFiles: 0, windowBytes: 0, windowLimitBytes: analysisSliceBudgets.maxAiContextSourceBytes, selectedCodeFiles: 0, codeOfferedRatio: 0 }, spec: { features: 0, scenarios: 0 }, coverage: { citedImplFiles: 0, citedImplFilesRatio: 0, citedImplBytes: 0, citedImplBytesRatio: 0, citedCodeFilesRatio: 0, citedCodeBytes: 0, citedCodeBytesRatio: 0 }, density: { scenariosPerCitedKB: 0, extrapolatedScenariosAtFullCoverage: 0 }, citedPaths: [], invalidCitedPaths: 0, error: message.slice(0, 300) });
+      metrics.push({ repo, head: "", groundTruth: { implFiles: 0, implBytes: 0, codeFiles: 0, codeBytes: 0, truncated: false }, window: { selectedFiles: 0, windowBytes: 0, windowLimitBytes: analysisSliceBudgets.maxAiContextSourceBytes, selectedCodeFiles: 0, codeOfferedRatio: 0 }, spec: { features: 0, scenarios: 0 }, coverage: { citedImplFiles: 0, citedImplFilesRatio: 0, citedImplBytes: 0, citedImplBytesRatio: 0, citedCodeFilesRatio: 0, citedCodeBytes: 0, citedCodeBytesRatio: 0 }, density: { scenariosPerCitedKB: 0, extrapolatedScenariosAtFullCoverage: 0 }, citedPaths: [], partitions: 0, invalidCitedPaths: 0, error: message.slice(0, 300) });
       console.error(`[fail] ${repo}: ${message.slice(0, 300)}`);
     }
   }

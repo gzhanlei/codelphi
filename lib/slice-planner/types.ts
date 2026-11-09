@@ -40,6 +40,8 @@ export interface ProductSliceInput {
   plannerVersion: SlicePlannerVersion;
   profileVersion: SliceProfileVersion;
   previousSlice?: SourceSlice;
+  /** 多趟提取：本趟排除此前分区已选的路径（在同一种子索引上重复规划即得下一分区）。 */
+  excludePaths?: ReadonlySet<string>;
 }
 
 export interface SliceBudgets {

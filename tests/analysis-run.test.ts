@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { queueAnalysis, runAnalysis } from "../lib/analysis";
-import { analyzeWithAI } from "../lib/ai";
-import { getRemoteAnalysisSources } from "../lib/remote-analysis";
+import { analyzeWithAI, type AnalysisResult } from "../lib/ai";
+import { getPartitionedAnalysisSources, getRemoteAnalysisSources } from "../lib/remote-analysis";
 import { generateRepositoryArchitectureVersion } from "../lib/architecture-version";
 import { insertSpecVersion } from "../lib/spec-versions";
-import { enqueueRunWithReservation, hasActiveReservation, heartbeat, capture, release, reserveForNewRun } from "../lib/billing/core";
+import { BillingError, enqueueRunWithReservation, hasActiveReservation, heartbeat, capture, release, reserveForNewRun } from "../lib/billing/core";
 
 const execute = vi.fn();
 const readLines = vi.fn();
@@ -25,6 +25,12 @@ const adapter = {
 
 vi.mock("../lib/db", () => ({ getDb: () => ({ execute, getConnection: async () => connection }) }));
 vi.mock("../lib/billing/core", () => ({
+  // 真实类：analysis.ts 以 instanceof BillingError 区分「账务拒绝→回 queued」与「真失败→failed」
+  BillingError: class BillingError extends Error {
+    constructor(public code: string, message: string) {
+      super(`[${code}] ${message}`);
+    }
+  },
   enqueueRunWithReservation: vi.fn(async (input: { requestId: string }) => ({ runId: 55, attempt: 1, allocations: [], reused: false, requestId: input.requestId })),
   hasActiveReservation: vi.fn(async () => true),
   heartbeat: vi.fn(async () => ({ renewed: true })),
@@ -44,7 +50,8 @@ vi.mock("../lib/ai", () => ({ analyzeWithAI: vi.fn() }));
 vi.mock("../lib/notifications", () => ({ deliverAnalysisNotifications: vi.fn(async () => undefined) }));
 const { compareIncrementalShadow } = vi.hoisted(() => ({ compareIncrementalShadow: vi.fn((incremental: { features: Array<{ name: string }>; changes: unknown[] }, _full: unknown) => ({ consistent: true, missingKeys: [] as string[], extraKeys: [] as string[], scenarioDiffs: [] as string[] })) }));
 vi.mock("../lib/incremental-shadow", () => ({ compareIncrementalShadow }));
-vi.mock("../lib/remote-analysis", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/remote-analysis")>(), getRemoteAnalysisSources: vi.fn() }));
+const { partitionedSourcesMock } = vi.hoisted(() => ({ partitionedSourcesMock: vi.fn() }));
+vi.mock("../lib/remote-analysis", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/remote-analysis")>(), getRemoteAnalysisSources: vi.fn(), getPartitionedAnalysisSources: partitionedSourcesMock }));
 vi.mock("../lib/spec-versions", () => ({ insertSpecVersion: vi.fn(async () => ({ specVersionId: 44, features: [{ name: "统一登录", summary: "s", scenarios: [] }] })), loadPreviousFeatureNames: vi.fn(async () => ["统一登录", "支付", "规格导出"]), loadPreviousSpecText: vi.fn(async () => [{ name: "统一登录", summary: "s", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy" }] }]) }));
 vi.mock("../lib/architecture-version", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/architecture-version")>(), generateRepositoryArchitectureVersion: vi.fn(async () => ({ status: "accepted", errorMessage: null })) }));
 
@@ -97,6 +104,11 @@ describe("analysis orchestration", () => {
     adapter.getRepository.mockResolvedValue({ owner: "gzhanlei", name: "radar", defaultBranch: "main" });
     adapter.getChangeContext.mockResolvedValue({ message: "change", committedAt: "2026-11-01T00:00:00Z", url: "https://github.com/commit/sha", files: [] });
     vi.mocked(getRemoteAnalysisSources).mockResolvedValue({ sources: [], slice: { files: [{ path: "lib/db.ts" }] }, index: { readLines, listDir }, openArchitectureIndex } as never);
+    // 真全量路径（affectedKeys=null）默认走分区提取：单分区等价旧行为
+    partitionedSourcesMock.mockResolvedValue({
+      partitions: [{ slice: { files: [{ path: "lib/db.ts" }] }, sources: [] }],
+      index: { readLines, listDir },
+    });
     openArchitectureIndex.mockReset().mockResolvedValue({ readLines, listDir });
     listDir.mockResolvedValue({ status: "indexed", truncated: false, entries: [{ path: "lib/db.ts", type: "blob" }, { path: "lib/ai.ts", type: "blob" }] });
     readLines.mockImplementation(async (request) => ({ startLine: 1, endLine: 1, lineCount: 1, byteSize: 100, lines: [`${request.path} complete evidence`] }));
@@ -134,15 +146,15 @@ describe("analysis orchestration", () => {
 
   it("uses shared scope when no source roots are stored and commits the result", async () => {
     await runAnalysis(8);
-    expect(getRemoteAnalysisSources).toHaveBeenCalledWith(expect.objectContaining({
+    expect(partitionedSourcesMock).toHaveBeenCalledWith(expect.objectContaining({
       provider: "github",
       access: { connectionId: 42, organizationId: 7 },
       scopeRoots: [{ path: "", role: "shared" }],
-    }), expect.anything());
+    }), expect.anything(), expect.objectContaining({ maxPartitions: 6 }));
+    // 单分区（默认 mock）行为与旧单窗路径一致：无 affectedFeatureNames
     expect(vi.mocked(analyzeWithAI).mock.calls[0][2]).toEqual({
       previousFeatureNames: ["统一登录", "支付", "规格导出"],
       previousSpec: [{ name: "统一登录", summary: "s", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy" }] }],
-      affectedFeatureNames: undefined,
       billing: { runId: 8, accountId: null, chargeComponent: "main" },
     });
     expect(connection.commit).toHaveBeenCalledOnce();
@@ -173,7 +185,7 @@ describe("analysis orchestration", () => {
   it("uses persisted source roots when present", async () => {
     sourceRows = [{ sourceRoots: [{ path: "apps/web", role: "web" }] }];
     await runAnalysis(8);
-    expect(getRemoteAnalysisSources).toHaveBeenCalledWith(expect.objectContaining({ scopeRoots: [{ path: "apps/web", role: "web" }] }), expect.anything());
+    expect(partitionedSourcesMock).toHaveBeenCalledWith(expect.objectContaining({ scopeRoots: [{ path: "apps/web", role: "web" }] }), expect.anything(), expect.anything());
     expect(connection.commit).toHaveBeenCalledOnce();
   });
 
@@ -221,6 +233,53 @@ describe("analysis orchestration", () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+
+  it("extracts per partition and merges chunk results on the true-full path", async () => {
+    // 分区 >1：每趟独立提取（分区上下文 i/N + 跨趟累计命名连续性），合并层出完整规格
+    runRows = [run];
+    partitionedSourcesMock.mockResolvedValue({
+      partitions: [
+        { slice: { files: [{ path: "lib/auth.ts" }] }, sources: [{ path: "lib/auth.ts", content: "1: auth" }] },
+        { slice: { files: [{ path: "lib/export.ts" }] }, sources: [{ path: "lib/export.ts", content: "1: export" }] },
+      ],
+      index: { readLines, listDir },
+    });
+    vi.mocked(analyzeWithAI)
+      .mockResolvedValueOnce({ product: { description: "d", evidence: [{ path: "lib/auth.ts", startLine: 1 }] }, release: { title: "v1", summary: "s" }, changes: [], features: [{ name: "统一登录", summary: "s1", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy", evidence: [{ path: "lib/auth.ts", startLine: 1 }] }] }] } as never)
+      .mockResolvedValueOnce({ product: { description: "d2", evidence: [{ path: "lib/export.ts", startLine: 1 }] }, release: { title: "v2", summary: "s2" }, changes: [], features: [{ name: "规格导出", summary: "s2", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o2", category: "happy", evidence: [{ path: "lib/export.ts", startLine: 1 }] }] }] } as never);
+    await runAnalysis(8);
+    expect(vi.mocked(analyzeWithAI)).toHaveBeenCalledTimes(2);
+    const firstCall = vi.mocked(analyzeWithAI).mock.calls[0][2] as { partition?: { index: number; total: number }; previousFeatureNames?: string[] };
+    const secondCall = vi.mocked(analyzeWithAI).mock.calls[1][2] as { partition?: { index: number; total: number }; previousFeatureNames?: string[] };
+    expect(firstCall.partition).toEqual({ index: 1, total: 2 });
+    // 跨趟命名连续性：第二趟看到第一趟产出的功能名
+    expect(secondCall.partition).toEqual({ index: 2, total: 2 });
+    expect(secondCall.previousFeatureNames).toContain("统一登录");
+    // 合并层把两趟功能并入同一份规格喂给 saveResult
+    const saved = vi.mocked(insertSpecVersion).mock.calls[0][2] as AnalysisResult;
+    expect(saved.features.map((feature) => feature.name)).toEqual(["统一登录", "规格导出"]);
+    expect(vi.mocked(capture)).toHaveBeenCalledTimes(1);
+    expect(connection.commit).toHaveBeenCalledOnce();
+  });
+
+  it("fails the run when a chunk cites evidence outside its own partition", async () => {
+    runRows = [run];
+    partitionedSourcesMock.mockResolvedValue({
+      partitions: [
+        { slice: { files: [{ path: "lib/auth.ts" }] }, sources: [{ path: "lib/auth.ts", content: "1: auth" }] },
+        { slice: { files: [{ path: "lib/export.ts" }] }, sources: [{ path: "lib/export.ts", content: "1: export" }] },
+      ],
+      index: { readLines, listDir },
+    });
+    vi.mocked(analyzeWithAI)
+      .mockResolvedValueOnce({ product: { description: "d", evidence: [{ path: "lib/auth.ts", startLine: 1 }] }, release: { title: "v1", summary: "s" }, changes: [], features: [] } as never)
+      .mockResolvedValueOnce({ product: { description: "d2", evidence: [{ path: "lib/auth.ts", startLine: 1 }] }, release: { title: "v2", summary: "s2" }, changes: [], features: [] } as never);
+    await runAnalysis(8);
+    // 第二趟引用了第一趟分区的文件 → 逐趟 assertEvidence 失败 → run failed，不产出部分合并规格
+    const [stored] = execute.mock.calls.find(([sql]) => String(sql).includes("status = 'failed'"))?.[1] as unknown[];
+    expect(String(stored)).toContain("AI returned unknown evidence paths");
+    expect(vi.mocked(capture)).not.toHaveBeenCalled();
   });
 
   it("falls back to behavioral-set carry-forward when incremental resolution rejects (RC2)", async () => {
@@ -294,6 +353,25 @@ describe("analysis orchestration", () => {
     expect(String(stored).startsWith("load failed\n")).toBe(true);
     // 失败释放（契约 §6.6）：置 failed 后独立调用 release，失败由 sweep 兜底
     expect(vi.mocked(release)).toHaveBeenCalledWith(8, "analysis_failed");
+  });
+
+  it("re-queues a run whose entry reservation is billing-gated instead of failing it (contract §6.6)", async () => {
+    runRows = [{ ...run, accountId: 7 }];
+    vi.mocked(hasActiveReservation).mockResolvedValueOnce(false);
+    vi.mocked(reserveForNewRun).mockRejectedValueOnce(new BillingError("quota_exceeded", "available 0 SAU is below requested 1 SAU"));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      await runAnalysis(8);
+      // 账务拒绝不是终态：保持 queued 等额度/订阅恢复后由 sweep 补跑，不标 failed、不释放
+      expect(execute).toHaveBeenCalledWith(
+        "UPDATE analysis_runs SET status = 'queued', started_at = NULL, finished_at = NULL WHERE id = ? AND status = 'running'",
+        [8],
+      );
+      expect(execute).not.toHaveBeenCalledWith(expect.stringContaining("status = 'failed'"), expect.anything());
+      expect(vi.mocked(release)).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it("records a fallback failure for non-Error rejections", async () => {

@@ -43,3 +43,9 @@ export function analysisAiContextBudgetOverride() {
   const raw = Number(process.env.ANALYSIS_AI_CONTEXT_BUDGET_BYTES ?? "");
   return Number.isInteger(raw) && raw > 0 ? raw : null;
 }
+
+/** 多趟提取分区上限（趟数）。每趟是一次真实 AI 调用；超大仓库耗尽即停（覆盖率随后披露）。 */
+export function analysisMaxPartitions() {
+  const raw = Number(process.env.ANALYSIS_MAX_PARTITIONS ?? "");
+  return Number.isInteger(raw) && raw > 0 ? raw : 6;
+}

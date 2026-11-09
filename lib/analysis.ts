@@ -2,17 +2,18 @@ import { randomUUID } from "node:crypto";
 import type { PoolConnection } from "mysql2/promise";
 import { getDb } from "./db";
 import { analyzeWithAI, type AnalysisResult } from "./ai";
-import { capture, enqueueRunWithReservation, hasActiveReservation, heartbeat, release, reserveForNewRun } from "./billing/core";
+import { BillingError, capture, enqueueRunWithReservation, hasActiveReservation, heartbeat, release, reserveForNewRun } from "./billing/core";
 import { FIRST_RUN_UNITS, HEARTBEAT_INTERVAL_MS } from "./billing/constants";
 import { enqueueBillingNotification } from "./billing/notifications";
 import { resolveAnalysisTarget, type ChangeContext, type CodeHostingProvider } from "./code-hosting";
-import { analysisSliceBudgets, getRemoteAnalysisSources, parseSourceRoots } from "./remote-analysis";
+import { analysisSliceBudgets, getPartitionedAnalysisSources, getRemoteAnalysisSources, parseSourceRoots, type AnalysisPartition } from "./remote-analysis";
 import { createSlicePlanner } from "./slice-planner";
 import { insertSpecVersion, loadPreviousFeatureNames, loadPreviousSpecText } from "./spec-versions";
 import { loadAffectedFeatureKeys, rebuildSpecFileIndex } from "./spec-file-index";
 import { resolveAnalysisMode } from "./incremental";
 import { compareIncrementalShadow } from "./incremental-shadow";
-import { incrementalShadowEnabled } from "./env";
+import { analysisMaxPartitions, incrementalShadowEnabled } from "./env";
+import { mergeChunkResults, type ExtractionChunk } from "./extraction-merge";
 import type { SpecFeature } from "./spec-diff";
 import type { SpecAnchorFeature } from "./spec-versions";
 import { markSpecDrift } from "./spec-drift";
@@ -49,6 +50,14 @@ export function assertEvidence(result: AnalysisResult, sources: Set<string>) {
   }
   for (const change of result.changes) change.evidence.forEach((item) => check(item.path));
   if (invalid.length > 0) throw new Error(`AI returned unknown evidence paths: ${[...new Set(invalid)].join(", ")}`);
+}
+
+/** 分区局部证据允许集：AI 只能引用本分区窗口与 diff 文件（逐趟口径校验）。 */
+function evidenceAllowSet(partition: AnalysisPartition, change: ChangeContext) {
+  return new Set([
+    ...partition.slice.files.map((file) => file.path),
+    ...change.files.map((file) => file.path),
+  ]);
 }
 
 export async function assertLatestRun(connection: PoolConnection, run: RunContext) {
@@ -255,14 +264,13 @@ async function runAnalysisBody(run: RunContext) {
   ]);
   const planner = createSlicePlanner({ now: Date.now });
   const scopeRoots = sourceRoots.length > 0 ? sourceRoots : [{ path: "", role: "shared" as const }];
-  const remote = await getRemoteAnalysisSources({
+  const remoteAnalysisRequest = {
     product: target.product,
     repository: { owner: repo.owner, repo: repo.name, revision: run.afterSha },
     access: target.access,
     provider: target.adapter.provider,
     scopeRoots,
-  }, { planner, budgets: analysisSliceBudgets });
-  const sources = remote.sources;
+  };
   const executeWrapper = (statement: string, parameters: Array<string | number | null>) => getDb().execute(statement, parameters);
   const previousFeatureNames = await loadPreviousFeatureNames(run.repositoryId, executeWrapper);
   // P0 措辞锚定：把上一版场景全文喂给 prompt，未变行为逐字沿用；加载失败降级为仅命名约束，不阻塞分析。
@@ -300,17 +308,55 @@ async function runAnalysisBody(run: RunContext) {
       }
     }
   }
-  const result = await analyzeWithAI(sources, change, {
-    previousFeatureNames,
-    previousSpec: previousSpecText,
-    affectedFeatureNames,
-    // 调用级成本回执（契约 M0-T2）：usage 即时落库，平台 shadow 单独记账不计 SAU
-    billing: { runId: run.id, accountId: run.accountId ?? null, chargeComponent: "main" },
-  });
-  assertEvidence(result, new Set([
-    ...remote.slice.files.map((file) => file.path),
-    ...change.files.map((file) => file.path),
-  ]));
+  // 多趟提取（真全量路径）：实现面超出单窗口时按分区逐趟提取后确定性合并。
+  // 增量与 RC2-carry 路径（affectedKeys 非空）保持单窗；SAU 结算仍为每 run 一次，
+  // 各趟成本经 llm_call_receipts（同 runId 多行，契约 M0-T2）如实记账。
+  let result: AnalysisResult;
+  let singleWindowSources: AnalysisPartition["sources"] | null = null;
+  if (affectedKeys === null) {
+    const { partitions } = await getPartitionedAnalysisSources(remoteAnalysisRequest, { planner, budgets: analysisSliceBudgets }, { maxPartitions: analysisMaxPartitions() });
+    console.log("[analysis] partitioned extraction", { runId: run.id, partitions: partitions.length });
+    if (partitions.length === 1) {
+      const single = partitions[0];
+      singleWindowSources = single.sources;
+      result = await analyzeWithAI(single.sources, change, {
+        previousFeatureNames,
+        previousSpec: previousSpecText,
+        billing: { runId: run.id, accountId: run.accountId ?? null, chargeComponent: "main" },
+      });
+      assertEvidence(result, evidenceAllowSet(single, change));
+    } else {
+      const chunks: ExtractionChunk[] = [];
+      const knownFeatureNames = new Set(previousFeatureNames);
+      for (const [index, partition] of partitions.entries()) {
+        const chunkResult = await analyzeWithAI(partition.sources, change, {
+          previousFeatureNames: [...knownFeatureNames],
+          previousSpec: previousSpecText,
+          partition: { index: index + 1, total: partitions.length },
+          billing: { runId: run.id, accountId: run.accountId ?? null, chargeComponent: "main" },
+        });
+        assertEvidence(chunkResult, evidenceAllowSet(partition, change));
+        for (const feature of chunkResult.features) knownFeatureNames.add(feature.name);
+        chunks.push({ result: chunkResult });
+      }
+      result = mergeChunkResults(chunks);
+    }
+  } else {
+    const remote = await getRemoteAnalysisSources(remoteAnalysisRequest, { planner, budgets: analysisSliceBudgets });
+    const sources = remote.sources;
+    singleWindowSources = sources;
+    result = await analyzeWithAI(sources, change, {
+      previousFeatureNames,
+      previousSpec: previousSpecText,
+      affectedFeatureNames,
+      // 调用级成本回执（契约 M0-T2）：usage 即时落库，平台 shadow 单独记账不计 SAU
+      billing: { runId: run.id, accountId: run.accountId ?? null, chargeComponent: "main" },
+    });
+    assertEvidence(result, new Set([
+      ...remote.slice.files.map((file) => file.path),
+      ...change.files.map((file) => file.path),
+    ]));
+  }
   const { specVersionId, features: mergedFeatures, collapse } = await saveResult(run, result, change, affectedKeys);
   // 坍缩护栏：新版场景数骤降只告警不阻断（版本 append-only，可回溯）；通知带警告供人工核实。
   if (collapse) {
@@ -347,7 +393,7 @@ async function runAnalysisBody(run: RunContext) {
   // 直接与全量输出比较会恒等失败（missingKeys = 全部未受影响功能）。
   if (affectedKeys && incrementalShadowEnabled()) {
     try {
-      const shadow = await analyzeWithAI(sources, change, {
+      const shadow = await analyzeWithAI(singleWindowSources ?? [], change, {
         previousFeatureNames,
         billing: { runId: run.id, accountId: run.accountId ?? null, chargeComponent: "platform_shadow" },
       });
@@ -374,6 +420,17 @@ async function runAnalysisSafely(runId: number) {
 
 export async function runAnalysis(runId: number) {
   await runAnalysisSafely(runId).catch(async (error: unknown) => {
+    if (error instanceof BillingError) {
+      // 账务拒绝不是终态（执行入口预留被拒，契约 §6.6）：保持 queued 等额度/订阅恢复后
+      // 由 sweep 补跑，绝不标 failed。仅回收未落库的执行——结果已结算落库（succeeded）
+      // 时条件不匹配即无操作；无 active 预留可释放，遗留预留由 reservation-ttl sweep 兜底。
+      console.warn("[analysis] dispatch gated by billing; run re-queued", { runId });
+      await getDb().execute(
+        "UPDATE analysis_runs SET status = 'queued', started_at = NULL, finished_at = NULL WHERE id = ? AND status = 'running'",
+        [runId],
+      );
+      return;
+    }
     // message 之外附上堆栈头部：生产排障时 error_message 是唯一现场。
     const message = error instanceof Error
       ? [error.message, ...(error.stack?.split("\n").slice(1, 6) ?? [])].join("\n").slice(0, 8_000)

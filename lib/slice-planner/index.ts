@@ -391,6 +391,8 @@ class DeterministicSlicePlanner implements SlicePlanner {
   private async selectListedFiles(index: OpenedRemoteSourceRevision, state: SlicePlanningState, entries: SourceTreeEntry[], subtreeKey: string) {
     const candidates = entries
       .filter((entry) => !entry.pruned && entry.type === "blob")
+      // 多趟提取：此前分区已选的路径不再入选（分区互不重叠）
+      .filter((entry) => !state.input.excludePaths?.has(entry.path))
       // 噪声过滤先于信号判定：tests/bench/examples 里的代码文件也带 service/entrypoint
       // 信号（express 的 test/app.route.js 撞 route、bench/*.ts 兜底 service），信号只回答
       // 「想看什么」，本策略回答「不看什么」。

@@ -116,30 +116,62 @@ export function loadAIVlogArchitectureSources(index: OpenedRemoteSourceRevision,
 }
 
 export async function getRemoteAnalysisSources(request: RemoteAnalysisRequest, runtime: RemoteAnalysisRuntime): Promise<RemoteAnalysisResult> {
+  const partitioned = await getPartitionedAnalysisSources(request, runtime, { maxPartitions: 1 });
+  return { ...partitioned.partitions[0], index: partitioned.index };
+}
+
+export interface AnalysisPartition {
+  slice: SourceSlice;
+  sources: SourceFile[];
+}
+
+export interface PartitionedAnalysisResult {
+  partitions: AnalysisPartition[];
+  /** 全部分区的规划器状态（分析层可用于后续 reads；当前保留为未来扩展位）。 */
+  index: OpenedRemoteSourceRevision;
+}
+
+/**
+ * 多趟提取的分区规划（无 AI 成本）：在同一个种子索引上反复规划，每趟排除此前分区
+ * 已选路径，直至无新路径或趟数上限。趟数总数在提取开始前确定（prompt 需要报 i/N）。
+ * 单窗仓库（实现面 ≤ 窗口）返回恰好 1 个分区，行为与 getRemoteAnalysisSources 一致。
+ */
+export async function getPartitionedAnalysisSources(request: RemoteAnalysisRequest, runtime: RemoteAnalysisRuntime, options: { maxPartitions: number }): Promise<PartitionedAnalysisResult> {
   const revision: SourceRevisionRef = {
     owner: request.repository.owner,
     repo: request.repository.repo,
     revision: request.repository.revision,
   };
   const index = await createRemoteSourceIndex(revision, { scopeRoots: request.scopeRoots, access: request.access, provider: request.provider, backend: request.backend, budgets: analysisSourceIndexBudgets });
-  const planner = runtime.planner;
-  const budgets = runtime.budgets;
-  const result = await planner.plan({
-    product: request.product,
-    repository: request.repository,
-    scopeRoots: request.scopeRoots,
-    budgets,
-    plannerVersion: "remote-analysis-v2",
-    profileVersion: "remote-analysis-v1",
-  }, index);
-  if (!result.slice) {
-    throw new Error(`Remote source slice failed: ${result.missing.join("; ") || "unknown planner failure"}`);
+  const partitions: AnalysisPartition[] = [];
+  const excludePaths = new Set<string>();
+  while (partitions.length < options.maxPartitions) {
+    const result = await runtime.planner.plan({
+      product: request.product,
+      repository: request.repository,
+      scopeRoots: request.scopeRoots,
+      budgets: runtime.budgets,
+      plannerVersion: "remote-analysis-v2",
+      profileVersion: "remote-analysis-v1",
+      excludePaths,
+    }, index);
+    if (!result.slice) throw new Error(`Remote source slice failed: ${result.missing.join("; ") || "unknown planner failure"}`);
+    if (result.slice.files.length === 0) {
+      // 首趟无候选 = 仓库没有可分析源码；后续趟无候选 = 分区耗尽（正常结束）
+      if (partitions.length === 0) throw new Error("No supported source files found");
+      break;
+    }
+    const sources = await sliceToSourceFiles(result.slice, index, runtime.budgets.maxAiContextSourceBytes);
+    if (sources.length === 0) {
+      if (partitions.length === 0) throw new Error("No supported source files found");
+      break;
+    }
+    // slice.files 对齐真实窗口：assertEvidence 的允许集来自 slice.files，
+    // 被硬顶排除的文件不得留在允许集（AI 引用未进 prompt 的路径应视为越界）。
+    const includedPaths = new Set(sources.map((source) => source.path));
+    const trimmedSlice = { ...result.slice, files: result.slice.files.filter((file) => includedPaths.has(file.path)) };
+    partitions.push({ slice: trimmedSlice, sources });
+    for (const source of sources) excludePaths.add(source.path);
   }
-  const sources = await sliceToSourceFiles(result.slice, index, budgets.maxAiContextSourceBytes);
-  if (sources.length === 0) throw new Error("No supported source files found");
-  // slice.files 对齐真实窗口：assertEvidence 的允许集来自 slice.files，
-  // 被硬顶排除的文件不得留在允许集（AI 引用未进 prompt 的路径应视为越界）。
-  const includedPaths = new Set(sources.map((source) => source.path));
-  const trimmedSlice = { ...result.slice, files: result.slice.files.filter((file) => includedPaths.has(file.path)) };
-  return { slice: trimmedSlice, sources, index };
+  return { partitions, index };
 }
