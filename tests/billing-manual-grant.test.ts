@@ -27,16 +27,17 @@ function harness(state: { userRow?: Record<string, unknown> | null; orgRow?: Rec
             return [userRow ? [userRow] : [], []];
           }
           if (sql.includes("FROM organizations WHERE slug")) return [[state.orgRow ?? { id: 7 }], []];
-          if (sql.includes("FROM billing_accounts WHERE account_id = ? FOR UPDATE")) return [[{ id: 7 }], []];
+          if (sql.includes("FROM billing_accounts WHERE account_id = ? FOR UPDATE")) return [[{ account_id: 7 }], []];
           if (sql.includes("t FOR UPDATE")) {
-            return [state.walletRow ? [{ walletId: 31, remaining: Number(state.walletRow.remaining_sau ?? 0), reserved: 0 }] : [], []];
+            // 运行时真实列名（wallet_id）：camelCase 伪造会掩盖读错列的 bug（生产 4318fd6 实发事故）
+            return [state.walletRow ? [{ wallet_id: 31, remaining: Number(state.walletRow.remaining_sau ?? 0), reserved: 0 }] : [], []];
           }
           if (sql.includes("INSERT INTO billing_quota_wallets")) {
             walletCreated = true;
             return [{ insertId: 31 }];
           }
           if (sql.includes("SELECT entry_id FROM billing_ledger WHERE idempotency_key")) {
-            return [ledgerKeys.includes(String(params[0])) ? [{ id: 1 }] : [], []];
+            return [ledgerKeys.includes(String(params[0])) ? [{ entry_id: 1 }] : [], []];
           }
           if (sql.includes("INSERT INTO billing_ledger")) {
             ledgerKeys.push(String(params[2]));

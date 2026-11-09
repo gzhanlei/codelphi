@@ -61,9 +61,10 @@ export async function grantQuotaByEmail(input: ManualGrantInput): Promise<Manual
     let walletId: number;
     let remaining = 0;
     const reserved = 0;
-    const wallet = (walletRows as Array<{ walletId: number; remaining: number }>)[0];
+    // 派生表列名是运行时真实形状（wallet_id），不得用 camelCase 断言掩盖——生产 4318fd6 曾因此把 undefined 绑进 INSERT
+    const wallet = (walletRows as Array<{ wallet_id: number; remaining: number; reserved: number }>)[0];
     if (wallet) {
-      walletId = wallet.walletId;
+      walletId = Number(wallet.wallet_id);
       remaining = Number(wallet.remaining);
     } else {
       const [insRows] = await conn.execute(
