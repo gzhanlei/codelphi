@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { AnalysisResult } from "../lib/ai";
 import { mergeChunkResults, nextReference } from "../lib/extraction-merge";
 
@@ -89,5 +89,38 @@ describe("mergeChunkResults", () => {
       chunk([{ name: "统一登录", summary: "s", scenarios: [scenario("HP-1", "返回结果页", "edge")] }]),
     ]);
     expect(merged.features[0].scenarios).toHaveLength(2);
+  });
+
+  it("truncates changes to the schema cap of 150 after dedupe", () => {
+    // 先去重再截断：两趟重复的 20 条去重后只算 20 条，不挤占 150 的额度
+    const repeated: AnalysisResult["changes"] = Array.from({ length: 20 }, (_, index) => ({
+      featureName: "规格导出", kind: "added" as const, description: `变更${index}`, userImpact: "", evidence: [],
+    }));
+    const unique: AnalysisResult["changes"] = Array.from({ length: 140 }, (_, index) => ({
+      featureName: "规格导出", kind: "changed" as const, description: `独立变更${index}`, userImpact: "", evidence: [],
+    }));
+    const merged = mergeChunkResults([chunk([], repeated), chunk([], unique), chunk([], repeated)]);
+    expect(merged.changes).toHaveLength(150);
+    // 去重在前：重复的 20 条全部保留，被截掉的是排在其后的独立变更
+    expect(merged.changes.filter((change) => change.kind === "added")).toHaveLength(20);
+  });
+
+  it("logs when truncation drops changes instead of discarding silently (W0-4)", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    try {
+      const changes: AnalysisResult["changes"] = Array.from({ length: 160 }, (_, index) => ({
+        featureName: "规格导出", kind: "added" as const, description: `变更${index}`, userImpact: "", evidence: [],
+      }));
+      const merged = mergeChunkResults([chunk([], changes)]);
+      expect(merged.changes).toHaveLength(150);
+      const logged = logSpy.mock.calls
+        .map((call) => call.map((item) => (typeof item === "string" ? item : JSON.stringify(item))).join(" "))
+        .join("\n");
+      expect(logged).toContain("truncat");
+      expect(logged).toContain("160");
+      expect(logged).toContain("150");
+    } finally {
+      logSpy.mockRestore();
+    }
   });
 });

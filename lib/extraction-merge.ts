@@ -79,8 +79,13 @@ export function mergeChunkResults(chunks: ExtractionChunk[]): AnalysisResult {
   return {
     product: first.product,
     release: first.release,
-    // changes 截断到 schema 上限：分区越多越容易超；发布页 changelog 取去重后的前 150 条
-    changes: changes.slice(0, 150),
+    // changes 截断到 schema 上限：分区越多越容易超；发布页 changelog 取去重后的前 150 条。
+    // 截断必须日志可查（W0-4）：不静默丢弃，runId 级排查靠这条日志对账。
+    changes: (() => {
+      if (changes.length <= 150) return changes;
+      console.log("[extraction-merge] changes truncated", { before: changes.length, after: 150, dropped: changes.length - 150 });
+      return changes.slice(0, 150);
+    })(),
     features,
   };
 }
