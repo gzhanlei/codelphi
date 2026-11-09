@@ -942,6 +942,31 @@ export async function hasActiveReservation(runId: number): Promise<boolean> {
   return (rows as unknown[]).length > 0;
 }
 
+export interface QueuedRunDispatchDecision {
+  dispatch: boolean;
+  reason: string;
+}
+
+/**
+ * queued run 补跑闸门（积压自愈的只读前判，契约 §6.6 执行入口的镜像）：
+ * 已有 active 预留的 run 直接放行——额度已为它锁定，执行入口 ensureReservation 会沿用；
+ * 否则按入队同款闸门复判：trialing 账户的 push 派发仍拦（§8.2.5）、额度不足仍拦。
+ * 不满足 → 保持 queued 等账务恢复（套餐生效/钱包发放后由 sweep 补跑），绝不标 failed：
+ * 失败是放弃，这里要的是「暂时不能跑，条件满足后自动补上」。
+ */
+export async function decideQueuedRunDispatch(run: { id: number; triggerType: string; accountId: number | null }): Promise<QueuedRunDispatchDecision> {
+  if (run.accountId == null) return { dispatch: false, reason: "no_account" };
+  if (await hasActiveReservation(run.id)) return { dispatch: true, reason: "reserved" };
+  const [rows] = await getDb().execute(
+    "SELECT plan_status FROM billing_accounts WHERE account_id = ? LIMIT 1",
+    [run.accountId],
+  );
+  const planStatus = (rows as Array<{ plan_status: string }>)[0]?.plan_status;
+  if (run.triggerType === "push" && planStatus === "trialing") return { dispatch: false, reason: "trial_auto_push_blocked" };
+  if (await availableSau(run.accountId) < FIRST_RUN_UNITS) return { dispatch: false, reason: "quota_exceeded" };
+  return { dispatch: true, reason: "gate_passed" };
+}
+
 /** 契约 §5 错误码 → HTTP 状态映射（路由层使用）。 */
 export function billingHttpStatus(code: BillingErrorCode): number {
   switch (code) {

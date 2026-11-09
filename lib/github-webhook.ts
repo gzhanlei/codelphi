@@ -130,6 +130,54 @@ export async function stageGitHubDelivery(deliveryId: string, eventType = "push"
   }
 }
 
+/** 仓库 → 计费账户（organization 即 account，契约 §3）。独立连接：调用点已释放事务连接。 */
+async function resolveProductAccountId(repositoryId: number): Promise<number | null> {
+  const conn = await getDb().getConnection();
+  try {
+    const [rows] = await conn.execute(
+      `SELECT p.organization_id AS organizationId FROM repositories repo JOIN products p ON p.id = repo.product_id WHERE repo.id = ?`,
+      [repositoryId],
+    );
+    const accountId = Number((rows as Array<{ organizationId: number }>)[0]?.organizationId ?? 0);
+    return accountId || null;
+  } finally {
+    conn.release();
+  }
+}
+
+/** 闸门拒绝落库（独立事务）：delivery → skipped + skipped_pushes；行锁幂等，终态不覆写。 */
+async function markPushDeliverySkipped(deliveryId: string, repositoryId: number, sha: string, reason: string) {
+  const conn = await getDb().getConnection();
+  try {
+    await conn.beginTransaction();
+    const [rows] = await conn.execute(
+      `SELECT status FROM github_webhook_deliveries WHERE delivery_id = ? FOR UPDATE`,
+      [deliveryId],
+    );
+    const status = (rows as Array<{ status: string }>)[0]?.status;
+    // 闸门事务回滚后本 delivery 回到 received；仅非终态可推进（重复回调/已 queued 幂等跳过）
+    if (status && status !== "queued" && status !== "skipped") {
+      await conn.execute(
+        `INSERT INTO skipped_pushes (repository_id, sha, reason, delivery_id) VALUES (?, ?, ?, ?)`,
+        [repositoryId, sha, reason.slice(0, 64), deliveryId],
+      );
+      await conn.execute(
+        `UPDATE github_webhook_deliveries SET status = 'skipped', result_json = ? WHERE delivery_id = ?`,
+        [JSON.stringify({ accepted: false, skipped: true, reason }), deliveryId],
+      );
+    }
+    await conn.commit();
+    conn.release();
+  } catch (error) {
+    try {
+      await conn.rollback();
+    } finally {
+      conn.release();
+    }
+    throw error;
+  }
+}
+
 /** 阶段二：行锁 + 状态机推进；queued/skipped 幂等返回原结果，received/processing/failed_retryable 续处理（P0-4）。 */
 async function deliverStagedPush(
   input: { deliveryId: string; repositoryId: number; before: string; after: string },
@@ -175,26 +223,18 @@ async function deliverStagedPush(
       return { status: 202, body, runId: result.runId };
     } catch (error) {
       if (!(error instanceof BillingError)) throw error;
-      // 闸门拒绝（额度/Trial 拦截/状态）→ skipped（§12.4.3）：静默跳过、零费用、不重试风暴
-      const reason = error.code === "quota_exceeded" ? "quota_exceeded" : error.message.replace(/^\[[^\]]+\]\s*/, "").slice(0, 64);
-      await conn.execute(
-        `INSERT INTO skipped_pushes (repository_id, sha, reason, delivery_id) VALUES (?, ?, ?, ?)`,
-        [input.repositoryId, input.after, reason.slice(0, 64), input.deliveryId],
-      );
-      const body = { accepted: false, skipped: true, reason };
-      await conn.execute(
-        `UPDATE github_webhook_deliveries SET status = 'skipped', result_json = ? WHERE delivery_id = ?`,
-        [JSON.stringify(body), input.deliveryId],
-      );
-      await conn.commit();
+      // 闸门拒绝（额度/Trial 拦截/状态）→ skipped（§12.4.3）：静默跳过、零费用、不重试风暴。
+      // 必须先回滚：enqueue 组合（契约 §9）先 INSERT analysis_runs('queued') 再判闸门，
+      // 带着这行 commit 会留下永远无人派发的孤儿 queued run（run 派发只发生在路由 after()
+      // 成功路径与启动恢复）——生产 run 137-141 即此缺陷产物。skipped 状态另起独立事务落库。
+      await conn.rollback();
       conn.release();
+      const reason = error.code === "quota_exceeded" ? "quota_exceeded" : error.message.replace(/^\[[^\]]+\]\s*/, "").slice(0, 64);
+      const body = { accepted: false, skipped: true, reason };
+      await markPushDeliverySkipped(input.deliveryId, input.repositoryId, input.after, reason);
       console.warn("[billing] auto push skipped by gate", { deliveryId: input.deliveryId, repositoryId: input.repositoryId, reason });
       try {
-        const [orgRows] = await conn.execute(
-          `SELECT p.organization_id AS organizationId FROM repositories repo JOIN products p ON p.id = repo.product_id WHERE repo.id = ?`,
-          [input.repositoryId],
-        );
-        const accountId = Number((orgRows as Array<{ organizationId: number }>)[0]?.organizationId ?? 0);
+        const accountId = await resolveProductAccountId(input.repositoryId);
         if (accountId) {
           await enqueueBillingNotification({
             accountId,

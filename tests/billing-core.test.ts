@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { BillingError, capture, heartbeat, release, reserveForNewRun } from "../lib/billing/core";
+import { BillingError, capture, decideQueuedRunDispatch, heartbeat, release, reserveForNewRun } from "../lib/billing/core";
 import { getDb } from "../lib/db";
 
 vi.mock("../lib/db", () => ({ getDb: vi.fn() }));
@@ -479,5 +479,47 @@ describe("deadlock retry", () => {
     routeCommonBasics(h);
     await expect(reserveForNewRun(8, 7, 1, "R1")).rejects.toMatchObject({ code: "deadlock_retry_exhausted" });
     expect(h.rolledBack()).toBe(3);
+  });
+});
+
+describe("decideQueuedRunDispatch (queued-run self-healing gate)", () => {
+  function routeGate(h: ReturnType<typeof harness>, overrides: { reserved?: unknown[]; planStatus?: string; available?: number } = {}) {
+    // decideQueuedRunDispatch 全部走连接池直查（非事务），须路由 db.execute
+    vi.mocked(h.db.execute).mockImplementation(async (sql: string) => {
+      if (sql.includes("FROM billing_reservations WHERE run_id = ? AND status = 'active'")) return [overrides.reserved ?? [], []];
+      if (sql.includes("SELECT plan_status FROM billing_accounts")) return [[{ plan_status: overrides.planStatus ?? "active" }], []];
+      if (sql.includes("SELECT COALESCE(SUM(remaining_sau - reserved_sau)")) return [[{ available: overrides.available ?? 2 }], []];
+      return [[], []];
+    });
+  }
+
+  it("passes a run that already holds an active reservation without re-checking account state", async () => {
+    const h = harness();
+    vi.mocked(getDb).mockReturnValue(h.db as never);
+    routeGate(h, { reserved: [{ reservation_id: 1 }], planStatus: "trialing", available: 0 });
+    await expect(decideQueuedRunDispatch({ id: 51, triggerType: "push", accountId: 7 })).resolves.toEqual({ dispatch: true, reason: "reserved" });
+  });
+
+  it("blocks a trialing account's push run but allows the same account's manual run when funded", async () => {
+    const h = harness();
+    vi.mocked(getDb).mockReturnValue(h.db as never);
+    routeGate(h, { planStatus: "trialing", available: 5 });
+    await expect(decideQueuedRunDispatch({ id: 51, triggerType: "push", accountId: 7 })).resolves.toEqual({ dispatch: false, reason: "trial_auto_push_blocked" });
+    await expect(decideQueuedRunDispatch({ id: 52, triggerType: "manual", accountId: 7 })).resolves.toEqual({ dispatch: true, reason: "gate_passed" });
+  });
+
+  it("blocks dispatch while available SAU is below the entry reservation, regardless of trigger", async () => {
+    const h = harness();
+    vi.mocked(getDb).mockReturnValue(h.db as never);
+    routeGate(h, { planStatus: "active", available: 0 });
+    await expect(decideQueuedRunDispatch({ id: 51, triggerType: "push", accountId: 7 })).resolves.toEqual({ dispatch: false, reason: "quota_exceeded" });
+    await expect(decideQueuedRunDispatch({ id: 51, triggerType: "manual", accountId: 7 })).resolves.toEqual({ dispatch: false, reason: "quota_exceeded" });
+  });
+
+  it("never dispatches a run without account ownership", async () => {
+    const h = harness();
+    vi.mocked(getDb).mockReturnValue(h.db as never);
+    await expect(decideQueuedRunDispatch({ id: 51, triggerType: "push", accountId: null })).resolves.toEqual({ dispatch: false, reason: "no_account" });
+    expect(h.db.execute).not.toHaveBeenCalled();
   });
 });

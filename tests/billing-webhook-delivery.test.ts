@@ -141,6 +141,27 @@ describe("staged push delivery (contract P0-4)", () => {
     expect(h.skipped).toEqual([{ repository_id: 9, sha: "after-sha", reason: "quota_exceeded", delivery_id: "D3" }]);
   });
 
+  it("rolls back the gate-rejected enqueue transaction so no orphan queued run is committed (prod 137-141 regression)", async () => {
+    const h = deliveryHarness();
+    vi.mocked(getDb).mockReturnValue(h.db as never);
+    // enqueue 组合先 INSERT analysis_runs('queued') 再判闸门：拒绝时若 commit 会留下
+    // 永远无人派发的孤儿 queued run（run 137-141 即此缺陷的生产产物）
+    const enqueue = vi.fn(async () => {
+      throw new BillingError("billing_state_conflict", "trial_auto_push_blocked");
+    });
+    const result = await processGitHubWebhook(pushInput("D6"), baseDependencies(enqueue));
+    expect(result.body).toEqual({ accepted: false, skipped: true, reason: "trial_auto_push_blocked" });
+    const enqueueConn = h.conns[1];
+    expect(enqueueConn.rollback).toHaveBeenCalled();
+    expect(enqueueConn.commit).not.toHaveBeenCalled();
+    // skipped 状态另起独立事务落库
+    const skippedConn = h.conns[2];
+    expect(skippedConn.commit).toHaveBeenCalled();
+    expect(h.row("D6").status).toBe("skipped");
+    expect(h.row("D6").run_id).toBeNull();
+    expect(h.skipped).toEqual([{ repository_id: 9, sha: "after-sha", reason: "trial_auto_push_blocked", delivery_id: "D6" }]);
+  });
+
   it("marks retryable failures and answers 500 so GitHub re-delivers; the retry continues processing (P0-4)", async () => {
     const h = deliveryHarness();
     vi.mocked(getDb).mockReturnValue(h.db as never);

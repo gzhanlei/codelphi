@@ -1,5 +1,7 @@
 import type { PoolConnection } from "mysql2/promise";
 import { getDb } from "../db";
+import { runAnalysis } from "../analysis";
+import { dispatchStuckQueuedRuns } from "../analysis-recovery";
 import { capture, expireStaleReservationsOnce } from "./core";
 import { markPaidAndFulfill, getOrderWithReconcile } from "../pay-orders";
 import { confirmRefundFromRemote, reclaimWalletIfSettled } from "../pay-refunds";
@@ -123,6 +125,15 @@ export async function runRateLimitCleanupOnce(windowSeconds = 3600): Promise<Job
 
 const startedJobs = new Set<string>();
 
+/**
+ * 积压 queued run 补跑作业：闸门允许（额度/订阅状态恢复）时自动补跑超时未认领的
+ * queued run（每仓库仅最新一条，更旧的标 superseded）。启动恢复管重启窗口，本作业
+ * 管「入队后无人在途」的长尾——包括账务恢复（套餐生效/钱包发放）后的自动补分析。
+ */
+export async function runQueuedRunRecoveryOnce(): Promise<JobResult> {
+  return withSweepLock("queued-run-recovery", async () => dispatchStuckQueuedRuns(runAnalysis));
+}
+
 /** 调度入口（instrumentation.ts 调用一次）：幂等启动，重复调用直接返回。 */
 export function startBillingSweeps() {
   if (process.env.BILLING_SWEEP_ENABLED === "false") return { started: false };
@@ -132,6 +143,7 @@ export function startBillingSweeps() {
   scheduleJob("billing-notify-delivery", 60 * 1_000, runBillingNotifyDeliveryOnce);
   scheduleJob("billing-daily", 24 * 60 * 60 * 1_000, runBillingDailyOnce);
   scheduleJob("rate-limit-cleanup", 60 * 60 * 1_000, () => runRateLimitCleanupOnce(3600));
+  scheduleJob("queued-run-recovery", 60 * 1_000, runQueuedRunRecoveryOnce);
   return { started: true, jobs: [...startedJobs] };
 }
 

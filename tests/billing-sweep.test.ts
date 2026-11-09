@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { expireStaleReservationsOnce } from "../lib/billing/core";
-import { runRateLimitCleanupOnce, runReservationSweepOnce } from "../lib/billing/sweep";
+import { runQueuedRunRecoveryOnce, runRateLimitCleanupOnce, runReservationSweepOnce } from "../lib/billing/sweep";
+import { dispatchStuckQueuedRuns } from "../lib/analysis-recovery";
+import { runAnalysis } from "../lib/analysis";
+
+vi.mock("../lib/analysis-recovery", () => ({ dispatchStuckQueuedRuns: vi.fn(async () => ({ superseded: 1, dispatched: 2 })) }));
+vi.mock("../lib/analysis", () => ({ runAnalysis: vi.fn(async () => undefined) }));
 import { getDb } from "../lib/db";
 
 vi.mock("../lib/db", () => ({ getDb: vi.fn() }));
@@ -167,5 +172,17 @@ describe("runRateLimitCleanupOnce", () => {
     expect(result.executed).toBe(true);
     expect(result.detail).toEqual({ deleted: 7 });
     expect(h.paramsOf("DELETE FROM rate_limit_hits")[0]).toEqual([7200]);
+  });
+});
+
+describe("runQueuedRunRecoveryOnce", () => {
+  it("delegates to the stuck-queued dispatcher under the job lock and records success", async () => {
+    const h = harness();
+    vi.mocked(getDb).mockReturnValue(h.db as never);
+    h.on("SELECT GET_LOCK", () => [{ acquired: 1 }]);
+    const result = await runQueuedRunRecoveryOnce();
+    expect(result).toEqual({ executed: true, detail: { superseded: 1, dispatched: 2 } });
+    expect(vi.mocked(dispatchStuckQueuedRuns)).toHaveBeenCalledWith(runAnalysis);
+    expect(h.sqls().some((sql) => sql.includes("billing_sweep_state"))).toBe(true);
   });
 });
