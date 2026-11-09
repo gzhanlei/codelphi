@@ -1,0 +1,123 @@
+import { createHash, randomBytes } from "node:crypto";
+import type { Execute } from "../db";
+
+/**
+ * A1 MCP OAuth PKCE 连接流（docs/specsight-gap-improvement-plan.md §4.1）。
+ * 授权码与访问 token 只存 SHA-256 哈希；码 10 分钟一次性；token 1 小时过期；
+ * 30 天未使用必须重连（last_used_at 判定）；回跳地址必须与批准时一致。
+ */
+
+export function sha256(value: string) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+/** Execute 参数类型只收 string|number|null；DATETIME(3) 用该格式串。 */
+function mysqlDatetime(date: Date) {
+  return date.toISOString().slice(0, 23).replace("T", " ");
+}
+
+/** 批准页主体：会话用户（chandler_sub）→ users.id。 */
+export async function resolveUserIdBySub(execute: Execute, sub: string): Promise<number | null> {
+  const [rows] = (await execute("SELECT id FROM users WHERE chandler_sub = ? LIMIT 1", [sub])) as [Array<{ id: number }>, unknown];
+  return rows[0] ? Number(rows[0].id) : null;
+}
+
+const CODE_TTL_MS = 10 * 60 * 1000;
+const TOKEN_TTL_MS = 60 * 60 * 1000;
+/** 30 天未使用需重连（计划 §4.1）。 */
+const IDLE_LIMIT_MS = 30 * 24 * 60 * 60 * 1000;
+
+export interface ApprovedGrant {
+  id: number;
+  /** 授权码明文，只在批准时返回一次。 */
+  code: string;
+}
+
+/** 批准页提交：建授权记录，返回一次性授权码（哈希落库）。 */
+export async function approveGrant(connection: { execute: Execute }, input: {
+  organizationId: number;
+  userId: number;
+  clientName: string;
+  redirectUri: string;
+  codeChallenge: string;
+}): Promise<ApprovedGrant> {
+  const code = randomBytes(24).toString("hex");
+  const insertResult = (await connection.execute(
+    `INSERT INTO mcp_oauth_grants (organization_id, user_id, client_name, redirect_uri, code_hash, code_challenge, code_challenge_method, code_expires_at, approved_at)
+     VALUES (?, ?, ?, ?, ?, ?, 'S256', ?, NOW(3))`,
+    [input.organizationId, input.userId, input.clientName.slice(0, 191), input.redirectUri, sha256(code), input.codeChallenge, mysqlDatetime(new Date(Date.now() + CODE_TTL_MS))],
+  )) as unknown;
+  const first = Array.isArray(insertResult) ? insertResult[0] : insertResult;
+  return { id: Number((first as { insertId: number }).insertId), code };
+}
+
+interface GrantRow {
+  id: number;
+  organizationId: number;
+  userId: number;
+  codeHash: string | null;
+  codeChallenge: string;
+  codeExpiresAt: Date | null;
+  redirectUri: string;
+}
+
+/** PKCE S256 校验：base64url(sha256(verifier)) 必须等于批准时的 challenge。 */
+function challengeMatches(codeChallenge: string, verifier: string) {
+  return createHash("sha256").update(verifier).digest("base64url") === codeChallenge;
+}
+
+/** 授权码换 token：码一次性、10 分钟内、verifier 过 PKCE、回跳地址一致。 */
+export async function exchangeCodeForToken(connection: { execute: Execute }, input: {
+  code: string;
+  codeVerifier: string;
+  redirectUri: string;
+}): Promise<{ grantId: number; organizationId: number; userId: number; plaintext: string } | null> {
+  const [rows] = (await connection.execute(
+    `SELECT id, organization_id AS organizationId, user_id AS userId, code_hash AS codeHash,
+            code_challenge AS codeChallenge, code_expires_at AS codeExpiresAt, redirect_uri AS redirectUri
+     FROM mcp_oauth_grants WHERE code_hash = ?`,
+    [sha256(input.code)],
+  )) as [GrantRow[], unknown];
+  const grant = rows[0];
+  if (!grant || !grant.codeHash) return null;
+  if (grant.redirectUri !== input.redirectUri) return null;
+  if (!grant.codeExpiresAt || grant.codeExpiresAt.getTime() < Date.now()) return null;
+  if (!challengeMatches(grant.codeChallenge, input.codeVerifier)) return null;
+  const plaintext = randomBytes(24).toString("hex");
+  // 码一次性：token 写入同行的同时清掉 code_hash，重复交换直接落空
+  const updateResult = (await connection.execute(
+    `UPDATE mcp_oauth_grants
+     SET token_hash = ?, token_expires_at = ?, last_used_at = NOW(3), code_hash = NULL, code_expires_at = NULL
+     WHERE id = ? AND code_hash = ?`,
+    [sha256(plaintext), mysqlDatetime(new Date(Date.now() + TOKEN_TTL_MS)), grant.id, grant.codeHash],
+  )) as unknown;
+  const updateFirst = Array.isArray(updateResult) ? updateResult[0] : updateResult;
+  const affected = Number((updateFirst as { affectedRows?: number }).affectedRows ?? 0);
+  if (affected === 0) return null;
+  return { grantId: grant.id, organizationId: grant.organizationId, userId: grant.userId, plaintext };
+}
+
+export interface McpTokenIdentity {
+  grantId: number;
+  organizationId: number;
+  userId: number;
+}
+
+/** token 身份：哈希查找 + 未过期 + 未撤销 + 30 天内用过（否则要求重连）。命中即刷新 last_used_at。 */
+export async function verifyAccessToken(connection: { execute: Execute }, plaintext: string): Promise<McpTokenIdentity | null> {
+  const [rows] = (await connection.execute(
+    `SELECT id, organization_id AS organizationId, user_id AS userId, token_expires_at AS tokenExpiresAt,
+            last_used_at AS lastUsedAt, revoked_at AS revokedAt
+     FROM mcp_oauth_grants WHERE token_hash = ?`,
+    [sha256(plaintext)],
+  )) as [Array<{ id: number; organizationId: number; userId: number; tokenExpiresAt: Date | null; lastUsedAt: Date | null; revokedAt: Date | null }>, unknown];
+  const grant = rows[0];
+  if (!grant) return null;
+  if (grant.revokedAt) return null;
+  if (!grant.tokenExpiresAt || grant.tokenExpiresAt.getTime() < Date.now()) return null;
+  // 30 天未使用必须重连；批准后从未使用（lastUsedAt NULL）按批准时间容忍一个 TTL 周期
+  const idleAnchor = grant.lastUsedAt ?? grant.tokenExpiresAt;
+  if (Date.now() - idleAnchor.getTime() > IDLE_LIMIT_MS + TOKEN_TTL_MS) return null;
+  await connection.execute("UPDATE mcp_oauth_grants SET last_used_at = NOW(3) WHERE id = ?", [grant.id]);
+  return { grantId: grant.id, organizationId: grant.organizationId, userId: grant.userId };
+}

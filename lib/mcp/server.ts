@@ -36,7 +36,8 @@ interface RpcResult { jsonrpc: "2.0"; id: string | number | null; result?: unkno
 
 export interface McpRuntime {
   execute?: Execute;
-  identity: McpKeyIdentity;
+  /** API key（keyId）或 OAuth token（grantId/userId）身份，工具面只用 organizationId 做作用域。 */
+  identity: { organizationId: number; keyId?: number; userId?: number; grantId?: number };
 }
 
 function rpcError(id: RpcRequest["id"], code: number, message: string): RpcResult {
