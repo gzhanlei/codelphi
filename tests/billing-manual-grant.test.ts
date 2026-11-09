@@ -35,7 +35,7 @@ function harness(state: { userRow?: Record<string, unknown> | null; orgRow?: Rec
             walletCreated = true;
             return [{ insertId: 31 }];
           }
-          if (sql.includes("SELECT id FROM billing_ledger WHERE idempotency_key")) {
+          if (sql.includes("SELECT entry_id FROM billing_ledger WHERE idempotency_key")) {
             return [ledgerKeys.includes(String(params[0])) ? [{ id: 1 }] : [], []];
           }
           if (sql.includes("INSERT INTO billing_ledger")) {
@@ -90,6 +90,11 @@ describe("grantQuotaByEmail", () => {
     const ledgerParams = ledgerCall?.params ?? [];
     expect(ledgerParams[4]).toBe("manual grant: manual-topup-2026-11-09");
     expect(ledgerParams[5]).toBe(205);
+    // 回归（生产 4318fd6 实发事故）：锁语句必须引用真实列名——
+    // billing_accounts 主键是 account_id、billing_ledger 主键是 entry_id，没有 id 列
+    expect(h.calls.some((c) => c.sql.includes("SELECT account_id FROM billing_accounts WHERE account_id = ? FOR UPDATE"))).toBe(true);
+    expect(h.calls.some((c) => c.sql.includes("SELECT entry_id FROM billing_ledger WHERE idempotency_key = ? FOR UPDATE"))).toBe(true);
+    expect(h.calls.some((c) => /^SELECT id FROM billing_(accounts|ledger)/.test(c.sql))).toBe(false);
   });
 
   it("creates the trial wallet automatically for legacy users without one", async () => {

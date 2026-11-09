@@ -45,7 +45,7 @@ export async function grantQuotaByEmail(input: ManualGrantInput): Promise<Manual
     if (!orgRow) throw new Error(`user ${userId} has no personal workspace`);
     const accountId = Number(orgRow.id);
 
-    await conn.execute(`SELECT id FROM billing_accounts WHERE account_id = ? FOR UPDATE`, [accountId]);
+    await conn.execute(`SELECT account_id FROM billing_accounts WHERE account_id = ? FOR UPDATE`, [accountId]);
 
     // Trial 钱包：无则自动创建（老用户兜底；source_key 稳定，重复创建靠 UNIQUE 兜底）
     const sourceKey = `trial:${userId}`;
@@ -76,7 +76,7 @@ export async function grantQuotaByEmail(input: ManualGrantInput): Promise<Manual
 
     const newRemaining = remaining + input.units;
     const idempotencyKey = `grt:manual:${input.reason}:${walletId}`;
-    const [dupRows] = await conn.execute(`SELECT id FROM billing_ledger WHERE idempotency_key = ? FOR UPDATE`, [idempotencyKey]);
+    const [dupRows] = await conn.execute(`SELECT entry_id FROM billing_ledger WHERE idempotency_key = ? FOR UPDATE`, [idempotencyKey]);
     if ((dupRows as unknown[]).length > 0) {
       // 同 reason 已发放过：零副作用返回（重放防护）
       await conn.commit();
