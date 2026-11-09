@@ -31,6 +31,17 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
   return NextResponse.json({
     product: { slug: details.product.slug, name: details.product.name, description: details.product.description, descriptionSource: details.product.descriptionSource },
     generatedAt: new Date().toISOString(),
+    // B1 覆盖披露（措辞红线：只写「证据覆盖率」，禁用「可信度/正确性/真相源」）；
+    // 触顶时显式声明未覆盖全部实现面；W0 分片多趟验收未达标前带统一标注。
+    ...(details.coverage ? {
+      evidenceCoverage: {
+        ...details.coverage,
+        note: details.coverage.partitionsCapped
+          ? "本规格未覆盖全部实现面（提取趟数触顶），未覆盖部分不产生结论。"
+          : "证据覆盖率按本规格版本对应的完整实现面计算。",
+        disclosureNote: "分片多趟验收未达标（W0-2 重跑进行中）。",
+      },
+    } : {}),
     features: details.features.map((feature) => ({
       name: feature.name,
       summary: feature.summary,

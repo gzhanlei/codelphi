@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { computeCoverageReceipt, enumerateImplementationSurface, isCoverageCapped } from "../lib/analysis-coverage";
+import type { AnalysisPartition, } from "../lib/remote-analysis";
 import type { OpenedRemoteSourceRevision, SourceTreeListing } from "../lib/remote-source-index";
 
 const entry = (path: string, size: number, type: "blob" | "tree" = "blob") => ({ path, type, sha: path, size: type === "blob" ? size : undefined });
@@ -15,7 +16,7 @@ function fakeIndex(files: Array<{ path: string; size: number }>): OpenedRemoteSo
       ...files.filter((file) => file.path.split("/").slice(0, -1).join("/") === path).map((file) => entry(file.path, file.size)),
       ...[...dirs].filter((dir) => dir.split("/").slice(0, -1).join("/") === path).map((dir) => entry(dir, 0, "tree")),
     ],
-  });
+  } as unknown as SourceTreeListing);
   return {
     identity: {} as OpenedRemoteSourceRevision["identity"],
     scopeRoots: [],
@@ -29,10 +30,10 @@ function fakeIndex(files: Array<{ path: string; size: number }>): OpenedRemoteSo
   };
 }
 
-const partition = (paths: Array<{ path: string; content: string }>) => ({
+const partition = (paths: Array<{ path: string; content: string }>): AnalysisPartition => ({
   slice: { files: paths.map((file) => ({ path: file.path })) },
   sources: paths,
-});
+} as unknown as AnalysisPartition);
 
 describe("computeCoverageReceipt", () => {
   it("computes the assembled-vs-total implementation surface in the measure-script dialect", async () => {

@@ -10,6 +10,7 @@ import { specFeatureKey } from "../lib/spec-diff";
 const execute = vi.fn();
 const readLines = vi.fn();
 const listDir = vi.fn();
+const listRoot = vi.fn();
 const openArchitectureIndex = vi.fn();
 const connection = {
   execute: vi.fn(),
@@ -104,14 +105,15 @@ describe("analysis orchestration", () => {
     });
     adapter.getRepository.mockResolvedValue({ owner: "gzhanlei", name: "radar", defaultBranch: "main" });
     adapter.getChangeContext.mockResolvedValue({ message: "change", committedAt: "2026-11-01T00:00:00Z", url: "https://github.com/commit/sha", files: [] });
-    vi.mocked(getRemoteAnalysisSources).mockResolvedValue({ sources: [], slice: { files: [{ path: "lib/db.ts" }] }, index: { readLines, listDir }, openArchitectureIndex } as never);
+    vi.mocked(getRemoteAnalysisSources).mockResolvedValue({ sources: [], slice: { files: [{ path: "lib/db.ts" }] }, index: { readLines, listDir, listRoot }, openArchitectureIndex } as never);
     // 真全量路径（affectedKeys=null）默认走分区提取：单分区等价旧行为
     partitionedSourcesMock.mockResolvedValue({
       partitions: [{ slice: { files: [{ path: "lib/db.ts" }] }, sources: [] }],
-      index: { readLines, listDir },
+      index: { readLines, listDir, listRoot },
     });
     openArchitectureIndex.mockReset().mockResolvedValue({ readLines, listDir });
     listDir.mockResolvedValue({ status: "indexed", truncated: false, entries: [{ path: "lib/db.ts", type: "blob" }, { path: "lib/ai.ts", type: "blob" }] });
+    listRoot.mockResolvedValue({ status: "indexed", truncated: false, entries: [{ path: "lib", type: "tree" }] });
     readLines.mockImplementation(async (request) => ({ startLine: 1, endLine: 1, lineCount: 1, byteSize: 100, lines: [`${request.path} complete evidence`] }));
     vi.mocked(analyzeWithAI).mockResolvedValue({ product: { description: "代码驱动的产品知识与变更中心。", evidence: [{ path: "lib/db.ts", startLine: 1 }] }, release: { title: "v1", summary: "summary" }, features: [], changes: [] });
   });
@@ -244,7 +246,7 @@ describe("analysis orchestration", () => {
         { slice: { files: [{ path: "lib/auth.ts" }] }, sources: [{ path: "lib/auth.ts", content: "1: auth" }] },
         { slice: { files: [{ path: "lib/export.ts" }] }, sources: [{ path: "lib/export.ts", content: "1: export" }] },
       ],
-      index: { readLines, listDir },
+      index: { readLines, listDir, listRoot },
     });
     execute.mockImplementation(async (sql: string) => {
       if (sql.includes("JOIN repositories repo")) return [runRows];
@@ -337,7 +339,7 @@ describe("analysis orchestration", () => {
         { slice: { files: [{ path: "lib/auth.ts" }] }, sources: [{ path: "lib/auth.ts", content: "1: auth" }] },
         { slice: { files: [{ path: "lib/export.ts" }] }, sources: [{ path: "lib/export.ts", content: "1: export" }] },
       ],
-      index: { readLines, listDir },
+      index: { readLines, listDir, listRoot },
     });
     adapter.getChangeContext.mockResolvedValue({ message: "change", committedAt: "2026-11-01T00:00:00Z", url: "", files: [{ path: "lib/auth.ts", status: "modified", patch: "+ const token = sign(payload);" }] });
     vi.mocked(analyzeWithAI)
@@ -379,7 +381,7 @@ describe("analysis orchestration", () => {
         { slice: { files: [{ path: "lib/auth.ts" }] }, sources: [{ path: "lib/auth.ts", content: "1: auth" }] },
         { slice: { files: [{ path: "lib/export.ts" }] }, sources: [{ path: "lib/export.ts", content: "1: export" }] },
       ],
-      index: { readLines, listDir },
+      index: { readLines, listDir, listRoot },
     });
     vi.mocked(analyzeWithAI)
       .mockResolvedValueOnce({ product: { description: "d", evidence: [{ path: "lib/auth.ts", startLine: 1 }] }, release: { title: "v1", summary: "s" }, changes: [], features: [{ name: "统一登录", summary: "s1", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy", evidence: [{ path: "lib/auth.ts", startLine: 1 }] }] }] } as never)
@@ -406,7 +408,7 @@ describe("analysis orchestration", () => {
         { slice: { files: [{ path: "lib/auth.ts" }] }, sources: [{ path: "lib/auth.ts", content: "1: auth" }] },
         { slice: { files: [{ path: "lib/export.ts" }] }, sources: [{ path: "lib/export.ts", content: "1: export" }] },
       ],
-      index: { readLines, listDir },
+      index: { readLines, listDir, listRoot },
     });
     vi.mocked(analyzeWithAI)
       .mockResolvedValueOnce({ product: { description: "d", evidence: [{ path: "lib/auth.ts", startLine: 1 }] }, release: { title: "v1", summary: "s" }, changes: [], features: [] } as never)

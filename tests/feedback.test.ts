@@ -22,6 +22,7 @@ const details = {
   behaviorChanges: [],
   foldedChanges: [],
   driftCount: 0,
+  coverage: null,
   architecture: undefined,
   regressionTasks: [],
   releaseTotal: 0,

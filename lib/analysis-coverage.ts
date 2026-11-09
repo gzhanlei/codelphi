@@ -1,3 +1,4 @@
+import type { PoolConnection } from "mysql2/promise";
 import { evidenceKind } from "./evidence";
 import type { AnalysisPartition } from "./remote-analysis";
 import type { OpenedRemoteSourceRevision } from "./remote-source-index";
@@ -75,4 +76,38 @@ export function computeCoverageReceipt(input: {
 /** 触顶判定：趟数到达上限即视为可能未覆盖全部实现面，展示层必须显式警示。 */
 export function isCoverageCapped(receipt: AnalysisCoverageReceipt, maxPartitions: number) {
   return receipt.partitionsUsed >= maxPartitions;
+}
+
+/** 回执与规格版本同事务落库（append-only，历史版本可回溯当时覆盖率）。 */
+export async function saveCoverageReceipt(connection: Pick<PoolConnection, "execute">, specVersionId: number, receipt: AnalysisCoverageReceipt) {
+  await connection.execute(
+    `INSERT INTO analysis_coverage_receipts
+      (spec_version_id, impl_files_assembled, impl_files_total, impl_bytes_assembled, impl_bytes_total, coverage_ratio, partitions_used, partitions_capped)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [specVersionId, receipt.implFilesAssembled, receipt.implFilesTotal, receipt.implBytesAssembled, receipt.implBytesTotal, receipt.coverageRatio, receipt.partitionsUsed, receipt.partitionsCapped ? 1 : 0],
+  );
+}
+
+export interface CoverageReceiptRow {
+  specVersionId: number;
+  implFilesAssembled: number;
+  implFilesTotal: number;
+  implBytesAssembled: number;
+  implBytesTotal: number;
+  coverageRatio: number;
+  partitionsUsed: number;
+  partitionsCapped: boolean;
+}
+
+/** 读取某规格版本的覆盖率回执（无回执返回 null：migration 054 之前的历史版本）。 */
+export async function loadCoverageReceipt(execute: (sql: string, params?: unknown[]) => Promise<unknown>, specVersionId: number): Promise<CoverageReceiptRow | null> {
+  const result = await execute(
+    `SELECT spec_version_id AS specVersionId, impl_files_assembled AS implFilesAssembled, impl_files_total AS implFilesTotal,
+            impl_bytes_assembled AS implBytesAssembled, impl_bytes_total AS implBytesTotal,
+            coverage_ratio AS coverageRatio, partitions_used AS partitionsUsed, partitions_capped AS partitionsCapped
+     FROM analysis_coverage_receipts WHERE spec_version_id = ?`,
+    [specVersionId],
+  );
+  const rows = (Array.isArray(result) ? result[0] : result) as unknown as Array<CoverageReceiptRow>;
+  return rows?.[0] ?? null;
 }

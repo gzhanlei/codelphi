@@ -13,6 +13,7 @@ import { loadAffectedFeatureKeys, rebuildSpecFileIndex } from "./spec-file-index
 import { resolveAnalysisMode } from "./incremental";
 import { compareIncrementalShadow } from "./incremental-shadow";
 import { analysisMaxPartitions, incrementalShadowEnabled } from "./env";
+import { computeCoverageReceipt, enumerateImplementationSurface, saveCoverageReceipt, type AnalysisCoverageReceipt } from "./analysis-coverage";
 import { mergeChunkResults, type ExtractionChunk } from "./extraction-merge";
 import type { SpecFeature } from "./spec-diff";
 import type { SpecAnchorFeature } from "./spec-versions";
@@ -157,7 +158,7 @@ export async function upsertRelease(connection: PoolConnection, run: RunContext,
   await ensureRegressionTasks(connection, releaseId);
 }
 
-async function saveResult(run: RunContext, result: AnalysisResult, change: ChangeContext, affectedKeys: ReadonlySet<string> | null = null) {
+async function saveResult(run: RunContext, result: AnalysisResult, change: ChangeContext, affectedKeys: ReadonlySet<string> | null = null, coverage?: AnalysisCoverageReceipt) {
   const connection = await getDb().getConnection();
   try {
     await connection.beginTransaction();
@@ -170,6 +171,8 @@ async function saveResult(run: RunContext, result: AnalysisResult, change: Chang
     const { specVersionId, features: mergedFeatures, collapse } = await insertSpecVersion(connection, run, result, { ...(affectedKeys ? { affectedKeys } : {}), behavioralChangePaths: behavioralPaths });
     await rebuildSpecFileIndex(connection, run.repositoryId, specVersionId);
     await markSpecDrift(connection, run.productId, specVersionId);
+    // B1：覆盖率回执与规格版本同事务落库（append-only，历史版本可回溯）
+    if (coverage) await saveCoverageReceipt(connection, specVersionId, coverage);
     // P0(I1):下线基准必须是 carry-forward 合并后的完整规格——用 AI 原始输出会让
     // 增量模式把未受影响的 generated 功能全部下线,工作台坍缩为本次触及的功能。
     await upsertGeneratedSpec(connection, run, mergedFeatures);
@@ -314,8 +317,16 @@ async function runAnalysisBody(run: RunContext) {
   // （同 runId 多行，契约 M0-T2）如实记账。
   let result: AnalysisResult;
   let singleWindowSources: AnalysisPartition["sources"] | null = null;
-  const { partitions } = await getPartitionedAnalysisSources(remoteAnalysisRequest, { planner, budgets: analysisSliceBudgets }, { maxPartitions: analysisMaxPartitions() });
+  const { partitions, index: sourceIndex } = await getPartitionedAnalysisSources(remoteAnalysisRequest, { planner, budgets: analysisSliceBudgets }, { maxPartitions: analysisMaxPartitions() });
   console.log("[analysis] partitioned extraction", { runId: run.id, partitions: partitions.length, mode: affectedKeys === null ? "full" : "incremental-carry" });
+  // B1 覆盖披露回执：装配面 vs 索引全树实现面（元数据级枚举，不读文件内容），
+  // 落 analysis_coverage_receipts，append-only 可回溯；口径与 measure-first-analysis.ts 一致。
+  const coverage = computeCoverageReceipt({
+    index: sourceIndex,
+    partitions,
+    maxPartitions: analysisMaxPartitions(),
+    implSurface: await enumerateImplementationSurface(sourceIndex),
+  });
   if (partitions.length === 1) {
     const single = partitions[0];
     singleWindowSources = single.sources;
@@ -343,7 +354,7 @@ async function runAnalysisBody(run: RunContext) {
     }
     result = mergeChunkResults(chunks);
   }
-  const { specVersionId, features: mergedFeatures, collapse } = await saveResult(run, result, change, affectedKeys);
+  const { specVersionId, features: mergedFeatures, collapse } = await saveResult(run, result, change, affectedKeys, coverage);
   // 坍缩护栏：新版场景数骤降只告警不阻断（版本 append-only，可回溯）；通知带警告供人工核实。
   if (collapse) {
     console.error("[spec] suspected spec collapse", { runId: run.id, specVersionId, ...collapse });
