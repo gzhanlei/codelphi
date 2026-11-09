@@ -44,7 +44,7 @@ export default async function SettingsPage() {
   const used = wallets.filter((w) => w.status === "active").reduce((sum, w) => sum + w.reserved_sau, 0);
 
   const [skippedRows] = await db.execute(
-    `SELECT COUNT(*) AS count, MAX(created_at) AS lastAt FROM skipped_pushes sp
+    `SELECT COUNT(*) AS count, MAX(sp.created_at) AS lastAt FROM skipped_pushes sp
      JOIN repositories repo ON repo.id = sp.repository_id WHERE repo.product_id IN (SELECT id FROM products WHERE organization_id = ?)`,
     [accountId],
   );
