@@ -13,8 +13,8 @@ vi.mock("../lib/session", () => ({ getSessionUser: vi.fn() }));
 vi.mock("../lib/product-access", () => ({ requireProductAccess: vi.fn() }));
 vi.mock("../lib/public-demo", async (importOriginal) => ({
   ...await importOriginal<typeof import("../lib/public-demo")>(),
-  resolvePublicDemoProduct: vi.fn(async (slug: string) =>
-    slug === "codelphi" ? { id: 1, slug, name: "CoDelphi", organizationId: 7 } : null),
+  resolveLegacyPublicDemoProduct: vi.fn(async (slug: string) =>
+    slug === "codelphi" ? { id: 1, slug, name: "CoDelphi", organizationId: 7, organizationSlug: "team" } : null),
 }));
 
 import { GET } from "../app/api/products/[slug]/progress-summary/route";

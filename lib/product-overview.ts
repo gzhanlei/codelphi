@@ -4,6 +4,8 @@ import type { BehaviorChangeRow, FeatureRow, ReleaseRow, ScenarioRow } from "./t
 
 interface ProductOverviewInput {
   product: { id: number; slug: string; name: string; description: string; descriptionSource?: string; descriptionEvidence?: unknown };
+  /** canonical 页面地址基路径 /products/{orgSlug}/{slug}，功能深链据此构造。 */
+  productBase: string;
   features: FeatureRow[];
   scenarios: ScenarioRow[];
   releases: ReleaseRow[];
@@ -48,6 +50,7 @@ export function buildProductOverview(input: ProductOverviewInput) {
   };
   return {
     slug: input.product.slug,
+    productBase: input.productBase,
     description: input.product.description,
     headline: input.product.description.trim() || "产品概览",
     headlineSource: input.product.descriptionSource === undefined ? "manual" : input.product.descriptionSource,
@@ -60,7 +63,7 @@ export function buildProductOverview(input: ProductOverviewInput) {
       summary: feature.summary,
       source: feature.source,
       scenarioCount: input.scenarios.filter((scenario) => scenario.featureId === feature.id).length,
-      href: `/products/${input.product.slug}${featureHref(feature.id)}`,
+      href: `${input.productBase}${featureHref(feature.id)}`,
     })).sort(compareCapabilities).slice(0, 6),
     changes: [...latestChanges]
       .sort((a, b) => (changeKindPriority[a.kind] ?? 9) - (changeKindPriority[b.kind] ?? 9) || a.id - b.id)

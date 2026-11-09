@@ -3,7 +3,7 @@ import { getDb } from "@/lib/db";
 import { loadRegressionTasks, renderRegressionTaskMarkdown } from "@/lib/regression-tasks";
 import { getSessionUser } from "@/lib/session";
 import { requireProductAccess } from "@/lib/product-access";
-import { resolvePublicDemoProduct } from "@/lib/public-demo";
+import { resolveLegacyPublicDemoProduct } from "@/lib/public-demo";
 import { enforceExportRateLimit } from "@/lib/rate-limit";
 import type { BehaviorChangeRow, ReleaseRow } from "@/lib/types";
 
@@ -18,7 +18,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
   if (access) {
     product = access.product;
   } else {
-    const demo = await resolvePublicDemoProduct(slug);
+    const demo = await resolveLegacyPublicDemoProduct(slug);
     if (!demo) return NextResponse.json({ error: user ? "产品不存在或不属于当前工作区" : "未登录" }, { status: user ? 404 : 401 });
     product = demo;
   }

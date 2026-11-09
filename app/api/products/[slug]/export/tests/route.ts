@@ -3,7 +3,7 @@ import { z } from "zod";
 import { getProductDetails } from "@/lib/product-details";
 import { requireProductAccess } from "@/lib/product-access";
 import { getSessionUser } from "@/lib/session";
-import { resolvePublicDemoProduct } from "@/lib/public-demo";
+import { resolveLegacyPublicDemoProduct } from "@/lib/public-demo";
 import { toGherkin, toMarkdownChecklist } from "@/lib/scenario-export";
 import { enforceExportRateLimit } from "@/lib/rate-limit";
 
@@ -20,7 +20,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
   if (access) {
     organizationId = access.product.organizationId;
   } else {
-    const demo = await resolvePublicDemoProduct(slug);
+    const demo = await resolveLegacyPublicDemoProduct(slug);
     if (!demo) return NextResponse.json({ error: user ? "产品不存在或不属于当前工作区" : "未登录" }, { status: user ? 404 : 401 });
     organizationId = demo.organizationId;
   }

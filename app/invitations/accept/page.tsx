@@ -52,7 +52,7 @@ export default async function AcceptInvitationPage({ searchParams }: { searchPar
     let redirectPath = "/organizations";
     if (invitation.kind === "product") {
       const accepted = await acceptProductInvitation(user, token);
-      redirectPath = `/products/${accepted.productSlug}`;
+      redirectPath = `/products/${accepted.organizationSlug}/${accepted.productSlug}`;
     } else {
       await acceptOrganizationInvitation(user, token);
     }

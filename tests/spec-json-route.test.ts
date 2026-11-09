@@ -6,7 +6,7 @@ import { getProductDetails } from "../lib/product-details";
 const { getSessionUser, resolveDemo } = vi.hoisted(() => ({ getSessionUser: vi.fn(), resolveDemo: vi.fn() }));
 
 vi.mock("../lib/session", () => ({ getSessionUser }));
-vi.mock("../lib/public-demo", () => ({ resolvePublicDemoProduct: resolveDemo }));
+vi.mock("../lib/public-demo", () => ({ resolveLegacyPublicDemoProduct: resolveDemo }));
 vi.mock("../lib/product-access", () => ({
   requireProductAccess: vi.fn(async () => ({
     product: { id: 1, slug: "radar", name: "Radar", description: "d", organizationId: 7 },
@@ -37,7 +37,7 @@ describe("spec.json export route", () => {
     expect(response.status).toBe(200);
     const payload = await response.json() as { product: { slug: string }; features: Array<{ name: string; stablePath: string; scenarios: Array<{ reference: string; evidence: unknown }> }>; scenarioCount: number };
     expect(payload.product.slug).toBe("radar");
-    expect(payload.features[0].stablePath).toBe("/products/radar/spec/feature/%E7%BB%9F%E4%B8%80%E7%99%BB%E5%BD%95");
+    expect(payload.features[0].stablePath).toBe("/products/team/radar/spec/feature/%E7%BB%9F%E4%B8%80%E7%99%BB%E5%BD%95");
     expect(payload.features[0].scenarios[0].evidence).toEqual([{ path: "lib/auth.ts", startLine: 5 }]);
     expect(payload.scenarioCount).toBe(1);
   });
@@ -57,7 +57,7 @@ describe("spec.json export route", () => {
 
   it("serves the public demo product to anonymous visitors without a session", async () => {
     getSessionUser.mockResolvedValue(null);
-    resolveDemo.mockResolvedValue({ id: 9, slug: "radar", name: "Radar", organizationId: 7 });
+    resolveDemo.mockResolvedValue({ id: 9, slug: "radar", name: "Radar", organizationId: 7, organizationSlug: "team" });
     const response = await GET(new NextRequest("https://radar.example/api/products/radar/spec.json"), context);
     expect(response.status).toBe(200);
     const payload = await response.json() as { scenarioCount: number };

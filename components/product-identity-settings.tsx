@@ -27,9 +27,9 @@ export function ProductIdentitySettings({ slug, name, canEdit }: { slug: string;
     setNotice("");
     try {
       const trimmedSlug = slugValue.trim().toLowerCase();
-      const nextSlug = await renameProduct(slug, { name: trimmedName, slug: trimmedSlug || undefined });
-      if (nextSlug !== slug) {
-        router.push(`/products/${nextSlug}?view=settings`);
+      const next = await renameProduct(slug, { name: trimmedName, slug: trimmedSlug || undefined });
+      if (next.slug !== slug) {
+        router.push(`/products/${next.organizationSlug}/${next.slug}?view=settings`);
       } else {
         setNotice("产品信息已保存");
         router.refresh();

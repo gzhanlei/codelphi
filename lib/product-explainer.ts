@@ -1,3 +1,4 @@
+import { appUrl } from "./env";
 import type { ProductOverviewData } from "./product-overview";
 
 function escapeHtml(value: string) {
@@ -126,7 +127,7 @@ ${data.changes.length > 0 ? `<table><thead><tr><th>类型</th><th>功能 / 场�
 </section>
 </main>
 <footer class="colophon">
-<a href="/products/${escapeHtml(data.slug)}"><span class="colophon-name">CoDelphi</span><span class="colophon-tagline">读懂每一次产品变化。</span></a>
+<a href="${escapeHtml(appUrl())}${escapeHtml(data.productBase)}"><span class="colophon-name">CoDelphi</span><span class="colophon-tagline">读懂每一次产品变化。</span></a>
 <p class="colophon-facts">${data.trust.specVersionId === null ? "规格未生成" : `规格版本 v${data.trust.specVersionId}`} · 生成于 ${new Date().toISOString().slice(0, 10)}</p>
 </footer>
 </div>

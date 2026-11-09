@@ -3,12 +3,13 @@ import { enforceExportRateLimit } from "@/lib/rate-limit";
 import { loadCachedExplainerHtml, saveExplainerCache } from "@/lib/explainer-cache";
 import { getSessionUser } from "@/lib/session";
 import { requireProductAccess } from "@/lib/product-access";
-import { resolvePublicDemoProduct } from "@/lib/public-demo";
+import { resolveLegacyPublicDemoProduct } from "@/lib/public-demo";
 import { getProductDetails } from "@/lib/product-details";
 import { buildProductOverview } from "@/lib/product-overview";
 import { renderProductExplainerHtml } from "@/lib/product-explainer";
 import { artifactSandboxHeaders } from "@/lib/artifact-response";
 import { errorMessage } from "@/lib/error-message";
+import { productBasePath } from "@/lib/product-links";
 
 /** Explainer 导出：登录成员按工作区读取；公开 demo 产品允许匿名只读（与页面 demo 视图同权）。 */
 export async function GET(request: NextRequest, context: { params: Promise<{ slug: string }> }) {
@@ -19,19 +20,22 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
   if (limited) return limited;
   const access = user ? await requireProductAccess(user, slug) : null;
   let organizationId: number;
+  let organizationSlug: string;
   if (access) {
     organizationId = access.product.organizationId;
+    organizationSlug = access.organization.slug;
   } else {
-    const demo = await resolvePublicDemoProduct(slug);
+    const demo = await resolveLegacyPublicDemoProduct(slug);
     if (!demo) return NextResponse.json({ error: user ? "产品不存在" : "未登录" }, { status: user ? 404 : 401 });
     organizationId = demo.organizationId;
+    organizationSlug = demo.organizationSlug;
   }
   const details = await getProductDetails(slug, organizationId);
   if (!details) return NextResponse.json({ error: "产品不存在" }, { status: 404 });
   // 渲染缓存（契约 §10.4）：命中零 Chromium 调用，键 = product + 当前 spec 版本
   const cached = await loadCachedExplainerHtml(details.product.id);
   if (cached) return new NextResponse(cached, { status: 200, headers: artifactSandboxHeaders() });
-  const overview = buildProductOverview(details);
+  const overview = buildProductOverview({ ...details, productBase: productBasePath(organizationSlug, details.product.slug) });
   try {
     const html = renderProductExplainerHtml(overview);
     await saveExplainerCache(details.product.id, html);

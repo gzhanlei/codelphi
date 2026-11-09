@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { architectureAnalysisPath, architectureArtifactPath, architectureFactsPath, architectureSpecPath, artifactAbsolutePathForRecord, getArchitectureDocument, getLatestArchitectureDocument, getProductIdentity, productArchitecturePath, safeArtifactAbsolutePath, saveArchitectureDocument } from "../lib/architecture-store";
+import { architectureAnalysisPath, architectureArtifactPath, architectureFactsPath, architectureSpecPath, artifactAbsolutePathForRecord, getArchitectureDocument, getLatestArchitectureDocument, getProductIdentity, safeArtifactAbsolutePath, saveArchitectureDocument } from "../lib/architecture-store";
 import { getDb } from "../lib/db";
 
 vi.mock("../lib/db", () => ({ getDb: vi.fn() }));
@@ -23,7 +23,6 @@ const record = {
 describe("architecture store", () => {
   it("creates managed paths and rejects traversal", () => {
     expect(architectureSpecPath("radar", 7)).toBe("artifacts/products/radar/7/architecture.json");
-    expect(productArchitecturePath("radar", 7)).toBe("/products/radar/architecture/7");
     expect(architectureArtifactPath("radar", 7)).toBe("artifacts/products/radar/7/architecture.html");
     expect(architectureFactsPath("radar", 7)).toBe("artifacts/products/radar/7/architecture.facts.json");
     expect(architectureAnalysisPath("radar", 7)).toBe("artifacts/products/radar/7/architecture.analysis.json");

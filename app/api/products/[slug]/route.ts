@@ -37,7 +37,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ s
     const result = await updateProductDescription(currentSlug, access.product.organizationId, description.trim());
     if (!result) return NextResponse.json(NOT_FOUND, { status: 404 });
   }
-  return NextResponse.json({ status: "updated", slug: currentSlug, name: currentName });
+  return NextResponse.json({ status: "updated", slug: currentSlug, name: currentName, organizationSlug: access.organization.slug });
 }
 
 export async function DELETE(_request: NextRequest, context: { params: Promise<{ slug: string }> }) {

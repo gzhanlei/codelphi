@@ -8,6 +8,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 
 function completeOverview() {
   return buildProductOverview({
+    productBase: "/products/default/radar",
     product: { id: 1, slug: "radar", name: "Radar", description: "代码驱动的产品知识中心", descriptionSource: "generated", descriptionEvidence: [{ path: "lib/analysis.ts", startLine: 185 }] },
     features: [{ id: 1, name: "产品分析", summary: "从代码生成规格", parentId: null, source: "generated" }],
     scenarios: [{ id: 2, featureId: 1, reference: "HP-1", context: "用户", action: "分析", outcome: "规格", category: "happy", source: "generated", evidence: [] }],
@@ -30,6 +31,7 @@ describe("product overview rendering", () => {
 
   it("renders empty history without an architecture placeholder", () => {
     const data = buildProductOverview({
+      productBase: "/products/default/radar",
       product: { id: 1, slug: "radar", name: "Radar", description: "" },
       features: [], scenarios: [], releases: [], behaviorChanges: [], latestRun: { status: "running" },
     });
@@ -43,6 +45,7 @@ describe("product overview rendering", () => {
 
   it("renders the latest release title and summary when it has no behavior diff", () => {
     const data = buildProductOverview({
+      productBase: "/products/default/radar",
       product: { id: 1, slug: "radar", name: "Radar", description: "" },
       features: [], scenarios: [],
       releases: [{ id: 9, title: "多提交 push 分析纳入全部提交标题", summary: "一次推送中的全部提交都会进入发布说明。", sha: "809a5b5ffff", url: "", committedAt: new Date("2026-11-06"), specVersionId: 8 }],
@@ -75,6 +78,7 @@ describe("product overview rendering", () => {
 
   it("prioritizes added and removed changes over wording updates and shows kind counts", () => {
     const data = buildProductOverview({
+      productBase: "/products/default/radar",
       product: { id: 1, slug: "radar", name: "Radar", description: "" },
       features: [], scenarios: [],
       releases: [{ id: 10, title: "v2", summary: "", sha: "1234567890ab", url: "", committedAt: new Date("2026-11-07"), specVersionId: 10 }],

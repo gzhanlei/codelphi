@@ -25,7 +25,7 @@ describe("product rename", () => {
     await expect(updateProductIdentity("radar", 7, { newSlug: "codelphi" })).resolves.toEqual({ status: "updated", id: 3, name: "radar", slug: "codelphi" });
     expect(execute).toHaveBeenNthCalledWith(2, "SELECT id FROM products WHERE slug = ? AND organization_id = ? AND id != ?", ["codelphi", 7, 3]);
     expect(execute).toHaveBeenNthCalledWith(3, "UPDATE products SET name = COALESCE(?, name), slug = COALESCE(?, slug), is_public_demo = COALESCE(?, is_public_demo) WHERE id = ?", [null, "codelphi", null, 3]);
-    expect(execute).toHaveBeenNthCalledWith(4, "DELETE FROM product_slug_history WHERE old_slug = ?", ["codelphi"]);
+    expect(execute).toHaveBeenNthCalledWith(4, "DELETE FROM product_slug_history WHERE old_slug = ? AND product_id = ?", ["codelphi", 3]);
     expect(execute).toHaveBeenNthCalledWith(5, "INSERT INTO product_slug_history (product_id, old_slug) VALUES (?, ?) ON DUPLICATE KEY UPDATE product_id = VALUES(product_id), changed_at = CURRENT_TIMESTAMP(3)", [3, "radar"]);
   });
 
@@ -49,11 +49,14 @@ describe("product rename", () => {
     expect(execute).toHaveBeenCalledTimes(1);
   });
 
-  it("resolves the current address of an old slug", async () => {
-    execute.mockResolvedValueOnce([[{ slug: "codelphi" }]]);
-    await expect(findProductByOldSlug("radar")).resolves.toEqual({ slug: "codelphi" });
+  it("resolves the current address of an old slug, preferring the caller's current workspace", async () => {
+    execute.mockResolvedValueOnce([[{ slug: "codelphi", org_slug: "default" }]]);
+    await expect(findProductByOldSlug("radar", { userSub: "sub-1", preferredOrgId: 1 })).resolves.toEqual({ slug: "codelphi", orgSlug: "default" });
+    const [sql, params] = execute.mock.calls[0];
+    expect(sql).toContain("ORDER BY (p.organization_id = ?) DESC, h.changed_at DESC");
+    expect(params).toEqual(["sub-1", "radar", "sub-1", 1]);
     execute.mockResolvedValueOnce([[]]);
-    await expect(findProductByOldSlug("unknown")).resolves.toBeNull();
+    await expect(findProductByOldSlug("unknown", { userSub: "sub-1" })).resolves.toBeNull();
   });
 });
 

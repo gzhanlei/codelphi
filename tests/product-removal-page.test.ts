@@ -1,7 +1,7 @@
 import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import ProductPage from "../app/products/[slug]/page";
+import ProductPage from "../app/products/[slug]/[product]/page";
 import { notFound } from "next/navigation";
 import { getProductDetails } from "@/lib/product-details";
 import { requireProductAccess, type ProductAccess } from "@/lib/product-access";
@@ -14,8 +14,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/lib/session", () => ({ getSessionUser: vi.fn(async () => ({ sub: "user" })) }));
 vi.mock("@/lib/product-access", () => ({ requireProductAccess: vi.fn() }));
 vi.mock("@/lib/product-details", () => ({ getProductDetails: vi.fn() }));
-vi.mock("@/lib/product-rename", () => ({ findProductByOldSlug: vi.fn(async () => null) }));
-vi.mock("@/lib/public-demo", () => ({ isPublicDemo: vi.fn(async () => false), isPublicDemoProduct: vi.fn(async () => false) }));
+vi.mock("@/lib/public-demo", () => ({ resolvePublicDemoProduct: vi.fn(async () => null) }));
 vi.mock("@/components/app-shell", () => ({ AppShell: ({ children }: { children: ReactNode }) => createElement("main", null, children) }));
 vi.mock("@/components/demo-shell", () => ({ DemoShell: ({ children }: { children: ReactNode }) => createElement("main", null, children) }));
 vi.mock("@/components/analyze-button", () => ({ AnalyzeButton: () => null }));
@@ -33,7 +32,7 @@ function access(overrides: Partial<ProductAccess>): ProductAccess {
   };
 }
 
-describe("product page removal action", () => {
+describe("product page removal action (canonical org-qualified route)", () => {
   beforeEach(() => {
     vi.mocked(requireProductAccess).mockResolvedValue(access({}));
     vi.mocked(getProductDetails).mockResolvedValue({
@@ -44,8 +43,13 @@ describe("product page removal action", () => {
   });
 
   async function renderPage(view?: string) {
-    return renderToStaticMarkup(await ProductPage({ params: Promise.resolve({ slug: "namedict" }), searchParams: Promise.resolve(view ? { view } : {}) }));
+    return renderToStaticMarkup(await ProductPage({ params: Promise.resolve({ slug: "workspace", product: "namedict" }), searchParams: Promise.resolve(view ? { view } : {}) }));
   }
+
+  it("authenticates against the URL org segment, not the cookie workspace", async () => {
+    await renderPage();
+    expect(requireProductAccess).toHaveBeenCalledWith(expect.objectContaining({ sub: "user" }), "namedict", "viewer", expect.anything(), undefined, "workspace");
+  });
 
   it("shows removal to workspace owners and editors", async () => {
     expect(await renderPage()).toContain('data-remove-product="namedict"');

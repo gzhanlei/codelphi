@@ -19,7 +19,13 @@ describe("repository links", () => {
 });
 
 describe("product tabs", () => {
-  const base = { slug: "codelphi", featureCount: 3, releaseCount: 5 };
+  const base = { productBase: "/products/default/codelphi", featureCount: 3, releaseCount: 5 };
+
+  it("builds tab links from the canonical org-qualified base path", () => {
+    const html = renderToStaticMarkup(createElement(ProductTabs, { ...base, view: "spec" }));
+    expect(html).toContain('href="/products/default/codelphi"');
+    expect(html).toContain('href="/products/default/codelphi?view=changes"');
+  });
 
   it("shows the settings tab only when allowed", () => {
     const withSettings = renderToStaticMarkup(createElement(ProductTabs, { ...base, view: "changes", showSettings: true }));
@@ -31,6 +37,6 @@ describe("product tabs", () => {
 
   it("marks the active view", () => {
     const html = renderToStaticMarkup(createElement(ProductTabs, { ...base, view: "settings", showSettings: true }));
-    expect(html).toContain('href="/products/codelphi?view=settings"');
+    expect(html).toContain('href="/products/default/codelphi?view=settings"');
   });
 });

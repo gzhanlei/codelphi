@@ -8,33 +8,42 @@ vi.mock("../lib/billing/core", () => ({ grantTrialQuota: vi.fn(async () => ({ gr
 
 /** ensureUserWorkspace 的注入式 execute mock（对齐 tests/organizations.test.ts 的内存库模式）。 */
 function createDb() {
-  const users = new Map<string, { id: number; sub: string }>();
-  const organizations = new Map<string, { id: number; slug: string; name: string }>();
+  const users = new Map<string, number>();
+  const organizations = new Map<number, { id: number; slug: string; name: string }>();
   const memberships = new Set<string>();
+  let orgSeq = 0;
+  const ownedPersonalOrgs = (sub: string) =>
+    [...organizations.values()].filter((org) => org.slug.startsWith("u-") && users.has(sub) && memberships.has(`${org.id}:${users.get(sub)!}`));
   const execute = vi.fn(async (sql: string, parameters: Array<string | number | null>) => {
     if (sql.includes("INSERT INTO users")) {
       const [sub] = parameters as [string];
-      if (!users.has(sub)) users.set(sub, { id: users.size + 1, sub });
-      return [{ insertId: users.get(sub)!.id }];
+      if (!users.has(sub)) users.set(sub, users.size + 1);
+      return [{ insertId: users.get(sub)! }];
     }
-    if (sql.includes("SELECT id FROM users WHERE chandler_sub")) {
+    if (sql.startsWith("SELECT id FROM users")) {
       const [sub] = parameters as [string];
-      const user = users.get(sub);
-      return [user ? [{ id: user.id }] : []];
+      return [users.has(sub) ? [{ id: users.get(sub)! }] : []];
     }
     if (sql.includes("INSERT INTO organizations") && !sql.includes("organization_members")) {
       const [slug, name] = parameters as [string, string];
-      if (!organizations.has(slug)) organizations.set(slug, { id: organizations.size + 1, slug, name });
-      return [{ insertId: organizations.get(slug)!.id }];
+      const id = ++orgSeq;
+      organizations.set(id, { id, slug, name });
+      return [{ insertId: id }];
     }
-    if (sql.includes("INSERT INTO organization_members")) {
-      const [slug, sub] = parameters as [string, string];
-      memberships.add(`${slug}:${sub}`);
+    if (sql.startsWith("SELECT id FROM organizations")) {
+      const [slug] = parameters as [string];
+      const found = [...organizations.values()].find((org) => org.slug === slug);
+      return [found ? [found] : []];
+    }
+    if (sql.includes("INSERT INTO organization_members (organization_id, user_id, role) VALUES")) {
+      const [orgId, userId] = parameters as [number, number];
+      memberships.add(`${orgId}:${userId}`);
       return [{ affectedRows: 1 }];
     }
-    if (sql.includes("SELECT o.id, o.slug, o.name, m.role FROM organizations o JOIN organization_members")) {
-      const [sub, slug] = parameters as [string, string];
-      return [[...organizations.values()].filter((org) => org.slug === slug && memberships.has(`${org.slug}:${sub}`)).map((org) => ({ ...org, role: "owner" }))];
+    if (sql.includes("WHERE u.chandler_sub = ? AND o.slug LIKE ?")) {
+      const [sub] = parameters as [string];
+      const rows = ownedPersonalOrgs(sub).map((org) => ({ ...org, role: "owner" }));
+      return [sql.includes("DESC") ? rows.reverse() : rows];
     }
     if (sql.includes("SELECT organization_id, role FROM organization_invitations")) return [[]];
     if (sql.includes("SELECT product_id, role FROM product_invitations")) return [[]];
@@ -72,7 +81,7 @@ describe("workspace trial authorization (contract M1-T4, P1-3 ownership freeze)"
     try {
       const user = { sub: "partner-2", email: "p2@example.com" };
       const org = await ensureUserWorkspace(user, db.execute);
-      expect(org.slug).toBe("u-partner-2");
+      expect(org.slug).toMatch(/^u-[0-9a-f]{10}$/);
       expect(getDb).not.toHaveBeenCalled();
     } finally {
       warnSpy.mockRestore();

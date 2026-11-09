@@ -1,12 +1,13 @@
 import { notFound, redirect } from "next/navigation";
+import { productBasePath } from "@/lib/product-links";
 import { resolveScenarioByStableKey } from "@/lib/stable-links";
 import { getSessionUser } from "@/lib/session";
 import { requireProductAccess } from "@/lib/product-access";
 
 export const dynamic = "force-dynamic";
 
-/** M3 场景稳定引用：解析到场景所属功能的最新规格视图。 */
-export default async function StableScenarioPage({ params }: { params: Promise<{ slug: string; stableKey: string; reference: string }> }) {
+/** 旧一段地址的场景稳定引用：解析后重定向到 canonical 产品页的规格视图。 */
+export default async function LegacyStableScenarioPage({ params }: { params: Promise<{ slug: string; stableKey: string; reference: string }> }) {
   const { slug, stableKey, reference } = await params;
   const user = await getSessionUser();
   if (!user) redirect("/login");
@@ -14,5 +15,5 @@ export default async function StableScenarioPage({ params }: { params: Promise<{
   if (!access) notFound();
   const featureId = await resolveScenarioByStableKey(access.product.id, decodeURIComponent(stableKey), decodeURIComponent(reference));
   if (featureId === null) notFound();
-  redirect(`/products/${slug}?view=spec&feature=${featureId}`);
+  redirect(`${productBasePath(access.organization.slug, slug)}?view=spec&feature=${featureId}`);
 }

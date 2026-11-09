@@ -34,7 +34,7 @@ describe("product description route", () => {
     vi.mocked(updateProductDescription).mockResolvedValue({ id: 3, description: "销售助手" });
     const response = await patchRequest("salesbuddy", { description: "  销售助手  " });
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ status: "updated", slug: "salesbuddy", name: "SalesBuddy" });
+    expect(await response.json()).toEqual({ status: "updated", slug: "salesbuddy", name: "SalesBuddy", organizationSlug: "team" });
     expect(updateProductDescription).toHaveBeenCalledWith("salesbuddy", 7, "销售助手");
     expect(requireProductAccess).toHaveBeenCalledWith(expect.objectContaining({ sub: "user" }), "salesbuddy", "editor");
     expect(updateProductIdentity).not.toHaveBeenCalled();
@@ -61,7 +61,7 @@ describe("product rename route", () => {
     vi.mocked(updateProductIdentity).mockResolvedValue({ status: "updated", id: 2, name: "CoDelphi", slug: "codelphi" });
     const response = await patchRequest("salesbuddy", { name: " CoDelphi ", slug: "Codelphi" });
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ status: "updated", slug: "codelphi", name: "CoDelphi" });
+    expect(await response.json()).toEqual({ status: "updated", slug: "codelphi", name: "CoDelphi", organizationSlug: "team" });
     expect(updateProductIdentity).toHaveBeenCalledWith("salesbuddy", 7, { name: "CoDelphi", newSlug: "codelphi" });
     expect(updateProductDescription).not.toHaveBeenCalled();
   });

@@ -32,6 +32,19 @@ describe("database migrations", () => {
     expect(sql).toContain("REFERENCES products(id) ON DELETE CASCADE");
   });
 
+  it("scopes product slug history uniqueness to the owning product for cross-org slug reuse", () => {
+    const sql = readFileSync(new URL("../migrations/048_product_slug_history_product_scoped.sql", import.meta.url), "utf8");
+    expect(sql).toContain("DROP INDEX product_slug_history_old_slug_unique");
+    expect(sql).toContain("ADD UNIQUE KEY product_slug_history_product_old_unique (product_id, old_slug)");
+  });
+
+  it("replaces personal workspace slugs with non-identifying random slugs", () => {
+    const sql = readFileSync(new URL("../migrations/049_personal_workspace_slug_randomize.sql", import.meta.url), "utf8");
+    expect(sql).toContain("UPDATE organizations");
+    expect(sql).toContain("CONCAT('u-', SUBSTRING(MD5(RAND()), 1, 10))");
+    expect(sql).toContain("WHERE slug LIKE 'u-%'");
+  });
+
   it("adds the public demo flag to products with a closed default", () => {
     const sql = readFileSync(new URL("../migrations/025_product_public_demo.sql", import.meta.url), "utf8");
     expect(sql).toContain("ALTER TABLE products ADD COLUMN is_public_demo TINYINT(1) NOT NULL DEFAULT 0");

@@ -156,6 +156,7 @@ export async function cancelProductInvitation(productId: number, invitationId: n
 export interface ProductInvitation {
   productId: number;
   productSlug: string;
+  organizationSlug: string;
   productName: string;
   email: string;
   role: ProductRole;
@@ -166,14 +167,15 @@ export interface ProductInvitation {
 export async function getProductInvitationByToken(token: string, execute: Execute = defaultExecute): Promise<ProductInvitation | null> {
   const value = tokenSchema.parse(token);
   const [rows] = await execute(
-    `SELECT i.product_id, i.email, i.role, i.status, i.expires_at, p.slug, p.name
+    `SELECT i.product_id, i.email, i.role, i.status, i.expires_at, p.slug, p.name, o.slug AS organization_slug
      FROM product_invitations i JOIN products p ON p.id = i.product_id
+     JOIN organizations o ON o.id = p.organization_id
      WHERE i.token_hash = ? AND i.status = 'pending' AND i.expires_at > CURRENT_TIMESTAMP(3)
      LIMIT 1`,
     [hashInvitationToken(value)],
-  ) as [Array<{ product_id: number; slug: string; name: string; email: string; role: ProductRole; status: string; expires_at: Date | null }>, unknown];
+  ) as [Array<{ product_id: number; slug: string; name: string; organization_slug: string; email: string; role: ProductRole; status: string; expires_at: Date | null }>, unknown];
   const row = rows[0];
-  return row ? { productId: row.product_id, productSlug: row.slug, productName: row.name, email: row.email, role: row.role, status: row.status, expiresAt: row.expires_at } : null;
+  return row ? { productId: row.product_id, productSlug: row.slug, organizationSlug: row.organization_slug, productName: row.name, email: row.email, role: row.role, status: row.status, expiresAt: row.expires_at } : null;
 }
 
 export async function acceptProductInvitation(profile: SessionUser, token: string, execute: Execute = defaultExecute) {

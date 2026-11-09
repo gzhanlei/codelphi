@@ -46,8 +46,8 @@ export async function updateProductIdentity(slug: string, organizationId: number
   }
 
   if (slugChanged && nextSlug) {
-    // 改回历史 slug 时先清掉对应记录，保证历史里永远只有"非当前"的旧 slug。
-    await db.execute("DELETE FROM product_slug_history WHERE old_slug = ?", [nextSlug]);
+    // 改回历史 slug 时先清掉本产品的对应记录（只限本产品，migration 048 起唯一键为 (product_id, old_slug)）。
+    await db.execute("DELETE FROM product_slug_history WHERE old_slug = ? AND product_id = ?", [nextSlug, product.id]);
     await db.execute(
       "INSERT INTO product_slug_history (product_id, old_slug) VALUES (?, ?) ON DUPLICATE KEY UPDATE product_id = VALUES(product_id), changed_at = CURRENT_TIMESTAMP(3)",
       [product.id, product.slug],
@@ -57,13 +57,32 @@ export async function updateProductIdentity(slug: string, organizationId: number
   return { status: "updated", id: Number(product.id), name: nextName ?? product.name, slug: slugChanged ? nextSlug! : product.slug };
 }
 
-/** 旧 slug → 现产品路由入口，供产品页把旧链接重定向到新地址。 */
-export async function findProductByOldSlug(oldSlug: string): Promise<{ slug: string } | null> {
+export interface OldSlugLookup {
+  /** 调用者的 chandler_sub，用于把重定向候选限定在可访问的工作区。 */
+  userSub: string;
+  /** 用户 cookie 当前工作区 id；命中的候选里优先返回它的。 */
+  preferredOrgId?: number | null;
+}
+
+/** 旧 slug → 现产品路由入口（带 org 段的 canonical 地址），供旧链接重定向。
+ *  跨工作区允许重名后，old_slug 不再全局唯一，这里只返回调用者可访问、且优先 cookie 工作区的那个。 */
+export async function findProductByOldSlug(oldSlug: string, options: OldSlugLookup): Promise<{ slug: string; orgSlug: string } | null> {
   const db = getDb();
   const [rows] = await db.execute(
-    "SELECT p.slug FROM product_slug_history h JOIN products p ON p.id = h.product_id WHERE h.old_slug = ? LIMIT 1",
-    [oldSlug],
+    `SELECT p.slug AS slug, o.slug AS org_slug
+     FROM product_slug_history h
+     JOIN products p ON p.id = h.product_id
+     JOIN organizations o ON o.id = p.organization_id
+     LEFT JOIN organization_members m ON m.organization_id = p.organization_id
+     LEFT JOIN users u ON u.id = m.user_id AND u.chandler_sub = ?
+     WHERE h.old_slug = ?
+       AND (u.id IS NOT NULL OR EXISTS (
+         SELECT 1 FROM product_members pm JOIN users pu ON pu.id = pm.user_id
+         WHERE pm.product_id = p.id AND pu.chandler_sub = ?))
+     ORDER BY (p.organization_id = ?) DESC, h.changed_at DESC
+     LIMIT 1`,
+    [options.userSub, oldSlug, options.userSub, options.preferredOrgId ?? -1],
   );
-  const row = (rows as Array<{ slug: string }>)[0];
-  return row ? { slug: row.slug } : null;
+  const row = (rows as Array<{ slug: string; org_slug: string }>)[0];
+  return row ? { slug: row.slug, orgSlug: row.org_slug } : null;
 }

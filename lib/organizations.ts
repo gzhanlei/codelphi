@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
 import { defaultExecute, type Execute } from "./db";
 import { upsertCodelphiUser, findUserIdBySub } from "./users";
@@ -16,6 +17,8 @@ export interface Organization {
 }
 
 export const ORGANIZATION_COOKIE = "codelphi_organization";
+/** 个人工作区保留前缀：u-% 行由系统物化，slug 为随机串（不回推身份），不出现在用户自建入口。 */
+const PERSONAL_SLUG_PREFIX = "u-";
 type Query = <T>(statement: string, parameters: Array<string | number | null>) => Promise<T[]>;
 
 function dbQuery<T>(execute: Execute): Query {
@@ -27,8 +30,13 @@ function dbQuery<T>(execute: Execute): Query {
   };
 }
 
-function defaultOrganization(profile: SessionUser): Organization {
-  return { id: 0, slug: `u-${profile.sub}`, name: `${profile.name ?? profile.email ?? "CoDelphi 用户"} 的工作区`, role: "owner" };
+function personalWorkspaceName(profile: SessionUser): string {
+  return `${profile.name ?? profile.email ?? "CoDelphi 用户"} 的工作区`;
+}
+
+/** 个人工作区 slug：org slug 会出现在产品 canonical URL 里，用随机串避免暴露 chandler sub。 */
+function randomPersonalSlug(): string {
+  return `${PERSONAL_SLUG_PREFIX}${randomBytes(5).toString("hex")}`;
 }
 
 export async function ensureUserWorkspace(profile: SessionUser, execute: Execute = defaultExecute) {
@@ -36,31 +44,36 @@ export async function ensureUserWorkspace(profile: SessionUser, execute: Execute
   await upsertCodelphiUser(profile, execute);
   await claimOrganizationInvitations(profile, execute);
   await claimProductInvitations(profile, execute);
-  const defaultOrg = defaultOrganization(profile);
   const existing = await query<Organization>(
     `SELECT o.id, o.slug, o.name, m.role FROM organizations o JOIN organization_members m ON m.organization_id = o.id
-     JOIN users u ON u.id = m.user_id WHERE u.chandler_sub = ? AND o.slug = ?`,
-    [profile.sub, defaultOrg.slug],
+     JOIN users u ON u.id = m.user_id WHERE u.chandler_sub = ? AND o.slug LIKE ? AND m.role = 'owner'
+     ORDER BY o.id LIMIT 1`,
+    [profile.sub, `${PERSONAL_SLUG_PREFIX}%`],
   );
   if (existing[0]) {
     // Trial 授权幂等重试：发放失败（如瞬时故障）的用户在下次登录自动补齐（契约 M1-T4）
     await grantTrialToWorkspace(profile, existing[0].id, execute);
     return existing[0];
   }
-  await execute(
-    "INSERT INTO organizations (slug, name) VALUES (?, ?) ON DUPLICATE KEY UPDATE name = VALUES(name), updated_at = CURRENT_TIMESTAMP(3)",
-    [defaultOrg.slug, defaultOrg.name],
+  const name = personalWorkspaceName(profile);
+  const slug = randomPersonalSlug();
+  await execute("INSERT INTO organizations (slug, name) VALUES (?, ?)", [slug, name]);
+  const [orgRow] = await query<{ id: number }>(
+    "SELECT id FROM organizations WHERE slug = ?",
+    [slug],
   );
+  const userId = await findUserIdBySub(profile.sub, execute);
+  if (!orgRow?.id || userId === null) throw new Error("Workspace bootstrap failed");
   await execute(
-    `INSERT INTO organization_members (organization_id, user_id, role)
-     SELECT o.id, u.id, 'owner' FROM organizations o JOIN users u WHERE o.slug = ? AND u.chandler_sub = ?
+    `INSERT INTO organization_members (organization_id, user_id, role) VALUES (?, ?, 'owner')
      ON DUPLICATE KEY UPDATE role = 'owner', updated_at = CURRENT_TIMESTAMP(3)`,
-    [defaultOrg.slug, profile.sub],
+    [orgRow.id, userId],
   );
   const rows = await query<Organization>(
     `SELECT o.id, o.slug, o.name, m.role FROM organizations o JOIN organization_members m ON m.organization_id = o.id
-     JOIN users u ON u.id = m.user_id WHERE u.chandler_sub = ? AND o.slug = ?`,
-    [profile.sub, defaultOrg.slug],
+     JOIN users u ON u.id = m.user_id WHERE u.chandler_sub = ? AND o.slug LIKE ? AND m.role = 'owner'
+     ORDER BY o.id DESC LIMIT 1`,
+    [profile.sub, `${PERSONAL_SLUG_PREFIX}%`],
   );
   if (!rows[0]) throw new Error("Workspace bootstrap failed");
   await grantTrialToWorkspace(profile, rows[0].id, execute);

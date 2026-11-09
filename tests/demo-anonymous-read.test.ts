@@ -26,7 +26,7 @@ vi.mock("../lib/session", () => ({
 vi.mock("../lib/product-access", () => ({ requireProductAccess: vi.fn() }));
 vi.mock("../lib/public-demo", async (importOriginal) => ({
   ...await importOriginal<typeof import("../lib/public-demo")>(),
-  resolvePublicDemoProduct: resolveDemo,
+  resolveLegacyPublicDemoProduct: resolveDemo,
 }));
 
 import { GET as searchGET } from "../app/api/products/[slug]/spec/search/route";
@@ -35,7 +35,7 @@ import { GET as explainerGET } from "../app/api/products/[slug]/explainer/route"
 import { getSessionUser, requireSessionUser } from "../lib/session";
 import { requireProductAccess } from "../lib/product-access";
 // 模块 mock 顶替了公开导出；助手本身的单测要走真实实现（它只依赖已 mock 的 lib/db）。
-const { resolvePublicDemoProduct } = await vi.importActual<typeof import("../lib/public-demo")>("../lib/public-demo");
+const { resolveLegacyPublicDemoProduct } = await vi.importActual<typeof import("../lib/public-demo")>("../lib/public-demo");
 
 const access = {
   product: { id: 1, slug: "codelphi", name: "CoDelphi", description: "d", organizationId: 7 },
@@ -44,7 +44,7 @@ const access = {
   via: "organization",
 } as const;
 
-const demoProduct = { id: 1, slug: "codelphi", name: "CoDelphi", organizationId: 7 };
+const demoProduct = { id: 1, slug: "codelphi", name: "CoDelphi", organizationId: 7, organizationSlug: "team" };
 
 function searchRequest(query = "") {
   return new NextRequest(`https://codelphi.example/api/products/codelphi/spec/search${query}`);
@@ -136,29 +136,29 @@ describe("anonymous read-only access for the public demo product", () => {
   });
 });
 
-describe("resolvePublicDemoProduct", () => {
+describe("resolveLegacyPublicDemoProduct", () => {
   it("resolves a product flagged as public demo in the database", async () => {
-    dbExecute.mockResolvedValue([[{ id: 1, slug: "codelphi", name: "CoDelphi", organization_id: 7, is_public_demo: 1 }], undefined]);
-    expect(await resolvePublicDemoProduct("codelphi")).toEqual(demoProduct);
+    dbExecute.mockResolvedValue([[{ id: 1, slug: "codelphi", name: "CoDelphi", organization_id: 7, is_public_demo: 1, organization_slug: "team" }], undefined]);
+    expect(await resolveLegacyPublicDemoProduct("codelphi")).toEqual(demoProduct);
   });
 
   it("falls back to the env whitelist for products not flagged in the database", async () => {
     process.env.PUBLIC_DEMO_SLUGS = "codelphi";
     try {
-      dbExecute.mockResolvedValue([[{ id: 2, slug: "codelphi", name: "CoDelphi", organization_id: 7, is_public_demo: 0 }], undefined]);
-      expect(await resolvePublicDemoProduct("codelphi")).toEqual({ id: 2, slug: "codelphi", name: "CoDelphi", organizationId: 7 });
+      dbExecute.mockResolvedValue([[{ id: 2, slug: "codelphi", name: "CoDelphi", organization_id: 7, is_public_demo: 0, organization_slug: "team" }], undefined]);
+      expect(await resolveLegacyPublicDemoProduct("codelphi")).toEqual({ id: 2, slug: "codelphi", name: "CoDelphi", organizationId: 7, organizationSlug: "team" });
     } finally {
       delete process.env.PUBLIC_DEMO_SLUGS;
     }
   });
 
   it("returns null for products outside both gates", async () => {
-    dbExecute.mockResolvedValue([[{ id: 3, slug: "chandler", name: "Chandler", organization_id: 7, is_public_demo: 0 }], undefined]);
-    expect(await resolvePublicDemoProduct("chandler")).toBeNull();
+    dbExecute.mockResolvedValue([[{ id: 3, slug: "chandler", name: "Chandler", organization_id: 7, is_public_demo: 0, organization_slug: "team" }], undefined]);
+    expect(await resolveLegacyPublicDemoProduct("chandler")).toBeNull();
   });
 
   it("returns null when the product does not exist", async () => {
     dbExecute.mockResolvedValue([[], undefined]);
-    expect(await resolvePublicDemoProduct("ghost")).toBeNull();
+    expect(await resolveLegacyPublicDemoProduct("ghost")).toBeNull();
   });
 });

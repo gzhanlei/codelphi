@@ -16,7 +16,7 @@
 - 🏗️ **真实可用**：CoDelphi 在生产环境持续分析自身仓库等多个真实产品，本项目本身就是它的第一个分析对象。
 
 ## 与本仓库实时同步的Demo
-https://codelphi.com/products/codelphi  无需注册登录也可只读查看。Demo 由产品的「设置」页里的公开演示开关控制（数据库 `products.is_public_demo`；`PUBLIC_DEMO_SLUGS` 环境变量仍作过渡兜底）。
+https://codelphi.com/products/default/codelphi  无需注册登录也可只读查看。产品页地址带工作区前缀：`/products/{工作区slug}/{产品slug}`；旧的一段式地址 `/products/{slug}` 会自动重定向。Demo 由产品的「设置」页里的公开演示开关控制（数据库 `products.is_public_demo`；`PUBLIC_DEMO_SLUGS` 环境变量仍作过渡兜底）。
 
 ## 懒得自托管，用我搭好的免费云服务
 https://codelphi.com

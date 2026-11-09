@@ -17,6 +17,7 @@ const releases: ReleaseRow[] = [{ id: 8, title: "Specs", summary: "Summary", sha
 describe("product overview", () => {
   it("builds linked capabilities, recent behavior changes and trust stats", () => {
     const overview = buildProductOverview({
+      productBase: "/products/default/radar",
       product: { id: 1, slug: "radar", name: "Radar", description: "产品知识中心" },
       features,
       scenarios,
@@ -30,7 +31,7 @@ describe("product overview", () => {
     expect(overview.headline).toBe("产品知识中心");
     expect(overview.freshness).toBe("Spec v8 · abcdef1 · 更新 11-01 00:00 UTC");
     expect(overview.analysisLabel).toBe("最近分析成功");
-    expect(overview.capabilities[0]).toMatchObject({ id: 1, name: "登录", scenarioCount: 2, href: "/products/radar?view=spec&feature=1" });
+    expect(overview.capabilities[0]).toMatchObject({ id: 1, name: "登录", scenarioCount: 2, href: "/products/default/radar?view=spec&feature=1" });
     expect(overview.capabilities.map((feature) => feature.id)).toEqual([1, 2, 3]);
     expect(overview.changes.map((change) => change.summary)).toEqual(["场景结果变化"]);
     expect(overview.trust).toMatchObject({ featureCount: 3, scenarioCount: 3, manualFeatureCount: 1, manualScenarioCount: 2, evidencePathCount: 2, specVersionId: 8 });
@@ -38,14 +39,14 @@ describe("product overview", () => {
   });
 
   it("uses the release version and handles unknown analysis states", () => {
-    const overview = buildProductOverview({ product: { id: 1, slug: "radar", name: "Radar", description: "" }, features: [], scenarios: [], releases, behaviorChanges: [], latestRun: { status: "degraded" } });
+    const overview = buildProductOverview({ productBase: "/products/default/radar", product: { id: 1, slug: "radar", name: "Radar", description: "" }, features: [], scenarios: [], releases, behaviorChanges: [], latestRun: { status: "degraded" } });
     expect(overview.freshness).toBe("Spec v8 · abcdef1 · 更新 11-01 00:00 UTC");
     expect(overview.trust.specVersionId).toBe(8);
     expect(overview.analysisLabel).toBe("分析状态：degraded");
   });
 
   it("reports when no spec version exists", () => {
-    const overview = buildProductOverview({ product: { id: 1, slug: "radar", name: "Radar", description: "" }, features: [], scenarios: [], releases: [], behaviorChanges: [], latestRun: undefined });
+    const overview = buildProductOverview({ productBase: "/products/default/radar", product: { id: 1, slug: "radar", name: "Radar", description: "" }, features: [], scenarios: [], releases: [], behaviorChanges: [], latestRun: undefined });
     expect(overview.freshness).toBe("尚未生成规格");
     expect(overview.trust.specVersionId).toBeNull();
     expect(overview.changes).toEqual([]);
@@ -53,6 +54,7 @@ describe("product overview", () => {
 
   it("exposes generated description provenance and evidence", () => {
     const overview = buildProductOverview({
+      productBase: "/products/default/radar",
       product: { id: 1, slug: "radar", name: "Radar", description: "代码驱动的产品知识中心", descriptionSource: "generated", descriptionEvidence: [{ path: "lib/analysis.ts", startLine: 185 }] },
       features: [], scenarios: [], releases: [], behaviorChanges: [], latestRun: { status: "succeeded" },
     });

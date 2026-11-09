@@ -15,12 +15,13 @@ export default async function DashboardPage() {
     SELECT pm.product_id FROM product_members pm JOIN users u ON u.id = pm.user_id WHERE u.chandler_sub = ?
   )`;
   const [productRows] = await db.execute(
-    `SELECT p.id, p.slug, p.name, p.description,
+    `SELECT p.id, p.slug, p.name, p.description, o.slug AS organizationSlug,
             latest_run.status AS analysisStatus,
             (SELECT COUNT(*) FROM features f WHERE f.product_id = p.id AND f.active = 1) AS featureCount,
             (SELECT COUNT(*) FROM releases r WHERE r.product_id = p.id) AS releaseCount,
             (SELECT MAX(r.committed_at) FROM releases r WHERE r.product_id = p.id) AS lastRelease
      FROM products p
+     JOIN organizations o ON o.id = p.organization_id
      LEFT JOIN analysis_runs latest_run ON latest_run.id = (
        SELECT r.id FROM analysis_runs r JOIN repositories repo ON repo.id = r.repository_id
        WHERE repo.product_id = p.id ORDER BY r.created_at DESC, r.id DESC LIMIT 1
@@ -31,8 +32,9 @@ export default async function DashboardPage() {
   const products = productRows as DashboardProduct[];
   const [releaseRows] = await db.execute(
     `SELECT r.id, r.title, r.summary, r.committed_at AS committedAt,
-            p.name AS productName, p.slug AS productSlug
+            p.name AS productName, p.slug AS productSlug, o.slug AS organizationSlug
      FROM releases r JOIN products p ON p.id = r.product_id
+     JOIN organizations o ON o.id = p.organization_id
      WHERE ${PRODUCT_VISIBILITY} ORDER BY r.committed_at DESC LIMIT 8`,
     [organization.id, user.sub],
   );

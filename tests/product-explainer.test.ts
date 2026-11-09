@@ -4,6 +4,7 @@ import type { ProductOverviewData } from "../lib/product-overview";
 
 const overview = {
   slug: "radar",
+  productBase: "/products/default/radar",
   description: "产品知识中心",
   headline: "产品知识中心",
   headlineSource: "generated",

@@ -33,7 +33,7 @@ function scenarioLine(scenario: ImpactScenario) {
 }
 
 /** 查询结果为纯渲染（SSR 可测）；交互状态由外层 SpecImpactQuery 持有。 */
-export function ImpactResult({ slug, affected }: { slug: string; affected: ImpactFeatureImpact[] }) {
+export function ImpactResult({ productBase, affected }: { productBase: string; affected: ImpactFeatureImpact[] }) {
   if (affected.length === 0) {
     return <p className="impact-hint">这些文件没有关联到任何产品行为——可能是新能力，也可能与用户可见行为无关。</p>;
   }
@@ -42,7 +42,7 @@ export function ImpactResult({ slug, affected }: { slug: string; affected: Impac
       {affected.map((impact) => (
         <div className="impact-feature" key={`${impact.feature}-${impact.featureId ?? "retired"}`}>
           {impact.featureId
-            ? <a className="impact-feature-name" href={`/products/${slug}${featureHref(impact.featureId)}`}>{impact.feature}</a>
+            ? <a className="impact-feature-name" href={`${productBase}${featureHref(impact.featureId)}`}>{impact.feature}</a>
             : <span className="impact-feature-name">{impact.feature}</span>}
           <ul>
             {impact.scenarios.map((scenario, index) => (
@@ -55,7 +55,7 @@ export function ImpactResult({ slug, affected }: { slug: string; affected: Impac
   );
 }
 
-export function SpecImpactQuery({ slug }: { slug: string }) {
+export function SpecImpactQuery({ slug, productBase }: { slug: string; productBase: string }) {
   const [files, setFiles] = useState("");
   const [affected, setAffected] = useState<ImpactFeatureImpact[] | null>(null);
   const [pending, setPending] = useState(false);
@@ -95,7 +95,7 @@ export function SpecImpactQuery({ slug }: { slug: string }) {
         </button>
       </div>
       {failed ? <p className="impact-hint" role="alert">查询暂时不可用，请稍后重试。</p> : null}
-      {affected ? <ImpactResult slug={slug} affected={affected} /> : null}
+      {affected ? <ImpactResult productBase={productBase} affected={affected} /> : null}
     </div>
   );
 }

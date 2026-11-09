@@ -1,5 +1,5 @@
 import { defaultExecute, type Execute } from "./db";
-import { currentOrganization, type Organization, type OrganizationRole } from "./organizations";
+import { currentOrganization, getOrganizationMembership, type Organization, type OrganizationRole } from "./organizations";
 import type { ProductRole } from "./product-members";
 import type { SessionUser } from "./types";
 
@@ -15,12 +15,16 @@ export interface ProductAccess {
 
 /**
  * 产品访问鉴权：工作区成员按组织角色，非工作区成员按 product_members 授权行。
+ * 传入 urlOrgSlug（canonical 页面路由的 org 段）时 URL 权威——直接按该工作区鉴权，
+ * 跳过 cookie 当前工作区，跨工作区直链不依赖用户的 cookie 状态。
  * 返回产品的真实 organizationId，下游 org-scoped 查询无需改动；
  * 无访问权限（产品不存在、跨工作区、角色不足）一律返回 null，由调用方按 404 处理。
  */
-export async function requireProductAccess(profile: SessionUser, slug: string, minimumRole: OrganizationRole = "viewer", execute: Execute = defaultExecute, cookieSlug?: string): Promise<ProductAccess | null> {
-  const organization = await currentOrganization(profile, cookieSlug, execute);
-  if (roleRank[organization.role] >= roleRank[minimumRole]) {
+export async function requireProductAccess(profile: SessionUser, slug: string, minimumRole: OrganizationRole = "viewer", execute: Execute = defaultExecute, cookieSlug?: string, urlOrgSlug?: string): Promise<ProductAccess | null> {
+  const organization = urlOrgSlug
+    ? await getOrganizationMembership(profile, urlOrgSlug, execute)
+    : await currentOrganization(profile, cookieSlug, execute);
+  if (organization && roleRank[organization.role] >= roleRank[minimumRole]) {
     const [rows] = await execute(
       "SELECT id, slug, name, description, organization_id FROM products WHERE slug = ? AND organization_id = ? LIMIT 1",
       [slug, organization.id],
@@ -55,9 +59,9 @@ export async function requireProductAccess(profile: SessionUser, slug: string, m
 }
 
 /** 由反查 slug 得到的产品再鉴权；slug 不存在视为资源不存在，返回 null。 */
-async function requireProductAccessBySlug(profile: SessionUser, slug: string | undefined, minimumRole: OrganizationRole, execute: Execute, cookieSlug?: string): Promise<ProductAccess | null> {
+async function requireProductAccessBySlug(profile: SessionUser, slug: string | undefined, minimumRole: OrganizationRole, execute: Execute, cookieSlug?: string, urlOrgSlug?: string): Promise<ProductAccess | null> {
   if (!slug) return null;
-  return requireProductAccess(profile, slug, minimumRole, execute, cookieSlug);
+  return requireProductAccess(profile, slug, minimumRole, execute, cookieSlug, urlOrgSlug);
 }
 
 /** 由 feature id 反查所属产品后鉴权；feature 不存在或无访问权限返回 null。 */

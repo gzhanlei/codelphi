@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProductDetails } from "@/lib/product-details";
+import { productBasePath } from "@/lib/product-links";
 import { specFeatureKey } from "@/lib/spec-diff";
 import { getSessionUser } from "@/lib/session";
 import { requireProductAccess } from "@/lib/product-access";
-import { resolvePublicDemoProduct } from "@/lib/public-demo";
+import { resolveLegacyPublicDemoProduct } from "@/lib/public-demo";
 import { enforceExportRateLimit } from "@/lib/rate-limit";
 
 /** M3 机器可读导出：当前规格快照 + 证据，M10 MCP 与外部自动化同源使用；公开 demo 产品允许匿名只读（与页面 demo 视图同权）。 */
@@ -14,12 +15,15 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
   if (limited) return limited;
   const access = user ? await requireProductAccess(user, slug) : null;
   let organizationId: number;
+  let organizationSlug: string;
   if (access) {
     organizationId = access.product.organizationId;
+    organizationSlug = access.organization.slug;
   } else {
-    const demo = await resolvePublicDemoProduct(slug);
+    const demo = await resolveLegacyPublicDemoProduct(slug);
     if (!demo) return NextResponse.json({ error: user ? "产品不存在或不属于当前工作区" : "未登录" }, { status: user ? 404 : 401 });
     organizationId = demo.organizationId;
+    organizationSlug = demo.organizationSlug;
   }
   const details = await getProductDetails(slug, organizationId);
   if (!details) return NextResponse.json({ error: "产品不存在或不属于当前工作区" }, { status: 404 });
@@ -31,7 +35,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
       name: feature.name,
       summary: feature.summary,
       source: feature.source,
-      stablePath: `/products/${slug}/spec/feature/${encodeURIComponent(specFeatureKey(feature.name))}`,
+      stablePath: `${productBasePath(organizationSlug, details.product.slug)}/spec/feature/${encodeURIComponent(specFeatureKey(feature.name))}`,
       scenarios: details.scenarios
         .filter((scenario) => scenario.featureId === feature.id)
         .map((scenario) => ({

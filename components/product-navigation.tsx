@@ -33,20 +33,22 @@ export function RunStatus({ run }: { run?: { status: string; errorMessage?: stri
   return <div className={`run-status ${run.status}`} role="status" aria-live="polite"><span>最近一次分析：{run.status}</span><RunError message={run.errorMessage} /><AnalysisStatusRefresh status={run.status} /></div>;
 }
 
-export function ProductTabs({ slug, view, featureCount, releaseCount, showSettings = false }: { slug: string; view: string; featureCount: number; releaseCount: number; showSettings?: boolean }) {
+export function ProductTabs({ productBase, view, featureCount, releaseCount, showSettings = false }: { productBase: string; view: string; featureCount: number; releaseCount: number; showSettings?: boolean }) {
   return (
     <nav className="view-tabs" aria-label="产品视图">
-      <Link className={selectedClass(view === "overview")} href={`/products/${slug}`}>概览</Link>
-      <Link className={selectedClass(view === "spec")} href={`/products/${slug}?view=spec`}>产品规格 <span>{featureCount}</span></Link>
-      <Link className={selectedClass(view === "changes")} href={`/products/${slug}?view=changes`}>发布变化 <span>{releaseCount}</span></Link>
-      {showSettings ? <Link className={selectedClass(view === "settings")} href={`/products/${slug}?view=settings`}>设置</Link> : null}
+      <Link className={selectedClass(view === "overview")} href={productBase}>概览</Link>
+      <Link className={selectedClass(view === "spec")} href={`${productBase}?view=spec`}>产品规格 <span>{featureCount}</span></Link>
+      <Link className={selectedClass(view === "changes")} href={`${productBase}?view=changes`}>发布变化 <span>{releaseCount}</span></Link>
+      {showSettings ? <Link className={selectedClass(view === "settings")} href={`${productBase}?view=settings`}>设置</Link> : null}
     </nav>
   );
 }
 
 interface ProductViewProps {
   view: string;
+  /** API fetch 仍按 slug；页面链接一律用 canonical 基路径。 */
   productSlug: string;
+  productBase: string;
   features: FeatureRow[];
   scenarios: ScenarioRow[];
   releases: ReleaseRow[];
@@ -61,10 +63,10 @@ interface ProductViewProps {
   canEdit?: boolean;
 }
 
-function ProductWorkspace({ view, productSlug, features, scenarios, releases, changes, behaviorChanges, foldedChanges, regressionTasks, releaseTotal, mode = "spec", featureId, canEdit }: Omit<ProductViewProps, "overview">) {
+function ProductWorkspace({ view, productSlug, productBase, features, scenarios, releases, changes, behaviorChanges, foldedChanges, regressionTasks, releaseTotal, mode = "spec", featureId, canEdit }: Omit<ProductViewProps, "overview">) {
   const selectedFeature = selectFeature(features, featureId);
   return view === "spec"
-    ? <SpecWorkspace slug={productSlug} tree={buildFeatureTree(features)} feature={selectedFeature} scenarios={scenarios} mode={mode} />
+    ? <SpecWorkspace slug={productSlug} productBase={productBase} tree={buildFeatureTree(features)} feature={selectedFeature} scenarios={scenarios} mode={mode} />
     : <ProductChanges slug={productSlug} releases={releases} changes={changes} behaviorChanges={behaviorChanges} foldedChanges={foldedChanges} regressionTasks={regressionTasks} releaseTotal={releaseTotal} canEdit={canEdit} />;
 }
 

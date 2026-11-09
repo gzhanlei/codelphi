@@ -11,6 +11,7 @@ vi.mock("../components/analysis-status-refresh", async (importOriginal) => ({
 const product: DashboardProduct = {
   id: 1,
   slug: "new-product",
+  organizationSlug: "acme",
   name: "New Product",
   description: "Evidence-backed product",
   featureCount: 0,
@@ -35,14 +36,14 @@ describe("dashboard product readiness", () => {
     expect(html).toContain("分析中，请稍候");
     expect(html).toContain("aria-disabled=\"true\"");
     expect(html).toContain("class=\"product-icon\">N</div>");
-    expect(html).not.toContain("href=\"/products/new-product\"");
+    expect(html).not.toContain("href=\"/products/acme/new-product\"");
     expect(html).not.toContain("Evidence-backed product");
   });
 
   it("turns the card into a link as soon as analysis succeeds", () => {
     const ready = { ...product, analysisStatus: "succeeded" };
     const html = renderToStaticMarkup(createElement(ProductGrid, { products: [ready] }));
-    expect(html).toContain("href=\"/products/new-product\"");
+    expect(html).toContain("href=\"/products/acme/new-product\"");
     expect(html).toContain("Evidence-backed product");
     expect(html).not.toContain("分析中，请稍候");
     expect(html).not.toContain("aria-disabled=\"true\"");
@@ -51,8 +52,24 @@ describe("dashboard product readiness", () => {
   it("keeps failure details reachable instead of showing a permanent waiting state", () => {
     const failed = { ...product, analysisStatus: "failed" };
     const html = renderToStaticMarkup(createElement(ProductGrid, { products: [failed] }));
-    expect(html).toContain("href=\"/products/new-product\"");
+    expect(html).toContain("href=\"/products/acme/new-product\"");
     expect(html).not.toContain("分析中，请稍候");
+  });
+
+  it("keeps an analyzing card clickable for a product that already has data (non-first onboarding)", () => {
+    const analyzing = { ...product, analysisStatus: "queued", featureCount: 12, releaseCount: 3 };
+    const html = renderToStaticMarkup(createElement(ProductGrid, { products: [analyzing] }));
+    expect(html).toContain("href=\"/products/acme/new-product\"");
+    expect(html).not.toContain("aria-disabled=\"true\"");
+    expect(html).toContain("分析中，历史规格可查看");
+  });
+
+  it("keeps the first-onboarding pending card non-clickable across analyzing statuses", () => {
+    for (const status of ["queued", "running"]) {
+      const html = renderToStaticMarkup(createElement(ProductGrid, { products: [{ ...product, analysisStatus: status }] }));
+      expect(html).toContain("aria-disabled=\"true\"");
+      expect(html).not.toContain("href=\"/products/acme/new-product\"");
+    }
   });
 
   it("renders useful empty states", () => {

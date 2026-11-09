@@ -6,7 +6,7 @@ import { getProductDetails } from "../lib/product-details";
 const { getSessionUser, resolveDemo } = vi.hoisted(() => ({ getSessionUser: vi.fn(), resolveDemo: vi.fn() }));
 
 vi.mock("../lib/session", () => ({ getSessionUser }));
-vi.mock("../lib/public-demo", () => ({ resolvePublicDemoProduct: resolveDemo }));
+vi.mock("../lib/public-demo", () => ({ resolveLegacyPublicDemoProduct: resolveDemo }));
 vi.mock("../lib/product-access", () => ({
   requireProductAccess: vi.fn(async () => ({
     product: { id: 1, slug: "radar", name: "Radar", description: "", organizationId: 7 },

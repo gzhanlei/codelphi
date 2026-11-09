@@ -5,7 +5,7 @@ import type { SpecSearchResult } from "@/lib/spec-search";
 import { featureHref } from "@/lib/spec-editor-ui";
 
 /** M3 产品内搜索：功能名/摘要、场景四段文本与证据路径，结果直达对应功能视图。 */
-export function SpecSearch({ slug }: { slug: string }) {
+export function SpecSearch({ slug, productBase }: { slug: string; productBase: string }) {
   const [query, setQuery] = useState("");
   const [result, setResult] = useState<SpecSearchResult | null>(null);
   const [failed, setFailed] = useState(false);
@@ -71,12 +71,12 @@ export function SpecSearch({ slug }: { slug: string }) {
       {result ? (
         <div className="spec-search-results">
           {result.features.map((feature) => (
-            <a className="spec-search-hit" href={`/products/${slug}${featureHref(feature.id)}`} key={`f${feature.id}`}>
+            <a className="spec-search-hit" href={`${productBase}${featureHref(feature.id)}`} key={`f${feature.id}`}>
               <span className="spec-search-kind">功能</span><strong>{feature.name}</strong><p>{feature.summary}</p>
             </a>
           ))}
           {result.scenarios.map((scenario) => (
-            <a className="spec-search-hit" href={`/products/${slug}${featureHref(scenario.featureId)}`} key={`s${scenario.id}`}>
+            <a className="spec-search-hit" href={`${productBase}${featureHref(scenario.featureId)}`} key={`s${scenario.id}`}>
               <span className="spec-search-kind">场景</span><strong>{scenario.featureName} · {scenario.reference}</strong><p>{scenario.context} → {scenario.action} → {scenario.outcome}</p>
             </a>
           ))}

@@ -50,7 +50,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
             <div className="demo-entry">
               <strong>不想登录？先看公开演示</strong>
               <p>{demo.name} 的规格清单、回归用例与 30 天变更索引全部匿名只读开放。</p>
-              <Link className="secondary-button" href={`/products/${demo.slug}`}>进入在线演示 →</Link>
+              <Link className="secondary-button" href={demo.organizationSlug ? `/products/${demo.organizationSlug}/${demo.slug}` : `/products/${demo.slug}`}>进入在线演示 →</Link>
               <DemoExports slug={demo.slug} />
             </div>
           ) : null}
