@@ -111,11 +111,11 @@ export async function runAnalysisTriggerSweepOnce(dependencies: TriggerSweepDepe
 /** 设置视图数据源：产品下各仓库的触发模式与未处理 push 计数。 */
 export async function listProductRepositoryTriggers(productId: number, execute: Execute = defaultExecute) {
   const [rows] = await execute(
-    `SELECT id, owner, name, analysis_trigger AS trigger, analysis_trigger_n AS n, analysis_trigger_hour AS hour,
+    `SELECT id, owner, name, analysis_trigger AS triggerMode, analysis_trigger_n AS n, analysis_trigger_hour AS hour,
             pending_push_count AS pendingPushCount
      FROM repositories WHERE product_id = ? ORDER BY id`,
     [productId],
-  ) as [Array<{ id: number; owner: string; name: string; trigger: AnalysisTriggerMode; n: number | null; hour: number | null; pendingPushCount: number }>, unknown];
+  ) as [Array<{ id: number; owner: string; name: string; triggerMode: AnalysisTriggerMode; n: number | null; hour: number | null; pendingPushCount: number }>, unknown];
   return rows;
 }
 

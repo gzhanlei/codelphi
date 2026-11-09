@@ -10,7 +10,7 @@ export interface RepositoryTriggerRow {
   id: number;
   owner: string;
   name: string;
-  trigger: AnalysisTriggerMode;
+  triggerMode: AnalysisTriggerMode;
   n: number | null;
   hour: number | null;
   pendingPushCount: number;
@@ -32,7 +32,7 @@ const TRIGGER_HOURS = [0, 1, 2, 3, 4, 5, 6, 22, 23];
 export function RepositoryTriggerSettings({ slug, repos, canEdit }: { slug: string; repos: RepositoryTriggerRow[]; canEdit: boolean }) {
   const router = useRouter();
   const [drafts, setDrafts] = useState<Record<number, { trigger: AnalysisTriggerMode; n: number; hour: number }>>(() =>
-    Object.fromEntries(repos.map((repo) => [repo.id, { trigger: repo.trigger, n: repo.n ?? 5, hour: repo.hour ?? 3 }])),
+    Object.fromEntries(repos.map((repo) => [repo.id, { trigger: repo.triggerMode, n: repo.n ?? 5, hour: repo.hour ?? 3 }])),
   );
   const [pendingId, setPendingId] = useState<number | null>(null);
   const [error, setError] = useState<Record<number, string>>({});
@@ -67,7 +67,7 @@ export function RepositoryTriggerSettings({ slug, repos, canEdit }: { slug: stri
       <div className="overview-panel-heading"><span>05</span><h2>分析触发模式</h2></div>
       <p className="overview-note">控制每次推送到主分支后何时开始分析。分析频率越高，每月消耗的分析单元越多；高频仓库建议切换到每天低峰期或每 N 次推送。</p>
       {repos.map((repo) => {
-        const draft = drafts[repo.id] ?? { trigger: repo.trigger, n: repo.n ?? 5, hour: repo.hour ?? 3 };
+        const draft = drafts[repo.id] ?? { trigger: repo.triggerMode, n: repo.n ?? 5, hour: repo.hour ?? 3 };
         return (
           <div key={repo.id} className="settings-form" style={{ marginBottom: 16 }}>
             <p className="overview-note" style={{ fontWeight: 600 }}>{repo.owner}/{repo.name}</p>
