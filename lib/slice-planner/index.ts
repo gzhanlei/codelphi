@@ -4,8 +4,29 @@ import { normalizeSourcePath } from "../remote-source-index/index";
 import { SourceIndexError, type SourceLineSlice, type SourceSignal, type SourceTreeEntry } from "../remote-source-index/types";
 import type { EvidenceClaim, PlannerDiagnostic, ProductSliceInput, ScopeResolution, SelectedSourceFile, SelectedSourceReason, SliceConfidence, SlicePlanResult, SlicePlanningState, SlicePlanner, StackProfileId, StackProfileMatch, TargetedReadApproval, TargetedReadDecision, TargetedReadRequest } from "./types";
 import type { OpenedRemoteSourceRevision } from "../remote-source-index/types";
+import { isWalkNoiseDirectory, selectionNoiseKind } from "./selection-policy";
 
 const interestingSignals = new Set<SourceSignal>(["manifest", "entrypoint", "route", "service", "database", "migration", "queue", "worker", "auth", "deployment", "frontend", "native"]);
+
+/**
+ * 子树份额上限（占 maxSelectedFiles 比例）：防止单个顶层子树（如 hono 的 adapters/）
+ * 烧光预算饿死 src/。只在确有多个子树竞争时生效（记账表 size > 1）——单子树仓库或
+ * 噪声剔除后只剩一个源码根的仓库（flask）不受约束，预算可用满。噪声目录已在遍历层剔除。
+ */
+const MAX_SUBTREE_SHARE = 0.5;
+
+function subtreeKeyOf(rootPath: string, path: string) {
+  const prefix = rootPath === "" ? "" : `${rootPath}/`;
+  const relative = path.startsWith(prefix) ? path.slice(prefix.length) : path;
+  const index = relative.indexOf("/");
+  return index === -1 ? "" : relative.slice(0, index);
+}
+
+function subtreeCap(state: SlicePlanningState, subtreeKey: string) {
+  if (state.subtreeSelections.size <= 1) return Number.POSITIVE_INFINITY;
+  const used = state.subtreeSelections.get(subtreeKey) ?? 0;
+  return used >= Math.ceil(state.input.budgets.maxSelectedFiles * MAX_SUBTREE_SHARE) ? 0 : Number.POSITIVE_INFINITY;
+}
 
 // The planner never needs more than the index default read window for profile matching.
 const maxPlannerLinesPerFile = 600;
@@ -222,6 +243,7 @@ class DeterministicSlicePlanner implements SlicePlanner {
         scope,
         selected: new Map(),
         fileContents: new Map(),
+        subtreeSelections: new Map(),
         evidenceClaims: [],
         questions: [],
         profileMatches: [],
@@ -341,33 +363,43 @@ class DeterministicSlicePlanner implements SlicePlanner {
     return { status: "completed", missing: [], diagnostics: state.diagnostics };
   }
 
-  // Iterative preorder walk with no depth cap: on a seeded (recursive) index every directory
+  // Iterative breadth-first walk with no depth cap: on a seeded (recursive) index every directory
   // listing is local, and on the per-directory fallback path the index tree-expansion budget
-  // still bounds API calls.
+  // still bounds API calls. BFS（替代原 DFS）让顶层目录公平地先于深层子树获得预算；
+  // 噪声目录（tests/examples/bench/docs/隐藏目录）在入队前整树跳过。
   private async walkScopeDirectories(index: OpenedRemoteSourceRevision, state: SlicePlanningState, rootPath: string) {
     const pending = [rootPath];
     const visited = new Set<string>();
     while (pending.length > 0) {
       if (state.budgetsRemaining.selectedFiles <= 0) return;
-      const path = pending.pop()!;
+      const path = pending.shift()!;
       if (visited.has(path)) continue;
       visited.add(path);
       const listing = await index.listDir(path);
-      await this.selectListedFiles(index, state, listing.entries);
-      for (const entry of [...listing.entries].reverse()) {
+      const subtreeKey = subtreeKeyOf(rootPath, path);
+      // 记账表按首次见到登记子树（含 0），供份额上限判断「是否存在多子树竞争」
+      if (!state.subtreeSelections.has(subtreeKey)) state.subtreeSelections.set(subtreeKey, 0);
+      await this.selectListedFiles(index, state, listing.entries, subtreeKey);
+      for (const entry of listing.entries) {
         if (entry.pruned || entry.type !== "tree") continue;
+        if (isWalkNoiseDirectory(entry.path)) continue;
         if (!visited.has(entry.path)) pending.push(entry.path);
       }
     }
   }
 
-  private async selectListedFiles(index: OpenedRemoteSourceRevision, state: SlicePlanningState, entries: SourceTreeEntry[]) {
+  private async selectListedFiles(index: OpenedRemoteSourceRevision, state: SlicePlanningState, entries: SourceTreeEntry[], subtreeKey: string) {
     const candidates = entries
-      .filter((entry) => !entry.pruned && entry.type === "blob" && entry.signals.some((signal) => interestingSignals.has(signal)))
+      .filter((entry) => !entry.pruned && entry.type === "blob")
+      // 噪声过滤先于信号判定：tests/bench/examples 里的代码文件也带 service/entrypoint
+      // 信号（express 的 test/app.route.js 撞 route、bench/*.ts 兜底 service），信号只回答
+      // 「想看什么」，本策略回答「不看什么」。
+      .filter((entry) => selectionNoiseKind(entry.path) === null)
+      .filter((entry) => entry.signals.some((signal) => interestingSignals.has(signal)))
       .sort((a, b) => candidatePriority(a) - candidatePriority(b) || basename(a.path).localeCompare(basename(b.path)));
     for (const entry of candidates) {
       try {
-        await this.selectFile(index, state, entry.path, entry.signals, reasonFor(entry.signals));
+        await this.selectFile(index, state, entry.path, entry.signals, reasonFor(entry.signals), subtreeKey);
       } catch (error) {
         if (error instanceof SourceIndexError && ["path_pruned", "binary_source", "blob_too_large"].includes(error.code)) continue;
         throw error;
@@ -375,8 +407,9 @@ class DeterministicSlicePlanner implements SlicePlanner {
     }
   }
 
-  private async selectFile(index: OpenedRemoteSourceRevision, state: SlicePlanningState, path: string, signals: SourceSignal[], reason: SelectedSourceReason) {
+  private async selectFile(index: OpenedRemoteSourceRevision, state: SlicePlanningState, path: string, signals: SourceSignal[], reason: SelectedSourceReason, subtreeKey: string) {
     if (state.selected.has(path) || state.budgetsRemaining.selectedFiles <= 0 || state.budgetsRemaining.selectedLineRanges <= 0 || state.budgetsRemaining.plannerContentBytes <= 0) return;
+    if ((state.subtreeSelections.get(subtreeKey) ?? 0) >= subtreeCap(state, subtreeKey)) return;
     const lineEnd = Math.min(maxPlannerLinesPerFile, state.budgetsRemaining.selectedLineRanges);
     const read = await index.readLines({
       path,
@@ -389,6 +422,7 @@ class DeterministicSlicePlanner implements SlicePlanner {
     state.budgetsRemaining.selectedFiles -= 1;
     state.budgetsRemaining.selectedLineRanges -= 1;
     state.budgetsRemaining.plannerContentBytes -= read.byteSize;
+    state.subtreeSelections.set(subtreeKey, (state.subtreeSelections.get(subtreeKey) ?? 0) + 1);
     recordSelection(state, {
       path,
       blobSha: read.blobSha,

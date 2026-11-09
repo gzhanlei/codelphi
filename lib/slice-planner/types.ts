@@ -235,6 +235,8 @@ export interface SlicePlanningState {
   scope: ScopeResolution;
   selected: Map<string, SelectedSourceFile>;
   fileContents: Map<string, string>;
+  /** 子树份额记账：scope root 下第一段 → 已选文件数（上限 = ceil(maxSelectedFiles × 0.5)）。 */
+  subtreeSelections: Map<string, number>;
   evidenceClaims: EvidenceClaim[];
   questions: PlannerQuestion[];
   profileMatches: StackProfileMatch[];

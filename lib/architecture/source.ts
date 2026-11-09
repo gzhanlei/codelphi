@@ -7,7 +7,8 @@ export interface ArchitectureSource {
 }
 
 const runtimeSourcePattern = /\.(?:go|ts|tsx|js|jsx|php|json|sql|java|kt|kts|py|rs|cs|csproj|xml|ya?ml|toml|gradle|properties)$/i;
-const nonRuntimePathPattern = /(?:^|\/)(?:__tests__|tests?|fixtures?|mocks?)(?:\/|\.)|\.(?:test|spec|d)\.[a-z]+$|_test\.(?:go|py)$/i;
+/** 测试/fixture/mock 路径判定（架构与切片选择共用口径，避免两处漂移）。 */
+export const nonRuntimePathPattern = /(?:^|\/)(?:__tests__|tests?|fixtures?|mocks?)(?:\/|\.)|\.(?:test|spec|d)\.[a-z]+$|_test\.(?:go|py)$/i;
 
 export function isArchitectureSourcePath(path: string) {
   return (path.endsWith("go.mod") || runtimeSourcePattern.test(path)) && !nonRuntimePathPattern.test(path) && !path.endsWith(".min.js");

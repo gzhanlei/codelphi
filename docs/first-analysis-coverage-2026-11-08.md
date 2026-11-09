@@ -45,3 +45,21 @@ AI「引用 discipline」本身基本成立：它引用的路径都在窗口内�
 ## 局限
 
 单次采样（temperature=0 但网关侧非确定性）；5 仓库非随机样本（知名度高、结构干净）；密度外推假设均匀；树截断时实现面为下界（本次 5 个仓库均无截断）。
+
+---
+
+## 修复后复测（2026-11-09，选择质量修复 F2/F3 + 信号缺口补齐）
+
+修复内容（按计划第 ① 步）：切片选择策略（`lib/slice-planner/selection-policy.ts`，噪声文件/目录剔除 + BFS + 子树份额上限）、窗口装配硬顶（`sliceToSourceFiles` maxBytes + slice.files 对齐）、**信号缺口补齐**（`baseSignals` service 扩展名漏 `.js`、entrypoint 漏 index.js/server.js/app.js/main.js——纯 JS 仓库源码此前零信号，express 的真实根因）。
+
+| 仓库 | 引用覆盖（字节）修复前 → 后 | 窗口修复前 → 后 | 备注 |
+|---|---|---|---|
+| express | 2.0% → **46.4%**（23×） | 19 文件/82KB → 8/64KB | lib/ 进窗，全部为真实源码 |
+| zod | 0.7% → 1.4% | 43/176KB → 55/113KB | src/ 进窗；src 单文件大，字节覆盖仍受窗口约束 |
+| flask | 27.8% → 25.1% | 39/188KB → 15/155KB | examples/tests 剔除后预算集中在 src 大文件，覆盖持平、内容质量更高 |
+| hono | 2.7% → **7.1%** | 55/180KB → 28/150KB | src/ 替代 adapters/ 成为窗口主体 |
+| cal.com | 0.03% → 0.1% | 44/195KB → 37/156KB | apps/packages 进窗 |
+
+- **软顶超限消失**：5 个窗口全部 ≤160KB（此前 4/5 超限 10–22%）。
+- flask 微降 2.7pp 属单次采样噪声与字节口径集中效应；其引用内容从「examples+src 混杂」变为「纯 src」。
+- 剩余缺口回到 F1（窗口上限）：zod/hono/cal.com 的字节覆盖仍受 160KB 约束——这正是第 ② 步「分片多趟提取」的立项依据。

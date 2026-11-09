@@ -63,7 +63,9 @@ export function parseSourceRoots(value: unknown): SourceScopeRoot[] {
   throw new Error("Product source roots must be an array of path objects or strings");
 }
 
-export function sliceToSourceFiles(slice: SourceSlice, index: OpenedRemoteSourceRevision): Promise<SourceFile[]> {
+export function sliceToSourceFiles(slice: SourceSlice, index: OpenedRemoteSourceRevision, maxBytes = Number.POSITIVE_INFINITY): Promise<SourceFile[]> {
+  // F3 硬顶（生产实测 4/5 仓库超预算 10–22%）：贪心按规划顺序整文件包含，超预算即停。
+  // 返回的文件集就是真实窗口——调用方须以它为准（assertEvidence 允许集 = 实际进 prompt 的内容）。
   return Promise.all(slice.files.map(async (file) => {
     const numbered: string[] = [];
     for (const range of file.lineRanges) {
@@ -77,7 +79,17 @@ export function sliceToSourceFiles(slice: SourceSlice, index: OpenedRemoteSource
       numbered.push(...read.lines.map((line, offset) => `${range.startLine + offset}: ${line}`));
     }
     return { path: file.path, content: numbered.join("\n") };
-  }));
+  })).then((files) => {
+    const included: SourceFile[] = [];
+    let total = 0;
+    for (const file of files) {
+      const size = Buffer.byteLength(file.content, "utf8");
+      if (total + size > maxBytes) continue;
+      included.push(file);
+      total += size;
+    }
+    return included;
+  });
 }
 
 async function loadExplicitArchitectureSources(index: OpenedRemoteSourceRevision, sources: SourceFile[], paths: string[], reason: string) {
@@ -117,13 +129,17 @@ export async function getRemoteAnalysisSources(request: RemoteAnalysisRequest, r
     repository: request.repository,
     scopeRoots: request.scopeRoots,
     budgets,
-    plannerVersion: "remote-analysis-v1",
+    plannerVersion: "remote-analysis-v2",
     profileVersion: "remote-analysis-v1",
   }, index);
   if (!result.slice) {
     throw new Error(`Remote source slice failed: ${result.missing.join("; ") || "unknown planner failure"}`);
   }
-  const sources = await sliceToSourceFiles(result.slice, index);
+  const sources = await sliceToSourceFiles(result.slice, index, budgets.maxAiContextSourceBytes);
   if (sources.length === 0) throw new Error("No supported source files found");
-  return { slice: result.slice, sources, index };
+  // slice.files 对齐真实窗口：assertEvidence 的允许集来自 slice.files，
+  // 被硬顶排除的文件不得留在允许集（AI 引用未进 prompt 的路径应视为越界）。
+  const includedPaths = new Set(sources.map((source) => source.path));
+  const trimmedSlice = { ...result.slice, files: result.slice.files.filter((file) => includedPaths.has(file.path)) };
+  return { slice: trimmedSlice, sources, index };
 }

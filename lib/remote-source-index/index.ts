@@ -35,13 +35,14 @@ function hasSegment(path: string, value: string) {
 
 const baseSignalRules: Array<{ match: (path: string, name: string) => boolean; signals: SourceSignal[] }> = [
   { match: (_path, name) => ["package.json", "go.mod", "cargo.toml", "pom.xml", "build.gradle", "androidmanifest.xml", "dockerfile", "docker-compose.yml", "cmakelists.txt", "readme.md", "agents.md"].includes(name), signals: ["manifest"] },
-  { match: (_path, name) => ["main.go", "main.ts", "index.ts", "server.ts", "app.ts", "application.java"].includes(name) || /(?:page|route|activity|service)\.(?:tsx|ts|java)$/.test(name), signals: ["entrypoint"] },
+  { match: (_path, name) => ["main.go", "main.ts", "main.js", "index.ts", "index.js", "server.ts", "server.js", "app.ts", "app.js", "application.java"].includes(name) || /(?:page|route|activity|service)\.(?:tsx|ts|js|java)$/.test(name), signals: ["entrypoint"] },
   { match: (_path, name) => /(?:route|controller|handler|endpoint)/.test(name), signals: ["route"] },
   { match: (_path, name) => /(?:repository|model|entity)/.test(name), signals: ["repository"] },
   { match: (_path, name) => /(?:database|db|postgres|mysql|sqlite)/.test(name) || /\.sql$/.test(name), signals: ["database", "migration"] },
   { match: (_path, name) => /(?:queue|worker|job)/.test(name), signals: ["queue", "worker"] },
   { match: (path, name) => /(?:^|\/)(?:oauth|auth)(?:\/|\.)/.test(path) || /(?:auth|oauth)/.test(name), signals: ["auth"] },
-  { match: (path) => /\.(?:java|kt|py|cs|php|go|rs|rb|ts|tsx|jsx|mjs|cjs)$/.test(path), signals: ["service"] },
+  // `.js` 必须在列：纯 JS 仓库（如 express）的源码此前零信号、永远进不了窗口
+  { match: (path) => /\.(?:java|kt|py|cs|php|go|rs|rb|ts|tsx|jsx|js|mjs|cjs)$/.test(path), signals: ["service"] },
   { match: (_path, name) => /(?:dockerfile|docker-compose|deploy|k8s|kubernetes)/.test(name), signals: ["deployment"] },
   { match: (path, name) => /\.(?:tsx|jsx)$/.test(name) || hasSegment(path, "app") && /\.tsx$/.test(name), signals: ["frontend"] },
   { match: (_path, name) => /\.(?:java|kt|swift|m|mm|c|cc|cpp|h|hpp)$/.test(name), signals: ["native"] },

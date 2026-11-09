@@ -332,6 +332,7 @@ describe("Slice Planner behavior", () => {
       scope: { status: "resolved", unresolved: [], scopeRoots: [{ path: "apps/checkout" }] },
       selected: new Map(),
       fileContents: new Map(),
+      subtreeSelections: new Map(),
       evidenceClaims: [],
       questions: [],
       profileMatches: [],
