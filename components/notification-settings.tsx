@@ -64,6 +64,7 @@ export function NotificationSettings({ slug, canEditChannels = true }: { slug: s
           {emailPref === null ? "…" : emailPref ? "已开启，点击关闭" : "已关闭，点击开启"}
         </button>
       </div>
+      <p className="overview-note">每周还有一封周期行为摘要（滚动 7 天，无变化不发）。<a className="text-button" href={`/api/products/${slug}/digests/latest`} target="_blank" rel="noreferrer">查看最近一期 ↗</a></p>
       {canEditChannels && channels.length > 0 ? (
         <ul className="notification-channel-list">
           {channels.map((channel) => (
