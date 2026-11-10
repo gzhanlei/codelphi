@@ -8,7 +8,7 @@ import { enqueueBillingNotification } from "./billing/notifications";
 import { resolveAnalysisTarget, type ChangeContext, type CodeHostingProvider } from "./code-hosting";
 import { analysisSliceBudgets, getPartitionedAnalysisSources, getRemoteAnalysisSources, parseSourceRoots, type AnalysisPartition } from "./remote-analysis";
 import { createSlicePlanner } from "./slice-planner";
-import { insertSpecVersion, loadPreviousFeatureNames, loadPreviousSpecText } from "./spec-versions";
+import { insertSpecVersion, loadLatestSpecFeatures, loadPreviousFeatureNames, loadPreviousSpecText } from "./spec-versions";
 import { loadAffectedFeatureKeys, rebuildSpecFileIndex } from "./spec-file-index";
 import { resolveAnalysisMode } from "./incremental";
 import { compareIncrementalShadow } from "./incremental-shadow";
@@ -356,12 +356,17 @@ async function runAnalysisBody(run: RunContext) {
     console.error("[analysis] load previous spec text failed; anchoring disabled for this run", error);
     previousSpecText = [];
   }
+  // BM-10（生产 run 213 实证）：窗口无实现级行为变更（纯文档/注释/格式提交）时跳过全部
+  // AI 提取——上一版规格原样沿用、零变化。docs-only diff 命中功能证据面会激活增量重提取，
+  // 文档内容被写成假场景（run 213：发布说明「无行为变化」vs 变化清单 54 条，自相矛盾）。
+  // 首分析（无上一版规格）不受影响，仍全量建基线；运行时翻转零 diff 本属静态盲区（2b）。
+  const noBehavioralWindow = previousFeatureNames.length > 0 && behavioralPaths.length === 0;
   // M9：增量模式下计算受影响集并做保守放行判定；任一条件不满足即回退全量。
   let affectedKeys: ReadonlySet<string> | null = null;
   let affectedFeatureNames: string[] | undefined;
   // W0-10：未归属的行为变更文件 = 行为 diff 文件中未命中索引者——显式交给增量 prompt 核对
   let unassignedBehavioralPaths: string[] | undefined;
-  if (run.analyzeMode === "incremental") {
+  if (!noBehavioralWindow && run.analyzeMode === "incremental") {
     const affected = await loadAffectedFeatureKeys(run.repositoryId, change.files.map((file) => file.path), executeWrapper);
     const resolved = resolveAnalysisMode({
       mode: "incremental",
@@ -399,11 +404,53 @@ async function runAnalysisBody(run: RunContext) {
   let mergeStats = { changesTruncated: 0, scenariosDeduped: 0 };
 
   const knownFeatureNames = new Set(previousFeatureNames);
-  const { partitions, index: sourceIndex } = await getPartitionedAnalysisSources(remoteAnalysisRequest, { planner, budgets: analysisSliceBudgets }, { maxPartitions: analysisMaxPartitions() });
+  let coverage: AnalysisCoverageReceipt | null = null;
+  let partitions: AnalysisPartition[] = [];
+  let enumerationMetrics: BehavioralEnumerationMetrics = {
+    pathsTotal: behavioralPaths.length,
+    pathsEnumerated: 0,
+    pathsOmitted: behavioralPaths.length,
+    groupsTotal: 0,
+    groupsCompleted: 0,
+    groupsFailed: 0,
+    status: "not_applicable",
+  };
+  if (noBehavioralWindow) {
+    // 零行为变更窗口：整体沿用上一版（含证据），release 说明如实声明「无行为变化」，
+    // 覆盖面继承上一版回执（append-only：沿用版本的覆盖面就是被沿用版本的覆盖面）。
+    const previousSpec = await loadLatestSpecFeatures(run.repositoryId);
+    if (!previousSpec) throw new Error("no-behavioral-change window but no previous spec found");
+    result = {
+      product: { description: "", evidence: [] },
+      release: {
+        title: (change.message ?? "").split("\n")[0].trim().slice(0, 120) || "无行为变化窗口",
+        summary: "本窗口无实现级行为变更（纯文档/注释/格式提交），规格原样沿用上一版，零行为变化。",
+      },
+      changes: [],
+      features: previousSpec?.features ?? [],
+    };
+    // 继承上一版回执（含 diff 面字段，AnalysisCoverageReceipt 形状）
+    const [inherited] = await executeWrapper(
+      `SELECT impl_files_assembled AS implFilesAssembled, impl_files_total AS implFilesTotal,
+              impl_bytes_assembled AS implBytesAssembled, impl_bytes_total AS implBytesTotal,
+              coverage_ratio AS coverageRatio, partitions_used AS partitionsUsed, partitions_capped AS partitionsCapped,
+              diff_total_paths AS diffTotalPaths, diff_selected_paths AS diffSelectedPaths, diff_omitted_paths AS diffOmittedPaths
+       FROM analysis_coverage_receipts WHERE spec_version_id = ?`,
+      [previousSpec.specVersionId],
+    );
+    coverage = ((Array.isArray(inherited) ? inherited[0] : inherited) as Array<AnalysisCoverageReceipt>)[0] ?? null;
+    if (!coverage) {
+      // 历史基线无回执（migration 054 之前）：按零装配如实披露
+      coverage = { implFilesAssembled: 0, implFilesTotal: 0, implBytesAssembled: 0, implBytesTotal: 0, coverageRatio: 0, partitionsUsed: 0, partitionsCapped: false, diffTotalPaths: change.files.length, diffSelectedPaths: 0, diffOmittedPaths: change.files.length };
+    }
+    console.log("[analysis] no-behavioral-change window; previous spec carried verbatim", { runId: run.id, diffFiles: change.files.length, carriedFeatures: result.features.length, specVersionId: previousSpec?.specVersionId ?? null });
+  } else {
+  const { partitions: planned, index: sourceIndex } = await getPartitionedAnalysisSources(remoteAnalysisRequest, { planner, budgets: analysisSliceBudgets }, { maxPartitions: analysisMaxPartitions() });
+  partitions = planned;
   console.log("[analysis] partitioned extraction", { runId: run.id, partitions: partitions.length, mode: affectedKeys === null ? "full" : "incremental-carry" });
   // B1 覆盖披露回执：装配面 vs 索引全树实现面（元数据级枚举，不读文件内容），
   // 落 analysis_coverage_receipts，append-only 可回溯；口径与 measure-first-analysis.ts 一致。
-  const coverage = computeCoverageReceipt({
+  coverage = computeCoverageReceipt({
     index: sourceIndex,
     partitions,
     maxPartitions: analysisMaxPartitions(),
@@ -452,15 +499,6 @@ async function runAnalysisBody(run: RunContext) {
   }
   // W0-8 行为面枚举：行为文件逐组定向提问（每文件显式回答行为/无行为），把召回从
   // 注意力问题变枚举问题。枚举是增强层：组硬失败重试一次后跳过，不阻塞主提取产出。
-  let enumerationMetrics: BehavioralEnumerationMetrics = {
-    pathsTotal: behavioralPaths.length,
-    pathsEnumerated: 0,
-    pathsOmitted: behavioralPaths.length,
-    groupsTotal: 0,
-    groupsCompleted: 0,
-    groupsFailed: 0,
-    status: "not_applicable",
-  };
   if (behavioralEnumerationEnabled() && behavioralPaths.length > 0) {
     const { chunks: enumeratedChunks, metrics } = await enumerateBehavioralChunks({
       behavioralPaths,
@@ -480,6 +518,7 @@ async function runAnalysisBody(run: RunContext) {
     // 增强层失败不得被误认为完整成功
     console.log("[analysis] behavioral enumeration", { runId: run.id, ...enumerationMetrics });
   }
+  } // else：提取分支结束（BM-10 零行为变更窗口不进入）
   const { specVersionId, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped } = await saveResult(run, result, change, affectedKeys, coverage);
   // W0-9 一致性核验：同功能内互斥结果并存（枚举多通道产物的语义矛盾）→ 告警供人工核实（append-only 已落库，不改写）
   const conflicts = detectOutcomeConflicts(mergedFeatures);

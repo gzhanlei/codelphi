@@ -55,7 +55,7 @@ const { compareIncrementalShadow } = vi.hoisted(() => ({ compareIncrementalShado
 vi.mock("../lib/incremental-shadow", () => ({ compareIncrementalShadow }));
 const { partitionedSourcesMock } = vi.hoisted(() => ({ partitionedSourcesMock: vi.fn() }));
 vi.mock("../lib/remote-analysis", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/remote-analysis")>(), getRemoteAnalysisSources: vi.fn(), getPartitionedAnalysisSources: partitionedSourcesMock }));
-vi.mock("../lib/spec-versions", () => ({ insertSpecVersion: vi.fn(async () => ({ specVersionId: 44, features: [{ name: "统一登录", summary: "s", scenarios: [] }], collapse: null, featureCollapses: [], misplacedScenarios: [], identityHijacksDropped: 0 })), loadPreviousFeatureNames: vi.fn(async () => ["统一登录", "支付", "规格导出"]), loadPreviousSpecText: vi.fn(async () => [{ name: "统一登录", summary: "s", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy" }] }]) }));
+vi.mock("../lib/spec-versions", () => ({ insertSpecVersion: vi.fn(async () => ({ specVersionId: 44, features: [{ name: "统一登录", summary: "s", scenarios: [] }], collapse: null, featureCollapses: [], misplacedScenarios: [], identityHijacksDropped: 0 })), loadLatestSpecFeatures: vi.fn(async () => ({ specVersionId: 44, features: [{ name: "统一登录", summary: "s", scenarios: [] }] })), loadPreviousFeatureNames: vi.fn(async () => ["统一登录", "支付", "规格导出"]), loadPreviousSpecText: vi.fn(async () => [{ name: "统一登录", summary: "s", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy" }] }]) }));
 vi.mock("../lib/architecture-version", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/architecture-version")>(), generateRepositoryArchitectureVersion: vi.fn(async () => ({ status: "accepted", errorMessage: null })) }));
 
 const run = {
@@ -105,7 +105,7 @@ describe("analysis orchestration", () => {
       return [{}];
     });
     adapter.getRepository.mockResolvedValue({ owner: "gzhanlei", name: "radar", defaultBranch: "main" });
-    adapter.getChangeContext.mockResolvedValue({ message: "change", committedAt: "2026-11-01T00:00:00Z", url: "https://github.com/commit/sha", files: [] });
+    adapter.getChangeContext.mockResolvedValue({ message: "change", committedAt: "2026-11-01T00:00:00Z", url: "https://github.com/commit/sha", files: [{ path: "lib/auth.ts", status: "modified", patch: "+export const ok = 1;" }] });
     vi.mocked(getRemoteAnalysisSources).mockResolvedValue({ sources: [], slice: { files: [{ path: "lib/db.ts" }] }, index: { readLines, listDir, listRoot }, openArchitectureIndex } as never);
     // 真全量路径（affectedKeys=null）默认走分区提取：单分区等价旧行为
     partitionedSourcesMock.mockResolvedValue({
@@ -449,7 +449,7 @@ describe("analysis orchestration", () => {
       if (sql.includes("SELECT sf.name FROM spec_features")) return [[{ name: "统一登录" }]];
       return [{}];
     });
-    adapter.getChangeContext.mockResolvedValue({ message: "docs-only change", committedAt: "2026-11-01T00:00:00Z", url: "", files: [] });
+    adapter.getChangeContext.mockResolvedValue({ message: "behavioral change", committedAt: "2026-11-01T00:00:00Z", url: "", files: [{ path: "lib/other.ts", status: "modified", patch: "+export const ok = 1;" }] });
     vi.mocked(analyzeWithAI)
       .mockResolvedValueOnce({ product: { description: "d", evidence: [{ path: "lib/auth.ts", startLine: 1 }] }, release: { title: "v1", summary: "s" }, changes: [], features: [{ name: "统一登录", summary: "s1", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy", evidence: [{ path: "lib/auth.ts", startLine: 1 }] }] }] } as never)
       .mockResolvedValueOnce({ product: { description: "d2", evidence: [{ path: "lib/auth.ts", startLine: 1 }] }, release: { title: "v2", summary: "s2" }, changes: [], features: [{ name: "越权功能", summary: "s2", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy", evidence: [{ path: "lib/auth.ts", startLine: 1 }] }] }] } as never);
@@ -513,7 +513,7 @@ describe("analysis orchestration", () => {
       if (sql.includes("SELECT sf.name FROM spec_features")) return [[{ name: "统一登录" }]];
       return [{}];
     });
-    adapter.getChangeContext.mockResolvedValue({ message: "docs-only change", committedAt: "2026-11-01T00:00:00Z", url: "", files: [] });
+    adapter.getChangeContext.mockResolvedValue({ message: "behavioral change", committedAt: "2026-11-01T00:00:00Z", url: "", files: [{ path: "lib/auth.ts", status: "modified", patch: "+export const ok = 1;" }] });
     const hallucinated = { product: { description: "d", evidence: [{ path: "lib/invented.ts", startLine: 1 }] }, release: { title: "v1", summary: "s" }, changes: [], features: [{ name: "虚构功能", summary: "s", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy", evidence: [{ path: "lib/invented.ts", startLine: 1 }] }] }] } as never;
     vi.mocked(analyzeWithAI).mockResolvedValue(hallucinated);
     await expect(runAnalysis(8)).resolves.toBeUndefined();
@@ -584,6 +584,25 @@ describe("analysis orchestration", () => {
     expect(scopeCall.affectedFeatureNames).toBeUndefined();
     const saved = vi.mocked(insertSpecVersion).mock.calls[0][3] as { affectedKeys?: Set<string> };
     expect(saved.affectedKeys).toBeUndefined();
+  });
+
+  it("skips extraction and carries the previous spec verbatim on a no-behavioral window (BM-10)", async () => {
+    // docs-only 窗口（patch-scan 无行为文件）→ 零 AI 调用、零提取，规格整体沿用
+    adapter.getChangeContext.mockResolvedValue({
+      message: "docs: clarify pipeline contract\n\nbody",
+      committedAt: "2026-11-01T00:00:00Z",
+      url: "https://github.com/commit/docs",
+      files: [{ path: "docs/analysis-pipeline.md", status: "modified", patch: "+文档内容不是行为。" }],
+    });
+    await runAnalysis(8);
+    expect(analyzeWithAI).not.toHaveBeenCalled();
+    expect(partitionedSourcesMock).not.toHaveBeenCalled();
+    expect(vi.mocked(insertSpecVersion)).toHaveBeenCalled();
+    const calledResult = vi.mocked(insertSpecVersion).mock.calls[0][2];
+    expect(calledResult.features[0]?.name).toBe("统一登录");
+    expect(calledResult.changes).toEqual([]);
+    // 结算照常（run 消耗了调度与账务链路；SAU 口径为产品决策）
+    expect(vi.mocked(capture)).toHaveBeenCalled();
   });
 
   it("records a readable failure when loading the run fails", async () => {

@@ -436,3 +436,26 @@ export async function loadPreviousSpecText(repositoryId: number, execute: Execut
       .map((scenario) => ({ reference: scenario.reference, context: scenario.context, action: scenario.action, outcome: scenario.outcome, category: scenario.category })),
   }));
 }
+
+/** BM-10：读取最新 spec 版本的完整功能集（含场景与证据），供零行为变更窗口整体沿用。无版本返回 null。 */
+export async function loadLatestSpecFeatures(repositoryId: number, execute: Execute = defaultExecute): Promise<{ specVersionId: number; features: SpecFeature[] } | null> {
+  const versionResult = await execute("SELECT id FROM spec_versions WHERE repository_id = ? ORDER BY id DESC LIMIT 1", [repositoryId]);
+  const versionPayload = Array.isArray(versionResult) ? versionResult[0] : versionResult;
+  const version = (versionPayload as Array<{ id: number }> | undefined)?.[0];
+  if (!version) return null;
+  const featureResult = await execute(
+    "SELECT id, name, summary, parent_key AS parentKey, source FROM spec_features WHERE spec_version_id = ? ORDER BY position",
+    [version.id],
+  );
+  const featurePayload = Array.isArray(featureResult) ? featureResult[0] : featureResult;
+  const featureRows = (featurePayload ?? []) as FeatureRow[];
+  const scenarioResult = await execute(
+    `SELECT spec_feature_id AS featureId, reference, context, action, outcome, category, source, evidence
+     FROM spec_scenarios WHERE spec_feature_id IN (${featureRows.map(() => "?").join(",") || "NULL"})`,
+    featureRows.map((feature) => feature.id),
+  );
+  const scenarioPayload = Array.isArray(scenarioResult) ? scenarioResult[0] : scenarioResult;
+  const scenarioRows = (scenarioPayload ?? []) as ScenarioRow[];
+  if (featureRows.length === 0) return null;
+  return { specVersionId: version.id, features: featuresFromRows(featureRows, scenarioRows) };
+}
