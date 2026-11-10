@@ -1,9 +1,53 @@
-import { specFeatureKey } from "../spec-diff";
-import { resolveFeatureByStableKey, resolveScenarioByStableKey } from "../stable-links";
 import { searchSpec } from "../spec-search";
 import { loadCoverageReceipt } from "../analysis-coverage";
 import { defaultExecute, type Execute } from "../db";
 import type { McpKeyIdentity } from "./api-keys";
+
+/**
+ * 稳定键解析内联版（与 lib/stable-links.ts 同语义）。2026-11-10 生产事故：各 route bundle
+ * 共享同一个 webpack 运行时注册表，模块 id 撞车时 c() 会拿到其他 bundle 注册的旧拷贝，
+ * 行为随加载顺序漂移（get_scenario 稳定返回空）。内联进 server.ts 后随本路由整体打包，
+ * 不再经过共享注册表。stable_key → 最新 spec 版本条目 → 活跃 live 条目，缺失返回 null。
+ */
+function specFeatureKey(name: string) {
+  return name.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+async function latestSpecFeatureName(stableKey: string, productId: number, execute: Execute) {
+  const [rows] = await execute(
+    `SELECT sf.name, sf.spec_version_id AS specVersionId
+     FROM spec_features sf
+     JOIN spec_versions v ON v.id = sf.spec_version_id
+     JOIN repositories r ON r.id = v.repository_id
+     WHERE sf.stable_key = ? AND r.product_id = ?
+     ORDER BY sf.spec_version_id DESC
+     LIMIT 1`,
+    [stableKey, productId],
+  ) as [Array<{ name: string; specVersionId: number }>, unknown];
+  return rows[0] ?? null;
+}
+
+async function resolveFeatureByStableKey(productId: number, stableKey: string, execute: Execute): Promise<number | null> {
+  const specFeature = await latestSpecFeatureName(stableKey, productId, execute);
+  if (!specFeature) return null;
+  const [rows] = await execute(
+    "SELECT f.id FROM features f WHERE f.product_id = ? AND f.name = ? AND f.active = 1 LIMIT 1",
+    [productId, specFeature.name],
+  ) as [Array<{ id: number }>, unknown];
+  return rows[0] ? Number((rows[0] as { id: number }).id) : null;
+}
+
+async function resolveScenarioByStableKey(productId: number, stableKey: string, reference: string, execute: Execute): Promise<number | null> {
+  const specFeature = await latestSpecFeatureName(stableKey, productId, execute);
+  if (!specFeature) return null;
+  const [rows] = await execute(
+    `SELECT f.id FROM scenarios s JOIN features f ON f.id = s.feature_id
+     WHERE f.product_id = ? AND f.name = ? AND f.active = 1 AND s.active = 1 AND s.reference = ?
+     LIMIT 1`,
+    [productId, specFeature.name, reference],
+  ) as [Array<{ id: number }>, unknown];
+  return rows[0] ? Number((rows[0] as { id: number }).id) : null;
+}
 
 /**
  * A1 MCP server 的只读工具面（docs/specsight-gap-improvement-plan.md §4.1）。
