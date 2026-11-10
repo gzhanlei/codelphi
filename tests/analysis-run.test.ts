@@ -289,6 +289,31 @@ describe("analysis orchestration", () => {
     }
   });
 
+  it("retries a failed extraction pass once before failing the run (model-drift resilience)", async () => {
+    // 模型侧偶发（证据路径幻觉、JSON 键漂移）按趟重试一次；重试调用的 receipt 照常落库
+    partitionedSourcesMock.mockResolvedValue({
+      partitions: [{ slice: { files: [{ path: "lib/auth.ts" }] }, sources: [{ path: "lib/auth.ts", content: "1: auth" }] }],
+      index: { readLines, listDir, listRoot },
+    });
+    execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("JOIN repositories repo")) return [runRows];
+      if (sql.includes("source_roots")) return [[]];
+      if (sql.includes("SELECT id FROM analysis_runs WHERE repository_id = ? AND after_sha = ?")) return [existingRunRows];
+      if (sql.includes("INSERT INTO analysis_runs")) return [{ insertId: 56 }];
+      if (sql.includes("SELECT sf.name FROM spec_features")) return [[{ name: "统一登录" }]];
+      return [{}];
+    });
+    adapter.getChangeContext.mockResolvedValue({ message: "change", committedAt: "2026-11-01T00:00:00Z", url: "", files: [{ path: "lib/auth.ts", status: "modified", patch: "+ const token = sign(payload);" }] });
+    vi.mocked(analyzeWithAI)
+      .mockRejectedValueOnce(new Error("AI returned unknown evidence paths: .github/labeler.yml"))
+      .mockResolvedValueOnce({ product: { description: "d", evidence: [{ path: "lib/auth.ts", startLine: 1 }] }, release: { title: "v1", summary: "s" }, changes: [], features: [{ name: "统一登录", summary: "s1", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy", evidence: [{ path: "lib/auth.ts", startLine: 1 }] }] }] } as never);
+    await expect(runAnalysis(8)).resolves.toBeUndefined();
+    // 第一次调用失败、第二次重试成功：run 不再因单趟偶发而作废
+    expect(analyzeWithAI).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(analyzeWithAI).mock.calls[0][0]).toEqual(vi.mocked(analyzeWithAI).mock.calls[1][0]);
+    expect(insertSpecVersion).toHaveBeenCalled();
+  });
+
   // W0-3 / I1 常驻回归（docs/m9-workbench-carry-forward-handoff.md §3）：
   // 工作台层（features active=1 的 upsert 集）必须与版本层（insertSpecVersion 返回的
   // 合并规格）集合等价——下线基准是合并结果而非 AI 原始输出，窄推送不得收缩工作台。

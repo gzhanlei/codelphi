@@ -61,6 +61,32 @@ function evidenceAllowSet(partition: AnalysisPartition, change: ChangeContext) {
   ]);
 }
 
+/**
+ * 单趟提取失败重试一次：模型侧偶发（证据路径幻觉、JSON 键漂移）按趟重试而不是让整个
+ * run 作废——重试调用的 LLM receipt 照常落库（成本如实记账），两次都失败才让 run 失败。
+ */
+async function extractPassWithRetry(options: {
+  sources: AnalysisPartition["sources"];
+  change: ChangeContext;
+  context: Parameters<typeof analyzeWithAI>[2];
+  allowSet: Set<string>;
+  label: string;
+}): Promise<AnalysisResult> {
+  try {
+    const result = await analyzeWithAI(options.sources, options.change, options.context);
+    assertEvidence(result, options.allowSet);
+    return result;
+  } catch (firstError) {
+    console.warn("[analysis] extraction pass failed; retrying once", {
+      label: options.label,
+      error: firstError instanceof Error ? firstError.message.slice(0, 200) : String(firstError),
+    });
+    const result = await analyzeWithAI(options.sources, options.change, options.context);
+    assertEvidence(result, options.allowSet);
+    return result;
+  }
+}
+
 export async function assertLatestRun(connection: PoolConnection, run: RunContext) {
   const [rows] = await connection.execute("SELECT id FROM analysis_runs WHERE repository_id = ? ORDER BY id DESC LIMIT 1", [run.repositoryId]);
   const latestRun = (rows as Array<{ id: number }>)[0];
@@ -330,25 +356,35 @@ async function runAnalysisBody(run: RunContext) {
   if (partitions.length === 1) {
     const single = partitions[0];
     singleWindowSources = single.sources;
-    result = await analyzeWithAI(single.sources, change, {
-      previousFeatureNames,
-      previousSpec: previousSpecText,
-      ...(affectedKeys !== null ? { affectedFeatureNames } : {}),
-      billing: { runId: run.id, accountId: run.accountId ?? null, chargeComponent: "main" },
+    result = await extractPassWithRetry({
+      sources: single.sources,
+      change,
+      context: {
+        previousFeatureNames,
+        previousSpec: previousSpecText,
+        ...(affectedKeys !== null ? { affectedFeatureNames } : {}),
+        billing: { runId: run.id, accountId: run.accountId ?? null, chargeComponent: "main" },
+      },
+      allowSet: evidenceAllowSet(single, change),
+      label: `single/${run.id}`,
     });
-    assertEvidence(result, evidenceAllowSet(single, change));
   } else {
     const chunks: ExtractionChunk[] = [];
     const knownFeatureNames = new Set(previousFeatureNames);
     for (const [index, partition] of partitions.entries()) {
-      const chunkResult = await analyzeWithAI(partition.sources, change, {
-        previousFeatureNames: [...knownFeatureNames],
-        previousSpec: previousSpecText,
-        ...(affectedKeys !== null ? { affectedFeatureNames } : {}),
-        partition: { index: index + 1, total: partitions.length },
-        billing: { runId: run.id, accountId: run.accountId ?? null, chargeComponent: "main" },
+      const chunkResult = await extractPassWithRetry({
+        sources: partition.sources,
+        change,
+        context: {
+          previousFeatureNames: [...knownFeatureNames],
+          previousSpec: previousSpecText,
+          ...(affectedKeys !== null ? { affectedFeatureNames } : {}),
+          partition: { index: index + 1, total: partitions.length },
+          billing: { runId: run.id, accountId: run.accountId ?? null, chargeComponent: "main" },
+        },
+        allowSet: evidenceAllowSet(partition, change),
+        label: `pass${index + 1}/${run.id}`,
       });
-      assertEvidence(chunkResult, evidenceAllowSet(partition, change));
       for (const feature of chunkResult.features) knownFeatureNames.add(feature.name);
       chunks.push({ result: chunkResult });
     }

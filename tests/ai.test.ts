@@ -33,6 +33,14 @@ describe("AI analysis output", () => {
     expect((parsed.features[0].scenarios[0] as unknown as Record<string, unknown>).result).toBeUndefined();
   });
 
+  it("strips invisible characters from evidence paths before the allow-set check", () => {
+    // W0-2 superset 重跑实测：模型在合法 diff 路径前后带零宽字符，精确匹配被误杀
+    const drifted = structuredClone(result);
+    drifted.features[0].scenarios[0].evidence[0].path = "\u200bapp/auth/login/route.ts ";
+    const parsed = parseAnalysisContent(JSON.stringify(drifted));
+    expect(parsed.features[0].scenarios[0].evidence[0].path).toBe("app/auth/login/route.ts");
+  });
+
   it("keeps an explicit outcome over the result alias and still rejects scenarios missing both", () => {
     const both = structuredClone(result) as { features: Array<{ scenarios: Array<Record<string, unknown>> }> };
     both.features[0].scenarios[0].result = "别名不应覆盖显式字段";

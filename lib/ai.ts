@@ -63,20 +63,42 @@ export function capEvidence(value: unknown) {
 }
 
 /**
- * 场景字段别名归一：生产实测（2026-11-10 run 174–179，复现于同提示重建）模型会把
- * 提示语里的「结果」直译成 result 键——模板已声明 outcome 仍系统性漂移，zod 对多余
- * 键静默放行、对缺失的 outcome 报 invalid_type，整趟分析作废。解析层在 schema 校验前
- * 把 result 升格为 outcome（显式 outcome 优先），未变证据校验口径。
+ * 模型输出归一（schema 校验前的解析层容忍，不改证据校验口径）：
+ * ① 场景结果字段别名——生产实测（2026-11-10 run 174–179）模型会把提示语里的「结果」
+ *    直译成 result 键，模板已声明 outcome 仍系统性漂移，zod 对多余键静默放行；
+ * ② 证据路径不可见字符——模型偶发在路径前后带零宽字符（U+200B 等）或首尾空白，
+ *    导致与分区允许集的精确匹配失败、合法引用被误杀（W0-2 superset 重跑实测）。
  */
+const INVISIBLE_CHARS = /[\u200b\u200c\u200d\u2060\ufeff]/g;
+
+function cleanEvidenceList(evidence: unknown): unknown {
+  if (!Array.isArray(evidence)) return evidence;
+  return evidence.map((item) => {
+    if (typeof item !== "object" || item === null || typeof (item as { path?: unknown }).path !== "string") return item;
+    const cleaned = { ...(item as Record<string, unknown>) };
+    const path = (cleaned.path as string).replace(INVISIBLE_CHARS, "").trim();
+    if (path) cleaned.path = path;
+    return cleaned;
+  });
+}
+
 export function normalizeScenarioAliases(value: unknown) {
-  const input = value as { features?: Array<{ scenarios?: Array<Record<string, unknown>> }> };
+  const input = value as {
+    product?: { evidence?: unknown };
+    changes?: Array<{ evidence?: unknown }>;
+    features?: Array<{ scenarios?: Array<{ evidence?: unknown }>; evidence?: unknown }>;
+  };
   return {
     ...input,
+    product: input.product ? { ...input.product, evidence: cleanEvidenceList(input.product.evidence) } : undefined,
+    changes: input.changes?.map((change) => ({ ...change, evidence: cleanEvidenceList(change.evidence) })),
     features: input.features?.map((feature) => ({
       ...feature,
+      evidence: cleanEvidenceList(feature.evidence),
       scenarios: feature.scenarios?.map((scenario) => {
-        if (scenario.outcome !== undefined || typeof scenario.result !== "string") return scenario;
-        const { result, ...rest } = scenario;
+        const cleaned = { ...scenario, evidence: cleanEvidenceList(scenario.evidence) } as Record<string, unknown>;
+        if (cleaned.outcome !== undefined || typeof cleaned.result !== "string") return cleaned;
+        const { result, ...rest } = cleaned;
         return { ...rest, outcome: result };
       }),
     })),
