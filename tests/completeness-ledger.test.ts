@@ -30,6 +30,8 @@ const enumMetrics = (overrides: Partial<BehavioralEnumerationMetrics> = {}): Beh
   pathsEnumerated: 30,
   pathsOmitted: 0,
   groupsTotal: 5,
+  hunksTotal: 0,
+  hunksTruncated: 0,
   groupsCompleted: 5,
   groupsFailed: 0,
   status: "complete",

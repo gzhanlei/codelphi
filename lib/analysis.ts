@@ -410,6 +410,8 @@ async function runAnalysisBody(run: RunContext) {
     pathsTotal: behavioralPaths.length,
     pathsEnumerated: 0,
     pathsOmitted: behavioralPaths.length,
+    hunksTotal: 0,
+    hunksTruncated: 0,
     groupsTotal: 0,
     groupsCompleted: 0,
     groupsFailed: 0,

@@ -120,6 +120,10 @@ export interface BehavioralEnumerationMetrics {
   groupsTotal: number;
   groupsCompleted: number;
   groupsFailed: number;
+  /** 行为文件的全部 hunk 数（R3 公平预算披露）。 */
+  hunksTotal: number;
+  /** 因文件级预算被裁剪的 hunk 数（>0 = 尾部上下文未全读，披露用）。 */
+  hunksTruncated: number;
   /** complete / partial / failed / not_applicable——增强层失败不得被误认为完整成功。 */
   status: "complete" | "partial" | "failed" | "not_applicable";
 }
@@ -132,7 +136,7 @@ export interface BehavioralEnumerationOutcome {
 export async function enumerateBehavioralChunks(options: BehavioralEnumerationOptions): Promise<BehavioralEnumerationOutcome> {
   const pathsTotal = new Set(options.behavioralPaths).size;
   if (pathsTotal === 0) {
-    return { chunks: [], metrics: { pathsTotal: 0, pathsEnumerated: 0, pathsOmitted: 0, groupsTotal: 0, groupsCompleted: 0, groupsFailed: 0, status: "not_applicable" } };
+    return { chunks: [], metrics: { pathsTotal: 0, pathsEnumerated: 0, pathsOmitted: 0, groupsTotal: 0, groupsCompleted: 0, groupsFailed: 0, hunksTotal: 0, hunksTruncated: 0, status: "not_applicable" } };
   }
   const groups = groupBehavioralTargets(options.behavioralPaths, behavioralEnumerationGroupSize());
   const capped = groups.slice(0, behavioralEnumerationMaxGroups());
@@ -143,6 +147,8 @@ export async function enumerateBehavioralChunks(options: BehavioralEnumerationOp
   const chunks: BehavioralEnumerationChunk[] = [];
   let groupsCompleted = 0;
   let groupsFailed = 0;
+  let hunksTotal = 0;
+  let hunksTruncated = 0;
   const pathsEnumerated = new Set<string>();
   for (const [groupIndex, group] of capped.entries()) {
     const label = `w0-8/g${groupIndex + 1}`;
@@ -151,16 +157,14 @@ export async function enumerateBehavioralChunks(options: BehavioralEnumerationOp
       const file = options.files.find((candidate) => candidate.path === path);
       if (!file) continue;
       const blocks: Array<{ startLine: number; endLine: number; content: string }> = [];
-      let budget = MAX_CONTEXT_LINES_PER_FILE;
       try {
-        for (const range of changeFileHunkRanges(file, CONTEXT_LINES)) {
-          const startLine = range.startLine;
-          const endLine = Math.min(range.endLine, startLine + MAX_LINES_PER_READ - 1, startLine + budget - 1);
-          if (endLine < startLine) continue;
-          const read = await options.index.readLines({ path, startLine, endLine, requestedBy: "behavioral_enumeration", reason: "W0-8 targeted behavioral extraction" });
+        // R3 公平预算：每 hunk 保底核心 ±context 行，剩余按需分配；截断计数披露
+        const allocatedReads = allocateHunkReads(changeFileHunkRanges(file, CONTEXT_LINES), MAX_CONTEXT_LINES_PER_FILE, CONTEXT_LINES);
+        hunksTotal += allocatedReads.length;
+        for (const item of allocatedReads) {
+          const read = await options.index.readLines({ path, startLine: item.allocated.startLine, endLine: Math.min(item.allocated.endLine, item.allocated.startLine + MAX_LINES_PER_READ - 1), requestedBy: "behavioral_enumeration", reason: "W0-8 targeted behavioral extraction" });
           blocks.push({ startLine: read.startLine, endLine: read.endLine, content: read.lines.map((line, offset) => `${read.startLine + offset}: ${line}`).join("\n") });
-          budget -= read.endLine - read.startLine + 1;
-          if (budget <= 0) break;
+          if (item.truncated) hunksTruncated += 1;
         }
       } catch (error) {
         // 文件在窗口内被删除或不可读：跳过该文件（patch 仍在组 prompt 里提供变更内容）
@@ -193,6 +197,59 @@ export async function enumerateBehavioralChunks(options: BehavioralEnumerationOp
   const status = pathsEnumerated.size === 0 ? "failed" : groupsFailed > 0 || cappedGroups > 0 || pathsOmitted > 0 ? "partial" : "complete";
   return {
     chunks,
-    metrics: { pathsTotal, pathsEnumerated: pathsEnumerated.size, pathsOmitted, groupsTotal: groups.length, groupsCompleted, groupsFailed, status },
+    metrics: { pathsTotal, pathsEnumerated: pathsEnumerated.size, pathsOmitted, groupsTotal: groups.length, groupsCompleted, groupsFailed, hunksTotal, hunksTruncated, status },
   };
+}
+
+/**
+ * R3 hunk 公平预算：400 行/文件帽不再按 hunk 顺序消耗（大文件尾部 hunk 整段被丢）。
+ * 每个 hunk 先保底 minPerHunk 行（核心变更区保证入选），剩余预算按剩余需求比例分配，
+ * 零头按序补齐；分配不满需求的 hunk 标记 truncated（由编排层计数披露）。
+ */
+export interface AllocatedHunkRead {
+  range: ReadRange;
+  /** 实际应读的行区间（裁剪后）。 */
+  allocated: ReadRange;
+  truncated: boolean;
+}
+
+export function allocateHunkReads(ranges: ReadonlyArray<ReadRange>, totalBudget: number, minPerHunk: number): AllocatedHunkRead[] {
+  const needs = ranges.map((range) => Math.max(1, range.endLine - range.startLine + 1));
+  const grants = needs.map(() => 0);
+  let used = 0;
+  // 第一步：每个 hunk 保底核心区间
+  for (let index = 0; index < needs.length && used < totalBudget; index += 1) {
+    const grant = Math.min(needs[index], minPerHunk, totalBudget - used);
+    grants[index] = grant;
+    used += grant;
+  }
+  // 第二步：剩余预算按剩余需求比例一次性分配（同一基数，顺序公平），零头按序补齐
+  let remaining = totalBudget - used;
+  const unmet = needs.map((need, index) => need - grants[index]);
+  const totalUnmet = unmet.reduce((sum, value) => sum + value, 0);
+  if (remaining > 0 && totalUnmet > 0) {
+    const shares = unmet.map((value) => Math.floor((remaining * value) / totalUnmet));
+    let spent = 0;
+    for (let index = 0; index < needs.length; index += 1) {
+      const grant = Math.min(unmet[index], shares[index], remaining - spent);
+      grants[index] += grant;
+      spent += grant;
+    }
+    remaining -= spent;
+    // 零头按序补齐（每轮 +1，直到预算用尽或全部满足）
+    let cursor = 0;
+    while (remaining > 0 && unmet.some((value, index) => needs[index] - grants[index] > 0)) {
+      const index = cursor % needs.length;
+      if (needs[index] - grants[index] > 0) {
+        grants[index] += 1;
+        remaining -= 1;
+      }
+      cursor += 1;
+    }
+  }
+  return ranges.map((range, index) => ({
+    range,
+    allocated: { startLine: range.startLine, endLine: range.startLine + grants[index] - 1 },
+    truncated: grants[index] < needs[index],
+  }));
 }

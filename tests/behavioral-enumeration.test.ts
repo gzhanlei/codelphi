@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { allocateHunkReads } from "../lib/behavioral-enumeration";
 import { behavioralChangePaths } from "../lib/patch-scan";
 import { changeFileHunkRanges, groupBehavioralTargets, hunkReadRanges, parsePatchHunks } from "../lib/behavioral-enumeration";
 import type { ChangeFile } from "../lib/code-hosting/types";
@@ -76,5 +77,42 @@ describe("groupBehavioralTargets", () => {
     expect(groupBehavioralTargets(["b.ts", "a.ts", "b.ts", "c.ts"], 2)).toEqual([["a.ts", "b.ts"], ["c.ts"]]);
     expect(groupBehavioralTargets([], 6)).toEqual([]);
     expect(groupBehavioralTargets(["a.ts"], 6)).toEqual([["a.ts"]]);
+  });
+});
+
+describe("allocateHunkReads (R3 hunk 公平预算)", () => {
+  const range = (start: number, end: number) => ({ startLine: start, endLine: end });
+  const lines = (r: { startLine: number; endLine: number }) => r.endLine - r.startLine + 1;
+
+  it("guarantees the core of every hunk before spending leftover budget", () => {
+    // 5 个 hunk 各需 200 行，总预算 400：旧顺序逻辑只喂前 2 个；公平分配每 hunk 保底 30
+    const ranges = [range(1, 200), range(300, 499), range(600, 799), range(900, 1099), range(1200, 1399)];
+    const allocated = allocateHunkReads(ranges, 400, 30);
+    // 等需求 hunk 等比分摊：(400-150 保底) / 剩余需求均分 → 每 hunk 80 行，全部截断但核心保住
+    expect(allocated.map((item) => lines(item.allocated))).toEqual([80, 80, 80, 80, 80]);
+    expect(allocated.every((item) => lines(item.allocated) >= 30)).toBe(true);
+    expect(allocated.every((item) => item.truncated)).toBe(true);
+  });
+
+  it("satisfies small hunks fully and leaves no truncation when budget is sufficient", () => {
+    const ranges = [range(1, 20), range(50, 90)];
+    const allocated = allocateHunkReads(ranges, 400, 30);
+    expect(allocated.map((item) => item.truncated)).toEqual([false, false]);
+    expect(allocated.map((item) => lines(item.allocated))).toEqual([20, 41]);
+  });
+
+  it("respects the total budget exactly and never over-allocates", () => {
+    const ranges = Array.from({ length: 12 }, (_, index) => range(index * 100 + 1, index * 100 + 80));
+    const allocated = allocateHunkReads(ranges, 400, 30);
+    const total = allocated.reduce((sum, item) => sum + lines(item.allocated), 0);
+    expect(total).toBeLessThanOrEqual(400);
+    // 保底不低于 30（预算允许时）
+    expect(allocated.every((item) => lines(item.allocated) >= 30)).toBe(true);
+  });
+
+  it("marks the single overflowing hunk truncated and keeps it within budget", () => {
+    const allocated = allocateHunkReads([range(1, 1000)], 400, 30);
+    expect(allocated[0].truncated).toBe(true);
+    expect(lines(allocated[0].allocated)).toBe(400);
   });
 });
