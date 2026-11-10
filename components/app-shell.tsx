@@ -3,20 +3,26 @@ import type { SessionUser } from "@/lib/types";
 import { userDisplayName, userInitial } from "@/lib/user-display";
 import { Brand, ShellFrame } from "./shell-frame";
 
-export function AppShell({ user, organizationName, children }: { user: SessionUser; organizationName?: string; children: React.ReactNode }) {
+export const MAIN_NAV_ITEMS = [
+  { href: "/", icon: "⌁", label: "产品总览" },
+  { href: "/organizations", icon: "◈", label: "我的工作区" },
+  { href: "/admin/feedback", icon: "◌", label: "反馈管理" },
+  { href: "/admin/pay", icon: "¥", label: "支付管理" },
+  { href: "/integrations", icon: "⌘", label: "代码仓库" },
+  { href: "/settings", icon: "⚙", label: "设置" },
+  { href: "/pricing", icon: "◇", label: "套餐与定价" },
+];
+
+export function AppShell({ user, organizationName, activeHref = "/", children }: { user: SessionUser; organizationName?: string; activeHref?: string; children: React.ReactNode }) {
   return (
     <ShellFrame
       sidebar={
         <>
           <Brand />
           <nav className="main-nav" aria-label="主导航">
-            <Link href="/" className="nav-item active"><span>⌁</span>产品总览</Link>
-            <Link href="/organizations" className="nav-item"><span>◈</span>我的工作区</Link>
-            <Link href="/admin/feedback" className="nav-item"><span>◌</span>反馈管理</Link>
-            <Link href="/admin/pay" className="nav-item"><span>¥</span>支付管理</Link>
-            <Link href="/integrations" className="nav-item"><span>⌘</span>代码仓库</Link>
-            <Link href="/settings" className="nav-item"><span>⚙</span>设置</Link>
-            <Link href="/pricing" className="nav-item"><span>◇</span>套餐与定价</Link>
+            {MAIN_NAV_ITEMS.map((item) => (
+              <Link key={item.href} href={item.href} className={`nav-item${activeHref === item.href ? " active" : ""}`}><span>{item.icon}</span>{item.label}</Link>
+            ))}
             <a href="https://app.chandler.work" className="nav-item" target="_blank" rel="noreferrer"><span>↗</span>Chandler</a>
           </nav>
           <div className="sidebar-note">CODE → CONTEXT<br />让每一次发布都有据可查</div>

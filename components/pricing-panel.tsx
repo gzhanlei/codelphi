@@ -146,7 +146,12 @@ export function PricingPanel() {
           <h2>待支付订单 {order.orderNo.slice(0, 18)}…</h2>
           {order.status === "pending" ? (
             <>
-              {order.prepay?.codeUrl ? <p>微信扫码：请打开微信「扫一扫」支付<br /><code className="pay-code">{order.prepay.codeUrl}</code></p> : null}
+              {order.prepay?.codeUrl ? (
+                <>
+                  {qrDataUrl ? <img src={qrDataUrl} alt="微信支付二维码" width={220} height={220} style={{ border: "1px solid #ddd", borderRadius: 8 }} /> : null}
+                  <p>微信扫码：请打开微信「扫一扫」支付<br /><code className="pay-code">{order.prepay.codeUrl}</code></p>
+                </>
+              ) : null}
               {order.prepay?.h5Url ? <p><a href={order.prepay.h5Url} target="_blank" rel="noreferrer">打开微信 H5 收银台支付 →</a></p> : null}
               {order.prepay?.payUrl ? <p><a href={order.prepay.payUrl} target="_blank" rel="noreferrer">打开支付宝支付 →</a></p> : null}
               <p>支付完成后本页自动更新（轮询中…）。</p>
