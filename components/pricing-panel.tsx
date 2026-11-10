@@ -33,7 +33,6 @@ interface OrderState {
 
 export function PricingPanel() {
   const [offers, setOffers] = useState<Offers | null>(null);
-  const [channel, setChannel] = useState<"wechat" | "alipay">("wechat");
   const [order, setOrder] = useState<OrderState | null>(null);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
@@ -66,7 +65,8 @@ export function PricingPanel() {
       const response = await fetch("/api/pay/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...body, channel }),
+        // 支付宝暂不开放（渠道参数服务端保留，恢复时只需加回渠道切换）
+        body: JSON.stringify({ ...body, channel: "wechat" }),
       });
       const data = await response.json();
       if (!response.ok) {
@@ -81,7 +81,7 @@ export function PricingPanel() {
     } finally {
       setPending(false);
     }
-  }, [channel]);
+  }, []);
 
   // 订单轮询：pending 每 3 秒查一次，终态停止
   useEffect(() => {
@@ -109,10 +109,6 @@ export function PricingPanel() {
 
   return (
     <>
-      <div className="channel-toggle">
-        <button className={channel === "wechat" ? "primary-button" : "text-button"} type="button" onClick={() => setChannel("wechat")}>微信支付</button>
-        <button className={channel === "alipay" ? "primary-button" : "text-button"} type="button" onClick={() => setChannel("alipay")}>支付宝</button>
-      </div>
       <div className="pricing-grid">
         {offers.plans.map((plan) => (
           <div className="panel pricing-card" key={plan.planId}>
@@ -153,7 +149,6 @@ export function PricingPanel() {
                 </>
               ) : null}
               {order.prepay?.h5Url ? <p><a href={order.prepay.h5Url} target="_blank" rel="noreferrer">打开微信 H5 收银台支付 →</a></p> : null}
-              {order.prepay?.payUrl ? <p><a href={order.prepay.payUrl} target="_blank" rel="noreferrer">打开支付宝支付 →</a></p> : null}
               <p>支付完成后本页自动更新（轮询中…）。</p>
             </>
           ) : order.status === "fulfilled" || order.status === "paid" ? (
