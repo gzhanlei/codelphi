@@ -209,17 +209,31 @@ export function specAnchoringSection(previousSpec?: SpecAnchorFeature[], maxChar
   ].join("\n");
 }
 
-/** M9 增量模式：约束 AI 只输出被触及的功能，其余由系统沿用上一版。 */
-export function incrementalScopeSection(affectedFeatureNames?: string[]) {
+/**
+ * W0-10 · 增量输出三类契约（外部评审采纳）：旧契约「必须且只能包含上述功能」会把
+ * 窗口中新发现的行为（新增入口/新模块/既有功能拆分）静默抑制——增量分析最危险的
+ * 失败模式是错误地认定某功能不需要分析。三类输出：
+ *   ① 清单内受影响功能：完整清单重新提取（覆盖与全量相当）；
+ *   ② 清单外新发现：必须作为独立功能输出（系统按行为等价合并，不会重复）；
+ *   ③ 未归属的行为变更文件：显式列出请模型特别核对（可能影响清单外功能或构成新功能）。
+ * 其余既有功能由系统沿用上一版。零成本补救通道：宁可多写一条，不可漏写一条。
+ */
+export function incrementalScopeSection(affectedFeatureNames?: string[], unassignedBehavioralPaths?: readonly string[]) {
   if (!affectedFeatureNames || affectedFeatureNames.length === 0) return null;
-  return [
+  const parts = [
     "【增量分析模式】",
     "本次只深入分析以下功能（这些功能的代码被本次提交触及）：",
     ...affectedFeatureNames.map((name) => `- ${name}`),
-    "features 数组必须且只能包含上述功能；其余功能由系统沿用上一版规格，请勿输出。",
-    "对上述每个功能，输出其当前行为的完整清单，覆盖程度与全量分析相当（通常每功能 3-8 个场景），happy/edge/error 全部类别逐一检查，边界与错误路径不得省略。",
-    "product 简介与 release 变化仍需覆盖整个提交的内容。",
-  ].join("\n");
+    "上述功能必须全部输出：输出其当前行为的完整清单，覆盖程度与全量分析相当（通常每功能 3-8 个场景），happy/edge/error 全部类别逐一检查，边界与错误路径不得省略。",
+    "【清单之外的新发现——必须输出】如果你在窗口代码或 diff 中发现不属于上述任何既有功能的用户可感知行为——包括新增的入口、模块、端点，新文件引入的新功能，或既有功能的拆分——必须作为独立功能输出，不得因为不在清单里而省略。",
+  ];
+  if (unassignedBehavioralPaths && unassignedBehavioralPaths.length > 0) {
+    parts.push("以下文件被本次提交修改，但尚未归属到任何既有功能。请特别核对其行为变化——它们可能影响清单外功能的行为，也可能构成新功能：");
+    parts.push(...unassignedBehavioralPaths.map((path) => `- ${path}`));
+  }
+  parts.push("除上述两类之外，其余既有功能由系统沿用上一版规格，请勿输出。");
+  parts.push("product 简介与 release 变化仍需覆盖整个提交的内容。");
+  return parts.filter(Boolean).join("\n");
 }
 
 export interface LlmBillingContext {
@@ -228,10 +242,10 @@ export interface LlmBillingContext {
   chargeComponent: ChargeComponent;
 }
 
-export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext, context: { previousFeatureNames?: string[]; previousSpec?: SpecAnchorFeature[]; affectedFeatureNames?: string[]; partition?: { index: number; total: number }; billing?: LlmBillingContext } = {}): Promise<AnalysisResult> {
+export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext, context: { previousFeatureNames?: string[]; previousSpec?: SpecAnchorFeature[]; affectedFeatureNames?: string[]; unassignedBehavioralPaths?: string[]; partition?: { index: number; total: number }; billing?: LlmBillingContext } = {}): Promise<AnalysisResult> {
   const anchor = specAnchoringSection(context.previousSpec);
   const continuity = anchor ? null : featureContinuitySection(context.previousFeatureNames);
-  const scope = incrementalScopeSection(context.affectedFeatureNames);
+  const scope = incrementalScopeSection(context.affectedFeatureNames, context.unassignedBehavioralPaths);
   const partition = context.partition;
   const partitionSection = partition
     ? `\n【分区提取】\n本窗口是代码库的第 ${partition.index}/${partition.total} 个分区，只包含代码库的一部分。其他分区由独立提取负责，合并层会统一去重与归并：只需覆盖本窗口内的全部主要用户功能，不要猜测窗口外的模块，也不要输出「其他功能见其他分区」之类的占位条目。`

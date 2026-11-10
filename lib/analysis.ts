@@ -359,6 +359,8 @@ async function runAnalysisBody(run: RunContext) {
   // M9：增量模式下计算受影响集并做保守放行判定；任一条件不满足即回退全量。
   let affectedKeys: ReadonlySet<string> | null = null;
   let affectedFeatureNames: string[] | undefined;
+  // W0-10：未归属的行为变更文件 = 行为 diff 文件中未命中索引者——显式交给增量 prompt 核对
+  let unassignedBehavioralPaths: string[] | undefined;
   if (run.analyzeMode === "incremental") {
     const affected = await loadAffectedFeatureKeys(run.repositoryId, change.files.map((file) => file.path), executeWrapper);
     const resolved = resolveAnalysisMode({
@@ -371,6 +373,7 @@ async function runAnalysisBody(run: RunContext) {
     if (resolved === "incremental") {
       affectedKeys = affected.keys;
       affectedFeatureNames = affected.names;
+      unassignedBehavioralPaths = behavioralPaths.filter((path) => !affected.matchedPaths.has(path));
     } else if (previousFeatureNames.length > 0) {
       // RC2（生产 run 125，2026-11-08）：全量回退不再裸跑——按行为变更集（patch-scan）
       // 重新算受影响面，证据文件本次无行为性行变更的既有功能原样沿用，只重提取行为性
@@ -380,6 +383,7 @@ async function runAnalysisBody(run: RunContext) {
       if (behavioral.names.length > 0) {
         affectedKeys = behavioral.keys;
         affectedFeatureNames = behavioral.names;
+        unassignedBehavioralPaths = behavioralPaths.filter((path) => !behavioral.matchedPaths.has(path));
       }
     }
   }
@@ -415,7 +419,7 @@ async function runAnalysisBody(run: RunContext) {
       context: {
         previousFeatureNames,
         previousSpec: previousSpecText,
-        ...(affectedKeys !== null ? { affectedFeatureNames } : {}),
+        ...(affectedKeys !== null ? { affectedFeatureNames, unassignedBehavioralPaths } : {}),
         billing: { runId: run.id, accountId: run.accountId ?? null, chargeComponent: "main" },
       },
       allowSet: evidenceAllowSet(single, change),
@@ -433,7 +437,7 @@ async function runAnalysisBody(run: RunContext) {
         context: {
           previousFeatureNames: [...knownFeatureNames],
           previousSpec: previousSpecText,
-          ...(affectedKeys !== null ? { affectedFeatureNames } : {}),
+          ...(affectedKeys !== null ? { affectedFeatureNames, unassignedBehavioralPaths } : {}),
           partition: { index: index + 1, total: partitions.length },
           billing: { runId: run.id, accountId: run.accountId ?? null, chargeComponent: "main" },
         },

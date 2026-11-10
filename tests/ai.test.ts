@@ -107,11 +107,18 @@ describe("feature naming continuity", () => {
     expect(section).toContain("已截断");
   });
 
-  it("renders the incremental scope section only for listed features", () => {
-    const section = incrementalScopeSection(["登录", "支付"]);
+  it("renders the incremental scope section with the three-class output contract (W0-10)", () => {
+    const section = incrementalScopeSection(["登录", "支付"], ["src/permission.ts"]);
     expect(section).toContain("【增量分析模式】");
     expect(section).toContain("- 登录");
-    expect(section).toContain("必须且只能包含上述功能");
+    expect(section).toContain("上述功能必须全部输出");
+    // ② 清单外新发现：必须输出（旧契约「必须且只能包含」会抑制新功能发现）
+    expect(section).toContain("清单之外的新发现——必须输出");
+    expect(section).toContain("不得因为不在清单里而省略");
+    // ③ 未归属的行为变更文件显式列出
+    expect(section).toContain("尚未归属到任何既有功能");
+    expect(section).toContain("src/permission.ts");
+    expect(section).toContain("其余既有功能由系统沿用上一版规格，请勿输出");
     expect(incrementalScopeSection(undefined)).toBeNull();
     expect(incrementalScopeSection([])).toBeNull();
   });

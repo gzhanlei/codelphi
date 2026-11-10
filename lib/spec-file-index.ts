@@ -45,14 +45,16 @@ export async function rebuildSpecFileIndex(connection: PoolConnection, repositor
 export interface AffectedFeatureKeys {
   keys: Set<string>;
   names: string[];
+  /** 命中索引的 diff 路径（用于计算「未归属的行为变更」）。 */
+  matchedPaths: Set<string>;
 }
 
 /** M9：diff 触碰的文件 ∩ 反向索引 → 受影响的规格功能（stable_key 集合 + 名称清单）。 */
 export async function loadAffectedFeatureKeys(repositoryId: number, paths: string[], execute: Execute = defaultExecute): Promise<AffectedFeatureKeys> {
-  if (paths.length === 0) return { keys: new Set(), names: [] };
+  if (paths.length === 0) return { keys: new Set(), names: [], matchedPaths: new Set() };
   const placeholders = paths.map(() => "?").join(",");
   const result = await execute(
-    `SELECT DISTINCT sf.stable_key AS stableKey, sf.name
+    `SELECT DISTINCT sf.stable_key AS stableKey, sf.name, i.path
      FROM spec_file_index i
      JOIN spec_features sf ON sf.id = i.spec_feature_id
      WHERE i.repository_id = ? AND i.path IN (${placeholders})
@@ -60,8 +62,8 @@ export async function loadAffectedFeatureKeys(repositoryId: number, paths: strin
     [repositoryId, ...paths],
   );
   const payload = Array.isArray(result) ? result[0] : [];
-  const rows = (Array.isArray(payload) ? payload : []) as Array<{ stableKey: string; name: string }>;
-  return { keys: new Set(rows.map((row) => row.stableKey)), names: [...new Set(rows.map((row) => row.name))] };
+  const rows = (Array.isArray(payload) ? payload : []) as Array<{ stableKey: string; name: string; path: string }>;
+  return { keys: new Set(rows.map((row) => row.stableKey)), names: [...new Set(rows.map((row) => row.name))], matchedPaths: new Set(rows.map((row) => row.path)) };
 }
 
 export interface AffectedScenario {

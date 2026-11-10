@@ -256,7 +256,7 @@ describe("analysis orchestration", () => {
       if (sql.includes("SELECT id FROM analysis_runs WHERE repository_id = ? AND after_sha = ?")) return [existingRunRows];
       if (sql.includes("INSERT INTO analysis_runs")) return [{ insertId: 55 }];
       if (sql.includes("SELECT sf.name FROM spec_features")) return [[{ name: "统一登录" }]];
-      if (sql.includes("FROM spec_file_index i")) return [[{ stableKey: "统一登录", name: "统一登录" }]];
+      if (sql.includes("FROM spec_file_index i")) return [[{ stableKey: "统一登录", name: "统一登录", path: "lib/auth.ts" }]];
       return [{}];
     });
     adapter.getChangeContext.mockResolvedValue({ message: "change", committedAt: "2026-11-01T00:00:00Z", url: "", files: [{ path: "lib/auth.ts", status: "modified", patch: "+ const token = sign(payload);" }] });
