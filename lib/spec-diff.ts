@@ -130,8 +130,10 @@ function featureChange(kind: "added" | "removed" | "changed", feature: SpecFeatu
 }
 
 export function scenarioBehaviorEqual(previous: SpecScenario, current: SpecScenario) {
-  return previous.category === current.category
-    && specTextEquivalent(previous.context, current.context)
+  // BM-5（benchmark bm1-incremental-blind-eval §3 F3）：同一触发/操作/结果即同一行为，
+  // category（happy/edge/error）是呈现标签——同文重复被标成不同 category（run 64：
+  // SQL 编辑器 ER-1=error 与 EC-5=edge 逐字同文并存）不构成新场景，等价时保留先到者。
+  return specTextEquivalent(previous.context, current.context)
     && specTextEquivalent(previous.action, current.action)
     && specTextEquivalent(previous.outcome, current.outcome);
 }

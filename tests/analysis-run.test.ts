@@ -340,7 +340,7 @@ describe("analysis orchestration", () => {
         merged.push({ ...feature });
       }
       mergedCalls.push(merged);
-      return { specVersionId: 44, features: merged, collapse: null };
+      return { specVersionId: 44, features: merged, collapse: null, identityHijacksDropped: 0 };
     });
     return mergedCalls;
   };

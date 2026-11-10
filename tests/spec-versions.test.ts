@@ -101,6 +101,32 @@ describe("spec version persistence", () => {
     expect(db.execute).not.toHaveBeenCalledWith(expect.stringContaining("INSERT INTO spec_features"), expect.arrayContaining(["Legacy"]));
   });
 
+  it("drops AI features that rewrite carried keys and keeps the carried content (BM-4 身份门禁)", async () => {
+    const db = connection([{ id: 11 }]);
+    const hijack = { name: "Legacy", summary: "SQL Lab 对无 schema 表应用 RLS", scenarios: [{ ...scenario, outcome: "RLS 谓词注入" }] };
+    const { features, identityHijacksDropped } = await insertSpecVersion(
+      db,
+      run,
+      { ...result, features: [result.features[0], result.features[1], hijack] },
+      { affectedKeys: new Set(["authentication"]) },
+    );
+    expect(identityHijacksDropped).toBe(1);
+    // carried 内容保全：Legacy 仍是上一版原样（summary "Removed"），不是 AI 的劫持内容
+    const legacy = features.find((feature) => feature.name === "Legacy");
+    expect(legacy?.summary).toBe("Removed");
+    expect(features.some((feature) => feature.name === "Legacy" && feature.summary === "SQL Lab 对无 schema 表应用 RLS")).toBe(false);
+    // 真实新行为不受影响：新键（contract ②）与受影响键（contract ①）照常写入
+    expect(features.map((feature) => feature.name)).toEqual(expect.arrayContaining(["Authentication", "New feature"]));
+  });
+
+  it("does not engage the identity gate in full mode", async () => {
+    const db = connection([{ id: 11 }]);
+    const hijack = { name: "Legacy", summary: "Rewritten", scenarios: [] };
+    const { features, identityHijacksDropped } = await insertSpecVersion(db, run, { ...result, features: [...result.features, hijack] });
+    expect(identityHijacksDropped).toBe(0);
+    expect(features.some((feature) => feature.name === "Legacy" && feature.summary === "Rewritten")).toBe(true);
+  });
+
   it("does not resurrect manually deleted generated content", async () => {
     const db = connection([], false, { feature: "New feature", scenario: "HP-1" });
     await insertSpecVersion(db, run, result);

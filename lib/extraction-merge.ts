@@ -52,7 +52,7 @@ export function mergeChunkResults(chunks: ExtractionChunk[], onStats?: (stats: {
         group.summaryScenarioCount = feature.scenarios.length;
       }
       for (const scenario of feature.scenarios) {
-        // 行为等价去重：同分类 + 情境/操作/结果同义（措辞漂移不算新场景）
+        // 行为等价去重：情境/操作/结果同义即同一行为（category 只是呈现标签，BM-5）
         if (group.scenarios.some((existing) => scenarioBehaviorEqual(existing, scenario))) {
           scenariosDeduped += 1;
           continue;

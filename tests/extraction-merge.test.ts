@@ -83,12 +83,19 @@ describe("mergeChunkResults", () => {
     expect(merged.features).toHaveLength(80);
   });
 
-  it("keeps category-distinct scenarios even with identical outcome text", () => {
+  it("dedupes identical behavior across category labels and keeps genuinely different outcomes (BM-5)", () => {
+    // BM-5：category 是呈现标签，同触发/操作/结果即同一行为（run 64：ER-1=error 与
+    // EC-5=edge 逐字同文并存的重复实例）；结果不同仍是两个行为。
     const merged = mergeChunkResults([
       chunk([{ name: "统一登录", summary: "s", scenarios: [scenario("HP-1", "返回结果页")] }]),
       chunk([{ name: "统一登录", summary: "s", scenarios: [scenario("HP-1", "返回结果页", "edge")] }]),
     ]);
-    expect(merged.features[0].scenarios).toHaveLength(2);
+    expect(merged.features[0].scenarios).toHaveLength(1);
+    const distinct = mergeChunkResults([
+      chunk([{ name: "统一登录", summary: "s", scenarios: [scenario("HP-1", "返回结果页")] }]),
+      chunk([{ name: "统一登录", summary: "s", scenarios: [scenario("HP-1", "拒绝并返回 401", "edge")] }]),
+    ]);
+    expect(distinct.features[0].scenarios).toHaveLength(2);
   });
 
   it("truncates changes to the schema cap of 150 after dedupe", () => {

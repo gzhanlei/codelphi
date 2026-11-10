@@ -54,6 +54,8 @@ export interface MergeIntegrityDimension {
   state: LedgerState;
   changesTruncated: number;
   scenariosDeduped: number;
+  /** BM-4 身份门禁：增量模式下 AI 覆盖 carried 键（同名键身份劫持）被丢弃的特征数。 */
+  identityHijacksDropped: number;
   outcomeConflicts: number;
   collapse: boolean;
 }
@@ -149,9 +151,10 @@ export function deriveEvidenceIntegrity(summaries: EvidenceSanitizeSummary[]): E
   return { state, droppedClaims, droppedScenarios, droppedFeatures, allCandidatesRejectedPasses };
 }
 
-export function deriveMergeIntegrity(input: { changesTruncated: number; scenariosDeduped: number; outcomeConflicts: number; collapse: boolean }): MergeIntegrityDimension {
+export function deriveMergeIntegrity(input: { changesTruncated: number; scenariosDeduped: number; identityHijacksDropped: number; outcomeConflicts: number; collapse: boolean }): MergeIntegrityDimension {
   let state: LedgerState = "complete";
-  if (input.changesTruncated > 0 || input.outcomeConflicts > 0 || input.collapse) state = "partial";
+  // BM-4：身份劫持被门禁拦下 ≠ 没发生——模型违约本身是完整性信号，如实 partial
+  if (input.changesTruncated > 0 || input.outcomeConflicts > 0 || input.collapse || input.identityHijacksDropped > 0) state = "partial";
   return { state, ...input };
 }
 

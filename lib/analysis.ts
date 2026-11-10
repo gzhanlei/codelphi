@@ -236,7 +236,7 @@ async function saveResult(run: RunContext, result: AnalysisResult, change: Chang
       [result.product.description, JSON.stringify(result.product.evidence), run.productId],
     );
     const behavioralPaths = behavioralChangePaths(change.files);
-    const { specVersionId, features: mergedFeatures, collapse } = await insertSpecVersion(connection, run, result, { ...(affectedKeys ? { affectedKeys } : {}), behavioralChangePaths: behavioralPaths });
+    const { specVersionId, features: mergedFeatures, collapse, identityHijacksDropped } = await insertSpecVersion(connection, run, result, { ...(affectedKeys ? { affectedKeys } : {}), behavioralChangePaths: behavioralPaths });
     await rebuildSpecFileIndex(connection, run.repositoryId, specVersionId);
     await markSpecDrift(connection, run.productId, specVersionId);
     // B1：覆盖率回执与规格版本同事务落库（append-only，历史版本可回溯）
@@ -247,7 +247,7 @@ async function saveResult(run: RunContext, result: AnalysisResult, change: Chang
     await upsertRelease(connection, run, result, change, specVersionId);
     await connection.execute("UPDATE analysis_runs SET status = 'succeeded', finished_at = CURRENT_TIMESTAMP(3) WHERE id = ?", [run.id]);
     await connection.commit();
-    return { specVersionId, features: mergedFeatures, collapse };
+    return { specVersionId, features: mergedFeatures, collapse, identityHijacksDropped };
   } catch (error) {
     await connection.rollback();
     throw error;
@@ -480,7 +480,7 @@ async function runAnalysisBody(run: RunContext) {
     // 增强层失败不得被误认为完整成功
     console.log("[analysis] behavioral enumeration", { runId: run.id, ...enumerationMetrics });
   }
-  const { specVersionId, features: mergedFeatures, collapse } = await saveResult(run, result, change, affectedKeys, coverage);
+  const { specVersionId, features: mergedFeatures, collapse, identityHijacksDropped } = await saveResult(run, result, change, affectedKeys, coverage);
   // W0-9 一致性核验：同功能内互斥结果并存（枚举多通道产物的语义矛盾）→ 告警供人工核实（append-only 已落库，不改写）
   const conflicts = detectOutcomeConflicts(mergedFeatures);
   if (conflicts.length > 0) {
@@ -567,7 +567,7 @@ async function runAnalysisBody(run: RunContext) {
       }),
       extractionCompletion: deriveExtractionCompletion(partitions.length, passInfos.map((pass) => ({ retries: pass.retries, empty: pass.sanitize.empty }))),
       evidenceIntegrity: deriveEvidenceIntegrity(passInfos.map((pass) => pass.sanitize)),
-      mergeIntegrity: deriveMergeIntegrity({ changesTruncated: mergeStats.changesTruncated, scenariosDeduped: mergeStats.scenariosDeduped, outcomeConflicts: conflicts.length, collapse: Boolean(collapse) }),
+      mergeIntegrity: deriveMergeIntegrity({ changesTruncated: mergeStats.changesTruncated, scenariosDeduped: mergeStats.scenariosDeduped, identityHijacksDropped, outcomeConflicts: conflicts.length, collapse: Boolean(collapse) }),
       verification: deriveVerification({ outcomeConflicts: conflicts.length, shadowRan, shadowConsistent }),
     } as const;
     const overall = deriveOverallState([

@@ -106,14 +106,16 @@ describe("deriveEvidenceIntegrity", () => {
 });
 
 describe("deriveMergeIntegrity", () => {
-  it("partial on truncation, conflicts, or collapse", () => {
-    expect(deriveMergeIntegrity({ changesTruncated: 20, scenariosDeduped: 5, outcomeConflicts: 0, collapse: false }).state).toBe("partial");
-    expect(deriveMergeIntegrity({ changesTruncated: 0, scenariosDeduped: 5, outcomeConflicts: 1, collapse: false }).state).toBe("partial");
-    expect(deriveMergeIntegrity({ changesTruncated: 0, scenariosDeduped: 5, outcomeConflicts: 0, collapse: true }).state).toBe("partial");
+  it("partial on truncation, conflicts, collapse, or identity hijacks", () => {
+    expect(deriveMergeIntegrity({ changesTruncated: 20, scenariosDeduped: 5, identityHijacksDropped: 0, outcomeConflicts: 0, collapse: false }).state).toBe("partial");
+    expect(deriveMergeIntegrity({ changesTruncated: 0, scenariosDeduped: 5, identityHijacksDropped: 0, outcomeConflicts: 1, collapse: false }).state).toBe("partial");
+    expect(deriveMergeIntegrity({ changesTruncated: 0, scenariosDeduped: 5, identityHijacksDropped: 0, outcomeConflicts: 0, collapse: true }).state).toBe("partial");
+    // BM-4：身份劫持被门禁拦下 ≠ 没发生——模型违约本身是完整性信号
+    expect(deriveMergeIntegrity({ changesTruncated: 0, scenariosDeduped: 5, identityHijacksDropped: 2, outcomeConflicts: 0, collapse: false }).state).toBe("partial");
   });
 
   it("complete when merge is clean (dedup alone is by-design, not partial)", () => {
-    expect(deriveMergeIntegrity({ changesTruncated: 0, scenariosDeduped: 9, outcomeConflicts: 0, collapse: false }).state).toBe("complete");
+    expect(deriveMergeIntegrity({ changesTruncated: 0, scenariosDeduped: 9, identityHijacksDropped: 0, outcomeConflicts: 0, collapse: false }).state).toBe("complete");
   });
 });
 

@@ -211,14 +211,38 @@ async function insertChanges(connection: PoolConnection, versionId: number, base
   }
 }
 
-export async function insertSpecVersion(connection: PoolConnection, run: RunContext, result: AnalysisResult, options: { affectedKeys?: ReadonlySet<string>; behavioralChangePaths?: ReadonlySet<string> } = {}): Promise<{ specVersionId: number; features: ReturnType<typeof mergeSpecSources>; collapse: SpecVersionCollapse | null }> {
+export async function insertSpecVersion(connection: PoolConnection, run: RunContext, result: AnalysisResult, options: { affectedKeys?: ReadonlySet<string>; behavioralChangePaths?: ReadonlySet<string> } = {}): Promise<{ specVersionId: number; features: ReturnType<typeof mergeSpecSources>; collapse: SpecVersionCollapse | null; identityHijacksDropped: number }> {
   const [previous, manual, tombstones] = await Promise.all([loadPreviousSpec(connection, run), loadManualSpec(connection, run.productId), loadManualTombstones(connection, run.productId)]);
   // M9 增量模式：受影响集之外的 generated 条目原样沿用上一版（三分合并：carried 种子 < AI < manual）。
   const affectedKeys = options.affectedKeys;
   const carried = affectedKeys && previous
     ? previous.features.filter((feature) => !affectedKeys.has(specFeatureKey(feature.name)))
     : [];
-  const features = mergeSpecSources(result.features, manual, tombstones, carried);
+  // BM-4 身份门禁（benchmark bm1-incremental-blind-eval §3 F1，P0）：增量模式下 AI 输出
+  // 不得覆盖 carried 键——W0-10 契约规定未受影响功能原样沿用、新行为走新键；违反即
+  // 「同名键身份劫持」（run 64 实锤：`databricks sql lab` 的内容被整体置换为 SQL Lab RLS）。
+  // 命中 carried 键的 AI 特征直接丢弃并计数（进完整性账本 mergeIntegrity），carried 内容保全；
+  // 真实新行为仍可经 ② 通道以新键进入规格。
+  let generated = result.features;
+  let identityHijacksDropped = 0;
+  if (affectedKeys && carried.length > 0) {
+    const carriedKeys = new Set(carried.map((feature) => specFeatureKey(feature.name)));
+    const hijackedNames: string[] = [];
+    generated = generated.filter((feature) => {
+      if (!carriedKeys.has(specFeatureKey(feature.name))) return true;
+      hijackedNames.push(feature.name);
+      return false;
+    });
+    identityHijacksDropped = hijackedNames.length;
+    if (identityHijacksDropped > 0) {
+      console.error("[spec] identity hijack dropped (BM-4 gate)", {
+        runId: run.id,
+        dropped: identityHijacksDropped,
+        keys: hijackedNames.map((name) => specFeatureKey(name)),
+      });
+    }
+  }
+  const features = mergeSpecSources(generated, manual, tombstones, carried);
   const changes = diffSpec(previous === null ? null : previous.features, features, options.behavioralChangePaths ? { behavioralChangePaths: options.behavioralChangePaths } : undefined);
   const collapse = detectSpecCollapse(previous, features);
   const [versionResult] = await connection.execute(
@@ -229,7 +253,7 @@ export async function insertSpecVersion(connection: PoolConnection, run: RunCont
   await insertFeatures(connection, versionId, features);
   await insertChanges(connection, versionId, previous === null ? null : previous.id, changes);
   // 合并后的完整 spec 一并返回：M9 影子对比必须以 carry-forward 之后的规格为对象。
-  return { specVersionId: versionId, features, collapse };
+  return { specVersionId: versionId, features, collapse, identityHijacksDropped };
 }
 
 /** 规格坍缩（护栏）：新版场景数较上一版骤降超过阈值。生产 v95（2026-11-08）178→83 即此形态。 */
