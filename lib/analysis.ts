@@ -51,6 +51,7 @@ export interface RunContext {
  * （空版本由坍缩护栏下游告警），不在此处抛错。
  */
 export function sanitizeEvidence(result: AnalysisResult, sources: Set<string>, label: string) {
+  const hadCandidates = result.features.length > 0 || result.changes.length > 0;
   const droppedPaths = new Set<string>();
   const keep = (items: AnalysisResult["product"]["evidence"]) =>
     items.filter((item) => {
@@ -72,6 +73,10 @@ export function sanitizeEvidence(result: AnalysisResult, sources: Set<string>, l
   });
   if (droppedPaths.size > 0) {
     console.warn("[analysis] dropped evidence-untraceable claims", { label, paths: [...droppedPaths], keptFeatures: result.features.length });
+  }
+  // W0-9 评审采纳（空结果三态）：候选全部被清洗 ≠ 无行为变化——独立告警，不得伪装成正常空结果
+  if (hadCandidates && result.features.length === 0 && result.changes.length === 0) {
+    console.error("[analysis] all_candidates_rejected", { label, paths: [...droppedPaths] });
   }
 }
 
@@ -383,6 +388,7 @@ async function runAnalysisBody(run: RunContext) {
     partitions,
     maxPartitions: analysisMaxPartitions(),
     implSurface: await enumerateImplementationSurface(sourceIndex),
+    diffPaths: remoteAnalysisRequest.diffPaths,
   });
   if (partitions.length === 1) {
     const single = partitions[0];
@@ -424,7 +430,7 @@ async function runAnalysisBody(run: RunContext) {
   // W0-8 行为面枚举：行为文件逐组定向提问（每文件显式回答行为/无行为），把召回从
   // 注意力问题变枚举问题。枚举是增强层：组硬失败重试一次后跳过，不阻塞主提取产出。
   if (behavioralEnumerationEnabled() && behavioralPaths.length > 0) {
-    const enumerated = await enumerateBehavioralChunks({
+    const { chunks: enumeratedChunks, metrics: enumerationMetrics } = await enumerateBehavioralChunks({
       behavioralPaths,
       files: change.files,
       index: sourceIndex,
@@ -432,11 +438,14 @@ async function runAnalysisBody(run: RunContext) {
       knownFeatureNames: [...knownFeatureNames],
       billing: { runId: run.id, accountId: run.accountId ?? null, chargeComponent: "main" },
     });
-    for (const { result: chunk } of enumerated) {
+    for (const { result: chunk } of enumeratedChunks) {
       for (const feature of chunk.features) knownFeatureNames.add(feature.name);
       chunks.push({ result: chunk });
     }
     result = mergeChunkResults(chunks);
+    // W0-9 评审采纳：枚举完整性状态结构化留痕（complete/partial/failed/not_applicable）——
+    // 增强层失败不得被误认为完整成功
+    console.log("[analysis] behavioral enumeration", { runId: run.id, ...enumerationMetrics });
   }
   const { specVersionId, features: mergedFeatures, collapse } = await saveResult(run, result, change, affectedKeys, coverage);
   // W0-9 一致性核验：同功能内互斥结果并存（枚举多通道产物的语义矛盾）→ 告警供人工核实（append-only 已落库，不改写）

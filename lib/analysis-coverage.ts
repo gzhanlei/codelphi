@@ -18,6 +18,10 @@ export interface AnalysisCoverageReceipt {
   coverageRatio: number;
   partitionsUsed: number;
   partitionsCapped: boolean;
+  /** W0-9 评审采纳：diff 覆盖口径——必选 ≠ 全覆盖，遗漏必须可见（null = 无窗口 diff 或 058 前历史版本）。 */
+  diffTotalPaths: number | null;
+  diffSelectedPaths: number | null;
+  diffOmittedPaths: number | null;
 }
 
 /** 全树实现面枚举：BFS listDir，元数据级（不读文件内容），受索引预算约束。 */
@@ -51,17 +55,28 @@ export function computeCoverageReceipt(input: {
   partitions: AnalysisPartition[];
   maxPartitions: number;
   implSurface?: Array<{ path: string; size: number }>;
+  /** W0-9 评审采纳：窗口 diff 路径清单（diff 覆盖率口径）。 */
+  diffPaths?: readonly string[];
 }): AnalysisCoverageReceipt {
   const assembledPaths = new Set<string>();
   for (const partition of input.partitions) {
     for (const file of partition.slice.files) assembledPaths.add(file.path);
   }
+  const assembledAll = assembledPaths;
   const assembled = [...assembledPaths].filter((path) => evidenceKind(path) === "implementation");
   const implBytesAssembled = input.partitions.reduce((total, partition) => {
     return total + partition.sources.reduce((sum, source) => sum + Buffer.byteLength(source.content, "utf8"), 0);
   }, 0);
   const surface = input.implSurface ?? [];
   const implBytesTotal = surface.reduce((total, file) => total + file.size, 0);
+  // W0-9 评审采纳：diff 必选 ≠ diff 全覆盖——diff 面自身的入选/遗漏单独计数，
+  // 6 分区帽或不可读导致的遗漏必须可见（「优先选择」不等于「实际覆盖」）。
+  const diffPaths = input.diffPaths ?? [];
+  const diffSelectedPaths = new Set<string>();
+  for (const path of new Set(diffPaths)) {
+    if (assembledAll.has(path)) diffSelectedPaths.add(path);
+  }
+  const diffTotal = diffSelectedPaths.size + [...new Set(diffPaths)].filter((path) => !assembledAll.has(path)).length;
   return {
     implFilesAssembled: assembled.length,
     implFilesTotal: surface.length,
@@ -70,6 +85,9 @@ export function computeCoverageReceipt(input: {
     coverageRatio: implBytesTotal === 0 ? 0 : implBytesAssembled / implBytesTotal,
     partitionsUsed: input.partitions.length,
     partitionsCapped: input.partitions.length >= input.maxPartitions,
+    diffTotalPaths: diffPaths.length > 0 ? diffTotal : null,
+    diffSelectedPaths: diffPaths.length > 0 ? diffSelectedPaths.size : null,
+    diffOmittedPaths: diffPaths.length > 0 ? diffTotal - diffSelectedPaths.size : null,
   };
 }
 
@@ -82,9 +100,9 @@ export function isCoverageCapped(receipt: AnalysisCoverageReceipt, maxPartitions
 export async function saveCoverageReceipt(connection: Pick<PoolConnection, "execute">, specVersionId: number, receipt: AnalysisCoverageReceipt) {
   await connection.execute(
     `INSERT INTO analysis_coverage_receipts
-      (spec_version_id, impl_files_assembled, impl_files_total, impl_bytes_assembled, impl_bytes_total, coverage_ratio, partitions_used, partitions_capped)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [specVersionId, receipt.implFilesAssembled, receipt.implFilesTotal, receipt.implBytesAssembled, receipt.implBytesTotal, receipt.coverageRatio, receipt.partitionsUsed, receipt.partitionsCapped ? 1 : 0],
+      (spec_version_id, impl_files_assembled, impl_files_total, impl_bytes_assembled, impl_bytes_total, coverage_ratio, partitions_used, partitions_capped, diff_total_paths, diff_selected_paths, diff_omitted_paths)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [specVersionId, receipt.implFilesAssembled, receipt.implFilesTotal, receipt.implBytesAssembled, receipt.implBytesTotal, receipt.coverageRatio, receipt.partitionsUsed, receipt.partitionsCapped ? 1 : 0, receipt.diffTotalPaths, receipt.diffSelectedPaths, receipt.diffOmittedPaths],
   );
 }
 

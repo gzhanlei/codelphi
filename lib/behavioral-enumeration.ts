@@ -110,13 +110,40 @@ const MAX_LINES_PER_READ = 400;
  * 仍失败则跳过该组（定向枚举是增强层，分区提取已提供基线覆盖）。每组结果用
  * 「组文件 ∪ 全部 diff 文件」作证据允许集清洗后返回；清洗后为空的组不返回。
  */
-export async function enumerateBehavioralChunks(options: BehavioralEnumerationOptions): Promise<BehavioralEnumerationChunk[]> {
+export interface BehavioralEnumerationMetrics {
+  /** patch-scan 行为文件总数。 */
+  pathsTotal: number;
+  /** 实际进入枚举组并被处理的文件数。 */
+  pathsEnumerated: number;
+  /** 未进入枚举的文件数（组数帽/组失败/不可读）。 */
+  pathsOmitted: number;
+  groupsTotal: number;
+  groupsCompleted: number;
+  groupsFailed: number;
+  /** complete / partial / failed / not_applicable——增强层失败不得被误认为完整成功。 */
+  status: "complete" | "partial" | "failed" | "not_applicable";
+}
+
+export interface BehavioralEnumerationOutcome {
+  chunks: BehavioralEnumerationChunk[];
+  metrics: BehavioralEnumerationMetrics;
+}
+
+export async function enumerateBehavioralChunks(options: BehavioralEnumerationOptions): Promise<BehavioralEnumerationOutcome> {
+  const pathsTotal = new Set(options.behavioralPaths).size;
+  if (pathsTotal === 0) {
+    return { chunks: [], metrics: { pathsTotal: 0, pathsEnumerated: 0, pathsOmitted: 0, groupsTotal: 0, groupsCompleted: 0, groupsFailed: 0, status: "not_applicable" } };
+  }
   const groups = groupBehavioralTargets(options.behavioralPaths, behavioralEnumerationGroupSize());
   const capped = groups.slice(0, behavioralEnumerationMaxGroups());
-  if (groups.length > capped.length) {
-    console.warn("[analysis] behavioral enumeration capped", { groups: groups.length, used: capped.length });
+  const cappedGroups = groups.length - capped.length;
+  if (cappedGroups > 0) {
+    console.warn("[analysis] behavioral enumeration capped", { groups: groups.length, used: capped.length, omittedPaths: new Set(groups.slice(capped.length).flat()).size });
   }
   const chunks: BehavioralEnumerationChunk[] = [];
+  let groupsCompleted = 0;
+  let groupsFailed = 0;
+  const pathsEnumerated = new Set<string>();
   for (const [groupIndex, group] of capped.entries()) {
     const label = `w0-8/g${groupIndex + 1}`;
     const targets: Array<{ path: string; patch: string; contextBlocks: Array<{ startLine: number; endLine: number; content: string }> }> = [];
@@ -157,7 +184,15 @@ export async function enumerateBehavioralChunks(options: BehavioralEnumerationOp
     }
     const allowSet = new Set([...group, ...options.files.map((file) => file.path)]);
     sanitizeEvidence(chunk, allowSet, label);
+    groupsCompleted += 1;
+    for (const target of targets) pathsEnumerated.add(target.path);
     if (chunk.features.length > 0) chunks.push({ result: chunk, label });
   }
-  return chunks;
+  groupsFailed = capped.length - groupsCompleted;
+  const pathsOmitted = pathsTotal - pathsEnumerated.size;
+  const status = pathsEnumerated.size === 0 ? "failed" : groupsFailed > 0 || cappedGroups > 0 || pathsOmitted > 0 ? "partial" : "complete";
+  return {
+    chunks,
+    metrics: { pathsTotal, pathsEnumerated: pathsEnumerated.size, pathsOmitted, groupsTotal: groups.length, groupsCompleted, groupsFailed, status },
+  };
 }
