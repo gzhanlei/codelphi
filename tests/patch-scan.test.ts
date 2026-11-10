@@ -86,4 +86,60 @@ describe("patch-scan 行为性行判定", () => {
     expect(behavioral.has("superset/config.py")).toBe(true);
     expect(behavioral.has(".gitlab-ci.yml")).toBe(false);
   });
+
+  it("treats a formatter reflow as non-behavioral — the real M8 patch shape (BM-9)", () => {
+    // 3807a4d743 真实形态：多行参数体折叠为单行，去空白后内容逐字符一致
+    const files = [
+      {
+        path: "superset-frontend/src/dashboard/components/filterscope/FilterScopeSelector.tsx",
+        status: "modified",
+        patch: [
+          "@@ -503,11 +503,10 @@ export default function FilterScopeSelector({",
+          "-  const [checkedFilterFields, setCheckedFilterFields] = useState<string[]>(",
+          "-    () =>",
+          "-      initialized.showSelector",
+          "-        ? initialized.initialState.checkedFilterFields",
+          "-        : [],",
+          "+  const [checkedFilterFields, setCheckedFilterFields] = useState<string[]>(() =>",
+          "+    initialized.showSelector",
+          "+      ? initialized.initialState.checkedFilterFields",
+          "+      : [],",
+          "  );",
+        ].join("\n"),
+      },
+    ];
+    expect(behavioralChangePaths(files).size).toBe(0);
+  });
+
+  it("treats a pure line reorder as non-behavioral (BM-9)", () => {
+    const files = [
+      {
+        path: "superset/utils/order.ts",
+        status: "modified",
+        patch: [
+          "@@ -1,5 +1,5 @@",
+          "-const a = computeA();",
+          "-const b = computeB();",
+          "+const b = computeB();",
+          "+const a = computeA();",
+        ].join("\n"),
+      },
+    ];
+    expect(behavioralChangePaths(files).size).toBe(0);
+  });
+
+  it("keeps semantic changes behavioral despite identical token multisets (BM-9 保守边界)", () => {
+    const files = [
+      // 操作数交换：token multiset 相同但行为翻转
+      { path: "superset/utils/math.ts", status: "modified", patch: "-const delta = b - a;\n+const delta = a - b;" },
+      // 运算符替换：去空白串不同
+      { path: "superset/utils/fallback.ts", status: "modified", patch: "-const v = a || b;\n+const v = a ?? b;" },
+      // optional chaining：标点差异被保留
+      { path: "superset/utils/access.ts", status: "modified", patch: "-const n = a.b;\n+const n = a?.b;" },
+      // 纯新增代码
+      { path: "superset/utils/new.ts", status: "modified", patch: "+const fresh = 1;" },
+    ];
+    const behavioral = behavioralChangePaths(files);
+    expect(behavioral.size).toBe(4);
+  });
 });
