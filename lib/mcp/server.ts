@@ -5,7 +5,6 @@ import { loadRegressionTasks } from "../regression-tasks";
 import { loadCoverageReceipt } from "../analysis-coverage";
 import { loadCompletenessLedgerBySpecVersion } from "../completeness-ledger";
 import { defaultExecute, type Execute } from "../db";
-import type { McpKeyIdentity } from "./api-keys";
 
 /**
  * 稳定键解析内联版（与 lib/stable-links.ts 同语义）。2026-11-10 生产事故：各 route bundle

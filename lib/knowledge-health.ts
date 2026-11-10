@@ -22,8 +22,6 @@ export interface KnowledgeHealthReport {
   unattributedEdits: number;
 }
 
-const KIND_LABEL: Record<string, string> = { happy: "HP", edge: "EC", error: "ER" };
-
 export function buildKnowledgeHealth(input: {
   features: Array<{ id: number; name: string; staleSince?: Date | string | null; verifiedAt?: Date | string | null; lastEditedBy?: string | null; lastEditedAt?: Date | string | null }>;
   scenarios: Array<{ id: number; featureId: number; reference: string; staleSince?: Date | string | null; verifiedAt?: Date | string | null; lastEditedBy?: string | null; lastEditedAt?: Date | string | null }>;
