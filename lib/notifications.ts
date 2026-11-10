@@ -88,7 +88,7 @@ function changeEvidence(change: NotificationChange): Evidence[] {
 }
 
 /** 通知消息与发布页 behavior-change-item 同构：功能/场景 + 变化类型 + 摘要 + 证据链接。 */
-export function renderNotificationText(productName: string, releaseUrl: string, changes: readonly NotificationChange[], evidenceUrls: ReadonlyArray<ReadonlyArray<string | null>>, collapse?: { previousScenarios: number; currentScenarios: number } | null, featureCollapses?: ReadonlyArray<{ featureName: string; previousScenarios: number; currentScenarios: number; removed: number; rewritten: number }>): string | null {
+export function renderNotificationText(productName: string, releaseUrl: string, changes: readonly NotificationChange[], evidenceUrls: ReadonlyArray<ReadonlyArray<string | null>>, collapse?: { previousScenarios: number; currentScenarios: number } | null, featureCollapses?: ReadonlyArray<{ featureName: string; previousScenarios: number; currentScenarios: number; removed: number; rewritten: number }>, misplacedCount?: number): string | null {
   if (changes.length === 0) return null;
   const lines = [`【CoDelphi】${productName} 检测到 ${changes.length} 条规格行为变化`, releaseUrl];
   if (collapse) {
@@ -97,6 +97,10 @@ export function renderNotificationText(productName: string, releaseUrl: string, 
   // BM-7 单功能坍缩护栏：受影响功能被窗口内容顶掉，逐功能警告供人工核实
   for (const featureCollapse of featureCollapses ?? []) {
     lines.push(`⚠️ 疑似单功能坍缩：「${featureCollapse.featureName}」场景 ${featureCollapse.previousScenarios} → ${featureCollapse.currentScenarios}（无等价对应删除 ${featureCollapse.removed}、改写 ${featureCollapse.rewritten}）。请核实该功能是否确有此变化。`);
+  }
+  // BM-6 跨域放置校验：证据面全外移且被其他既有功能主张，聚合提示
+  if (misplacedCount && misplacedCount > 0) {
+    lines.push(`⚠️ 疑似跨域放置：${misplacedCount} 条场景的证据与所属功能既有证据面不符。请核实这些场景是否归属了正确的功能。`);
   }
   changes.forEach((change, index) => {
     const subject = change.entityType === "scenario" && change.scenarioReference
@@ -117,6 +121,8 @@ export interface AnalysisNotificationInput {
   collapse?: { previousScenarios: number; currentScenarios: number } | null;
   /** BM-7 单功能坍缩护栏检测结果（detectFeatureCollapses）；逐功能警告进通知正文。 */
   featureCollapses?: ReadonlyArray<{ featureName: string; previousScenarios: number; currentScenarios: number; removed: number; rewritten: number }>;
+  /** BM-6 跨域放置校验命中的场景数；>0 时正文带聚合提示。 */
+  misplacedCount?: number;
 }
 
 export interface NotificationDependencies {
@@ -170,7 +176,7 @@ export async function deliverAnalysisNotifications(input: AnalysisNotificationIn
   const evidenceUrls = changes.map((change) =>
     changeEvidence(change).slice(0, maxEvidenceLinksPerChange).map((item) => evidenceUrl(run, run.afterSha, item)),
   );
-  const text = renderNotificationText(run.productName, releaseUrl, changes, evidenceUrls, input.collapse, input.featureCollapses);
+  const text = renderNotificationText(run.productName, releaseUrl, changes, evidenceUrls, input.collapse, input.featureCollapses, input.misplacedCount);
   if (text === null) return;
 
   const secret = notificationSecret();

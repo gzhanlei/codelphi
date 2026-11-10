@@ -67,4 +67,23 @@ describe("patch-scan 行为性行判定", () => {
     expect(behavioral.has("sdk/src/guestTokenRefresh.test.ts")).toBe(false);
     expect(behavioral.has("superset/db_engine_specs/databricks.py")).toBe(true);
   });
+
+  it("excludes CI/infrastructure paths regardless of patch content (BM-8)", () => {
+    const files = [
+      { path: ".github/labeler.yml", status: "modified", patch: "+  i18n:polish:" },
+      { path: ".github/workflows/ci.yml", status: "modified", patch: "+  - run: npm test" },
+      { path: "dev/check_license.sh", status: "modified", patch: "+curl --retry 5" },
+      { path: "superset-frontend/package-lock.json", status: "modified", patch: "+      \"fastmcp\": \"4.1.4\"" },
+      { path: "superset/config.py", status: "modified", patch: "+FLAG = True" },
+      { path: ".gitlab-ci.yml", status: "modified", patch: "+  script: make" },
+    ];
+    const behavioral = behavioralChangePaths(files);
+    expect(behavioral.has(".github/labeler.yml")).toBe(false);
+    expect(behavioral.has(".github/workflows/ci.yml")).toBe(false);
+    // 保守边界：.sh 脚本不排除（部署脚本可能承载行为），lockfile 与 CI 配置排除
+    expect(behavioral.has("dev/check_license.sh")).toBe(true);
+    expect(behavioral.has("superset-frontend/package-lock.json")).toBe(false);
+    expect(behavioral.has("superset/config.py")).toBe(true);
+    expect(behavioral.has(".gitlab-ci.yml")).toBe(false);
+  });
 });

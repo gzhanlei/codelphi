@@ -211,7 +211,7 @@ async function insertChanges(connection: PoolConnection, versionId: number, base
   }
 }
 
-export async function insertSpecVersion(connection: PoolConnection, run: RunContext, result: AnalysisResult, options: { affectedKeys?: ReadonlySet<string>; behavioralChangePaths?: ReadonlySet<string> } = {}): Promise<{ specVersionId: number; features: ReturnType<typeof mergeSpecSources>; collapse: SpecVersionCollapse | null; featureCollapses: FeatureCollapse[]; identityHijacksDropped: number }> {
+export async function insertSpecVersion(connection: PoolConnection, run: RunContext, result: AnalysisResult, options: { affectedKeys?: ReadonlySet<string>; behavioralChangePaths?: ReadonlySet<string> } = {}): Promise<{ specVersionId: number; features: ReturnType<typeof mergeSpecSources>; collapse: SpecVersionCollapse | null; featureCollapses: FeatureCollapse[]; misplacedScenarios: MisplacedScenario[]; identityHijacksDropped: number }> {
   const [previous, manual, tombstones] = await Promise.all([loadPreviousSpec(connection, run), loadManualSpec(connection, run.productId), loadManualTombstones(connection, run.productId)]);
   // M9 增量模式：受影响集之外的 generated 条目原样沿用上一版（三分合并：carried 种子 < AI < manual）。
   const affectedKeys = options.affectedKeys;
@@ -246,6 +246,7 @@ export async function insertSpecVersion(connection: PoolConnection, run: RunCont
   const changes = diffSpec(previous === null ? null : previous.features, features, options.behavioralChangePaths ? { behavioralChangePaths: options.behavioralChangePaths } : undefined);
   const collapse = detectSpecCollapse(previous, features);
   const featureCollapses = detectFeatureCollapses(previous, features);
+  const misplacedScenarios = detectMisplacedScenarios(previous, features);
   const [versionResult] = await connection.execute(
     "INSERT INTO spec_versions (product_id, repository_id, analysis_run_id, sha) VALUES (?, ?, ?, ?)",
     [run.productId, run.repositoryId, run.id, run.afterSha],
@@ -254,7 +255,7 @@ export async function insertSpecVersion(connection: PoolConnection, run: RunCont
   await insertFeatures(connection, versionId, features);
   await insertChanges(connection, versionId, previous === null ? null : previous.id, changes);
   // 合并后的完整 spec 一并返回：M9 影子对比必须以 carry-forward 之后的规格为对象。
-  return { specVersionId: versionId, features, collapse, featureCollapses, identityHijacksDropped };
+  return { specVersionId: versionId, features, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped };
 }
 
 /** 规格坍缩（护栏）：新版场景数较上一版骤降超过阈值。生产 v95（2026-11-08）178→83 即此形态。 */
@@ -316,6 +317,57 @@ export function detectFeatureCollapses(previous: { features: SpecFeature[] } | n
     }
   }
   return collapses;
+}
+
+/**
+ * BM-6 跨域放置校验（benchmark bm1-incremental-blind-eval §3 F2）：restore_impact 场景
+ * 落到 REST API、缩略图隔离落到嵌入式访客凭据回退——模型把窗口行为写进证据面无关的
+ * 既有功能。确定性判定取最强信号（双档中的高档）：新场景的**全部**证据路径都在该功能
+ * 上一版证据面之外，且被另一个既有功能的证据面主张 → 跨域放置违规，计数入完整性账本。
+ * 低档（证据不属任何既有功能面 = 纯外扩）不可机械判定真假——合法的功能边界扩张
+ * （如 SQL 编辑器新增 sql/rls.py 场景）同形，不告警、归人工核实签发。
+ */
+export interface MisplacedScenario {
+  featureName: string;
+  scenarioReference: string;
+  evidencePaths: string[];
+  ownedByKey: string;
+  ownedByName: string;
+}
+
+export function detectMisplacedScenarios(previous: { features: SpecFeature[] } | null, current: SpecFeature[]): MisplacedScenario[] {
+  if (!previous) return [];
+  const surfaces = new Map<string, { name: string; paths: Set<string> }>();
+  for (const feature of previous.features) {
+    const paths = new Set<string>();
+    for (const scenario of feature.scenarios) {
+      for (const item of scenario.evidence) paths.add(item.path);
+    }
+    surfaces.set(specFeatureKey(feature.name), { name: feature.name, paths });
+  }
+  const misplaced: MisplacedScenario[] = [];
+  for (const feature of current) {
+    const key = specFeatureKey(feature.name);
+    const own = surfaces.get(key);
+    // 新键没有既有证据面可校验；沿用的 carried 场景证据与上一版相同，天然命中自身面
+    if (!own) continue;
+    for (const scenario of feature.scenarios) {
+      const paths = [...new Set(scenario.evidence.map((item) => item.path))];
+      if (paths.length === 0) continue;
+      if (paths.some((path) => own.paths.has(path))) continue;
+      const owner = [...surfaces.entries()].find(([otherKey, surface]) => otherKey !== key && paths.some((path) => surface.paths.has(path)));
+      if (owner) {
+        misplaced.push({
+          featureName: feature.name,
+          scenarioReference: scenario.reference,
+          evidencePaths: paths,
+          ownedByKey: owner[0],
+          ownedByName: owner[1].name,
+        });
+      }
+    }
+  }
+  return misplaced;
 }
 
 function countScenarios(features: SpecFeature[]) {

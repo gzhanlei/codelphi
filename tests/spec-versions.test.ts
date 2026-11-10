@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { PoolConnection } from "mysql2/promise";
 import type { AnalysisResult } from "../lib/ai";
 import type { RunContext } from "../lib/analysis";
-import { detectFeatureCollapses, detectSpecCollapse, featureParentKey, insertSpecVersion, loadPreviousFeatureNames } from "../lib/spec-versions";
+import { detectFeatureCollapses, detectMisplacedScenarios, detectSpecCollapse, featureParentKey, insertSpecVersion, loadPreviousFeatureNames } from "../lib/spec-versions";
 
 const run: RunContext = { id: 8, repositoryId: 3, productId: 4, owner: "gzhanlei", name: "radar", beforeSha: "a", afterSha: "b", connectionId: null, provider: "github", organizationId: 1, productSlug: "radar", productName: "Radar" };
 const scenario = { reference: "HP-1", context: "Visitor", action: "Signs in", outcome: "Dashboard", category: "happy" as const, evidence: [] };
@@ -209,6 +209,43 @@ describe("detectFeatureCollapses (BM-7 单功能坍缩护栏)", () => {
 
   it("returns empty for a first version", () => {
     expect(detectFeatureCollapses(null, [feature("A", [scen("HP-1", "a")])])).toEqual([]);
+  });
+});
+
+describe("detectMisplacedScenarios (BM-6 跨域放置校验)", () => {
+  const scen = (reference: string, evidence: string[], outcome = "o", category: "happy" | "edge" | "error" = "happy") => ({ reference, context: "c", action: "a", outcome, category, evidence: evidence.map((path) => ({ path, startLine: 1 })) });
+  const feature = (name: string, scenarios: ReturnType<typeof scen>[]) => ({ name, summary: "s", scenarios });
+
+  it("flags restore_impact scenarios citing another feature's evidence surface (run 64 REST API 形态)", () => {
+    const previous = { features: [
+      feature("REST API", [scen("HP-1", ["docs/admin_docs/security/security.mdx"])]),
+      feature("仪表盘", [scen("EC-1", ["superset/dashboards/api.py"])]),
+    ] };
+    const current = [feature("REST API", [
+      scen("HP-1", ["docs/admin_docs/security/security.mdx"]),
+      scen("HP-2", ["superset/dashboards/api.py"], "恢复影响计数"),
+    ])];
+    expect(detectMisplacedScenarios(previous, current)).toEqual([
+      { featureName: "REST API", scenarioReference: "HP-2", evidencePaths: ["superset/dashboards/api.py"], ownedByKey: "仪表盘", ownedByName: "仪表盘" },
+    ]);
+  });
+
+  it("passes scenarios that hit the feature's own evidence surface", () => {
+    const previous = { features: [feature("数据库连接配置", [scen("HP-1", ["frontend/DatabaseConnectionForm/constants.ts"])])] };
+    const current = [feature("数据库连接配置", [scen("HP-2", ["db_engine_specs/athena.py", "frontend/DatabaseConnectionForm/constants.ts"], "Athena 表单")])];
+    expect(detectMisplacedScenarios(previous, current)).toEqual([]);
+  });
+
+  it("does not flag pure expansion into unowned territory (不可机械判定，归人工核实)", () => {
+    const previous = { features: [feature("SQL 编辑器", [scen("HP-1", ["docs/security.mdx"])])] };
+    const current = [feature("SQL 编辑器", [scen("EC-1", ["superset/sql/parse.py"], "RLS 生效")])];
+    expect(detectMisplacedScenarios(previous, current)).toEqual([]);
+  });
+
+  it("skips new keys and returns empty for a first version", () => {
+    const previous = { features: [feature("旧功能", [scen("HP-1", ["a.py"])])] };
+    expect(detectMisplacedScenarios(previous, [feature("新功能", [scen("HP-1", ["a.py"])])])).toEqual([]);
+    expect(detectMisplacedScenarios(null, [feature("新功能", [scen("HP-1", ["a.py"])])])).toEqual([]);
   });
 });
 

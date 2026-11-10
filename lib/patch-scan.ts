@@ -1,4 +1,4 @@
-import { evidenceKind } from "./evidence";
+import { evidenceKind, isInfrastructureEvidence } from "./evidence";
 import type { ChangeFile } from "./code-hosting/types";
 
 /**
@@ -51,11 +51,12 @@ export function patchOnlyCommentsOrBlank(patch: string): boolean {
   return true;
 }
 
-/** 本发布中包含行为性行变更的 implementation 级文件路径集合；未入集合 = 仅注释/空白变动、无 patch 佐证或非实现证据。 */
+/** 本发布中包含行为性行变更的 implementation 级文件路径集合；未入集合 = 仅注释/空白变动、无 patch 佐证、非实现证据或 CI/基础设施路径（BM-8：工作流/锁文件不承载产品行为）。 */
 export function behavioralChangePaths(files: ReadonlyArray<ChangeFile>): Set<string> {
   const behavioral = new Set<string>();
   for (const file of files) {
     if (evidenceKind(file.path) !== "implementation") continue;
+    if (isInfrastructureEvidence(file.path)) continue;
     const pythonOnly = /\.py$/i.test(file.path);
     const commentAware = COMMENT_STYLE_LANGUAGES.test(file.path);
     if (!file.patch || !commentAware || file.patch.length > TRUNCATION_GUARD_LENGTH) {

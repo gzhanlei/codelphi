@@ -106,18 +106,20 @@ describe("deriveEvidenceIntegrity", () => {
 });
 
 describe("deriveMergeIntegrity", () => {
-  it("partial on truncation, conflicts, collapse, identity hijacks, or feature collapses", () => {
-    expect(deriveMergeIntegrity({ changesTruncated: 20, scenariosDeduped: 5, identityHijacksDropped: 0, featureCollapses: 0, outcomeConflicts: 0, collapse: false }).state).toBe("partial");
-    expect(deriveMergeIntegrity({ changesTruncated: 0, scenariosDeduped: 5, identityHijacksDropped: 0, featureCollapses: 0, outcomeConflicts: 1, collapse: false }).state).toBe("partial");
-    expect(deriveMergeIntegrity({ changesTruncated: 0, scenariosDeduped: 5, identityHijacksDropped: 0, featureCollapses: 0, outcomeConflicts: 0, collapse: true }).state).toBe("partial");
+  it("partial on truncation, conflicts, collapse, identity hijacks, feature collapses, or misplaced scenarios", () => {
+    expect(deriveMergeIntegrity({ changesTruncated: 20, scenariosDeduped: 5, identityHijacksDropped: 0, featureCollapses: 0, misplacedScenarios: 0, outcomeConflicts: 0, collapse: false }).state).toBe("partial");
+    expect(deriveMergeIntegrity({ changesTruncated: 0, scenariosDeduped: 5, identityHijacksDropped: 0, featureCollapses: 0, misplacedScenarios: 0, outcomeConflicts: 1, collapse: false }).state).toBe("partial");
+    expect(deriveMergeIntegrity({ changesTruncated: 0, scenariosDeduped: 5, identityHijacksDropped: 0, featureCollapses: 0, misplacedScenarios: 0, outcomeConflicts: 0, collapse: true }).state).toBe("partial");
     // BM-4：身份劫持被门禁拦下 ≠ 没发生——模型违约本身是完整性信号
-    expect(deriveMergeIntegrity({ changesTruncated: 0, scenariosDeduped: 5, identityHijacksDropped: 2, featureCollapses: 0, outcomeConflicts: 0, collapse: false }).state).toBe("partial");
+    expect(deriveMergeIntegrity({ changesTruncated: 0, scenariosDeduped: 5, identityHijacksDropped: 2, featureCollapses: 0, misplacedScenarios: 0, outcomeConflicts: 0, collapse: false }).state).toBe("partial");
     // BM-7：单功能坍缩被护栏发现同样如实 partial
-    expect(deriveMergeIntegrity({ changesTruncated: 0, scenariosDeduped: 5, identityHijacksDropped: 0, featureCollapses: 1, outcomeConflicts: 0, collapse: false }).state).toBe("partial");
+    expect(deriveMergeIntegrity({ changesTruncated: 0, scenariosDeduped: 5, identityHijacksDropped: 0, featureCollapses: 1, misplacedScenarios: 0, outcomeConflicts: 0, collapse: false }).state).toBe("partial");
+    // BM-6：跨域放置被检出同样如实 partial
+    expect(deriveMergeIntegrity({ changesTruncated: 0, scenariosDeduped: 5, identityHijacksDropped: 0, featureCollapses: 0, misplacedScenarios: 3, outcomeConflicts: 0, collapse: false }).state).toBe("partial");
   });
 
   it("complete when merge is clean (dedup alone is by-design, not partial)", () => {
-    expect(deriveMergeIntegrity({ changesTruncated: 0, scenariosDeduped: 9, identityHijacksDropped: 0, featureCollapses: 0, outcomeConflicts: 0, collapse: false }).state).toBe("complete");
+    expect(deriveMergeIntegrity({ changesTruncated: 0, scenariosDeduped: 9, identityHijacksDropped: 0, featureCollapses: 0, misplacedScenarios: 0, outcomeConflicts: 0, collapse: false }).state).toBe("complete");
   });
 });
 

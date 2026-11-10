@@ -82,6 +82,11 @@ describe("notification rendering", () => {
     expect(text).toContain("⚠️ 疑似单功能坍缩：「语义视图批量删除」场景 13 → 5（无等价对应删除 8、改写 3）");
   });
 
+  it("renders the misplaced-scenario aggregate warning (BM-6)", () => {
+    const text = renderNotificationText("Radar", "https://codelphi.com/commit/abc", changes, [[], []], null, [], 3);
+    expect(text).toContain("⚠️ 疑似跨域放置：3 条场景的证据与所属功能既有证据面不符");
+  });
+
   it("returns null when there is nothing to notify about", () => {
     expect(renderNotificationText("Radar", "https://codelphi.com/commit/abc", [], [])).toBeNull();
   });
