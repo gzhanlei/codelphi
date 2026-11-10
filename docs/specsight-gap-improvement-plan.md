@@ -385,6 +385,7 @@
 | 2026-11-10 | v1.7。**BM-1 当日完成**（真增量窗口两轮 run 64/65，均 incremental-carry）：FUR=0 红线守住、AFR-行为 8/8、NFR 7/7；新发现 P0 缺陷「stable key 身份劫持」及跨域放置/特性内重复/场景位移三模式 → 新增工单 BM-4..8；报告 `docs/benchmark/bm1-incremental-blind-eval-2026-11-10.md`，预标与判定明细冻结入库；判定脚本 `scripts/bm1-{judge,run,reset}.ts`。 |
 | 2026-11-10 | v1.8。**BM-4/BM-5/BM-7 当日落地并重放验证**（run 66/67 同窗口）：BM-4 身份门禁（carried 键 AI 写入丢弃+账本计数）run 66 拦截同键 2 次、run 67 拦截 5 次（含 3 个新键）；BM-5 category 放宽去重；BM-7 单功能坍缩护栏 run 67 捕获语义视图批量删除 17→7 与数据源连接 18→12。FUR 四轮全 0；报告 §9 四轮对照表；工单簿 BM-4/5/7 收口，BM-6/8 待做。 |
 | 2026-11-10 | v1.9。**BM-6/BM-8 当日落地**（run 68 五轮对照）：BM-6 detectMisplacedScenarios（他键归属档进账本，纯外扩归人工）run 68 检出 9 条并**破案三轮坍缩悬案**——语义视图批量删除被删场景全部归属数据集列表管理证据面（顶位非丢失）；BM-8 infra 证据集（CI/lockfile）进行为集排除，证伪门禁自然折叠 CI-only 功能，B1 分母不动。FUR 五轮全 0；报告 §9 五轮对照。**当日已部署生产 7b8e243（BM-4/5/7 + R1/W0-9/W0-10），生产 run 214 实证护栏抓到 R1 功能 37→17 静默位移**；BM-6/8 本次提交待下次部署。 |
+| 2026-11-10 | v2.0。**BM-2/BM-3 当日落地**（矩阵四跑 run 69-72，全 full 模式符合预测）：M7 纯重构 diff 归因虚报 0/2；**M8 纯格式虚报 2/2**（formatter diff → 假新增功能）→ 新工单 BM-9；选型反面教材（refactor 前缀 ≠ 行为保持）入目录；护栏在 full 模式下量化出重建噪音（错位 18-23/run vs 增量 9/run）。BM-3 模板指标 2c/4 落地。首份 benchmark 报告 `docs/benchmark/report-2026-11-10.md`（验收线冻结：FUR ≤2%、增量 UP ≥85%）。**累计九轮 < $1.2。BM-6/8/2/3 均未部署**（待下次一并）。 |
 
 ## 9. 外部评审采纳的下一轮工单（2026-11-10，ChatGPT 管线评审）
 
@@ -406,8 +407,9 @@ P0 已当轮处理（diff 覆盖指标 migration 058、枚举完整性状态、�
 | # | 工单 | 要点 | 验收 |
 |---|---|---|---|
 | BM-1 | 增量分析盲评专项（第一优先） | 按规格 §6：受控构造与 `spec_file_index` 有交集的真增量窗口（受控路径 `queueAnalysis(beforeSha, afterSha)` 首选）；三清单预标（affected / unaffected-confirmed / new + unknown 区）；测 AFR/UP/FUR/NFR/Stale 五指标 | **✅ 2026-11-10 当日完成**（`docs/benchmark/bm1-incremental-blind-eval-2026-11-10.md`，两轮同基线 run 64/65 均真 incremental-carry）：FUR=0 红线守住、AFR-行为 8/8、NFR 7/7 语义覆盖；发现 stable key 身份劫持（P0）等四类缺陷模式 → BM-4..8 |
-| BM-2 | 跨窗口变更矩阵回归集 | 按规格 §5：八类裁剪案例（superset 跨窗口，每案例 ≥2 次运行）；#7 纯重构 / #8 纯格式为「不虚报」常驻回归，#5 共享依赖为「显式披露」检验（不要求全识别）；报告格式落规格 §9（分项 + Macro + Failure Gallery） | 案例与预标冻结入库 `docs/benchmark/frozen/` + 指标脚本可重跑 + 首份 benchmark 报告产出（BM-1 报告已含 Failure Gallery 雏形） |
-| BM-3 | Evidence Support 标注进验收模板 | `pilot-acceptance-template.md` 增两个字段：①证据支持描述（描述正确性，≥95% 参照线）；②预标重要程度 core/normal/internal（高风险召回口径的地基） | 模板更新 + 下一轮盲评报告含该指标 |
+| BM-2 | 跨窗口变更矩阵回归集 | 按规格 §5：八类裁剪案例（superset 跨窗口，每案例 ≥2 次运行）；#7 纯重构 / #8 纯格式为「不虚报」常驻回归，#5 共享依赖为「显式披露」检验（不要求全识别）；报告格式落规格 §9（分项 + Macro + Failure Gallery） | **✅ 2026-11-10 首批落地**（案例目录+预标冻结 `frozen/superset-matrix/catalog.md`；M7 纯重构 2d2e557190 ×2、M8 纯格式 3807a4d743 ×2，四跑全 succeeded）：M7 diff 归因虚报 0/2、**M8 虚报 2/2（格式 diff → 假新增功能，FG-1 → 新工单 BM-9）**、模式预测 4/4、#4 删除待真实 PR；首份 benchmark 报告 `docs/benchmark/report-2026-11-10.md`。#1/#2/#3/#5/#6 复用 BM-1 单窗口数据（非逐类隔离，逐类隔离待后续批次） |
+| BM-3 | Evidence Support 标注进验收模板 | `pilot-acceptance-template.md` 增两个字段：①证据支持描述（描述正确性，≥95% 参照线）；②预标重要程度 core/normal/internal（高风险召回口径的地基） | **✅ 2026-11-10 当日落地**（模板指标 2c + 4 + 口径说明「路径校验 ≠ 语义支持」）；下一轮盲评报告含该指标 |
+| BM-9 | 格式重排虚报（FG-1，M8 矩阵新发现） | patch-scan 对格式重排（token 集不变的行重排）判非行为，或 feature 级重发现归并——M8 两轮复现「formatter diff → 假新增功能」（80.0% 精确率防线的新形态） | M8 案例重放虚报归零 |
 | BM-4 | **stable key 身份完整性门禁（P0）** | 合并层对「既有键 + summary 身份漂移」组合拒绝覆盖或降级为新键（最小约束：功能名/简介语义不变才允许原键写入）——run #1 `databricks sql lab` 被整体置换为 SQL Lab RLS、`图表构建与可视化` 两轮被置换为 XY 时序 | **✅ 2026-11-10 当日落地**（`lib/spec-versions.ts`：增量模式下命中 carried 键的 AI 特征丢弃，计数入账本 mergeIntegrity=partial；测试 3 例）。同窗口重放 run 66 实证：与 run #1 同键的两次劫持尝试全被拦截、carried 逐字保全、FUR 仍为 0（报告 §9） |
 | BM-5 | 跨通道场景去重 | 重提取/枚举产物与 carried 场景集之间复用 `scenarioBehaviorEqual`；特性内新增场景彼此去重（REST API EC-1..5 五条近似重复实例） | **✅ 2026-11-10 部分落地**：`scenarioBehaviorEqual` 放宽 category 要求（同触发/操作/结果即同一行为，run 64 ER-1/EC-5 同文异标实例）——确定性可修的部分已修；语义近似重复（措辞不同）与键分裂属模型侧，归 BM-6/BM-8 |
 | BM-6 | 跨域放置校验 | 新场景归属功能时校验证据文件与功能既有证据面交集（restore_impact→REST API、缩略图隔离→嵌入式访客凭据回退 实例） | **✅ 2026-11-10 当日落地**（`lib/spec-versions.ts` detectMisplacedScenarios：场景全部证据路径在自身面外且被其他既有功能主张 → 违规；纯外扩不可机械判定归人工）。run 68 实证 9 条，**破案三轮悬案：语义视图批量删除被删场景全部归属数据集列表管理证据面（顶位而非丢失）** |
