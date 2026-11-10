@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { loadPublishedChangelog } from "../lib/changelog";
 
 const { dbExecute } = vi.hoisted(() => ({ dbExecute: vi.fn() }));
@@ -6,6 +6,7 @@ const { dbExecute } = vi.hoisted(() => ({ dbExecute: vi.fn() }));
 vi.mock("../lib/db", () => ({ getDb: () => ({ execute: dbExecute }) }));
 
 describe("published changelog loader (M11)", () => {
+  beforeEach(() => vi.clearAllMocks());
   it("keeps only published notes in descending publish order with block views", async () => {
     const noteRows = [
       { id: 2, status: "published", emphasis: "重点", voiceId: null, shareToken: "t2", publishedAt: new Date("2026-11-10T00:00:00Z"), unpublishedAt: null, releaseId: 9, releaseTitle: "新版", releaseSha: "bbb", releaseUrl: "https://github.com/x/y/compare/b", committedAt: new Date("2026-11-10T00:00:00Z") },
