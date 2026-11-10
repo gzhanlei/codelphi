@@ -36,11 +36,13 @@ const DIMENSION_REASON: Record<keyof Omit<LedgerDetailsView, "overall">, string>
   extractionCompletion: "部分提取趟重试或为空结果",
   evidenceIntegrity: "存在被剔除的不可溯源声明",
   mergeIntegrity: "合并层有截断/冲突/护栏检出",
-  verification: "尚未经完整核验（人工核实为外部生命周期）",
+  verification: "存在一致性冲突或影子对比不一致",
 };
 
 /** 六维度徽章顺序。 */
 export const LEDGER_DIMENSION_ORDER = ["sourceCoverage", "behavioralEnumeration", "extractionCompletion", "evidenceIntegrity", "mergeIntegrity", "verification"] as const;
+
+export type LedgerDimensionKey = (typeof LEDGER_DIMENSION_ORDER)[number];
 
 /** overall 的展示文案：complete 不夸大（「完整」仅指账本六维度全绿），失败如实列维度。 */
 export function describeLedgerOverall(overall: LedgerStateView): { label: string; tone: "ok" | "warn" | "bad" | "muted" } {
@@ -50,10 +52,12 @@ export function describeLedgerOverall(overall: LedgerStateView): { label: string
   return { label: "不适用", tone: "muted" };
 }
 
-/** 非 complete/not_applicable 维度的「标签：短因」清单，partial/failed 展示用；全绿返回空数组。 */
-export function summarizeLedgerIssues(details: LedgerDetailsView): Array<{ label: string; state: LedgerStateView; reason: string }> {
+/** 非 complete/not_applicable 维度的「标签：短因」清单，partial/failed 展示用；全绿返回空数组。
+ * hideDimensions：已在别处给出事实的维度不重复内联（如源码覆盖——覆盖率披露行已给量化数字，维度状态仍在悬浮明细可见）。 */
+export function summarizeLedgerIssues(details: LedgerDetailsView, hideDimensions?: ReadonlyArray<LedgerDimensionKey>): Array<{ label: string; state: LedgerStateView; reason: string }> {
+  const hidden = new Set(hideDimensions ?? []);
   return LEDGER_DIMENSION_ORDER
-    .filter((key) => details[key].state === "partial" || details[key].state === "failed")
+    .filter((key) => !hidden.has(key) && (details[key].state === "partial" || details[key].state === "failed"))
     .map((key) => ({ label: LEDGER_DIMENSION_LABELS[key], state: details[key].state, reason: DIMENSION_REASON[key] }));
 }
 

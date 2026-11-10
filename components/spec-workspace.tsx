@@ -17,8 +17,6 @@ import type { CoverageReceiptRow } from "@/lib/analysis-coverage";
 import type { CompletenessLedgerRow } from "@/lib/completeness-ledger";
 import { describeLedgerOverall, formatLedgerDimensions, summarizeLedgerIssues, toLedgerDetailsView } from "@/lib/completeness-ledger-view";
 
-// W0-2 增量盲评重跑达标前，覆盖披露必须带此标注（docs/specsight-gap-improvement-plan.md §3.3）。
-const W0_UNMET_NOTE = "（分片多趟验收未达标，W0-2 重跑进行中）";
 
 export function SpecWorkspace({ slug, productBase, tree, feature, scenarios, mode, coverage, completeness }: { slug: string; productBase: string; tree: FeatureTreeItem[]; feature?: FeatureRow; scenarios: ScenarioRow[]; mode: string; coverage?: CoverageReceiptRow | null; completeness?: CompletenessLedgerRow | null }) {
   const router = useRouter();
@@ -49,14 +47,14 @@ export function SpecWorkspace({ slug, productBase, tree, feature, scenarios, mod
         <p className="coverage-disclosure" title="证据覆盖率按本规格版本对应的完整实现面计算">
           证据覆盖率 {(coverage.coverageRatio * 100).toFixed(1)}%（装配 {coverage.implFilesAssembled}/{coverage.implFilesTotal} 个实现文件，{coverage.partitionsUsed} 趟提取）
           {coverage.partitionsCapped ? "；本规格未覆盖全部实现面（提取趟数触顶），未覆盖部分不产生结论。" : ""}
-          {W0_UNMET_NOTE}
         </p>
       ) : null}
       {completeness ? (() => {
         const details = toLedgerDetailsView(completeness.details);
         if (!details) return null;
         const overall = describeLedgerOverall(details.overall);
-        const issues = summarizeLedgerIssues(details);
+        // 源码覆盖的量化事实已在上面的覆盖率披露行，内联清单不重复；维度状态保留在悬浮明细
+        const issues = summarizeLedgerIssues(details, coverage ? ["sourceCoverage"] : []);
         return (
           <p className={`completeness-disclosure completeness-${overall.tone}`} title={`六维度状态：${formatLedgerDimensions(details)}`}>
             分析完整性：{overall.label}

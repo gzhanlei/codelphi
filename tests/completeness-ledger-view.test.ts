@@ -41,6 +41,12 @@ describe("summarizeLedgerIssues", () => {
     ]);
   });
 
+  it("hides dimensions whose facts are already disclosed elsewhere (覆盖率行已在场时源码覆盖不重复内联)", () => {
+    expect(summarizeLedgerIssues(details, ["sourceCoverage"])).toEqual([
+      { label: "合并完整性", state: "partial", reason: "合并层有截断/冲突/护栏检出" },
+    ]);
+  });
+
   it("returns empty for a fully green ledger", () => {
     const green = {
       sourceCoverage: { state: "complete" },
