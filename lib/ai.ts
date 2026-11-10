@@ -365,8 +365,26 @@ export interface BehavioralTarget {
   contextBlocks: Array<{ startLine: number; endLine: number; content: string }>;
 }
 
-export function behavioralEnumerationPrompt(targets: BehavioralTarget[], knownFeatureNames: string[], change: ChangeContext): string {
-  const names = knownFeatureNames.map((name) => name.trim()).filter(Boolean).slice(0, 60);
+/**
+ * W0-9 · 复述与判定分离（patch-anchored 两步提取）：
+ * 单步提取把「复述变更」与「判断是否值得写」混在一次注意力里，显著性过滤会静默吞掉
+ * 低显著的边缘行为（W0-7 后残余 L8/L15 实测：文件已读、已显式提问，仍答「无可感知行为」）。
+ * 两步拆开：第一步只复述每个变更块的改前/改后（机械任务，接近确定代码的理解上限）；
+ * 第二步对每条复述显式判定，判定标准偏向计入（拿不准 → 计入；判为内部实现 → reviewed
+ * 条目留痕而非丢弃——宽松模式教训：错漏真行为 > 多留一条边缘条目）。
+ */
+
+export interface BehavioralDescription {
+  path: string;
+  /** 变更块标识（hunk 行区间）。 */
+  hunk: string;
+  /** 改前这段代码做什么。 */
+  before: string;
+  /** 改后这段代码做什么。 */
+  after: string;
+}
+
+export function behavioralDescribePrompt(targets: BehavioralTarget[], change: ChangeContext): string {
   const sections = targets.map((target) => {
     const blocks = target.contextBlocks
       .map((block) => `【变更区上下文 ${block.startLine}-${block.endLine}（带行号）】\n${block.content}`)
@@ -374,29 +392,83 @@ export function behavioralEnumerationPrompt(targets: BehavioralTarget[], knownFe
     return `--- 文件：${target.path} ---\n【变更 diff】\n${target.patch || "（无 patch）"}\n${blocks}`;
   });
   return [
-    "你在维护一个产品知识库。仅根据给定代码和 diff 输出事实，不要补充猜测。",
-    "【定向行为枚举】",
-    `以下是本批次 ${targets.length} 个文件在本窗口的变更 diff 与变更区上下文代码。对每个文件逐一核对其变更块：`,
-    "- 文件的修改引入或改变了用户可感知的行为（新/变参数、新/变响应、新/变权限边界、新配置项、错误路径变化、重试/跳过等控制流变化）→ 输出对应场景；证据必须给出精确 path:startLine（行号取自上下文代码）。",
-    "- 该文件的修改没有用户可感知行为变化（纯重构/注释/样式/内部实现调整）→ 不要为它输出场景。",
-    "逐个文件显式核对，不得遗漏任何一个文件；也不要为本批次之外的文件输出场景。",
-    "注意控制流语义：try/except(pass) 等被捕获的错误意味着该错误不再向上抛出——行为描述必须反映修改后的外部可见结果（如「创建不再因…而失败」），而不是把被捕获的错误写成输出行为。",
-    "规格按功能组织，每个场景包含情境、操作、结果，分类为 happy/edge/error，reference 使用 HP-n/EC-n/ER-n。JSON 字段名必须与下方模板逐字一致：情境=context、操作=action、结果=outcome，禁止用 result 等同义键名。",
-    names.length > 0 ? `功能名优先复用以下既有功能名（同属一个产品功能的场景归入同一功能）：${names.join("、")}` : "将同属一个产品功能的场景归入同一功能名。",
-
-    "只返回 JSON，不要 Markdown。结构：",
-    '{"product":{"description":"","evidence":[{"path":"","startLine":1}]},"release":{"title":"","summary":""},"changes":[{"featureName":"","kind":"added|changed|removed|fixed|reviewed","description":"","userImpact":"","evidence":[{"path":"","startLine":1}]}],"features":[{"name":"","summary":"","scenarios":[{"reference":"HP-1","context":"","action":"","outcome":"","category":"happy","evidence":[{"path":"","startLine":1}]}]}]}',
-    `\n【本次提交】\n${change.message}\n\n【文件变化】\n${JSON.stringify(change.files)}`,
+    "你在向一位不了解此变更的工程师转述代码变更。只复述事实，不要判断是否值得写、是否用户可感知。",
+    "对下面每个文件的每个变更块（@@ 区间）输出一条复述：改前这段代码做什么、改后做什么。用简体中文。",
+    "每个变更块都必须有一条复述，不得合并、不得省略；文件没有变更块则输出空 changes。",
+    '只返回 JSON，不要 Markdown。结构：{"files":[{"path":"","changes":[{"hunk":"","before":"","after":""}]}]}',
+    `\n【本次提交】\n${change.message}`,
     "\n【变更文件（逐文件 diff 与变更区上下文）】\n" + sections.join("\n"),
   ].join("\n");
 }
 
+export function parseBehavioralDescriptions(content: string, targets: BehavioralTarget[]): BehavioralDescription[] {
+  const trimmed = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start < 0) throw new Error("AI response did not contain a JSON object");
+  const json = JSON.parse(trimmed.slice(start, end + 1)) as { files?: Array<{ path?: unknown; changes?: Array<{ hunk?: unknown; before?: unknown; after?: unknown }> }> };
+  const known = new Set(targets.map((target) => target.path));
+  const out: BehavioralDescription[] = [];
+  for (const file of json.files ?? []) {
+    const path = typeof file.path === "string" ? file.path : "";
+    if (!known.has(path)) continue;
+    for (const change of file.changes ?? []) {
+      if (typeof change.before !== "string" || typeof change.after !== "string") continue;
+      out.push({ path, hunk: typeof change.hunk === "string" ? change.hunk : "", before: change.before, after: change.after });
+    }
+  }
+  return out;
+}
+
+export function behavioralJudgmentPrompt(descriptions: BehavioralDescription[], targets: BehavioralTarget[], knownFeatureNames: string[], change: ChangeContext): string {
+  const names = knownFeatureNames.map((name) => name.trim()).filter(Boolean).slice(0, 60);
+  const sections = targets.map((target) => {
+    const blocks = target.contextBlocks
+      .map((block) => `【变更区上下文 ${block.startLine}-${block.endLine}（带行号）】\n${block.content}`)
+      .join("\n");
+    const targetDescriptions = descriptions_filter(descriptions, target.path);
+    return `--- 文件：${target.path} ---\n【逐块改前/改后复述】\n${targetDescriptions}\n${blocks}`;
+  });
+  return [
+    "你在维护一个产品知识库。以下是对本批次文件每个变更块的改前/改后复述与对应上下文代码。",
+    "对每条复述显式判定并处理，不得遗漏任何一条：",
+    "- 复述描述的行为变化对外部观察者可见（新/变参数、新/变响应、新/变权限边界、新配置项、错误路径变化、重试/跳过等控制流变化）→ 输出对应场景；证据给出精确 path:startLine（行号取自上下文代码）。",
+    "- 只有当你能明确断言该变更对任何外部观察者完全不可见时才不输出场景；拿不准 → 一律输出场景（宁可多写一条，不可漏写一条）。",
+    "- 判为内部实现的条目 → 在 changes 里输出 kind=reviewed 的条目（附证据），保持完整性留痕。",
+    "规格按功能组织，每个场景包含情境、操作、结果，分类为 happy/edge/error，reference 使用 HP-n/EC-n/ER-n。JSON 字段名必须与下方模板逐字一致：情境=context、操作=action、结果=outcome，禁止用 result 等同义键名。",
+    "注意控制流语义：try/except(pass) 等被捕获的错误意味着该错误不再向上抛出——行为描述必须反映修改后的外部可见结果（如「创建不再因…而失败」），而不是把被捕获的错误写成输出行为。",
+    names.length > 0 ? `功能名优先复用以下既有功能名（同属一个产品功能的场景归入同一功能）：${names.join("、")}` : "将同属一个产品功能的场景归入同一功能名。",
+    "只返回 JSON，不要 Markdown。结构：",
+    '{"product":{"description":"","evidence":[{"path":"","startLine":1}]},"release":{"title":"","summary":""},"changes":[{"featureName":"","kind":"added|changed|removed|fixed|reviewed","description":"","userImpact":"","evidence":[{"path":"","startLine":1}]}],"features":[{"name":"","summary":"","scenarios":[{"reference":"HP-1","context":"","action":"","outcome":"","category":"happy","evidence":[{"path":"","startLine":1}]}]}]}',
+    `\n【本次提交】\n${change.message}`,
+    "\n【变更文件（复述与上下文）】\n" + sections.join("\n"),
+  ].join("\n");
+}
+
+// 判定 prompt 内按文件取复述的辅助（避免闭包序列化问题）
+function descriptions_filter(descriptions: BehavioralDescription[], path: string): string {
+  const lines = descriptions
+    .filter((d) => d.path === path)
+    .map((d) => `- 块 ${d.hunk || "?"}：改前：${d.before}；改后：${d.after}`);
+  return lines.length > 0 ? lines.join("\n") : "（本文件无逐块复述，直接核对 diff 与上下文）";
+}
+
 export async function analyzeBehavioralGroup(targets: BehavioralTarget[], knownFeatureNames: string[], change: ChangeContext, billing?: LlmBillingContext): Promise<AnalysisResult> {
-  const prompt = behavioralEnumerationPrompt(targets, knownFeatureNames, change);
+  // 第一步·复述：每个变更块的改前/改后（机械任务，不做显著性判断）
+  const describeContent = await requestStructuredCompletion(
+    [
+      { role: "system", content: "你是严谨的代码分析器，只输出可验证的结构化事实。" },
+      { role: "user", content: behavioralDescribePrompt(targets, change) },
+    ],
+    billing,
+  );
+  const descriptions = parseBehavioralDescriptions(describeContent, targets);
+  // 第二步·判定：对每条复述显式分类（宁多勿漏；内部实现 → reviewed 留痕）
+  const judgePrompt = behavioralJudgmentPrompt(descriptions, targets, knownFeatureNames, change);
   const content = await requestStructuredCompletion(
     [
       { role: "system", content: "你是严谨的代码分析器，只输出可验证的结构化事实。" },
-      { role: "user", content: prompt },
+      { role: "user", content: judgePrompt },
     ],
     billing,
   );

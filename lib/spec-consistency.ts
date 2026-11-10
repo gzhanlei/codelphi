@@ -41,7 +41,7 @@ function isNegated(outcome: string, token: string): boolean {
 export function detectOutcomeConflicts(features: Array<{ name: string; scenarios: ConsistencyScenario[] }>): OutcomeConflict[] {
   const conflicts: OutcomeConflict[] = [];
   for (const feature of features) {
-    const byToken = new Map<string, { negated: ConsistencyScenario; affirmative: ConsistencyScenario }>();
+    const byToken = new Map<string, { negated?: ConsistencyScenario; affirmative?: ConsistencyScenario }>();
     for (const scenario of feature.scenarios) {
       for (const token of errorTokens(scenario.outcome)) {
         const entry = byToken.get(token) ?? {};

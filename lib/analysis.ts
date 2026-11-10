@@ -18,6 +18,7 @@ import { mergeChunkResults, type ExtractionChunk } from "./extraction-merge";
 import { behavioralEnumerationEnabled } from "./env";
 import { behavioralChangePaths } from "./patch-scan";
 import { enumerateBehavioralChunks } from "./behavioral-enumeration";
+import { detectOutcomeConflicts } from "./spec-consistency";
 import type { SpecFeature } from "./spec-diff";
 import type { SpecAnchorFeature } from "./spec-versions";
 import { markSpecDrift } from "./spec-drift";
@@ -438,6 +439,14 @@ async function runAnalysisBody(run: RunContext) {
     result = mergeChunkResults(chunks);
   }
   const { specVersionId, features: mergedFeatures, collapse } = await saveResult(run, result, change, affectedKeys, coverage);
+  // W0-9 一致性核验：同功能内互斥结果并存（枚举多通道产物的语义矛盾）→ 告警供人工核实（append-only 已落库，不改写）
+  const conflicts = detectOutcomeConflicts(mergedFeatures);
+  if (conflicts.length > 0) {
+    console.error("[spec] outcome conflicts detected", {
+      runId: run.id,
+      conflicts: conflicts.map((c) => ({ feature: c.feature, token: c.token, negated: c.negated.reference, affirmative: c.affirmative.reference })),
+    });
+  }
   // 坍缩护栏：新版场景数骤降只告警不阻断（版本 append-only，可回溯）；通知带警告供人工核实。
   if (collapse) {
     console.error("[spec] suspected spec collapse", { runId: run.id, specVersionId, ...collapse });

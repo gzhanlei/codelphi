@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { analyzeBehavioralGroup, analyzeWithAI, capEvidence, featureContinuitySection, incrementalScopeSection, parseAnalysisContent, specAnchoringSection, behavioralEnumerationPrompt } from "../lib/ai";
+import { analyzeBehavioralGroup, analyzeWithAI, behavioralDescribePrompt, behavioralJudgmentPrompt, capEvidence, featureContinuitySection, incrementalScopeSection, parseAnalysisContent, parseBehavioralDescriptions, specAnchoringSection } from "../lib/ai";
 
 const result = {
   product: { description: "统一认证与产品知识中心。", evidence: [{ path: "app/auth/login/route.ts", startLine: 1 }] },
@@ -206,45 +206,66 @@ describe("spec wording anchoring (P0 noise control)", () => {
   });
 });
 
-describe("behavioral enumeration targeted extraction (W0-8)", () => {
+describe("behavioral enumeration two-step extraction (W0-9)", () => {
   const targets = [
     { path: "superset/utils/oauth2.py", patch: "@@ -408,7 +408,9 @@\n+        if is_guest:\n+            return None", contextBlocks: [{ startLine: 400, endLine: 412, content: "400: ...\n408: if is_guest:\n409:     return None" }] },
     { path: "superset/commands/database/create.py", patch: "@@ -95,7 +95,16 @@ def run(self):\n+            except (OAuth2RedirectError, MissingOAuth2TokenError):\n+                pass", contextBlocks: [{ startLine: 95, endLine: 115, content: "95: database = self._create_database()\n96: try:\n97:     add_permissions(database)\n98: except (OAuth2RedirectError, MissingOAuth2TokenError):\n99:     pass" }] },
   ];
   const change = { message: "behavioral window", committedAt: "", url: "", files: [{ path: targets[0].path, status: "modified", patch: targets[0].patch }] };
 
-  it("prompt names every target file, its patch, and locks field names", () => {
-    const prompt = behavioralEnumerationPrompt(targets, ["嵌入式 SDK"], change);
+  it("describe prompt demands per-hunk before/after and forbids judgment language", () => {
+    const prompt = behavioralDescribePrompt(targets, change);
     expect(prompt).toContain("superset/utils/oauth2.py");
-    expect(prompt).toContain("superset/commands/database/create.py");
-    expect(prompt).toContain("if is_guest");
-    expect(prompt).toContain("嵌入式 SDK");
-    expect(prompt).toContain("禁止用 result 等同义键名");
+    expect(prompt).toContain("每个变更块都必须有一条复述");
+    expect(prompt).toContain("只复述事实，不要判断是否值得写、是否用户可感知");
     expect(prompt).toContain("except (OAuth2RedirectError, MissingOAuth2TokenError)");
-    expect(prompt).toContain("try/except(pass)");
+  });
+
+  it("describe parse keeps only known paths and drops malformed entries", () => {
+    const content = JSON.stringify({ files: [
+      { path: "superset/utils/oauth2.py", changes: [{ hunk: "408-424", before: "访客请求失败后自动重试授权", after: "访客请求直接返回错误，不再进入重试" }] },
+      { path: "未知名/文件.ts", changes: [{ hunk: "1-2", before: "a", after: "b" }] },
+      { path: "superset/utils/oauth2.py", changes: [{ hunk: "x", before: 42 }] },
+    ] });
+    const parsed = parseBehavioralDescriptions(content, targets);
+    expect(parsed).toEqual([{ path: "superset/utils/oauth2.py", hunk: "408-424", before: "访客请求失败后自动重试授权", after: "访客请求直接返回错误，不再进入重试" }]);
+  });
+
+  it("judge prompt carries the inclusion bias, reviewed fallback, control-flow hint, and no escape hatch", () => {
+    const descriptions = [{ path: "superset/utils/oauth2.py", hunk: "408-424", before: "访客请求失败后自动重试授权", after: "访客请求直接返回错误" }];
+    const prompt = behavioralJudgmentPrompt(descriptions, targets, ["嵌入式 SDK"], change);
+    expect(prompt).toContain("拿不准 → 一律输出场景");
+    expect(prompt).toContain("宁可多写一条，不可漏写一条");
+    expect(prompt).toContain("kind=reviewed");
+    expect(prompt).toContain("不再向上抛出");
+    expect(prompt).toContain("禁止用 result 等同义键名");
+    expect(prompt).toContain("嵌入式 SDK");
+    expect(prompt).not.toContain("不要为它输出场景");
   });
 
   it("parses behavioral output tolerantly: missing product/release injected, empty features legal", async () => {
     vi.stubEnv("AI_MODEL", "test-model");
     vi.stubEnv("AI_API_KEY", "test-key");
     vi.stubEnv("AI_BASE_URL", "https://gateway.test");
-    const content = JSON.stringify({
-      changes: [{ featureName: "审计", kind: "added", description: "d", userImpact: "", evidence: [{ path: "superset/utils/oauth2.py", startLine: 409 }] }],
-      features: [],
-    });
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content } }], usage: {} }), { status: 200 })));
+    const describePayload = { choices: [{ message: { content: JSON.stringify({ files: [{ path: "superset/utils/oauth2.py", changes: [{ hunk: "408-424", before: "旧：访客请求失败后自动重试授权", after: "新：访客请求直接返回错误" }] }] }) } }], usage: {} };
+    const judgePayload = { choices: [{ message: { content: JSON.stringify({ changes: [{ featureName: "审计", kind: "added", description: "d", userImpact: "", evidence: [{ path: "superset/utils/oauth2.py", startLine: 409 }] }], features: [] }) } }], usage: {} };
+    const bodies: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: unknown, init: { body: string }) => {
+      bodies.push(JSON.parse(init.body).messages[1].content);
+      const payload = bodies.length === 1 ? describePayload : judgePayload;
+      return new Response(JSON.stringify(payload), { status: 200 });
+    }));
     const parsed = await analyzeBehavioralGroup(targets, ["嵌入式 SDK"], change, { runId: 1, accountId: null, chargeComponent: "main" });
-    // product/release 缺省注入（合并层只取分区首趟，占位不进规格）
+    // 两次调用：先复述后判定；判定 prompt 携带复述结果
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]).toContain("改前");
+    expect(bodies[1]).toContain("宁可多写一条");
+    // product/release 缺省注入（合并层只取分区首趟，占位不进规格），features 空数组合法
     expect(parsed.product.description).toContain("superset/utils/oauth2.py");
     expect(parsed.features).toEqual([]);
     expect(parsed.changes[0].evidence[0].path).toBe("superset/utils/oauth2.py");
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
   });
-
-  it("marks control-flow captures so inverted semantics get a second look", () => {
-    const prompt = behavioralEnumerationPrompt(targets, [], change);
-    // except(pass) 类变更的语义提示在位（L12 曾被反向写成「抛出错误」）
-    expect(prompt).toContain("不再向上抛出");
-  });
 });
+
