@@ -40,6 +40,9 @@ Next.js（App Router）· TypeScript · React · MySQL 8 · Vitest · OpenAI 兼
 - 当前版本不生成或展示系统架构图，也不外接架构服务；产品卡片只等待 `queued/running` 分析结束。
 - 不可变 Spec Version 快照，合并人工功能与场景，并计算确定性的功能/场景行为 Diff。
 - 发布页优先展示行为变化及前后差异，Commit 与 AI 摘要仅作为证据和补充。
+- 发布稿（客户向 release notes）：从行为变化勾选生成草稿，块级人工校对（改写保留原文回退），人工发布后生成公开只读页（可复制链接 / Markdown 导出），下线即同 URL 撤下；每块锚定 spec_change 并附证据路径。
+- 周期行为摘要（Digest）：滚动 7 天窗口自动汇总，按 Highlight 分桶给 support / sales / marketing 视角，经 Slack/Webhook/邮件分发；无变化的周不发送。
+- 介绍材料：从行为账本事实清单生成结构化介绍大纲（受众/差异化/语气为人工定位输入，生成只逐字引用），每页要点可追溯到规格锚点，一键经 PPTCreator 烧成 PPTX/PDF 并可导出 Markdown/HTML/大纲 JSON。
 - LLM 结构化输出校验、代码证据路径校验。
 - MySQL 版本化迁移、CoDelphi 自产品注册脚本。
 - 自动分析仅更新 generated 内容，不覆盖 manual 功能或场景；生成功能名作为稳定关联键不可直接修改。
