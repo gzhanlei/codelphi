@@ -43,30 +43,65 @@ function CandidatePicker({ candidates, selected, onToggle }: {
   );
 }
 
-function BlockEditor({ block, canEdit, onSave, onReset }: {
+function BlockEditor({ slug, noteId, block, canEdit, onSave, onReset }: {
+  slug: string;
+  noteId: number;
   block: ReleaseNoteBlockView;
   canEdit: boolean;
   onSave: (position: number, summaryOverride: string) => void;
   onReset: (position: number) => void;
 }) {
+  const guard = useDemoGuard();
+  const [value, setValue] = useState(block.summary);
+  const [enhancing, setEnhancing] = useState(false);
+  const [enhanceError, setEnhanceError] = useState("");
+
+  const enhance = async () => {
+    if (guard()) return;
+    setEnhancing(true);
+    setEnhanceError("");
+    try {
+      const response = await fetch(`/api/products/${slug}/release-notes/${noteId}/enhance`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ position: block.position }),
+      });
+      const data = await response.json() as { suggestion?: string; error?: string };
+      if (!response.ok) throw new Error(data.error ?? "AI 改写失败");
+      // 人在环：建议只替换文本框内容，失焦保存才落库
+      setValue(data.suggestion ?? "");
+    } catch (cause: unknown) {
+      setEnhanceError(errorMessage(cause, "AI 改写失败"));
+    } finally {
+      setEnhancing(false);
+    }
+  };
+
   return (
     <div className="release-notes-block">
       <div className="release-notes-block-head">
         <strong>{blockTitle(block)}</strong>
-        {block.overridden ? <span className="drift-badge">已人工改写 <button type="button" className="release-notes-reset" onClick={() => onReset(block.position)}>还原原文</button></span> : null}
+        {block.overridden ? <span className="drift-badge">已人工改写 <button type="button" className="release-notes-reset" onClick={() => { setValue(block.summary); onReset(block.position); }}>还原原文</button></span> : null}
       </div>
       {canEdit ? (
-        <textarea
-          className="release-notes-summary"
-          defaultValue={block.summary}
-          aria-label={`块文案：${blockTitle(block)}`}
-          maxLength={4000}
-          onBlur={(event) => {
-            if (event.target.value !== block.summary) onSave(block.position, event.target.value);
-          }}
-        />
+        <>
+          <textarea
+            className="release-notes-summary"
+            value={value}
+            aria-label={`块文案：${blockTitle(block)}`}
+            maxLength={4000}
+            onChange={(event) => setValue(event.target.value)}
+            onBlur={() => {
+              if (value !== block.summary) onSave(block.position, value);
+            }}
+          />
+          <button className="text-button" type="button" disabled={enhancing} onClick={() => void enhance()}>
+            {enhancing ? "AI 改写中…" : "AI 润色（只改措辞，锚定与证据不变）"}
+          </button>
+          {enhanceError ? <p className="description-dialog-error" role="alert">{enhanceError}</p> : null}
+        </>
       ) : (
-        <p>{block.summary}</p>
+        <p>{value}</p>
       )}
       <EvidenceLinks value={block.evidencePaths.map((path) => ({ path }))} />
     </div>
@@ -227,7 +262,7 @@ export function ReleaseNotesPanel({ slug, releaseId, canEdit }: { slug: string; 
             </>
           ) : (
             state.blocks.map((block) => (
-              <BlockEditor key={block.position} block={block} canEdit={editable} onSave={saveBlock} onReset={resetBlock} />
+              <BlockEditor key={block.position} slug={slug} noteId={note.id} block={block} canEdit={editable} onSave={saveBlock} onReset={resetBlock} />
             ))
           )}
           <div className="release-notes-actions">
