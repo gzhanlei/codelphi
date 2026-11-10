@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { analyzeWithAI, capEvidence, featureContinuitySection, incrementalScopeSection, parseAnalysisContent, specAnchoringSection } from "../lib/ai";
+import { analyzeBehavioralGroup, analyzeWithAI, capEvidence, featureContinuitySection, incrementalScopeSection, parseAnalysisContent, specAnchoringSection, behavioralEnumerationPrompt } from "../lib/ai";
 
 const result = {
   product: { description: "统一认证与产品知识中心。", evidence: [{ path: "app/auth/login/route.ts", startLine: 1 }] },
@@ -203,5 +203,48 @@ describe("spec wording anchoring (P0 noise control)", () => {
     expect(userMessage).toContain("- HP-1｜happy｜情境：未登录用户");
     expect(userMessage).not.toContain("【上一版规格的功能清单");
     vi.unstubAllGlobals();
+  });
+});
+
+describe("behavioral enumeration targeted extraction (W0-8)", () => {
+  const targets = [
+    { path: "superset/utils/oauth2.py", patch: "@@ -408,7 +408,9 @@\n+        if is_guest:\n+            return None", contextBlocks: [{ startLine: 400, endLine: 412, content: "400: ...\n408: if is_guest:\n409:     return None" }] },
+    { path: "superset/commands/database/create.py", patch: "@@ -95,7 +95,16 @@ def run(self):\n+            except (OAuth2RedirectError, MissingOAuth2TokenError):\n+                pass", contextBlocks: [{ startLine: 95, endLine: 115, content: "95: database = self._create_database()\n96: try:\n97:     add_permissions(database)\n98: except (OAuth2RedirectError, MissingOAuth2TokenError):\n99:     pass" }] },
+  ];
+  const change = { message: "behavioral window", committedAt: "", url: "", files: [{ path: targets[0].path, status: "modified", patch: targets[0].patch }] };
+
+  it("prompt names every target file, its patch, and locks field names", () => {
+    const prompt = behavioralEnumerationPrompt(targets, ["嵌入式 SDK"], change);
+    expect(prompt).toContain("superset/utils/oauth2.py");
+    expect(prompt).toContain("superset/commands/database/create.py");
+    expect(prompt).toContain("if is_guest");
+    expect(prompt).toContain("嵌入式 SDK");
+    expect(prompt).toContain("禁止用 result 等同义键名");
+    expect(prompt).toContain("except (OAuth2RedirectError, MissingOAuth2TokenError)");
+    expect(prompt).toContain("try/except(pass)");
+  });
+
+  it("parses behavioral output tolerantly: missing product/release injected, empty features legal", async () => {
+    vi.stubEnv("AI_MODEL", "test-model");
+    vi.stubEnv("AI_API_KEY", "test-key");
+    vi.stubEnv("AI_BASE_URL", "https://gateway.test");
+    const content = JSON.stringify({
+      changes: [{ featureName: "审计", kind: "added", description: "d", userImpact: "", evidence: [{ path: "superset/utils/oauth2.py", startLine: 409 }] }],
+      features: [],
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content } }], usage: {} }), { status: 200 })));
+    const parsed = await analyzeBehavioralGroup(targets, ["嵌入式 SDK"], change, { runId: 1, accountId: null, chargeComponent: "main" });
+    // product/release 缺省注入（合并层只取分区首趟，占位不进规格）
+    expect(parsed.product.description).toContain("superset/utils/oauth2.py");
+    expect(parsed.features).toEqual([]);
+    expect(parsed.changes[0].evidence[0].path).toBe("superset/utils/oauth2.py");
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("marks control-flow captures so inverted semantics get a second look", () => {
+    const prompt = behavioralEnumerationPrompt(targets, [], change);
+    // except(pass) 类变更的语义提示在位（L12 曾被反向写成「抛出错误」）
+    expect(prompt).toContain("不再向上抛出");
   });
 });

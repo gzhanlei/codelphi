@@ -380,9 +380,10 @@ export function behavioralEnumerationPrompt(targets: BehavioralTarget[], knownFe
     "- 文件的修改引入或改变了用户可感知的行为（新/变参数、新/变响应、新/变权限边界、新配置项、错误路径变化、重试/跳过等控制流变化）→ 输出对应场景；证据必须给出精确 path:startLine（行号取自上下文代码）。",
     "- 该文件的修改没有用户可感知行为变化（纯重构/注释/样式/内部实现调整）→ 不要为它输出场景。",
     "逐个文件显式核对，不得遗漏任何一个文件；也不要为本批次之外的文件输出场景。",
+    "注意控制流语义：try/except(pass) 等被捕获的错误意味着该错误不再向上抛出——行为描述必须反映修改后的外部可见结果（如「创建不再因…而失败」），而不是把被捕获的错误写成输出行为。",
     "规格按功能组织，每个场景包含情境、操作、结果，分类为 happy/edge/error，reference 使用 HP-n/EC-n/ER-n。JSON 字段名必须与下方模板逐字一致：情境=context、操作=action、结果=outcome，禁止用 result 等同义键名。",
     names.length > 0 ? `功能名优先复用以下既有功能名（同属一个产品功能的场景归入同一功能）：${names.join("、")}` : "将同属一个产品功能的场景归入同一功能名。",
-    "product 简介与 release 变化可留空结构（本批次只关注场景与变化）。",
+
     "只返回 JSON，不要 Markdown。结构：",
     '{"product":{"description":"","evidence":[{"path":"","startLine":1}]},"release":{"title":"","summary":""},"changes":[{"featureName":"","kind":"added|changed|removed|fixed|reviewed","description":"","userImpact":"","evidence":[{"path":"","startLine":1}]}],"features":[{"name":"","summary":"","scenarios":[{"reference":"HP-1","context":"","action":"","outcome":"","category":"happy","evidence":[{"path":"","startLine":1}]}]}]}',
     `\n【本次提交】\n${change.message}\n\n【文件变化】\n${JSON.stringify(change.files)}`,
@@ -399,7 +400,31 @@ export async function analyzeBehavioralGroup(targets: BehavioralTarget[], knownF
     ],
     billing,
   );
-  return parseAnalysisContent(content);
+  return parseBehavioralContent(content, targets);
+}
+
+/**
+ * 定向枚举的宽容解析：product/release 允许缺省（注入占位——合并层只取分区首趟的
+ * product/release，占位不会进规格），features 允许为空（「无行为变化」是合法回答）。
+ */
+export function parseBehavioralContent(content: string, targets: BehavioralTarget[]): AnalysisResult {
+  const trimmed = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start < 0) throw new Error("AI response did not contain a JSON object");
+  const json = JSON.parse(trimmed.slice(start, end + 1)) as Record<string, unknown>;
+  const emptyProduct = !json.product || typeof json.product !== "object" || !(json.product as { description?: unknown }).description;
+  if (emptyProduct) {
+    json.product = {
+      description: `行为面枚举补充：${targets.map((t) => t.path).join("、")}`,
+      evidence: targets.slice(0, 5).map((t) => ({ path: t.path, startLine: t.contextBlocks[0]?.startLine ?? 1 })),
+    };
+  }
+  if (!json.release || typeof json.release !== "object") json.release = { title: "行为面枚举", summary: "行为面枚举补充（合并层只取分区首趟的 release，占位不进规格）。" };
+  if (!Array.isArray(json.features)) json.features = [];
+  if (!Array.isArray(json.changes)) json.changes = [];
+  const behavioralSchema = analysisSchema.extend({ features: z.array(analysisSchema.shape.features.element).max(50) });
+  return behavioralSchema.parse(capEvidence(normalizeScenarioAliases(json)));
 }
 
 function isAbortTimeout(error: unknown) {
