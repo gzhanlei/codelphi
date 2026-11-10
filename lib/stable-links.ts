@@ -31,7 +31,7 @@ export async function resolveFeatureByStableKey(productId: number, stableKey: st
   return rows[0] ? Number((rows[0] as { id: number }).id) : null;
 }
 
-/** 返回场景所在 live feature id；场景未知时返回 null。 */
+/** 返回场景所在 live feature id（历史命名不准：返回的是 feature id 不是场景行 id，规格场景页依赖该语义）；场景未知时返回 null。 */
 export async function resolveScenarioByStableKey(productId: number, stableKey: string, reference: string, execute: Execute = defaultExecute): Promise<number | null> {
   const specFeature = await latestSpecFeatureName(stableKey, productId, execute);
   if (!specFeature) return null;

@@ -37,11 +37,15 @@ async function resolveFeatureByStableKey(productId: number, stableKey: string, e
   return rows[0] ? Number((rows[0] as { id: number }).id) : null;
 }
 
-async function resolveScenarioByStableKey(productId: number, stableKey: string, reference: string, execute: Execute): Promise<number | null> {
+/**
+ * 返回场景行 id（注意与 lib/stable-links.ts 的 resolveScenarioByStableKey 不同：
+ * 那个返回 live feature id，规格场景页依赖该语义；本工具面需要的是场景行本身）。
+ */
+async function resolveScenarioRowId(productId: number, stableKey: string, reference: string, execute: Execute): Promise<number | null> {
   const specFeature = await latestSpecFeatureName(stableKey, productId, execute);
   if (!specFeature) return null;
   const [rows] = await execute(
-    `SELECT f.id FROM scenarios s JOIN features f ON f.id = s.feature_id
+    `SELECT s.id FROM scenarios s JOIN features f ON f.id = s.feature_id
      WHERE f.product_id = ? AND f.name = ? AND f.active = 1 AND s.active = 1 AND s.reference = ?
      LIMIT 1`,
     [productId, specFeature.name, reference],
@@ -183,7 +187,7 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
   if (name === "get_scenario") {
     const stableKey = specFeatureKey(String(args.stableKey ?? ""));
     const reference = String(args.reference ?? "");
-    const scenarioId = await resolveScenarioByStableKey(product.id, stableKey, reference, execute);
+    const scenarioId = await resolveScenarioRowId(product.id, stableKey, reference, execute);
     if (scenarioId === null) return {};
     const scenarios = await queryRows<{ reference: string; context: string; action: string; outcome: string; category: string; source: string; evidence: unknown; featureName: string }>(
       execute(
