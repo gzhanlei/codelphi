@@ -332,3 +332,20 @@ p { line-height: 1.7; }
 .release-notes-emphasis input:focus { border-color: var(--green); outline: none; background: #fff; }
 .release-notes-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
 .release-notes-notice { color: var(--green); }
+
+/* 介绍材料面板（overview 04：定位块 → AI 大纲 → PPT 烧片） */
+.intro-material-panel { margin-top: 18px; }
+.intro-positioning { display: grid; gap: 8px; margin: 8px 0 10px; max-width: 560px; }
+.intro-positioning label { display: grid; gap: 3px; font-size: 12px; color: var(--muted); }
+.intro-positioning textarea, .intro-positioning input { border: 1px solid #ccd8d1; border-radius: 8px; background: #fbfcfb; padding: 7px 10px; font: inherit; font-size: 12px; box-sizing: border-box; min-height: 32px; resize: vertical; }
+.intro-positioning textarea { min-height: 44px; }
+.intro-positioning textarea:focus, .intro-positioning input:focus { border-color: var(--green); outline: none; background: #fff; }
+.intro-slides { display: grid; gap: 8px; margin-top: 8px; }
+.intro-slide { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 10px 12px; }
+.intro-slide-head { font-size: 12px; color: #94a19c; display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+.intro-slide-head strong { color: var(--ink); font-size: 13px; }
+.intro-slide-type { border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; font-size: 10px; font-weight: 600; color: var(--green); }
+.intro-slide ul { margin: 6px 0 0; padding-left: 18px; font-size: 12px; color: #3d4b44; }
+.intro-slide-notes { margin: 6px 0 0; font-size: 12px; color: #94a19c; }
+.intro-slide-anchors { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 6px; }
+.intro-slide-anchors code { font-size: 10px; background: #f0f4f1; border-radius: 4px; padding: 1px 5px; color: #4a6659; }

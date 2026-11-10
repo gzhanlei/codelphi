@@ -26,9 +26,12 @@ export type LlmOutcome = "success" | "failed" | "timeout";
 export type ChargeComponent = "main" | "platform_shadow";
 
 export interface LlmCallReceiptInput {
-  runId: number;
+  /** 分析口径绑定 analysis_runs；独立生成（call_kind='intro_material' 等）无 run，为 null。 */
+  runId: number | null;
   accountId: number | null;
   chargeComponent: ChargeComponent;
+  /** 调用类别（migration 062）：'intro_material' 等；分析口径留空。 */
+  callKind?: string | null;
   model: string;
   outcome: LlmOutcome;
   /** 网关原始 usage 对象；null/undefined = usage 不可得（usage_status=unknown）。 */
@@ -87,8 +90,8 @@ export async function recordLlmCallReceipt(input: LlmCallReceiptInput): Promise<
       `INSERT INTO llm_call_receipts
         (run_id, account_id, charge_component, model, provider_request_id, outcome, usage_status,
          input_tokens, output_tokens, cache_hit_tokens, cache_miss_tokens, usage_json,
-         pricing_version, input_price, output_price, cache_price, currency, llm_cost_amount, pricing_status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         pricing_version, input_price, output_price, cache_price, currency, llm_cost_amount, pricing_status, call_kind)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         input.runId,
         input.accountId,
@@ -109,6 +112,7 @@ export async function recordLlmCallReceipt(input: LlmCallReceiptInput): Promise<
         priced ? (pricedLlm?.currency ?? "CNY") : "CNY",
         cost,
         priced ? "priced" : "unpriced",
+        input.callKind ?? null,
       ],
     );
   } catch (error) {

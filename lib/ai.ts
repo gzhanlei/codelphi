@@ -237,9 +237,11 @@ export function incrementalScopeSection(affectedFeatureNames?: string[], unassig
 }
 
 export interface LlmBillingContext {
-  runId: number;
+  /** 分析口径绑定 run；独立生成（介绍材料等）无 run，为 null + callKind 标注。 */
+  runId: number | null;
   accountId: number | null;
   chargeComponent: ChargeComponent;
+  callKind?: string | null;
 }
 
 export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext, context: { previousFeatureNames?: string[]; previousSpec?: SpecAnchorFeature[]; affectedFeatureNames?: string[]; unassignedBehavioralPaths?: string[]; partition?: { index: number; total: number }; billing?: LlmBillingContext } = {}): Promise<AnalysisResult> {
@@ -285,7 +287,7 @@ export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext
  * 网关调用 + 回执记账的共享体（契约 M0-T2：超时与失败都落一条 unknown-usage 记录，
  * 网关 2xx 但结构不可解析时 usage 若存在仍落库）。供标准提取与 W0-8 定向枚举共用。
  */
-async function requestStructuredCompletion(messages: Array<{ role: string; content: string }>, billing?: LlmBillingContext): Promise<string> {
+export async function requestStructuredCompletion(messages: Array<{ role: string; content: string }>, billing?: LlmBillingContext): Promise<string> {
   const model = requiredEnv("AI_MODEL");
   let response: Response;
   try {
@@ -312,6 +314,7 @@ async function requestStructuredCompletion(messages: Array<{ role: string; conte
         runId: billing.runId,
         accountId: billing.accountId,
         chargeComponent: billing.chargeComponent,
+        callKind: billing.callKind ?? null,
         model,
         outcome: isAbortTimeout(error) ? "timeout" : "failed",
         usageRaw: null,
@@ -326,6 +329,7 @@ async function requestStructuredCompletion(messages: Array<{ role: string; conte
         runId: billing.runId,
         accountId: billing.accountId,
         chargeComponent: billing.chargeComponent,
+        callKind: billing.callKind ?? null,
         model,
         outcome: "failed",
         usageRaw: null,
@@ -348,6 +352,7 @@ async function requestStructuredCompletion(messages: Array<{ role: string; conte
         runId: billing.runId,
         accountId: billing.accountId,
         chargeComponent: billing.chargeComponent,
+        callKind: billing.callKind ?? null,
         model,
         outcome: "failed",
         usageRaw: payloadRecord?.usage ?? null,
@@ -361,6 +366,7 @@ async function requestStructuredCompletion(messages: Array<{ role: string; conte
       runId: billing.runId,
       accountId: billing.accountId,
       chargeComponent: billing.chargeComponent,
+      callKind: billing.callKind ?? null,
       model,
       outcome: "success",
       usageRaw: usage,
