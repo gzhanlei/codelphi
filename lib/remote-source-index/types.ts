@@ -97,7 +97,7 @@ export interface SourceBlobMeta {
   cacheState: "miss" | "cached" | "fetched";
 }
 
-export type SourceReadRequestedBy = "planner" | "profile" | "ai_explorer" | "evidence_verifier";
+export type SourceReadRequestedBy = "planner" | "profile" | "ai_explorer" | "evidence_verifier" | "behavioral_enumeration";
 
 export interface SourceLineRequest {
   path: string;

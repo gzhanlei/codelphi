@@ -49,3 +49,17 @@ export function analysisMaxPartitions() {
   const raw = Number(process.env.ANALYSIS_MAX_PARTITIONS ?? "");
   return Number.isInteger(raw) && raw > 0 ? raw : 6;
 }
+
+export function behavioralEnumerationEnabled() {
+  return process.env.BEHAVIORAL_ENUMERATION !== "false";
+}
+
+export function behavioralEnumerationGroupSize() {
+  const raw = Number(process.env.BEHAVIORAL_ENUM_GROUP_SIZE ?? "");
+  return Number.isInteger(raw) && raw > 0 ? raw : 6;
+}
+
+export function behavioralEnumerationMaxGroups() {
+  const raw = Number(process.env.BEHAVIORAL_ENUM_MAX_GROUPS ?? "");
+  return Number.isInteger(raw) && raw > 0 ? raw : 8;
+}

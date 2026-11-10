@@ -115,7 +115,7 @@ export function parseAnalysisContent(content: string): AnalysisResult {
   return analysisSchema.parse(capEvidence(normalizeScenarioAliases(JSON.parse(json))));
 }
 
-interface ChangeContext {
+export interface ChangeContext {
   message: string;
   files: Array<{ path: string; status: string; patch: string }>;
 }
@@ -257,9 +257,22 @@ export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext
     `\n【当前代码，带行号】\n${sources.map((file) => `\n--- ${file.path} ---\n${file.content}`).join("\n")}`,
   ].join("\n");
 
-  const model = requiredEnv("AI_MODEL");
-  const billing = context.billing;
+  const content = await requestStructuredCompletion(
+    [
+      { role: "system", content: "你是严谨的代码分析器，只输出可验证的结构化事实。" },
+      { role: "user", content: prompt },
+    ],
+    context.billing,
+  );
+  return parseAnalysisContent(content);
+}
 
+/**
+ * 网关调用 + 回执记账的共享体（契约 M0-T2：超时与失败都落一条 unknown-usage 记录，
+ * 网关 2xx 但结构不可解析时 usage 若存在仍落库）。供标准提取与 W0-8 定向枚举共用。
+ */
+async function requestStructuredCompletion(messages: Array<{ role: string; content: string }>, billing?: LlmBillingContext): Promise<string> {
+  const model = requiredEnv("AI_MODEL");
   let response: Response;
   try {
     response = await fetch(chatCompletionsUrl(), {
@@ -270,10 +283,7 @@ export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext
       },
       body: JSON.stringify({
         model,
-        messages: [
-          { role: "system", content: "你是严谨的代码分析器，只输出可验证的结构化事实。" },
-          { role: "user", content: prompt },
-        ],
+        messages,
         temperature: 0,
         max_tokens: 16_000,
         stream: false,
@@ -343,6 +353,52 @@ export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext
       providerRequestId: requestId,
     });
   }
+  return content;
+}
+
+/** W0-8 行为面枚举：逐文件显式提问的定向提取（小 prompt、强制逐文件回答）。 */
+export interface BehavioralTarget {
+  path: string;
+  /** 该文件在本窗口的 unified diff patch。 */
+  patch: string;
+  /** 变更区上下文（带行号的代码行）。 */
+  contextBlocks: Array<{ startLine: number; endLine: number; content: string }>;
+}
+
+export function behavioralEnumerationPrompt(targets: BehavioralTarget[], knownFeatureNames: string[], change: ChangeContext): string {
+  const names = knownFeatureNames.map((name) => name.trim()).filter(Boolean).slice(0, 60);
+  const sections = targets.map((target) => {
+    const blocks = target.contextBlocks
+      .map((block) => `【变更区上下文 ${block.startLine}-${block.endLine}（带行号）】\n${block.content}`)
+      .join("\n");
+    return `--- 文件：${target.path} ---\n【变更 diff】\n${target.patch || "（无 patch）"}\n${blocks}`;
+  });
+  return [
+    "你在维护一个产品知识库。仅根据给定代码和 diff 输出事实，不要补充猜测。",
+    "【定向行为枚举】",
+    `以下是本批次 ${targets.length} 个文件在本窗口的变更 diff 与变更区上下文代码。对每个文件逐一核对其变更块：`,
+    "- 文件的修改引入或改变了用户可感知的行为（新/变参数、新/变响应、新/变权限边界、新配置项、错误路径变化、重试/跳过等控制流变化）→ 输出对应场景；证据必须给出精确 path:startLine（行号取自上下文代码）。",
+    "- 该文件的修改没有用户可感知行为变化（纯重构/注释/样式/内部实现调整）→ 不要为它输出场景。",
+    "逐个文件显式核对，不得遗漏任何一个文件；也不要为本批次之外的文件输出场景。",
+    "规格按功能组织，每个场景包含情境、操作、结果，分类为 happy/edge/error，reference 使用 HP-n/EC-n/ER-n。JSON 字段名必须与下方模板逐字一致：情境=context、操作=action、结果=outcome，禁止用 result 等同义键名。",
+    names.length > 0 ? `功能名优先复用以下既有功能名（同属一个产品功能的场景归入同一功能）：${names.join("、")}` : "将同属一个产品功能的场景归入同一功能名。",
+    "product 简介与 release 变化可留空结构（本批次只关注场景与变化）。",
+    "只返回 JSON，不要 Markdown。结构：",
+    '{"product":{"description":"","evidence":[{"path":"","startLine":1}]},"release":{"title":"","summary":""},"changes":[{"featureName":"","kind":"added|changed|removed|fixed|reviewed","description":"","userImpact":"","evidence":[{"path":"","startLine":1}]}],"features":[{"name":"","summary":"","scenarios":[{"reference":"HP-1","context":"","action":"","outcome":"","category":"happy","evidence":[{"path":"","startLine":1}]}]}]}',
+    `\n【本次提交】\n${change.message}\n\n【文件变化】\n${JSON.stringify(change.files)}`,
+    "\n【变更文件（逐文件 diff 与变更区上下文）】\n" + sections.join("\n"),
+  ].join("\n");
+}
+
+export async function analyzeBehavioralGroup(targets: BehavioralTarget[], knownFeatureNames: string[], change: ChangeContext, billing?: LlmBillingContext): Promise<AnalysisResult> {
+  const prompt = behavioralEnumerationPrompt(targets, knownFeatureNames, change);
+  const content = await requestStructuredCompletion(
+    [
+      { role: "system", content: "你是严谨的代码分析器，只输出可验证的结构化事实。" },
+      { role: "user", content: prompt },
+    ],
+    billing,
+  );
   return parseAnalysisContent(content);
 }
 

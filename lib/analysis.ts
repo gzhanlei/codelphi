@@ -15,12 +15,14 @@ import { compareIncrementalShadow } from "./incremental-shadow";
 import { analysisMaxPartitions, incrementalShadowEnabled } from "./env";
 import { computeCoverageReceipt, enumerateImplementationSurface, saveCoverageReceipt, type AnalysisCoverageReceipt } from "./analysis-coverage";
 import { mergeChunkResults, type ExtractionChunk } from "./extraction-merge";
+import { behavioralEnumerationEnabled } from "./env";
+import { behavioralChangePaths } from "./patch-scan";
+import { enumerateBehavioralChunks } from "./behavioral-enumeration";
 import type { SpecFeature } from "./spec-diff";
 import type { SpecAnchorFeature } from "./spec-versions";
 import { markSpecDrift } from "./spec-drift";
 import { deliverAnalysisNotifications } from "./notifications";
 import { ensureRegressionTasks } from "./regression-tasks";
-import { behavioralChangePaths } from "./patch-scan";
 
 export interface RunContext {
   id: number;
@@ -323,6 +325,8 @@ async function runAnalysisBody(run: RunContext) {
     diffPaths: change.files.map((file) => file.path),
   };
   const executeWrapper = (statement: string, parameters: Array<string | number | null>) => getDb().execute(statement, parameters);
+  // W0-8 行为面枚举：patch-scan 行为文件清单（跨模式共享，RC2 与定向枚举共用）
+  const behavioralPaths = [...behavioralChangePaths(change.files)].sort();
   const previousFeatureNames = await loadPreviousFeatureNames(run.repositoryId, executeWrapper);
   // P0 措辞锚定：把上一版场景全文喂给 prompt，未变行为逐字沿用；加载失败降级为仅命名约束，不阻塞分析。
   let previousSpecText: SpecAnchorFeature[];
@@ -352,7 +356,7 @@ async function runAnalysisBody(run: RunContext) {
       // 重新算受影响面，证据文件本次无行为性行变更的既有功能原样沿用，只重提取行为性
       // 触及的功能。宽 diff 下 160KB 窗口丢场景曾致 v95 规格坍缩（178→83）。
       // 行为集为空或未命中任何既有功能时保持全量：可能是索引未覆盖的新功能，需 AI 看新代码。
-      const behavioral = await loadAffectedFeatureKeys(run.repositoryId, [...behavioralChangePaths(change.files)], executeWrapper);
+      const behavioral = await loadAffectedFeatureKeys(run.repositoryId, [...behavioralPaths], executeWrapper);
       if (behavioral.names.length > 0) {
         affectedKeys = behavioral.keys;
         affectedFeatureNames = behavioral.names;
@@ -365,6 +369,10 @@ async function runAnalysisBody(run: RunContext) {
   // （同 runId 多行，契约 M0-T2）如实记账。
   let result: AnalysisResult;
   let singleWindowSources: AnalysisPartition["sources"] | null = null;
+  // W0-8 行为面枚举：patch-scan 行为文件清单（跨模式共享，RC2 与定向枚举共用）
+  const chunks: ExtractionChunk[] = [];
+
+  const knownFeatureNames = new Set(previousFeatureNames);
   const { partitions, index: sourceIndex } = await getPartitionedAnalysisSources(remoteAnalysisRequest, { planner, budgets: analysisSliceBudgets }, { maxPartitions: analysisMaxPartitions() });
   console.log("[analysis] partitioned extraction", { runId: run.id, partitions: partitions.length, mode: affectedKeys === null ? "full" : "incremental-carry" });
   // B1 覆盖披露回执：装配面 vs 索引全树实现面（元数据级枚举，不读文件内容），
@@ -390,9 +398,9 @@ async function runAnalysisBody(run: RunContext) {
       allowSet: evidenceAllowSet(single, change),
       label: `single/${run.id}`,
     });
+    for (const feature of result.features) knownFeatureNames.add(feature.name);
+    chunks.push({ result });
   } else {
-    const chunks: ExtractionChunk[] = [];
-    const knownFeatureNames = new Set(previousFeatureNames);
     for (const [index, partition] of partitions.entries()) {
       const chunkResult = await extractPassWithRetry({
         sources: partition.sources,
@@ -409,6 +417,23 @@ async function runAnalysisBody(run: RunContext) {
       });
       for (const feature of chunkResult.features) knownFeatureNames.add(feature.name);
       chunks.push({ result: chunkResult });
+    }
+    result = mergeChunkResults(chunks);
+  }
+  // W0-8 行为面枚举：行为文件逐组定向提问（每文件显式回答行为/无行为），把召回从
+  // 注意力问题变枚举问题。枚举是增强层：组硬失败重试一次后跳过，不阻塞主提取产出。
+  if (behavioralEnumerationEnabled() && behavioralPaths.length > 0) {
+    const enumerated = await enumerateBehavioralChunks({
+      behavioralPaths,
+      files: change.files,
+      index: sourceIndex,
+      change,
+      knownFeatureNames: [...knownFeatureNames],
+      billing: { runId: run.id, accountId: run.accountId ?? null, chargeComponent: "main" },
+    });
+    for (const { result: chunk } of enumerated) {
+      for (const feature of chunk.features) knownFeatureNames.add(feature.name);
+      chunks.push({ result: chunk });
     }
     result = mergeChunkResults(chunks);
   }

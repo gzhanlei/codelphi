@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { queueAnalysis, runAnalysis } from "../lib/analysis";
+import { analyzeBehavioralGroup } from "../lib/ai";
 import { analyzeWithAI, type AnalysisResult } from "../lib/ai";
 import { getPartitionedAnalysisSources, getRemoteAnalysisSources } from "../lib/remote-analysis";
 import { generateRepositoryArchitectureVersion } from "../lib/architecture-version";
@@ -48,7 +49,7 @@ vi.mock("../lib/code-hosting", async (importOriginal) => ({
     product: { id: run.productId, slug: run.productSlug, name: run.productName },
   })),
 }));
-vi.mock("../lib/ai", () => ({ analyzeWithAI: vi.fn() }));
+vi.mock("../lib/ai", () => ({ analyzeWithAI: vi.fn(), analyzeBehavioralGroup: vi.fn() }));
 vi.mock("../lib/notifications", () => ({ deliverAnalysisNotifications: vi.fn(async () => undefined) }));
 const { compareIncrementalShadow } = vi.hoisted(() => ({ compareIncrementalShadow: vi.fn((incremental: { features: Array<{ name: string }>; changes: unknown[] }, _full: unknown) => ({ consistent: true, missingKeys: [] as string[], extraKeys: [] as string[], scenarioDiffs: [] as string[] })) }));
 vi.mock("../lib/incremental-shadow", () => ({ compareIncrementalShadow }));
@@ -116,6 +117,7 @@ describe("analysis orchestration", () => {
     listRoot.mockResolvedValue({ status: "indexed", truncated: false, entries: [{ path: "lib", type: "tree" }] });
     readLines.mockImplementation(async (request) => ({ startLine: 1, endLine: 1, lineCount: 1, byteSize: 100, lines: [`${request.path} complete evidence`] }));
     vi.mocked(analyzeWithAI).mockResolvedValue({ product: { description: "代码驱动的产品知识与变更中心。", evidence: [{ path: "lib/db.ts", startLine: 1 }] }, release: { title: "v1", summary: "summary" }, features: [], changes: [] });
+    vi.mocked(analyzeBehavioralGroup).mockResolvedValue({ product: { description: "枚举", evidence: [{ path: "lib/db.ts", startLine: 1 }] }, release: { title: "", summary: "" }, changes: [], features: [] });
   });
 
   it("reuses an existing queued run via the enqueue combinator", async () => {
@@ -457,6 +459,36 @@ describe("analysis orchestration", () => {
     expect(savedResult.features.map((feature) => feature.name)).toEqual(["统一登录"]);
     // 第二趟 product.evidence 被清洗为空，但合并只取第一趟 product——不受影响
     expect(savedResult.product.evidence).toHaveLength(1);
+  });
+
+  it("enumerates behavioral diff files with targeted per-file extraction (W0-8)", async () => {
+    partitionedSourcesMock.mockResolvedValue({
+      partitions: [{ slice: { files: [{ path: "lib/auth.ts" }] }, sources: [{ path: "lib/auth.ts", content: "1: auth" }] }],
+      index: { readLines, listDir, listRoot },
+    });
+    execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("JOIN repositories repo")) return [runRows];
+      if (sql.includes("source_roots")) return [[]];
+      if (sql.includes("SELECT id FROM analysis_runs WHERE repository_id = ? AND after_sha = ?")) return [existingRunRows];
+      if (sql.includes("INSERT INTO analysis_runs")) return [{ insertId: 60 }];
+      if (sql.includes("SELECT sf.name FROM spec_features")) return [[{ name: "统一登录" }]];
+      return [{}];
+    });
+    adapter.getChangeContext.mockResolvedValue({ message: "behavioral change", committedAt: "2026-11-01T00:00:00Z", url: "", files: [
+      { path: "lib/auth.ts", status: "modified", patch: "@@ -1,3 +1,5 @@\n+ const skip = true;" },
+      { path: "lib/audit.ts", status: "added", patch: "@@ -0,0 +1,2 @@\n+ export const audit = 1;" },
+    ] });
+    vi.mocked(analyzeWithAI).mockResolvedValue({ product: { description: "d", evidence: [{ path: "lib/auth.ts", startLine: 1 }] }, release: { title: "v1", summary: "s" }, changes: [], features: [{ name: "统一登录", summary: "s1", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy", evidence: [{ path: "lib/auth.ts", startLine: 1 }] }] }] } as never);
+    vi.mocked(analyzeBehavioralGroup).mockResolvedValue({ product: { description: "枚举", evidence: [{ path: "lib/audit.ts", startLine: 1 }] }, release: { title: "", summary: "" }, changes: [{ featureName: "审计日志", kind: "added", description: "审计", userImpact: "", evidence: [{ path: "lib/audit.ts", startLine: 1 }] }], features: [{ name: "审计日志", summary: "审计", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy", evidence: [{ path: "lib/audit.ts", startLine: 2 }] }] }] } as never);
+    await expect(runAnalysis(8)).resolves.toBeUndefined();
+    // 定向枚举按组调用：组内包含全部行为文件与各自 patch；上下文带既有功能名清单
+    const [targets, known] = vi.mocked(analyzeBehavioralGroup).mock.calls[0];
+    expect(targets.map((t) => t.path).sort()).toEqual(["lib/audit.ts", "lib/auth.ts"]);
+    expect(targets.find((t) => t.path === "lib/auth.ts")?.patch).toContain("const skip");
+    expect(known).toContain("统一登录");
+    // 枚举产出的功能进入合并规格
+    const savedResult = vi.mocked(insertSpecVersion).mock.calls[0][2] as AnalysisResult;
+    expect(savedResult.features.map((feature) => feature.name)).toContain("审计日志");
   });
 
   it("accepts a sanitized-empty pass as a no-change window (collapse detection downstream)", async () => {
