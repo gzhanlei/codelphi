@@ -220,6 +220,7 @@ curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3008/login
 说明：
 
 - 服务器建议通过只读的 GitHub deploy key 拉取代码。
+- 2026-11-11 版本部署清单：执行迁移 060–063（`npm run db:migrate`）；可选配置 `PPT_PARTNER_KEY`/`PPT_PARTNER_URL`（介绍材料的 PPT 烧片走 PPTCreator partner MCP，未配置时该端点返回 501，大纲生成与 release notes 不受影响）；Digest 周报 sweep 首次运行会为窗口内有发布的产品各生成一期近 7 天摘要并投递（幂等键 = 产品+周期起点，仅一次）。
 - 数据库迁移未纳入部署流程，schema 变更需在服务器上手动执行 `npm run db:migrate`。
 - Explainer 导出需要 Chrome/Chromium（常规产品分析不依赖它）：服务器安装 `chromium` 后，Archify 运行时会自动发现标准路径下的 `chromium-browser`/`chrome`；也可通过 Archify 运行时认读的环境变量 `ARCHIFY_CHROME` 显式指定可执行文件路径。注意只装 `chromium-headless` 子包（二进制名不匹配）不会被自动发现。
 

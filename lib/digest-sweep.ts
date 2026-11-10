@@ -62,7 +62,13 @@ async function loadWindowChanges(execute: Execute, productId: number, window: Di
 
 const kindLabels: Record<string, string> = { added: "新增", changed: "更新", removed: "移除" };
 
-/** 纯函数：digest → 渠道/邮件文本（确定性，无生成文本）。 */
+const AUDIENCE_SECTIONS: Array<{ key: keyof DigestContent["audiences"]; label: string }> = [
+  { key: "support", label: "对支持/客服" },
+  { key: "sales", label: "对销售" },
+  { key: "marketing", label: "对市场" },
+];
+
+/** 纯函数：digest → 渠道/邮件文本（确定性，无生成文本；§4.3 内容结构=变更清单+受众分节）。 */
 export function renderDigestText(productName: string, content: DigestContent): string {
   const lines = [
     `【CoDelphi】${productName} 周期行为摘要（${content.period.start} ~ ${content.period.end}）`,
@@ -74,6 +80,15 @@ export function renderDigestText(productName: string, content: DigestContent): s
     const subject = change.scenarioReference ? `${change.featureName} · ${change.scenarioReference}` : change.featureName;
     lines.push(`- ${kind} ${subject}：${change.summary}${change.highlightType ? `（${change.highlightType}）` : ""}`);
     if (change.evidencePaths.length > 0) lines.push(`  证据：${change.evidencePaths.slice(0, 4).join("、")}`);
+  }
+  for (const section of AUDIENCE_SECTIONS) {
+    const bucket = content.audiences[section.key];
+    if (!bucket || bucket.length === 0) continue;
+    lines.push("", `${section.label}：`);
+    for (const change of bucket) {
+      const subject = change.scenarioReference ? `${change.featureName} · ${change.scenarioReference}` : change.featureName;
+      lines.push(`- ${subject}：${change.summary}`);
+    }
   }
   return lines.join("\n");
 }

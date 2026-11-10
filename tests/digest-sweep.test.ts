@@ -77,10 +77,13 @@ describe("digest weekly sweep (A2 §4.3 接线)", () => {
     const text = renderDigestText("SalesBuddy", {
       period: { start: "2026-11-04", end: "2026-11-10" },
       changes: [{ ...changeRow, specChangeId: 11, evidencePaths: ["lib/chat.ts"] }],
-      audiences: { support: [], sales: [], marketing: [] },
+      audiences: { support: [], sales: [], marketing: [{ ...changeRow, specChangeId: 11, evidencePaths: [] }] },
     });
     expect(text).toContain("SalesBuddy 周期行为摘要（2026-11-04 ~ 2026-11-10）");
     expect(text).toContain("- 新增 助理聊天 · HP-2：URL 可点（News）");
     expect(text).toContain("证据：lib/chat.ts");
+    expect(text).toContain("对市场：");
+    expect(text).toContain("- 助理聊天 · HP-2：URL 可点");
+    expect(text).not.toContain("对销售：");
   });
 });
