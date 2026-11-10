@@ -169,7 +169,11 @@ superset 实测（run 63）：sourceCoverage partial（35/2149，diff 57/120 入
 
 **手动补跑路径**（无 push 场景）：服务器 `tsx` 脚本 `queueAnalysis` + 原子认领（`UPDATE started_at WHERE queued AND started_at IS NULL`）+ `await runAnalysis(id)`；sweep 只领 >10 分钟的 queued。
 
-## 11. M9 影子对比口径成文（R4，2026-11-11）
+## 11. changes 截断影响边界（R2 确认，2026-11-11）
+
+合并层的 changes 截断帽 150（`lib/extraction-merge.ts`，截断事实经 `mergeStats.changesTruncated` 计入完整性账本 mergeIntegrity，>0 即 partial）**只作用于 `changes` 展示表（changelog 层）**。回归任务链路不受影响——证据链：`ensureRegressionTasks`（`lib/regression-tasks.ts`）的数据源是 `spec_changes`（spec-diff 从功能/场景派生，无 150 帽）与 `release_files`（行为文件清单），不读 `changes` 表。行为变化列表页（`loadBehaviorChanges`）同样走 `spec_changes`。因此截断只损失 changelog 条目的完整性展示，不影响回归推荐、行为账本或发布稿锚定面（发布稿候选也取 `spec_changes`）。
+
+## 12. M9 影子对比口径成文（R4，2026-11-11）
 
 **机制**：增量 run 落库成功后，另取一份单窗切片跑全量提取（`charge_component='platform_shadow'`，只对比不落库）。对比对象是 carry-forward 合并后的**完整规格**——增量 AI 输出只含受影响功能，直接比会恒等失败。多趟增量 run 无单一窗口时显式另取单窗切片（W0-6 要点 5），不用空输入、不静默失效。
 
@@ -181,7 +185,7 @@ superset 实测（run 63）：sourceCoverage partial（35/2149，diff 57/120 入
 
 **声明边界**：影子对比是「两种执行路径（增量 vs 单窗）的路径一致性指标」，不构成召回证明，也不能替代人工盲评（错误高度相关：同一模型/prompt/索引）。召回主张由 benchmark 盲评承担。影子失败只告警（best-effort），consistent=null 不进门槛判定，不回滚分析。
 
-## 12. 实测锚点（superset 盲评，同窗口同基线四跑）
+## 13. 实测锚点（superset 盲评，同窗口同基线四跑）
 
 | 轮次 | 机制 | 召回（15 条冻结预标） | 精确率（功能级） |
 |---|---|---|---|
