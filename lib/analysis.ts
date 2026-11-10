@@ -319,6 +319,8 @@ async function runAnalysisBody(run: RunContext) {
     access: target.access,
     provider: target.adapter.provider,
     scopeRoots,
+    // W0-7：窗口 diff 文件必选装配（行为证据一手面，保证分区覆盖 diff 面）
+    diffPaths: change.files.map((file) => file.path),
   };
   const executeWrapper = (statement: string, parameters: Array<string | number | null>) => getDb().execute(statement, parameters);
   const previousFeatureNames = await loadPreviousFeatureNames(run.repositoryId, executeWrapper);

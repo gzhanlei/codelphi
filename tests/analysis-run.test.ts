@@ -308,6 +308,8 @@ describe("analysis orchestration", () => {
       .mockRejectedValueOnce(new Error("AI returned unknown evidence paths: .github/labeler.yml"))
       .mockResolvedValueOnce({ product: { description: "d", evidence: [{ path: "lib/auth.ts", startLine: 1 }] }, release: { title: "v1", summary: "s" }, changes: [], features: [{ name: "统一登录", summary: "s1", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy", evidence: [{ path: "lib/auth.ts", startLine: 1 }] }] }] } as never);
     await expect(runAnalysis(8)).resolves.toBeUndefined();
+    // W0-7：窗口 diff 文件路径透传给分区装配（必选）
+    expect(partitionedSourcesMock.mock.calls[0][0]).toMatchObject({ diffPaths: ["lib/auth.ts"] });
     // 第一次调用失败、第二次重试成功：run 不再因单趟偶发而作废
     expect(analyzeWithAI).toHaveBeenCalledTimes(2);
     expect(vi.mocked(analyzeWithAI).mock.calls[0][0]).toEqual(vi.mocked(analyzeWithAI).mock.calls[1][0]);

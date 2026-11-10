@@ -78,7 +78,7 @@ function backendFrom(files: Map<string, string>, trees: Map<string, SourceTreeAp
 const tree = (path: string) => ({ path, type: "tree" as const, sha: `tree-${path}` });
 const blob = (path: string) => ({ path, type: "blob" as const, sha: "filled-by-backend" });
 
-async function planSelection(budgets: Partial<SliceBudgets>, files: Map<string, string>, trees: Map<string, SourceTreeApiEntry[]>, scopeRoots: SourceRevisionRef[] extends never ? never : Array<{ path: string }> = [{ path: "" }], onList?: (path: string) => void) {
+async function planSelection(budgets: Partial<SliceBudgets>, files: Map<string, string>, trees: Map<string, SourceTreeApiEntry[]>, scopeRoots: Array<{ path: string }> = [{ path: "" }], onList?: (path: string) => void, diffPaths?: string[], excludePaths?: ReadonlySet<string>) {
   const index = await createRemoteSourceIndex(ref, { access: {}, scopeRoots, backend: backendFrom(files, trees, onList) });
   return createSlicePlanner({ now: () => 20 }).plan({
     product: { id: 1, slug: "commerce", name: "Commerce" },
@@ -87,6 +87,8 @@ async function planSelection(budgets: Partial<SliceBudgets>, files: Map<string, 
     budgets: { ...baseBudgets, ...budgets },
     plannerVersion: "v1",
     profileVersion: "v1",
+    diffPaths,
+    excludePaths,
   }, index);
 }
 
@@ -132,6 +134,68 @@ describe("planner selection policy", () => {
     const result = await planSelection({}, files, trees, [{ path: "" }]);
     // 关键断言：test/app.route.js（route 信号 decoy）被排除；无类别的散文件（play.ts）允许保留
     expect(result.slice?.files.map((file) => file.path)).toEqual(["package.json", "lib/router.js", "scripts/play.ts"]);
+  });
+
+  it("selects window diff files first, overriding noise classification (W0-7)", async () => {
+    // W0-2 solo 重跑残余根因：窗口 diff 是行为证据的一手面，装配必须保证入选——
+    // 即使路径命中噪声分类（被本窗口修改本身就是入选理由）
+    const files = new Map([
+      ["package.json", "{\"dependencies\":{\"express\":\"4.0.0\"}}\n"],
+      [".github/labeler.yml", "python:\\n  - any: []\\n"],
+      ["test/foo.spec.ts", "it('foo');\n"],
+      ["src/main.ts", "export const main = 1;\n"],
+    ]);
+    const trees = new Map<string, SourceTreeApiEntry[]>([
+      ["", [blob("package.json"), tree(".github"), tree("test"), tree("src")]],
+      [".github", [blob(".github/labeler.yml")]],
+      ["test", [blob("test/foo.spec.ts")]],
+      ["src", [blob("src/main.ts")]],
+    ]);
+    const result = await planSelection({ maxSelectedFiles: 5 }, files, trees, [{ path: "" }], undefined, [".github/labeler.yml", "test/foo.spec.ts", "src/main.ts"]);
+    expect(result.status).toBe("completed");
+    // diff 文件先于遍历入选（路径序），噪声分类不再排除窗口 diff 面；剩余预算归遍历
+    const paths = result.slice?.files.map((file) => file.path) ?? [];
+    expect(paths.slice(0, 3)).toEqual([".github/labeler.yml", "src/main.ts", "test/foo.spec.ts"]);
+    expect(paths).toContain("package.json");
+  });
+
+  it("spreads diff files across partitions before walking (W0-7)", async () => {
+    const files = new Map([
+      ["package.json", "{\"dependencies\":{\"express\":\"4.0.0\"}}\n"],
+      ["src/a.ts", "export const a = 1;\n"],
+      ["src/b.ts", "export const b = 2;\n"],
+      ["src/c.ts", "export const c = 3;\n"],
+      ["src/d.ts", "export const d = 4;\n"],
+      ["lib/walk.ts", "export const walk = 1;\n"],
+    ]);
+    const trees = new Map<string, SourceTreeApiEntry[]>([
+      ["", [blob("package.json"), tree("src"), tree("lib")]],
+      ["src", [blob("src/a.ts"), blob("src/b.ts"), blob("src/c.ts"), blob("src/d.ts")]],
+      ["lib", [blob("lib/walk.ts")]],
+    ]);
+    const diffPaths = ["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts"];
+    // 分区 1：预算 2 全给 diff 文件
+    const first = await planSelection({ maxSelectedFiles: 2 }, files, trees, [{ path: "" }], undefined, diffPaths);
+    expect(first.slice?.files.map((file) => file.path)).toEqual(["src/a.ts", "src/b.ts"]);
+    // 分区 2：排除分区 1 后，剩余 diff 文件仍先于遍历
+    const exclude = new Set(first.slice!.files.map((file) => file.path));
+    const second = await planSelection({ maxSelectedFiles: 4 }, files, trees, [{ path: "" }], undefined, diffPaths, exclude);
+    expect(second.slice?.files.map((file) => file.path)).toEqual(["src/c.ts", "src/d.ts", "package.json", "lib/walk.ts"]);
+  });
+
+  it("skips missing or unreadable diff paths without failing the plan (W0-7)", async () => {
+    const files = new Map([
+      ["package.json", "{\"dependencies\":{\"express\":\"4.0.0\"}}\n"],
+      ["src/real.ts", "export const real = 1;\n"],
+    ]);
+    const trees = new Map<string, SourceTreeApiEntry[]>([
+      ["", [blob("package.json"), tree("src")]],
+      ["src", [blob("src/real.ts")]],
+    ]);
+    const result = await planSelection({}, files, trees, [{ path: "" }], undefined, ["src/ghost.ts", "src/binary.bin", "src/real.ts"]);
+    expect(result.status).toBe("completed");
+    // 不可读 diff 路径静默跳过，剩余预算由遍历补位
+    expect(result.slice?.files.map((file) => file.path)).toEqual(["src/real.ts", "package.json"]);
   });
 
   it("walks breadth-first so sibling subtrees both feed the window on tight budgets", async () => {

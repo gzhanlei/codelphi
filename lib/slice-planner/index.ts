@@ -258,6 +258,21 @@ class DeterministicSlicePlanner implements SlicePlanner {
         },
       };
 
+      // W0-7：窗口 diff 文件必选装配（W0-2 solo 重跑残余根因：装配 126 < diff 131，
+      // 行为证据的一手面未被保证入选）。diff 文件跳过噪声过滤与子树份额（被本窗口修改
+      // 本身就是入选理由），仍尊重文件数 / 行数 / 字节预算；路径序保证跨分区稳定分片。
+      const diffPaths = [...new Set(input.diffPaths ?? [])]
+        .filter((path) => !state.input.excludePaths?.has(path))
+        .sort();
+      for (const path of diffPaths) {
+        if (state.budgetsRemaining.selectedFiles <= 0 || state.budgetsRemaining.selectedLineRanges <= 0 || state.budgetsRemaining.plannerContentBytes <= 0) break;
+        try {
+          await this.selectFile(index, state, path, [], "window_diff", "", { ignoreShareCap: true });
+        } catch (error) {
+          if (error instanceof SourceIndexError && ["path_not_found", "path_pruned", "binary_source", "blob_too_large"].includes(error.code)) continue;
+          throw error;
+        }
+      }
       for (const scopeRoot of scope.scopeRoots) {
         await this.walkScopeDirectories(index, state, scopeRoot.path);
       }
@@ -409,9 +424,9 @@ class DeterministicSlicePlanner implements SlicePlanner {
     }
   }
 
-  private async selectFile(index: OpenedRemoteSourceRevision, state: SlicePlanningState, path: string, signals: SourceSignal[], reason: SelectedSourceReason, subtreeKey: string) {
+  private async selectFile(index: OpenedRemoteSourceRevision, state: SlicePlanningState, path: string, signals: SourceSignal[], reason: SelectedSourceReason, subtreeKey: string, options: { ignoreShareCap?: boolean } = {}) {
     if (state.selected.has(path) || state.budgetsRemaining.selectedFiles <= 0 || state.budgetsRemaining.selectedLineRanges <= 0 || state.budgetsRemaining.plannerContentBytes <= 0) return;
-    if ((state.subtreeSelections.get(subtreeKey) ?? 0) >= subtreeCap(state, subtreeKey)) return;
+    if (!options.ignoreShareCap && (state.subtreeSelections.get(subtreeKey) ?? 0) >= subtreeCap(state, subtreeKey)) return;
     const lineEnd = Math.min(maxPlannerLinesPerFile, state.budgetsRemaining.selectedLineRanges);
     const read = await index.readLines({
       path,
@@ -424,7 +439,7 @@ class DeterministicSlicePlanner implements SlicePlanner {
     state.budgetsRemaining.selectedFiles -= 1;
     state.budgetsRemaining.selectedLineRanges -= 1;
     state.budgetsRemaining.plannerContentBytes -= read.byteSize;
-    state.subtreeSelections.set(subtreeKey, (state.subtreeSelections.get(subtreeKey) ?? 0) + 1);
+    if (!options.ignoreShareCap) state.subtreeSelections.set(subtreeKey, (state.subtreeSelections.get(subtreeKey) ?? 0) + 1);
     recordSelection(state, {
       path,
       blobSha: read.blobSha,

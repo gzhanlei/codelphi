@@ -14,6 +14,8 @@ export interface RemoteAnalysisRequest {
   provider?: CodeHostingProvider;
   scopeRoots: SourceScopeRoot[];
   backend?: RemoteSourceBackend;
+  /** W0-7：窗口 diff 文件路径——分区装配必选（行为证据一手面）。 */
+  diffPaths?: readonly string[];
 }
 
 export interface RemoteAnalysisRuntime {
@@ -154,6 +156,7 @@ export async function getPartitionedAnalysisSources(request: RemoteAnalysisReque
       plannerVersion: "remote-analysis-v2",
       profileVersion: "remote-analysis-v1",
       excludePaths,
+      diffPaths: request.diffPaths,
     }, index);
     if (!result.slice) throw new Error(`Remote source slice failed: ${result.missing.join("; ") || "unknown planner failure"}`);
     if (result.slice.files.length === 0) {
