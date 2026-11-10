@@ -406,8 +406,8 @@ P0 已当轮处理（diff 覆盖指标 migration 058、枚举完整性状态、�
 | BM-1 | 增量分析盲评专项（第一优先） | 按规格 §6：受控构造与 `spec_file_index` 有交集的真增量窗口（受控路径 `queueAnalysis(beforeSha, afterSha)` 首选）；三清单预标（affected / unaffected-confirmed / new + unknown 区）；测 AFR/UP/FUR/NFR/Stale 五指标 | **✅ 2026-11-10 当日完成**（`docs/benchmark/bm1-incremental-blind-eval-2026-11-10.md`，两轮同基线 run 64/65 均真 incremental-carry）：FUR=0 红线守住、AFR-行为 8/8、NFR 7/7 语义覆盖；发现 stable key 身份劫持（P0）等四类缺陷模式 → BM-4..8 |
 | BM-2 | 跨窗口变更矩阵回归集 | 按规格 §5：八类裁剪案例（superset 跨窗口，每案例 ≥2 次运行）；#7 纯重构 / #8 纯格式为「不虚报」常驻回归，#5 共享依赖为「显式披露」检验（不要求全识别）；报告格式落规格 §9（分项 + Macro + Failure Gallery） | 案例与预标冻结入库 `docs/benchmark/frozen/` + 指标脚本可重跑 + 首份 benchmark 报告产出（BM-1 报告已含 Failure Gallery 雏形） |
 | BM-3 | Evidence Support 标注进验收模板 | `pilot-acceptance-template.md` 增两个字段：①证据支持描述（描述正确性，≥95% 参照线）；②预标重要程度 core/normal/internal（高风险召回口径的地基） | 模板更新 + 下一轮盲评报告含该指标 |
-| BM-4 | **stable key 身份完整性门禁（P0）** | 合并层对「既有键 + summary 身份漂移」组合拒绝覆盖或降级为新键（最小约束：功能名/简介语义不变才允许原键写入）——run #1 `databricks sql lab` 被整体置换为 SQL Lab RLS、`图表构建与可视化` 两轮被置换为 XY 时序 | 身份劫持案例重放归零；append-only 读者不再读到假变更 |
-| BM-5 | 跨通道场景去重 | 重提取/枚举产物与 carried 场景集之间复用 `scenarioBehaviorEqual`；特性内新增场景彼此去重（REST API EC-1..5 五条近似重复实例） | 重复实例重放归零；场景膨胀率（+92%）显著回落 |
+| BM-4 | **stable key 身份完整性门禁（P0）** | 合并层对「既有键 + summary 身份漂移」组合拒绝覆盖或降级为新键（最小约束：功能名/简介语义不变才允许原键写入）——run #1 `databricks sql lab` 被整体置换为 SQL Lab RLS、`图表构建与可视化` 两轮被置换为 XY 时序 | **✅ 2026-11-10 当日落地**（`lib/spec-versions.ts`：增量模式下命中 carried 键的 AI 特征丢弃，计数入账本 mergeIntegrity=partial；测试 3 例）。同窗口重放 run 66 实证：与 run #1 同键的两次劫持尝试全被拦截、carried 逐字保全、FUR 仍为 0（报告 §9） |
+| BM-5 | 跨通道场景去重 | 重提取/枚举产物与 carried 场景集之间复用 `scenarioBehaviorEqual`；特性内新增场景彼此去重（REST API EC-1..5 五条近似重复实例） | **✅ 2026-11-10 部分落地**：`scenarioBehaviorEqual` 放宽 category 要求（同触发/操作/结果即同一行为，run 64 ER-1/EC-5 同文异标实例）——确定性可修的部分已修；语义近似重复（措辞不同）与键分裂属模型侧，归 BM-6/BM-8 |
 | BM-6 | 跨域放置校验 | 新场景归属功能时校验证据文件与功能既有证据面交集（restore_impact→REST API、缩略图隔离→嵌入式访客凭据回退 实例） | 放置错误实例重放归零或转显式披露 |
-| BM-7 | 单功能坍缩护栏 + 未变改写告警 | 总护栏 >30% 之外增加单功能级降幅/删除数阈值；机械命中但行为未变功能的改写告警（语义视图批量删除 两轮 8 删 3 改实例） | 实例触发告警可见 |
+| BM-7 | 单功能坍缩护栏 + 未变改写告警 | 总护栏 >30% 之外增加单功能级降幅/删除数阈值；机械命中但行为未变功能的改写告警（语义视图批量删除 三轮 8/10 删 3 改复现实例） | 实例触发告警可见 |
 | BM-8 | 噪音分类增强 | CI/组件名类条目（`CI 与许可证检查`、`KebabMenuButton`）降级 reviewed；patch-scan 噪音面扩展 | 噪音键重放不再进功能层 |

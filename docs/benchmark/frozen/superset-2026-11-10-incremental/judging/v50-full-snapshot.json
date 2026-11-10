@@ -1,0 +1,3484 @@
+[
+ {
+  "id": 782,
+  "stableKey": "amazon athena 连接表单",
+  "name": "Amazon Athena 连接表单",
+  "summary": "Athena 引擎提供动态连接表单参数 schema，逐字段配置 AWS 凭据、区域、S3 暂存目录、Schema 与 Work Group，并与 SQLAlchemy URI 双向转换。",
+  "scenarios": [
+   {
+    "action": "保存或校验连接参数。",
+    "context": "Athena 连接既未填 s3_staging_dir 也未填 work_group。",
+    "outcome": "返回缺少 s3_staging_dir、work_group 的警告。",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "保存或校验连接参数。",
+    "context": "Athena 连接未填 region_name。",
+    "outcome": "返回缺少 region_name 的警告。",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "通过动态表单保存连接。",
+    "context": "用户编辑已有 Athena 连接，其 URI 含 catalog_name、role_arn、endpoint_url 等额外查询参数。",
+    "outcome": "额外查询参数经 query 字段原样保留，编辑不会丢弃。",
+    "category": "edge",
+    "reference": "EC-3"
+   },
+   {
+    "action": "以默认空表集合调用 get_search_path。",
+    "context": "调用 get_search_path 时未传入表名集合。",
+    "outcome": "返回该 catalog 的搜索路径列表与空映射。",
+    "category": "edge",
+    "reference": "EC-4"
+   },
+   {
+    "action": "提交连接表单。",
+    "context": "管理员在 Athena 连接表单中仅填写部分 AWS 参数。",
+    "outcome": "表单按动态 schema 校验必填项，缺失参数时提示对应字段。",
+    "category": "edge",
+    "reference": "EC-5"
+   },
+   {
+    "action": "保存连接。",
+    "context": "用户提交 Athena 连接表单但未填写 region_name。",
+    "outcome": "校验失败，region_name 为必填字段。",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "在连接表单填写 AWS Access Key ID、Secret、Region、S3 暂存目录或 Work Group 并保存。",
+    "context": "管理员为 Amazon Athena 新建连接。",
+    "outcome": "表单字段被转换为 Athena SQLAlchemy URI 并保存。",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "调用 Database.get_search_path 并传入 catalog 与表名集合。",
+    "context": "数据库连接配置了搜索路径，查询引用未限定 schema 的表。",
+    "outcome": "返回搜索路径列表与表到 schema 的映射，供连接表单与权限判定使用。",
+    "category": "happy",
+    "reference": "HP-10"
+   },
+   {
+    "action": "打开 Athena 连接表单并填写 AWS Access Key ID、AWS Secret Access Key、AWS region 与 Athena work group。",
+    "context": "管理员在数据源连接页面新建 Amazon Athena 数据库连接。",
+    "outcome": "表单展示对应字段并接受填写值，连接配置可保存。",
+    "category": "happy",
+    "reference": "HP-11"
+   },
+   {
+    "action": "打开连接表单。",
+    "context": "管理员编辑已有 Athena 连接。",
+    "outcome": "URI 被解析回各表单字段，额外查询参数保留在 query 字段中。",
+    "category": "happy",
+    "reference": "HP-2"
+   },
+   {
+    "action": "保存连接。",
+    "context": "Athena 连接使用 VPC/PrivateLink 自定义主机。",
+    "outcome": "region_name 字段保留完整主机与端口，URI 按原样重建。",
+    "category": "happy",
+    "reference": "HP-3"
+   },
+   {
+    "action": "打开 Athena 连接配置表单。",
+    "context": "管理员在 Superset 中新建或编辑 Amazon Athena 数据库连接。",
+    "outcome": "表单按动态连接参数 schema 渲染 Athena 专属连接字段，可填写并保存连接参数。",
+    "category": "happy",
+    "reference": "HP-4"
+   },
+   {
+    "action": "打开连接配置表单。",
+    "context": "用户新建或编辑 Amazon Athena 数据库连接。",
+    "outcome": "表单按动态参数 schema 渲染连接参数字段。",
+    "category": "happy",
+    "reference": "HP-5"
+   },
+   {
+    "action": "打开 Athena 连接表单。",
+    "context": "用户在数据库连接弹窗中选择 Amazon Athena 引擎。",
+    "outcome": "表单在 Role 之后依次展示 AWS Access Key ID、AWS Secret Access Key、Region、S3 query results location、Schema、Work Group 输入项，并带有对应标签与占位提示。",
+    "category": "happy",
+    "reference": "HP-6"
+   },
+   {
+    "action": "在 S3 query results location 字段上查看帮助提示。",
+    "context": "用户填写 Athena 连接参数。",
+    "outcome": "显示提示「Optional if your workgroup sets a result location.」。",
+    "category": "happy",
+    "reference": "HP-7"
+   },
+   {
+    "action": "保存数据库连接后重新打开连接配置。",
+    "context": "用户填写并保存 Athena 连接参数。",
+    "outcome": "aws_access_key_id、aws_secret_access_key、region_name、s3_staging_dir、schema_name、work_group 参数被保存并可回填显示。",
+    "category": "happy",
+    "reference": "HP-8"
+   },
+   {
+    "action": "在连接表单中填写 region_name 及可选的访问密钥、s3_staging_dir、schema_name、work_group。",
+    "context": "用户创建 Amazon Athena 数据库连接。",
+    "outcome": "连接以结构化参数保存，表单按 AthenaParametersSchema 渲染各独立字段。",
+    "category": "happy",
+    "reference": "HP-9"
+   }
+  ]
+ },
+ {
+  "id": 783,
+  "stableKey": "ci 与许可证检查",
+  "name": "CI 与许可证检查",
+  "summary": "CI 后端环境固定 setup-uv 版本，许可证检查脚本下载 RAT jar 时启用失败重试。",
+  "scenarios": [
+   {
+    "action": "运行 check_license.sh。",
+    "context": "下载 RAT jar 时网络短暂失败。",
+    "outcome": "curl 以 --retry 5 --retry-all-errors 重试下载，成功后继续许可证检查。",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "脚本执行 curl 下载。",
+    "context": "RAT jar 下载在重试后仍失败或返回 HTTP 错误。",
+    "outcome": "curl 以失败退出并输出错误信息，脚本随后报告下载失败并以非零状态退出。",
+    "category": "error",
+    "reference": "ER-2"
+   },
+   {
+    "action": "执行 setup-backend action。",
+    "context": "CI 运行后端环境安装。",
+    "outcome": "setup-uv 使用允许列表中的固定版本 v10.3.3。",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "执行 check_license.sh。",
+    "context": "运行许可证检查。",
+    "outcome": "下载 RAT jar 时启用失败重试，成功后继续检查。",
+    "category": "happy",
+    "reference": "HP-2"
+   },
+   {
+    "action": "执行 Install uv 步骤。",
+    "context": "CI 运行 setup-backend 复合动作安装后端依赖。",
+    "outcome": "使用固定提交 68559e99（v10.3.3）的 astral-sh/setup-uv 安装 uv。",
+    "category": "happy",
+    "reference": "HP-3"
+   },
+   {
+    "action": "脚本通过 curl 下载 RAT jar。",
+    "context": "运行 check_license.sh 且本地尚无 RAT jar，Maven 仓库首次请求出现瞬时失败。",
+    "outcome": "curl 自动重试最多 5 次、间隔 3 秒，成功后继续许可证检查。",
+    "category": "happy",
+    "reference": "HP-4"
+   },
+   {
+    "action": "运行 setup-backend 与 check_license.sh。",
+    "context": "CI 流水线执行后端环境安装与许可证检查。",
+    "outcome": "setup-uv 使用允许列表版本，RAT jar 下载失败时自动重试。",
+    "category": "happy",
+    "reference": "HP-5"
+   }
+  ]
+ },
+ {
+  "id": 784,
+  "stableKey": "databricks sql lab",
+  "name": "Databricks SQL Lab",
+  "summary": "在 Databricks SEA 连接上执行与取消 SQL Lab 查询。",
+  "scenarios": [
+   {
+    "action": "读取取消 ID",
+    "context": "查询尚未执行",
+    "outcome": "返回无取消 ID",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "取消正在运行的查询",
+    "context": "用户在 SQL Lab 运行 Databricks 查询",
+    "outcome": "查询被取消",
+    "category": "happy",
+    "reference": "HP-1"
+   }
+  ]
+ },
+ {
+  "id": 785,
+  "stableKey": "databricks sql lab 查询取消",
+  "name": "Databricks SQL Lab 查询取消",
+  "summary": "支持在 SEA 连接上取消 SQL Lab 查询。",
+  "scenarios": [
+   {
+    "action": "读取取消标识",
+    "context": "语句尚未执行",
+    "outcome": "无取消标识可用",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "停止该查询",
+    "context": "用户在 SEA 连接的 Databricks 上运行 SQL Lab 查询",
+    "outcome": "查询被取消",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "取消该查询",
+    "context": "在 Databricks SEA 连接上运行 SQL Lab 查询",
+    "outcome": "查询被成功取消",
+    "category": "happy",
+    "reference": "HP-2"
+   }
+  ]
+ },
+ {
+  "id": 786,
+  "stableKey": "databricks 查询取消",
+  "name": "Databricks 查询取消",
+  "summary": "支持在 SEA 连接上取消 SQL Lab 查询，执行前无查询 ID 时返回不可取消。",
+  "scenarios": [
+   {
+    "action": "请求取消",
+    "context": "语句尚未执行，游标上无查询 ID",
+    "outcome": "返回不可取消",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "尝试读取取消 ID",
+    "context": "查询尚未执行、游标上尚无查询 ID",
+    "outcome": "返回无查询 ID，不发起取消",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "点击取消",
+    "context": "用户在 SQL Lab 中运行 Databricks SEA 查询",
+    "outcome": "查询被取消",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "点击取消",
+    "context": "用户在 SQL Lab 中执行 Databricks 查询",
+    "outcome": "正在执行的查询被取消",
+    "category": "happy",
+    "reference": "HP-2"
+   }
+  ]
+ },
+ {
+  "id": 787,
+  "stableKey": "docker 部署",
+  "name": "Docker 部署",
+  "summary": "提供多种 docker-compose 配置与多阶段 Dockerfile，支持开发、轻量、非开发及发布镜像构建。",
+  "scenarios": [
+   {
+    "action": "使用不同项目名与 NODE_PORT 启动 docker-compose-light.yml",
+    "context": "需要运行多个轻量 Superset 实例",
+    "outcome": "各实例卷与数据库相互隔离",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "启动 docker-compose.yml 中的 nginx",
+    "context": "webpack dev server 在约 10 分钟内未提供 manifest.json",
+    "outcome": "nginx 启动失败并输出错误提示",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "使用 docker-compose.yml 启动服务",
+    "context": "开发者需要本地开发环境",
+    "outcome": "启动 nginx、redis、db、superset、worker 等开发栈",
+    "category": "happy",
+    "reference": "HP-1"
+   }
+  ]
+ },
+ {
+  "id": 788,
+  "stableKey": "kebabmenubutton",
+  "name": "KebabMenuButton",
+  "summary": "更多操作按钮支持浮层样式与悬浮提示。",
+  "scenarios": [
+   {
+    "action": "悬停更多操作按钮。",
+    "context": "调用方未传 tooltipTitle。",
+    "outcome": "不显示提示内容，按钮与下拉行为不变。",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "悬停或聚焦更多操作按钮并打开下拉。",
+    "context": "调用方传入 tooltipTitle 与 overlayStyle。",
+    "outcome": "显示配置的悬浮提示，下拉浮层应用指定样式。",
+    "category": "happy",
+    "reference": "HP-1"
+   }
+  ]
+ },
+ {
+  "id": 789,
+  "stableKey": "mcp 语义表字段重选",
+  "name": "MCP 语义表字段重选",
+  "summary": "通过 MCP 更新表与交互表图表时，对缺失或过期语义选择标记的图表要求完整字段重选。",
+  "scenarios": [
+   {
+    "action": "生成图表",
+    "context": "语义层提供方未声明选择身份版本",
+    "outcome": "不写入语义选择标记，不虚构身份",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "生成图表。",
+    "context": "语义视图提供方未声明 selection_identity_version。",
+    "outcome": "不写入虚构的选择标记。",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "调用 update_chart。",
+    "context": "语义表图表的选择标记过期且未提供全部成员列。",
+    "outcome": "拒绝更新并提示在 Explore 中恢复。",
+    "category": "edge",
+    "reference": "EC-3"
+   },
+   {
+    "action": "调用 update_chart",
+    "context": "更新语义表图表时未提供全部列或未显式给出过滤器",
+    "outcome": "拒绝更新并提示需完整重选字段与显式过滤器",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "调用 update_chart。",
+    "context": "保留的语义选择无法验证。",
+    "outcome": "请求被拒绝并提示在 Explore 中恢复。",
+    "category": "error",
+    "reference": "ER-2"
+   },
+   {
+    "action": "调用 update_chart。",
+    "context": "语义表图表保留未验证的旧选择。",
+    "outcome": "拒绝更新并返回恢复提示。",
+    "category": "error",
+    "reference": "ER-3"
+   },
+   {
+    "action": "调用 update_chart 并按目标视图成员 ID 提供全部列与显式过滤器",
+    "context": "语义表图表的语义选择标记缺失或过期",
+    "outcome": "图表更新成功并写入新的语义选择标记",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "调用 generate_chart 或 generate_explore_link",
+    "context": "生成图表或 Explore 链接时选择语义视图成员",
+    "outcome": "新选择的成员被打上语义选择标记，保留的旧选择不被标记",
+    "category": "happy",
+    "reference": "HP-2"
+   },
+   {
+    "action": "调用 update_chart 并按目标视图成员 ID 提供全部列与显式过滤器。",
+    "context": "语义表图表的语义选择标记缺失或过期。",
+    "outcome": "图表字段被完整重选并写入新的选择标记。",
+    "category": "happy",
+    "reference": "HP-3"
+   },
+   {
+    "action": "提交生成请求。",
+    "context": "通过 generate_chart 或 generate_explore_link 新建语义选择。",
+    "outcome": "新选择被打上目标视图的 selection_identity_version 标记。",
+    "category": "happy",
+    "reference": "HP-4"
+   },
+   {
+    "action": "调用 update_chart 并提供目标视图全部成员列与显式过滤器。",
+    "context": "语义表图表的语义选择标记缺失或过期。",
+    "outcome": "图表字段被完整重选并保存。",
+    "category": "happy",
+    "reference": "HP-5"
+   },
+   {
+    "action": "提交生成请求。",
+    "context": "通过 generate_chart 新建语义表图表。",
+    "outcome": "新选择的成员被打上语义选择标记。",
+    "category": "happy",
+    "reference": "HP-6"
+   }
+  ]
+ },
+ {
+  "id": 790,
+  "stableKey": "mcp 语义表完整重选",
+  "name": "MCP 语义表完整重选",
+  "summary": "update_chart 支持对语义选择标记缺失或过期的 table 与 interactive table 图表进行完整字段重选，要求提供全部列并显式给出过滤器。",
+  "scenarios": [
+   {
+    "action": "生成语义图表。",
+    "context": "语义提供方未声明 selection_identity_version。",
+    "outcome": "不写入语义选择身份标记。",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "调用 update_chart 仅更新图表名称。",
+    "context": "语义表图表保留的选择无法验证。",
+    "outcome": "拒绝更新并提示通过 Explore 恢复。",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "merge_extra_form_data 合并两者。",
+    "context": "MCP 图表生成请求的 extra_form_data 与缓存 extra_form_data 均包含语义选择来源。",
+    "outcome": "合并后的 extra_form_data 包含合并去重后的 semantic_selection_sources 列表。",
+    "category": "edge",
+    "reference": "EC-3"
+   },
+   {
+    "action": "compose_extra_form_data 合并两者。",
+    "context": "仪表盘作用域与模型 extra_form_data 均包含 semantic_selection_sources。",
+    "outcome": "合并结果中的 semantic_selection_sources 汇总双方来源记录，成员键不再被重复合并。",
+    "category": "edge",
+    "reference": "EC-4"
+   },
+   {
+    "action": "compose_extra_form_data 合并两者。",
+    "context": "模型 extra_form_data 含 filters 等成员键但无 semantic_selection_sources，而作用域含来源记录。",
+    "outcome": "为无来源的模型输入追加 {\"datasource\": \"\", \"version\": null} 记录，避免其成员被后续版本化输入认证。",
+    "category": "edge",
+    "reference": "EC-5"
+   },
+   {
+    "action": "调用 update_chart。",
+    "context": "重选时未提供全部列或未显式给出过滤器。",
+    "outcome": "请求被拒绝，要求完整重选。",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "调用 UpdateChartRequest 更新图表配置。",
+    "context": "MCP 客户端更新一个语义表已过时的图表，且未重新选择所有列或未显式指定过滤器。",
+    "outcome": "请求被拒绝，返回带 Explore 恢复指引的错误，提示需完整重选列并以 [] 清空过滤器。",
+    "category": "error",
+    "reference": "ER-2"
+   },
+   {
+    "action": "调用 update_chart 并按目标视图成员 ID 提供全部列与显式过滤器。",
+    "context": "语义表图表的语义选择标记缺失或过期。",
+    "outcome": "图表字段选择被完整重选并保存。",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "调用 generate_chart 或 generate_explore_link 选择语义视图成员。",
+    "context": "新建语义图表。",
+    "outcome": "新选择的成员被打上语义选择身份标记。",
+    "category": "happy",
+    "reference": "HP-2"
+   },
+   {
+    "action": "执行完整语义表重选操作。",
+    "context": "用户在 MCP 语义表配置中需要重新选择全部语义表。",
+    "outcome": "语义表选择被整体替换为新的选择结果，配置按重选后的表集合生效。",
+    "category": "happy",
+    "reference": "HP-3"
+   },
+   {
+    "action": "执行完整重选。",
+    "context": "用户在 MCP 语义表配置中需要重新选择全部表。",
+    "outcome": "语义表选择被完整替换为新的选择结果。",
+    "category": "happy",
+    "reference": "HP-4"
+   },
+   {
+    "action": "调用 generate_chart 并传入语义视图配置。",
+    "context": "MCP 客户端对语义视图生成图表，且语义视图选择身份版本为字符串。",
+    "outcome": "form_data 被写入 semantic_selection_version，随后通过语义视图 form_data 校验并继续生成图表。",
+    "category": "happy",
+    "reference": "HP-5"
+   },
+   {
+    "action": "调用 update_chart 提交新的语义表选择。",
+    "context": "MCP 客户端通过 update_chart 对语义视图图表执行完整语义表重选。",
+    "outcome": "工具使用 prove_table_reselection 与 has_dormant_table_grain 校验重选，成功时返回更新后的图表响应。",
+    "category": "happy",
+    "reference": "HP-6"
+   },
+   {
+    "action": "调用 generate_explore_link 并传入语义视图配置。",
+    "context": "MCP 客户端为语义视图生成 Explore 链接。",
+    "outcome": "form_data 在设置 datasource 后被打上新语义选择标记，校验通过后返回带来源标记的 Explore 链接。",
+    "category": "happy",
+    "reference": "HP-7"
+   },
+   {
+    "action": "执行完整重选语义表。",
+    "context": "用户在 MCP 中编辑语义表选择。",
+    "outcome": "语义表集合按新选择完整替换。",
+    "category": "happy",
+    "reference": "HP-8"
+   }
+  ]
+ },
+ {
+  "id": 791,
+  "stableKey": "mcp 语义表重选",
+  "name": "MCP 语义表重选",
+  "summary": "update_chart 对 table 与 interactive table 图表支持完整字段重选，要求提供目标视图全部成员列并显式给出过滤器。",
+  "scenarios": [
+   {
+    "action": "调用 update_chart。",
+    "context": "更新请求只提供部分成员列。",
+    "outcome": "请求被拒绝，提示需重选全部列。",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "调用 update_chart 重选语义表字段",
+    "context": "调用方未提供 columns 或 filters",
+    "outcome": "返回不完整类别提示，拒绝重选",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "调用 update_chart",
+    "context": "保存的图表含未验证的保留选择",
+    "outcome": "拒绝并提示在 Explore 中恢复",
+    "category": "edge",
+    "reference": "EC-3"
+   },
+   {
+    "action": "调用 update_chart。",
+    "context": "更新请求保留未验证的旧选择。",
+    "outcome": "请求被拒绝并提示通过 Explore 恢复。",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "调用 generate_chart 或 update_chart",
+    "context": "调用方在语义视图上使用 ad-hoc 聚合或 SQL 表达式",
+    "outcome": "返回 semantic_view_adhoc_not_supported 错误",
+    "category": "error",
+    "reference": "ER-2"
+   },
+   {
+    "action": "调用 update_chart 并提供目标视图全部成员列与显式过滤器。",
+    "context": "语义表图表的语义选择标记缺失或过期。",
+    "outcome": "图表更新成功，新选择被标记为当前版本。",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "调用 update_chart",
+    "context": "调用方更新语义表图表且提供目标视图全部成员列与显式过滤器",
+    "outcome": "图表字段被完整重选并保存",
+    "category": "happy",
+    "reference": "HP-2"
+   },
+   {
+    "action": "调用 generate_chart 并传入 view_id",
+    "context": "调用方生成新语义视图图表",
+    "outcome": "form_data 被打上语义选择版本标记",
+    "category": "happy",
+    "reference": "HP-3"
+   }
+  ]
+ },
+ {
+  "id": 792,
+  "stableKey": "oauth2 客户端配置",
+  "name": "OAuth2 客户端配置",
+  "summary": "数据库连接表单中的 OAuth2 客户端信息字段，读取、同步并镜像编辑到 Secure Extra。",
+  "scenarios": [
+   {
+    "action": "展开面板",
+    "context": "切换配置方式后字段重新挂载但表单中仍有已输入的客户端信息",
+    "outcome": "显示表单中正在编辑的值而非已存掩码值",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "打开连接表单",
+    "context": "引擎为 Google Sheets 且连接为公开模式",
+    "outcome": "不渲染 OAuth2 客户端信息面板",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "组件初始化读取 OAuth2 客户端信息。",
+    "context": "后端返回的 masked_encrypted_extra 为字符串 \"null\" 或非法 JSON。",
+    "outcome": "asObject 将值规整为空对象，字段以默认值或空字符串渲染，不抛出异常。",
+    "category": "edge",
+    "reference": "EC-3"
+   },
+   {
+    "action": "父组件更新 db 数据。",
+    "context": "masked_encrypted_extra 或 parameters.oauth2_client_info 在表单打开期间发生变化。",
+    "outcome": "useEffect 依据 masked_encrypted_extra 与序列化值重新同步本地状态。",
+    "category": "edge",
+    "reference": "EC-4"
+   },
+   {
+    "action": "打开 OAuth2 客户端字段。",
+    "context": "后端返回的 masked_encrypted_extra 为字符串 \"null\" 或非法 JSON。",
+    "outcome": "字段以空值或默认值渲染，不因解析失败而报错。",
+    "category": "edge",
+    "reference": "EC-5"
+   },
+   {
+    "action": "展开“OAuth2 client information”并填写 Client ID、Secret、授权与令牌 URI、Scope",
+    "context": "管理员为支持 OAuth2 的引擎配置客户端",
+    "outcome": "输入值同步写入表单参数与 Secure Extra",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "字段重新挂载。",
+    "context": "用户已填写 OAuth2 客户端信息，随后将配置方式切换为 SQLAlchemy URI 再切回。",
+    "outcome": "输入框显示 parameters.oauth2_client_info 中已填写的内容，而非空值。",
+    "category": "happy",
+    "reference": "HP-2"
+   },
+   {
+    "action": "在 Client ID 等输入框中输入内容。",
+    "context": "用户编辑 OAuth2 客户端信息输入框。",
+    "outcome": "本地状态更新、onParametersChange 收到 oauth2_client_info 对象，同时 onEncryptedExtraInputChange 将同一对象镜像到 Secure Extra。",
+    "category": "happy",
+    "reference": "HP-3"
+   },
+   {
+    "action": "表单重新挂载 OAuth2 客户端字段。",
+    "context": "用户已填写 OAuth2 客户端信息，随后将配置方式切换为 SQLAlchemy URI 再切回。",
+    "outcome": "输入框显示此前已输入的客户端信息，而非空值。",
+    "category": "happy",
+    "reference": "HP-4"
+   },
+   {
+    "action": "修改 Client ID 等字段。",
+    "context": "用户在 OAuth2 客户端信息中编辑任一输入框。",
+    "outcome": "本地状态更新，同时写入 parameters.oauth2_client_info 与 encrypted extra。",
+    "category": "happy",
+    "reference": "HP-5"
+   }
+  ]
+ },
+ {
+  "id": 793,
+  "stableKey": "rest api",
+  "name": "REST API",
+  "summary": "提供 API 以支持程序化定制与集成。",
+  "scenarios": [
+   {
+    "action": "GET 仪表盘版本详情。",
+    "context": "调用方未传 include_restore_impact 或传 false。",
+    "outcome": "不计算恢复影响，响应与原有版本详情一致。",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "GET 仪表盘版本详情",
+    "context": "调用方未传 include_restore_impact 或传 false",
+    "outcome": "不计算恢复影响，响应保持原有结构",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "GET 仪表盘版本详情。",
+    "context": "调用方未传 include_restore_impact 或为 false。",
+    "outcome": "响应不包含 _restore_impact 字段。",
+    "category": "edge",
+    "reference": "EC-3"
+   },
+   {
+    "action": "GET 仪表盘版本详情。",
+    "context": "调用方未传 include_restore_impact 或传 false。",
+    "outcome": "响应不计算恢复影响，行为与之前一致。",
+    "category": "edge",
+    "reference": "EC-4"
+   },
+   {
+    "action": "GET 仪表盘版本详情。",
+    "context": "调用方未传 include_restore_impact 或传 false。",
+    "outcome": "不计算恢复影响，响应不含移除数量。",
+    "category": "edge",
+    "reference": "EC-5"
+   },
+   {
+    "action": "GET 仪表盘版本详情。",
+    "context": "调用方请求不存在的版本 UUID。",
+    "outcome": "返回 404。",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "调用 REST API",
+    "context": "开发者需要程序化访问 Superset 能力",
+    "outcome": "完成定制与集成",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "GET /api/v1/dashboard/{uuid}/versions/{version_uuid}/。",
+    "context": "调用方请求仪表盘版本详情并传入 include_restore_impact=true。",
+    "outcome": "响应附带恢复将移除的当前成员图表数量。",
+    "category": "happy",
+    "reference": "HP-2"
+   },
+   {
+    "action": "GET /api/v1/dashboard/{uuid}/versions/{version_uuid}/?include_restore_impact=true",
+    "context": "调用方请求仪表盘版本详情并需要恢复影响",
+    "outcome": "响应附带恢复将移除的当前成员图表数量",
+    "category": "happy",
+    "reference": "HP-3"
+   },
+   {
+    "action": "GET /api/v1/dashboard/{uuid}/versions/{version_uuid}/。",
+    "context": "调用方请求仪表盘版本详情并传入 include_restore_impact=true。",
+    "outcome": "响应 result 中 _restore_impact.removed_chart_count 返回当前成员中不属于该版本的图表数量。",
+    "category": "happy",
+    "reference": "HP-4"
+   },
+   {
+    "action": "GET /api/v1/dashboard/{uuid}/versions/{version_uuid}/。",
+    "context": "调用方请求仪表盘版本详情并传入 include_restore_impact=true。",
+    "outcome": "响应附带恢复将移除的图表数量。",
+    "category": "happy",
+    "reference": "HP-5"
+   }
+  ]
+ },
+ {
+  "id": 794,
+  "stableKey": "sql lab",
+  "name": "SQL Lab",
+  "summary": "SQL Lab 的 RLS 与表禁用清单对未限定 schema 的表引用进行解析匹配。",
+  "scenarios": [
+   {
+    "action": "执行查询并做 RLS/禁用表校验。",
+    "context": "Snowflake 查询使用 db..table 双点引用，未指定 schema。",
+    "outcome": "该引用按 PUBLIC schema 解析并参与匹配。",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "执行查询并做 RLS/禁用表校验。",
+    "context": "Postgres 表名含非 ASCII 大写字母且未加引号。",
+    "outcome": "按 Postgres 编码折叠规则生成候选拼写进行匹配，避免误判为不同表。",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "在 SQL Lab 中执行该查询。",
+    "context": "用户查询的非限定表命中表拒绝名单。",
+    "outcome": "查询被拒绝并返回相应错误，而不是返回表数据。",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "执行查询并做 RLS/禁用表校验。",
+    "context": "引擎无法确定未限定 schema 的表所在 schema。",
+    "outcome": "该表被视为可能位于任一 schema，按任意 schema 匹配规则处理。",
+    "category": "error",
+    "reference": "ER-2"
+   },
+   {
+    "action": "在 SQL Lab 中执行引用该非限定表的查询。",
+    "context": "数据源配置了 RLS 规则或表拒绝名单，用户在 SQL Lab 中查询未带 schema 的非限定表名。",
+    "outcome": "查询按 RLS 规则与表拒绝名单进行校验，受限表不再因缺少 schema 限定而绕过限制。",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "执行查询，RLS 与 DISALLOWED_SQL_TABLES 校验该表引用。",
+    "context": "Postgres 连接配置了 search_path，查询引用未带 schema 的表名。",
+    "outcome": "按 search_path 顺序解析表所在 schema，命中对应 RLS 规则或禁用清单。",
+    "category": "happy",
+    "reference": "HP-2"
+   }
+  ]
+ },
+ {
+  "id": 795,
+  "stableKey": "sql lab 查询取消",
+  "name": "SQL Lab 查询取消",
+  "summary": "SQL Lab 查询的 RLS 缓存键解析支持 schema 搜索路径，并扩展 RLS 与表黑名单工具导入以覆盖无 schema 表。",
+  "scenarios": [
+   {
+    "action": "调用 get_inner_rls_cache_key。",
+    "context": "查询 SQL 为空。",
+    "outcome": "返回空列表，不进行 RLS 解析。",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "执行查询。",
+    "context": "SQL Lab 查询引用未限定表名（无 schema）。",
+    "outcome": "查询结果按 RLS 与表黑名单过滤/拦截。",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "计算查询的 RLS 缓存键。",
+    "context": "SQL Lab 查询引用未限定 schema 的表，且用户对相关表存在 RLS 规则。",
+    "outcome": "缓存键包含按搜索路径解析后的 RLS 谓词，不同 RLS 用户不会命中同一缓存条目。",
+    "category": "happy",
+    "reference": "HP-2"
+   }
+  ]
+ },
+ {
+  "id": 796,
+  "stableKey": "sql lab 查询成本估算",
+  "name": "SQL Lab 查询成本估算",
+  "summary": "在 SQL Lab 中估算查询成本，并在估算前应用与执行路径一致的禁用函数、禁用表、文件传输、DML 与 RLS 控制。",
+  "scenarios": [
+   {
+    "action": "触发成本估算。",
+    "context": "成本估算的 SQL 引用被禁用表或禁用函数。",
+    "outcome": "返回禁用表或禁用函数错误，不执行估算。",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "解析并校验该表引用。",
+    "context": "用户在 PostgreSQL 引擎上执行引用大小写不一致的未加引号表名的查询。",
+    "outcome": "按方言归一化策略折叠对象名后匹配，引用解析为同一物理表。",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "调用 folds_unquoted_object_names 判断是否折叠对象名。",
+    "context": "引擎属于 CASE_SENSITIVE_OBJECT_NAMES 或没有专属方言。",
+    "outcome": "返回 False，按大小写敏感精确匹配。",
+    "category": "edge",
+    "reference": "EC-3"
+   },
+   {
+    "action": "触发成本估算。",
+    "context": "成本估算超过配置的超时时间。",
+    "outcome": "返回估算超时错误。",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "请求估算查询成本。",
+    "context": "用户对引用无 schema 非限定表的 SQL 发起成本估算，而该表在表拒绝列表中。",
+    "outcome": "估算被拒绝并返回表被禁止访问的错误，而非返回成本结果。",
+    "category": "error",
+    "reference": "ER-2"
+   },
+   {
+    "action": "触发成本估算。",
+    "context": "用户在 SQL Lab 对查询做成本估算。",
+    "outcome": "返回数据库给出的查询成本。",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "触发成本估算。",
+    "context": "用户在 SQL Lab 对引用无 schema 非限定表的查询做成本估算。",
+    "outcome": "按连接搜索路径解析表所属 schema，应用 RLS 与表拒绝名单后返回估算。",
+    "category": "happy",
+    "reference": "HP-2"
+   },
+   {
+    "action": "请求估算查询成本。",
+    "context": "用户对引用无 schema 非限定表的 SQL 发起成本估算，且该表未被拒绝。",
+    "outcome": "估算正常返回成本结果，RLS 与表拒绝列表校验通过。",
+    "category": "happy",
+    "reference": "HP-3"
+   },
+   {
+    "action": "提交查询执行。",
+    "context": "用户在 SQL Lab 中执行引用未限定 schema 表的查询。",
+    "outcome": "RLS 与表黑名单对未限定表生效，越权表访问被拦截。",
+    "category": "happy",
+    "reference": "HP-4"
+   }
+  ]
+ },
+ {
+  "id": 797,
+  "stableKey": "sql 编辑器",
+  "name": "SQL 编辑器",
+  "summary": "提供基于 Web 的 SQL 编辑器供高级用户编写与执行查询。",
+  "scenarios": [
+   {
+    "action": "解析 SQL 提取表。",
+    "context": "SQL 中未加引号的名称与 CTE 同名，引擎为 PostgreSQL、Oracle 或 Snowflake。",
+    "outcome": "按引擎折叠规则识别为 CTE 引用，不误报为物理表。",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "解析表引用。",
+    "context": "Snowflake 查询使用两段式名称 db..table。",
+    "outcome": "解析为 PUBLIC schema 下的表。",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "执行查询",
+    "context": "SQL Lab 查询引用无 schema 的非限定表且该表在默认 schema 或搜索路径中被 RLS 或黑名单覆盖",
+    "outcome": "按引擎标识符折叠规则匹配并应用 RLS 谓词或拒绝禁用表",
+    "category": "edge",
+    "reference": "EC-3"
+   },
+   {
+    "action": "执行查询",
+    "context": "查询的数据库无对应 DB-API 驱动或 SQLAlchemy 方言",
+    "outcome": "无法连接该数据源",
+    "category": "edge",
+    "reference": "EC-4"
+   },
+   {
+    "action": "解析 SQL 提取表。",
+    "context": "未限定 schema 的表名在 PostgreSQL、Oracle、Snowflake 上大小写与 CTE 名称冲突。",
+    "outcome": "未加引号名称按 ASCII 大小写折叠后识别为 CTE 引用，不误报为物理表。",
+    "category": "edge",
+    "reference": "EC-5"
+   },
+   {
+    "action": "执行查询或估算查询。",
+    "context": "SQL Lab 查询引用未写 schema 的非限定表，且该表在数据库 search path 中命中 RLS 或表黑名单。",
+    "outcome": "RLS 谓词被注入或表被黑名单拦截，不再因缺少 schema 而绕过。",
+    "category": "edge",
+    "reference": "EC-6"
+   },
+   {
+    "action": "解析 SQL 提取表引用。",
+    "context": "SQL 中 CTE 名称与物理表名仅大小写不同，引擎为 PostgreSQL、Oracle 或 Snowflake。",
+    "outcome": "未加引号的 ASCII 名称按引擎规则折叠，CTE 引用不被误报为物理表。",
+    "category": "edge",
+    "reference": "EC-7"
+   },
+   {
+    "action": "执行查询",
+    "context": "SQL Lab 查询引用无 schema 的非限定表且该表在拒绝列表中",
+    "outcome": "查询被拒绝列表拦截",
+    "category": "edge",
+    "reference": "EC-8"
+   },
+   {
+    "action": "执行查询",
+    "context": "查询的数据库无对应 DB-API 驱动或 SQLAlchemy 方言",
+    "outcome": "无法连接该数据源",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "触发成本估算。",
+    "context": "成本估算的 SQL 引用被禁用表或禁用函数。",
+    "outcome": "返回禁用表或禁用函数错误，不执行估算。",
+    "category": "error",
+    "reference": "ER-2"
+   },
+   {
+    "action": "编写并执行 SQL 查询",
+    "context": "高级用户在 SQL Lab 中",
+    "outcome": "返回查询结果",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "加载编辑器并输入 SQL。",
+    "context": "使用 superset-ui-core 提供的 SQL 编辑器组件。",
+    "outcome": "编辑器基于 ace-builds 1.45.2 运行，编辑与高亮功能正常。",
+    "category": "happy",
+    "reference": "HP-2"
+   },
+   {
+    "action": "执行查询。",
+    "context": "SQL Lab 查询引用未写 schema 的非限定表，且该表存在 RLS 规则。",
+    "outcome": "RLS 谓词被注入到该表读取上。",
+    "category": "happy",
+    "reference": "HP-3"
+   },
+   {
+    "action": "执行查询。",
+    "context": "SQL Lab 查询引用未限定 schema 的表，且该表在默认 schema 或搜索路径中命中 RLS 或表黑名单。",
+    "outcome": "RLS 谓词被注入或表被黑名单拦截。",
+    "category": "happy",
+    "reference": "HP-4"
+   },
+   {
+    "action": "触发成本估算。",
+    "context": "用户在 SQL Lab 对查询做成本估算，查询引用无 schema 的非限定表。",
+    "outcome": "按连接搜索路径解析表所属 schema，应用 RLS 与表拒绝名单后返回估算。",
+    "category": "happy",
+    "reference": "HP-5"
+   }
+  ]
+ },
+ {
+  "id": 798,
+  "stableKey": "仪表盘",
+  "name": "仪表盘",
+  "summary": "支持创建与查看包含多个图表的动态仪表盘。",
+  "scenarios": [
+   {
+    "action": "保存仪表盘布局",
+    "context": "仪表盘布局引用了调用者不可读的非成员图表",
+    "outcome": "该图表保存为缺失图表占位块，布局保存成功",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "GET 仪表盘详情。",
+    "context": "调用方没有宽松仪表盘访问权限。",
+    "outcome": "响应 charts 字段仅包含 can_access_chart 通过的成员图表。",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "打开恢复确认弹窗。",
+    "context": "恢复影响计数请求失败或返回 0。",
+    "outcome": "计数为 0 时不显示移除警告；请求失败时弹窗仍可继续恢复流程。",
+    "category": "edge",
+    "reference": "EC-3"
+   },
+   {
+    "action": "判定当前用户是否为访客。",
+    "context": "访客令牌用户名与普通用户名相同。",
+    "outcome": "不依据用户名判定，按令牌定义识别为访客。",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "访客请求仪表盘或缩略图",
+    "context": "嵌入式访客令牌携带空用户名",
+    "outcome": "仍被识别为访客并按访客身份应用行级规则，不因用户名为空而误判",
+    "category": "error",
+    "reference": "ER-2"
+   },
+   {
+    "action": "创建仪表盘并添加图表",
+    "context": "用户整理多个图表",
+    "outcome": "展示动态仪表盘",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "GET 仪表盘详情。",
+    "context": "调用方对某仪表盘拥有宽松仪表盘访问权限。",
+    "outcome": "响应 charts 字段包含该仪表盘全部成员图表。",
+    "category": "happy",
+    "reference": "HP-2"
+   },
+   {
+    "action": "访客请求仪表盘缩略图。",
+    "context": "嵌入访客令牌携带空用户名。",
+    "outcome": "访客被识别为嵌入访客，缩略图摘要按访客自身键隔离。",
+    "category": "happy",
+    "reference": "HP-3"
+   },
+   {
+    "action": "Tab 到卡片菜单按钮。",
+    "context": "非编辑者用户在仪表盘卡片上使用键盘导航。",
+    "outcome": "先显示编辑与归档/删除权限提示，菜单不自动打开。",
+    "category": "happy",
+    "reference": "HP-4"
+   },
+   {
+    "action": "选择某个历史版本并查看确认文案。",
+    "context": "用户打开仪表盘版本恢复确认弹窗。",
+    "outcome": "弹窗显示当前成员中不属于该版本、恢复后将被移除的图表数量，并说明图表本身不会被删除。",
+    "category": "happy",
+    "reference": "HP-5"
+   },
+   {
+    "action": "打开恢复确认弹窗。",
+    "context": "用户在版本历史中恢复仪表盘旧版本。",
+    "outcome": "弹窗显示当前成员中将被移除的图表数量并提示图表本身不被删除。",
+    "category": "happy",
+    "reference": "HP-6"
+   }
+  ]
+ },
+ {
+  "id": 799,
+  "stableKey": "仪表盘布局保存",
+  "name": "仪表盘布局保存",
+  "summary": "保存仪表盘布局时，用户无法读取的图表以缺失图表占位块保存，保存本身成功。",
+  "scenarios": [
+   {
+    "action": "保存布局",
+    "context": "仪表盘上已有图表（含已归档）",
+    "outcome": "已有图表不做可读性检查",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "保存布局",
+    "context": "布局引用调用者不可读的新图表",
+    "outcome": "该图表以缺失占位保存而非拒绝保存",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "保存仪表盘布局。",
+    "context": "布局中的图表已是现有成员或复制来源成员。",
+    "outcome": "已允许的图表被直接接受，保存不会丢弃未新增的图表。",
+    "category": "edge",
+    "reference": "EC-3"
+   },
+   {
+    "action": "保存仪表盘布局。",
+    "context": "保存的布局新链接了调用方不可读的图表。",
+    "outcome": "返回布局无效错误，错误信息列出被阻止的图表 ID。",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "保存仪表盘布局",
+    "context": "用户保存的布局引用了自己无法读取的图表",
+    "outcome": "保存成功，该图表不附加并以 This chart no longer exists. 占位块保存",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "提交布局保存",
+    "context": "编辑者保存含不可读图表的仪表盘布局",
+    "outcome": "布局保存成功，不可读图表显示为缺失图表占位块",
+    "category": "happy",
+    "reference": "HP-2"
+   },
+   {
+    "action": "保存仪表盘布局",
+    "context": "仪表盘布局引用了调用方无法读取的非成员图表",
+    "outcome": "该图表被保存为缺失图表占位，布局其余部分正常保存",
+    "category": "happy",
+    "reference": "HP-3"
+   },
+   {
+    "action": "保存布局",
+    "context": "用户保存含不可读图表的仪表盘布局",
+    "outcome": "不可读图表保存为缺失图表占位块",
+    "category": "happy",
+    "reference": "HP-4"
+   },
+   {
+    "action": "打开导入弹窗并提交导入。",
+    "context": "用户在仪表盘列表导入包含加密文件的导出包。",
+    "outcome": "导入弹窗识别加密文件额外字段并正常处理导入。",
+    "category": "happy",
+    "reference": "HP-5"
+   },
+   {
+    "action": "保存仪表盘布局。",
+    "context": "布局仅包含已有成员图表或调用方可读的新图表。",
+    "outcome": "保存成功，不因图表可读性被拒绝。",
+    "category": "happy",
+    "reference": "HP-6"
+   },
+   {
+    "action": "执行导入。",
+    "context": "用户在仪表盘列表导入包含加密文件的导出包。",
+    "outcome": "导入流程识别加密文件额外字段并继续处理。",
+    "category": "happy",
+    "reference": "HP-7"
+   },
+   {
+    "action": "保存仪表盘布局",
+    "context": "仪表盘布局引用了当前用户不可读的图表",
+    "outcome": "保存成功，该位置保存为缺失图表磁贴",
+    "category": "happy",
+    "reference": "HP-8"
+   },
+   {
+    "action": "保存仪表盘布局。",
+    "context": "调用方保存的布局新链接了其不可读的图表。",
+    "outcome": "不可读的新图表 ID 被识别，布局保存将其保存为缺失图表瓦片而非直接失败。",
+    "category": "happy",
+    "reference": "HP-9"
+   }
+  ]
+ },
+ {
+  "id": 800,
+  "stableKey": "仪表盘版本恢复影响提示",
+  "name": "仪表盘版本恢复影响提示",
+  "summary": "仪表盘版本恢复前统计当前成员中不属于目标版本的图表数量，并在确认弹窗中提示这些图表将被移除。",
+  "scenarios": [
+   {
+    "action": "打开恢复确认弹窗。",
+    "context": "目标版本包含当前全部成员图表。",
+    "outcome": "移除数量为 0，弹窗不显示移除警告。",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "GET 仪表盘版本详情。",
+    "context": "调用方未传 include_restore_impact 或传 false。",
+    "outcome": "不计算恢复影响，响应不含移除数量。",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "在警告提示中选择取消。",
+    "context": "用户看到移除图表警告后取消恢复。",
+    "outcome": "仪表盘保持当前版本不变，图表不被移除。",
+    "category": "edge",
+    "reference": "EC-3"
+   },
+   {
+    "action": "打开恢复确认弹窗。",
+    "context": "用户切换到另一个版本或另一个仪表盘。",
+    "outcome": "按新的 entityUuid/versionUuid 重新请求并展示对应的移除图表数量。",
+    "category": "edge",
+    "reference": "EC-4"
+   },
+   {
+    "action": "打开恢复确认弹窗触发影响计数请求。",
+    "context": "版本接口返回的 _restore_impact.removed_chart_count 缺失、非数字、非整数或为负数。",
+    "outcome": "请求抛出 Invalid restore impact response 错误，影响计数不可用。",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "打开恢复确认弹窗触发影响计数请求。",
+    "context": "影响计数请求超过 10000 毫秒未返回。",
+    "outcome": "请求超时失败，影响计数不可用。",
+    "category": "error",
+    "reference": "ER-2"
+   },
+   {
+    "action": "打开恢复确认弹窗。",
+    "context": "用户在版本历史中恢复仪表盘旧版本。",
+    "outcome": "弹窗显示当前成员中将被移除的图表数量并提示图表本身不被删除。",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "GET /api/v1/dashboard/{uuid}/versions/{version_uuid}/。",
+    "context": "调用方请求仪表盘版本详情并传入 include_restore_impact=true。",
+    "outcome": "响应附带恢复将移除的图表数量。",
+    "category": "happy",
+    "reference": "HP-2"
+   },
+   {
+    "action": "触发版本恢复。",
+    "context": "用户选择恢复仪表盘的历史版本，该版本与当前版本图表集合不同。",
+    "outcome": "恢复前显示警告，列出将被移除的图表，用户确认后才执行恢复。",
+    "category": "happy",
+    "reference": "HP-3"
+   },
+   {
+    "action": "确认恢复该版本。",
+    "context": "恢复某仪表盘历史版本会移除当前图表。",
+    "outcome": "恢复前显示将移除图表的警告。",
+    "category": "happy",
+    "reference": "HP-4"
+   },
+   {
+    "action": "打开恢复确认弹窗。",
+    "context": "用户在仪表盘版本历史中选择一个历史版本并点击恢复。",
+    "outcome": "弹窗请求版本接口并展示将被移除的图表数量提示。",
+    "category": "happy",
+    "reference": "HP-5"
+   },
+   {
+    "action": "触发恢复操作。",
+    "context": "用户在版本历史中选择一个会移除部分图表的仪表盘历史版本。",
+    "outcome": "恢复前显示警告，列出将被移除的图表。",
+    "category": "happy",
+    "reference": "HP-6"
+   }
+  ]
+ },
+ {
+  "id": 801,
+  "stableKey": "列表排序状态恢复",
+  "name": "列表排序状态恢复",
+  "summary": "列表视图在浏览器前进后退时恢复排序、页码与搜索，并保持排序控件与结果一致。",
+  "scenarios": [
+   {
+    "action": "列表状态 effect 运行。",
+    "context": "初始排序与当前排序不同。",
+    "outcome": "受控排序被重置为初始排序。",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "重新渲染表格。",
+    "context": "受控排序被恢复为空排序。",
+    "outcome": "表头排序指示被清除。",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "query 同步 effect 执行。",
+    "context": "当前 sortBy 已等于 initialSortBy。",
+    "outcome": "不触发 setSortBy，排序控件不重新挂载。",
+    "category": "edge",
+    "reference": "EC-3"
+   },
+   {
+    "action": "使用浏览器 Back 与 Forward。",
+    "context": "用户在图表或数据集列表中修改排序、页码与搜索。",
+    "outcome": "排序、页码与搜索一并从 URL 恢复，控件与结果同步。",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "重新渲染 TableCollection。",
+    "context": "受控排序从非空恢复为空排序。",
+    "outcome": "表头排序指示被清除。",
+    "category": "happy",
+    "reference": "HP-2"
+   },
+   {
+    "action": "使用浏览器后退/前进。",
+    "context": "用户在列表页排序、翻页并搜索后离开再返回。",
+    "outcome": "排序、分页与搜索作为同一 URL 状态被恢复。",
+    "category": "happy",
+    "reference": "HP-3"
+   },
+   {
+    "action": "页面加载并同步 query。",
+    "context": "列表视图以 URL 中的初始排序加载，当前 sortBy 与 initialSortBy 不一致。",
+    "outcome": "sortBy 被重置为 initialSortBy，CardSortSelect 因 key 变化重新挂载并显示正确排序。",
+    "category": "happy",
+    "reference": "HP-4"
+   }
+  ]
+ },
+ {
+  "id": 802,
+  "stableKey": "列表视图排序与历史状态",
+  "name": "列表视图排序与历史状态",
+  "summary": "列表视图的排序、分页与过滤状态与 URL 同步，并支持浏览器前进后退恢复。",
+  "scenarios": [
+   {
+    "action": "列表重新渲染",
+    "context": "受控排序被恢复为空排序",
+    "outcome": "表头不再显示排序指示",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "点击其中一个列头排序",
+    "context": "列配置未显式设置 id，仅有字符串 accessor",
+    "outcome": "仅被点击的列头标记为已排序，其他列头不受影响",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "渲染列表视图表格。",
+    "context": "调用方未传入 sortBy。",
+    "outcome": "组件按无外部排序状态正常渲染，不报错。",
+    "category": "edge",
+    "reference": "EC-3"
+   },
+   {
+    "action": "点击可排序列头",
+    "context": "用户在列表视图点击列头排序",
+    "outcome": "列表按该列排序并重新请求数据，URL 记录 sortColumn 与 sortOrder",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "点击后退",
+    "context": "用户使用浏览器后退回到之前的列表状态",
+    "outcome": "排序、页码与搜索过滤一并恢复，表头排序指示同步更新",
+    "category": "happy",
+    "reference": "HP-2"
+   },
+   {
+    "action": "渲染列表视图表格。",
+    "context": "列表视图恢复了此前保存的排序状态。",
+    "outcome": "传入的 sortBy 被用于列映射，排序指示与恢复的排序状态一致。",
+    "category": "happy",
+    "reference": "HP-3"
+   }
+  ]
+ },
+ {
+  "id": 803,
+  "stableKey": "前端插件构建",
+  "name": "前端插件构建",
+  "summary": "前端与嵌入式 SDK 的构建依赖版本管理。",
+  "scenarios": [
+   {
+    "action": "以低于 1.45.2 的 ace-builds 版本安装。",
+    "context": "宿主项目安装 superset-ui-chart-controls 或 plugin-chart-handlebars。",
+    "outcome": "peer 依赖约束 ^1.45.2 不被满足，包管理器给出 peer 依赖告警或安装失败。",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "执行依赖安装。",
+    "context": "宿主项目安装 superset-ui-chart-controls 或 plugin-chart-handlebars，其 ace-builds 版本低于 1.45.2。",
+    "outcome": "peerDependencies 校验提示 ace-builds 版本不满足 ^1.45.2 要求，需升级 ace-builds。",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "运行构建",
+    "context": "共享包声明编译失败",
+    "outcome": "在并行插件构建前停止并返回失败状态",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "运行 plugins:build",
+    "context": "开发者构建前端插件",
+    "outcome": "先构建共享包声明，再并行构建各插件",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "安装 devDependencies 并执行构建脚本。",
+    "context": "开发者构建 superset-embedded-sdk。",
+    "outcome": "@babel/core 解析为 ^8.0.10 范围内的版本，构建正常完成。",
+    "category": "happy",
+    "reference": "HP-2"
+   },
+   {
+    "action": "安装 dependencies 并打包。",
+    "context": "构建 superset-frontend 前端产物。",
+    "outcome": "query-string 使用 10.0.0 版本参与打包，前端产物正常生成。",
+    "category": "happy",
+    "reference": "HP-3"
+   },
+   {
+    "action": "运行 build.js 执行 tsc 阶段。",
+    "context": "开发者执行前端构建脚本，存在多个含 TypeScript 文件的插件包。",
+    "outcome": "先完成 superset-core、superset-ui-core、superset-ui-chart-controls 的声明构建，再并行执行各插件的 tsc.sh --build，构建成功。",
+    "category": "happy",
+    "reference": "HP-4"
+   },
+   {
+    "action": "运行 npm install 与前端构建。",
+    "context": "开发者安装 superset-frontend 依赖并构建前端。",
+    "outcome": "query-string 安装为 10.0.0，@types/estree 安装为 ^1.0.10 范围内版本，构建成功。",
+    "category": "happy",
+    "reference": "HP-5"
+   },
+   {
+    "action": "执行 npm install。",
+    "context": "安装 superset-ui-core 依赖。",
+    "outcome": "ace-builds 解析为 ^1.45.2 范围内的版本，SQL 编辑器相关组件正常构建。",
+    "category": "happy",
+    "reference": "HP-6"
+   },
+   {
+    "action": "脚本在输出 Run tsc 后先构建共享包声明，再并行构建各插件包。",
+    "context": "开发者执行前端插件构建脚本。",
+    "outcome": "共享声明只构建一次，插件并行构建读取同一份声明，构建成功完成。",
+    "category": "happy",
+    "reference": "HP-7"
+   }
+  ]
+ },
+ {
+  "id": 804,
+  "stableKey": "发布流程工具",
+  "name": "发布流程工具",
+  "summary": "提供变更日志生成、发布邮件生成与发布校验脚本，辅助 Apache 发布流程。",
+  "scenarios": [
+   {
+    "action": "生成变更日志",
+    "context": "GitHub 不再提供某 PR 信息",
+    "outcome": "使用提交详情列出该 PR 并打印警告",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "运行 check_license.sh。",
+    "context": "下载 RAT jar 时网络短暂失败。",
+    "outcome": "curl 以 --fail --retry 5 重试下载，失败时输出错误信息而非静默写入空文件。",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "运行 check_license.sh。",
+    "context": "RAT jar 下载在重试后仍失败。",
+    "outcome": "curl 以非零状态退出，脚本不把不完整文件当作 jar。",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "运行 check_license.sh",
+    "context": "下载 RAT jar 时网络请求失败",
+    "outcome": "curl/wget 按重试参数重试，仍失败则清理临时文件并提示手动安装",
+    "category": "error",
+    "reference": "ER-2"
+   },
+   {
+    "action": "生成变更日志",
+    "context": "GitHub 凭据无效",
+    "outcome": "提示凭据错误并退出",
+    "category": "error",
+    "reference": "ER-3"
+   },
+   {
+    "action": "运行 check_license.sh。",
+    "context": "下载 RAT jar 时网络短暂失败。",
+    "outcome": "curl 以 --retry 5 --retry-all-errors 重试下载，成功后继续许可证检查。",
+    "category": "error",
+    "reference": "ER-4"
+   },
+   {
+    "action": "运行 changelog.py changelog",
+    "context": "发布经理需要生成变更日志",
+    "outcome": "按 PR 输出 CHANGELOG 文件，支持缓存续跑",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "运行 verify_release.py 传入 tar.gz 路径",
+    "context": "验证者需要校验发布包",
+    "outcome": "输出 SHA-512 与 RSA/EDDSA 密钥校验结果",
+    "category": "happy",
+    "reference": "HP-2"
+   },
+   {
+    "action": "触发 labeler 工作流。",
+    "context": "提交的 PR 修改了 superset/translations/pl/** 下的文件。",
+    "outcome": "PR 被自动添加 i18n:polish 标签。",
+    "category": "happy",
+    "reference": "HP-3"
+   },
+   {
+    "action": "执行许可证检查脚本。",
+    "context": "CI 运行 check_license.sh 下载 RAT jar。",
+    "outcome": "curl 以失败重试方式下载 jar，下载成功后继续检查。",
+    "category": "happy",
+    "reference": "HP-4"
+   },
+   {
+    "action": "重新执行 check_license.sh。",
+    "context": "许可证检查脚本首次下载 RAT jar 失败。",
+    "outcome": "curl 以 --retry 5 --retry-all-errors 重试下载，成功后继续检查。",
+    "category": "happy",
+    "reference": "HP-5"
+   },
+   {
+    "action": "触发自动标签流程。",
+    "context": "贡献者提交涉及波兰语翻译的 PR。",
+    "outcome": "PR 被正确打上波兰语相关标签。",
+    "category": "happy",
+    "reference": "HP-6"
+   }
+  ]
+ },
+ {
+  "id": 805,
+  "stableKey": "图表列表与数据源过滤",
+  "name": "图表列表与数据源过滤",
+  "summary": "提供图表列表的浏览、搜索、排序与按数据源过滤，支持按数据集或语义视图筛选图表。",
+  "scenarios": [
+   {
+    "action": "按数据源过滤图表",
+    "context": "过滤值使用旧版整数数据集 ID",
+    "outcome": "按 table 类型数据集 ID 匹配",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "以语义视图数据源 id 过滤图表列表。",
+    "context": "数据源为语义视图。",
+    "outcome": "匹配语义视图数据源的图表被包含在结果中。",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "按数据源过滤图表",
+    "context": "过滤值格式非法或类型未知",
+    "outcome": "返回空结果而不扩大列表",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "在图表列表按数据源过滤",
+    "context": "用户需要查看某数据源的图表",
+    "outcome": "仅列出该数据集或语义视图的图表",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "通过图表列表导入弹窗上传图表导出文件",
+    "context": "用户在图表列表页导入包含加密字段的图表文件",
+    "outcome": "导入流程按 FileEncryptedExtraFields 定义识别加密字段并完成导入",
+    "category": "happy",
+    "reference": "HP-2"
+   },
+   {
+    "action": "调用图表列表接口并传入 datasource_id 过滤条件。",
+    "context": "用户按数据源筛选图表列表。",
+    "outcome": "返回该数据源下的图表，包括关联语义视图数据源的图表。",
+    "category": "happy",
+    "reference": "HP-3"
+   }
+  ]
+ },
+ {
+  "id": 806,
+  "stableKey": "图表列表数据源筛选",
+  "name": "图表列表数据源筛选",
+  "summary": "图表列表的 Datasource 筛选在启用语义层时同时包含语义视图与数据集。",
+  "scenarios": [
+   {
+    "action": "在图表列表的 Datasource 筛选中选择该语义视图",
+    "context": "启用语义层后用户需要查找由某语义视图构建的图表",
+    "outcome": "列出由该语义视图构建的图表",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "在图表列表使用数据源筛选",
+    "context": "用户需要按数据源筛选图表",
+    "outcome": "返回匹配该数据源的图表，包含语义视图",
+    "category": "happy",
+    "reference": "HP-2"
+   }
+  ]
+ },
+ {
+  "id": 807,
+  "stableKey": "图表列表数据源过滤",
+  "name": "图表列表数据源过滤",
+  "summary": "在图表列表中按数据集或语义视图筛选图表。",
+  "scenarios": [
+   {
+    "action": "打开 Dataset 过滤器",
+    "context": "语义层未启用",
+    "outcome": "仍使用仅数据集的 /api/v1/dataset/ 端点，不请求统一 datasource 端点",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "调用图表列表 API 并传入无效 datasource_id。",
+    "context": "用户传入不存在的 datasource_id。",
+    "outcome": "返回空图表列表而非报错。",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "在图表列表按数据源过滤",
+    "context": "用户需要查看某数据源下的图表",
+    "outcome": "列表仅显示该数据源（含语义视图）关联的图表",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "在图表列表 Datasource 过滤器中搜索并选择某个语义视图",
+    "context": "启用语义层",
+    "outcome": "图表请求携带 datasource_id 与 chart_datasource 操作符，值为 <id>__semantic_view",
+    "category": "happy",
+    "reference": "HP-2"
+   },
+   {
+    "action": "选择数据源过滤条件。",
+    "context": "用户在图表列表中使用数据源筛选。",
+    "outcome": "筛选请求携带 chart_datasource 操作符，列表按数据源过滤。",
+    "category": "happy",
+    "reference": "HP-3"
+   },
+   {
+    "action": "调用图表列表 API 并传入 datasource_id 过滤参数。",
+    "context": "用户按数据源筛选图表列表。",
+    "outcome": "返回仅属于该数据源的图表，包括语义视图数据源下的图表。",
+    "category": "happy",
+    "reference": "HP-4"
+   },
+   {
+    "action": "选择 chart_datasource 过滤操作符并指定数据源。",
+    "context": "用户在图表列表中使用数据源过滤。",
+    "outcome": "列表返回该数据源下的图表，包含语义视图。",
+    "category": "happy",
+    "reference": "HP-5"
+   },
+   {
+    "action": "应用数据源筛选",
+    "context": "图表列表按数据源筛选，数据源为语义视图",
+    "outcome": "筛选结果包含使用该语义视图的图表",
+    "category": "happy",
+    "reference": "HP-6"
+   }
+  ]
+ },
+ {
+  "id": 808,
+  "stableKey": "图表创建数据源入口",
+  "name": "图表创建数据源入口",
+  "summary": "图表创建页在启用语义层时将数据集与语义视图统称为 datasources，并提供语义视图创建入口。",
+  "scenarios": [
+   {
+    "action": "点击 Add a datasource 链接",
+    "context": "语义层未启用",
+    "outcome": "打开数据集创建表单",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "点击 add-chart-new-semantic-view 链接",
+    "context": "语义层功能已启用，用户点击 \"create a semantic view\" 链接",
+    "outcome": "跳转到 /tablemodelview/list/?create=semantic_view 并进入语义视图创建流程",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "在图表创建页点击 Add a datasource",
+    "context": "启用语义层且用户有数据集写权限",
+    "outcome": "打开数据源列表，New 提供数据集与语义视图两种选择",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "点击 create a semantic view 链接",
+    "context": "启用语义层",
+    "outcome": "直接打开语义视图创建表单",
+    "category": "happy",
+    "reference": "HP-2"
+   },
+   {
+    "action": "在创建图表页查看数据源帮助文本。",
+    "context": "语义层已启用且用户有创建数据集权限。",
+    "outcome": "显示指向 /tablemodelview/list/ 的 'Add a datasource' 链接，以及指向 /tablemodelview/list/?create=semantic_view 的 'create a semantic view' 链接。",
+    "category": "happy",
+    "reference": "HP-3"
+   },
+   {
+    "action": "在创建图表页查看数据源帮助文本。",
+    "context": "语义层未启用且用户有创建数据集权限。",
+    "outcome": "显示指向 /dataset/add/ 的 'Add a dataset' 链接，不显示语义视图创建链接。",
+    "category": "happy",
+    "reference": "HP-4"
+   },
+   {
+    "action": "在图表创建页查看数据集帮助文案",
+    "context": "语义层功能已启用，用户有创建数据集权限",
+    "outcome": "显示 \"Add a datasource\" 链接指向 /tablemodelview/list/，并额外显示 \"or create a semantic view\" 链接指向 /tablemodelview/list/?create=semantic_view",
+    "category": "happy",
+    "reference": "HP-5"
+   },
+   {
+    "action": "在图表创建页查看数据集帮助文案",
+    "context": "语义层功能未启用，用户有创建数据集权限",
+    "outcome": "显示 \"Add a dataset\" 链接指向 /dataset/add/，不显示创建语义视图链接",
+    "category": "happy",
+    "reference": "HP-6"
+   }
+  ]
+ },
+ {
+  "id": 809,
+  "stableKey": "图表创建数据源选择",
+  "name": "图表创建数据源选择",
+  "summary": "在图表创建页选择数据集或语义视图并进入 Explore 构建图表。",
+  "scenarios": [
+   {
+    "action": "查看数据集帮助文本",
+    "context": "语义层未启用",
+    "outcome": "仅显示“Add a dataset”链接指向 /dataset/add/，不显示创建语义视图入口",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "打开图表创建页",
+    "context": "通过 dataset_id 预选的数据集加载失败且非 404",
+    "outcome": "显示加载数据集失败的错误提示",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "打开图表创建页并展开 Datasource 下拉框",
+    "context": "启用语义层且用户具有数据集写权限",
+    "outcome": "同名数据集与语义视图作为两个带 Dataset/Semantic View 标签的独立选项展示",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "选择图表类型并双击或点击创建新图表",
+    "context": "启用语义层并选择某个语义视图",
+    "outcome": "跳转 Explore，datasource 参数为 <id>__semantic_view",
+    "category": "happy",
+    "reference": "HP-2"
+   }
+  ]
+ },
+ {
+  "id": 810,
+  "stableKey": "图表数据查询",
+  "name": "图表数据查询",
+  "summary": "执行图表查询并返回结果，将构建查询阶段的数据库错误转换为查询失败错误。",
+  "scenarios": [
+   {
+    "action": "执行图表数据查询并触发 SQLAlchemyError。",
+    "context": "查询上下文未关联数据库。",
+    "outcome": "返回查询失败错误，错误信息为异常字符串。",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "执行图表数据查询",
+    "context": "构建查询时数据库拒绝登录",
+    "outcome": "返回带数据库错误信息的查询失败错误",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "执行图表数据查询。",
+    "context": "虚拟数据集默认 schema 查询时数据库拒绝登录。",
+    "outcome": "返回 ChartDataQueryFailedError，错误信息由数据库引擎规范提取，而非未预期的服务器错误。",
+    "category": "error",
+    "reference": "ER-2"
+   },
+   {
+    "action": "执行图表数据查询",
+    "context": "用户查看图表",
+    "outcome": "返回查询结果",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "执行图表数据查询。",
+    "context": "虚拟数据集默认 schema 查找时数据库登录被拒。",
+    "outcome": "返回 ChartDataQueryFailedError，包含数据库引擎提取的错误信息，而非未预期的服务器错误。",
+    "category": "happy",
+    "reference": "HP-2"
+   }
+  ]
+ },
+ {
+  "id": 811,
+  "stableKey": "图表更新并发保护",
+  "name": "图表更新并发保护",
+  "summary": "图表更新在写入前校验保存输入未被并发修改，过期更新被拒绝。",
+  "scenarios": [
+   {
+    "action": "提交带 expected_basis 的图表更新。",
+    "context": "图表在准备更新后被他人修改。",
+    "outcome": "返回 ChartUpdateFailedError，提示重新加载后重试。",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "提交带 expected_basis 的图表更新。",
+    "context": "图表自准备更新后未被他人修改。",
+    "outcome": "更新成功并提交。",
+    "category": "happy",
+    "reference": "HP-1"
+   }
+  ]
+ },
+ {
+  "id": 812,
+  "stableKey": "图表构建与可视化",
+  "name": "图表构建与可视化",
+  "summary": "XY 图表时间列判定与 form_data 重建逻辑。",
+  "scenarios": [
+   {
+    "action": "调用 apply_temporal_columns。",
+    "context": "XY 图表插件在获得权威时间列类型后需要重建 form_data。",
+    "outcome": "form_data 被清空并由 map_xy_config(config, temporal_columns=temporal_columns) 的结果整体更新。",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "调用 map_xy_config 并传入 temporal_columns。",
+    "context": "MCP 生成 XY 图表且已知数据集时间列集合。",
+    "outcome": "x 轴列是否真正为时间列依据权威时间列集合判定，进而决定时间轴配置与排序/警告。",
+    "category": "happy",
+    "reference": "HP-1"
+   }
+  ]
+ },
+ {
+  "id": 813,
+  "stableKey": "安全依赖管理",
+  "name": "安全依赖管理",
+  "summary": "依赖安全下限与锁定版本管理。",
+  "scenarios": [
+   {
+    "action": "按更新后的约束安装或升级依赖。",
+    "context": "环境中已存在 pyarrow 26.0.0。",
+    "outcome": "26.0.0 不满足 >=26.0.1 约束，需升级到 26.0.1 及以上。",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "安装 fastmcp 扩展依赖。",
+    "context": "环境中已存在低于 4.1.4 的 fastmcp。",
+    "outcome": "依赖解析要求升级到 4.1.4 及以上版本。",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "执行依赖安装/校验。",
+    "context": "环境中已安装 pyarrow 26.0.0 并尝试满足 Superset 依赖约束。",
+    "outcome": "因低于新的下限 26.0.1 而无法满足约束，需升级 pyarrow。",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "解析 pyarrow 版本",
+    "context": "安装 Superset 依赖",
+    "outcome": "安装 26.0.1 及以上版本，排除含 CVE-2026-111497 的版本",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "执行依赖安装/解析。",
+    "context": "用户按 pyproject.toml 或 requirements 安装 Superset 依赖。",
+    "outcome": "pyarrow 被解析并锁定为 26.0.1（>=26.0.1,<27），不再接受 26.0.0。",
+    "category": "happy",
+    "reference": "HP-2"
+   },
+   {
+    "action": "解析 fastmcp 版本。",
+    "context": "安装 MCP 相关依赖。",
+    "outcome": "安装 fastmcp 4.1.4 及以上、5.0 以下版本。",
+    "category": "happy",
+    "reference": "HP-3"
+   },
+   {
+    "action": "解析 fastmcp 版本",
+    "context": "安装 Superset 的 fastmcp 可选依赖",
+    "outcome": "解析到 4.1.4 及以上、5.0 以下版本",
+    "category": "happy",
+    "reference": "HP-4"
+   },
+   {
+    "action": "解析 fastmcp 版本。",
+    "context": "安装 Superset 的 fastmcp 可选依赖。",
+    "outcome": "安装 fastmcp 4.1.4 及以上、5.0 以下版本。",
+    "category": "happy",
+    "reference": "HP-5"
+   },
+   {
+    "action": "解析 fastmcp 版本。",
+    "context": "安装 fastmcp 可选依赖。",
+    "outcome": "安装 4.1.4 及以上、5.0 以下版本。",
+    "category": "happy",
+    "reference": "HP-6"
+   },
+   {
+    "action": "解析 fastmcp 版本。",
+    "context": "安装 fastmcp 可选依赖。",
+    "outcome": "安装 fastmcp>=4.1.4,<5.0 范围内的版本。",
+    "category": "happy",
+    "reference": "HP-7"
+   },
+   {
+    "action": "执行依赖安装。",
+    "context": "用户安装 Superset 的 fastmcp 可选依赖组。",
+    "outcome": "解析并安装 fastmcp 4.1.4 及以上、5.0 以下的版本。",
+    "category": "happy",
+    "reference": "HP-8"
+   },
+   {
+    "action": "执行依赖安装。",
+    "context": "开发者安装开发依赖。",
+    "outcome": "安装 fastmcp 4.1.4。",
+    "category": "happy",
+    "reference": "HP-9"
+   }
+  ]
+ },
+ {
+  "id": 814,
+  "stableKey": "安全角色与认证",
+  "name": "安全角色与认证",
+  "summary": "提供高度可扩展的安全角色与认证选项，基于 Flask-AppBuilder 的 RBAC。",
+  "scenarios": [
+   {
+    "action": "查看者访问已发布仪表盘及其图表、数据集请求",
+    "context": "启用 ENABLE_VIEWERS 与 VIEWER_PROMISCUOUS_MODE",
+    "outcome": "仅已列出的查看者在查看该仪表盘时免数据集权限读取",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "执行查询。",
+    "context": "SQL Lab 查询引用未写 schema 的非限定表，且该表在禁用表名单中。",
+    "outcome": "查询被拒绝，非限定表名不再绕过黑名单。",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "判定当前用户是否为访客",
+    "context": "嵌入式访客令牌的用户名为空",
+    "outcome": "仅依据当前用户求值判定为访客，不读取用户名",
+    "category": "edge",
+    "reference": "EC-3"
+   },
+   {
+    "action": "判定当前用户是否为访客",
+    "context": "访客令牌携带空用户名",
+    "outcome": "仍按访客处理，不依赖用户名",
+    "category": "edge",
+    "reference": "EC-4"
+   },
+   {
+    "action": "访问该入口点",
+    "context": "某入口点缺少或错误执行角色能力检查",
+    "outcome": "属于安全边界违规",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "执行复制或保存",
+    "context": "复制仪表盘或保存带新目标数据集的原生过滤器，而用户对该图表或数据集无访问权限",
+    "outcome": "返回 HTTP 422 并指明图表或数据集",
+    "category": "error",
+    "reference": "ER-2"
+   },
+   {
+    "action": "配置角色与权限",
+    "context": "管理员需要控制用户访问",
+    "outcome": "按角色能力矩阵限制访问",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "请求该仪表盘的图表数据、/charts、/datasets 与钻取",
+    "context": "启用 ENABLE_VIEWERS 与 VIEWER_PROMISCUOUS_MODE 后，已发布仪表盘的列名查看者查看该仪表盘",
+    "outcome": "无需数据集权限即可读取，授权不延伸到其他位置",
+    "category": "happy",
+    "reference": "HP-2"
+   },
+   {
+    "action": "判定当前用户是否为访客。",
+    "context": "嵌入访客令牌携带空用户名。",
+    "outcome": "按令牌定义识别为访客，不因用户名为空而误判。",
+    "category": "happy",
+    "reference": "HP-3"
+   },
+   {
+    "action": "调用 is_guest_user 判定当前用户。",
+    "context": "嵌入式访客令牌携带空用户名。",
+    "outcome": "仍被识别为访客用户，不因用户名为空返回 False。",
+    "category": "happy",
+    "reference": "HP-4"
+   },
+   {
+    "action": "调用 is_guest_user 判断当前用户。",
+    "context": "嵌入式访客令牌携带空用户名。",
+    "outcome": "仍被识别为访客用户，不依赖用户名取值。",
+    "category": "happy",
+    "reference": "HP-5"
+   },
+   {
+    "action": "调用 is_guest_user 判定当前用户。",
+    "context": "嵌入访客令牌携带空用户名。",
+    "outcome": "仍被识别为访客用户，不因用户名为空而误判为普通用户。",
+    "category": "happy",
+    "reference": "HP-6"
+   }
+  ]
+ },
+ {
+  "id": 815,
+  "stableKey": "导入导出",
+  "name": "导入导出",
+  "summary": "数据集与保存查询的导入导出行为，包括 Secure Extra 携带与关联数据库复用。",
+  "scenarios": [
+   {
+    "action": "提交导入",
+    "context": "导入的 encrypted_extra_secrets 不是对象",
+    "outcome": "返回校验错误",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "执行数据集导出",
+    "context": "Secure Extra 中 oauth2_client_info 被整块替换为掩码字符串",
+    "outcome": "该块不被携带，导出包中不包含该 Secure Extra 块",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "导入数据集包",
+    "context": "导入数据集时关联数据库已存在",
+    "outcome": "已存在的关联数据库被复用，不被覆盖",
+    "category": "edge",
+    "reference": "EC-3"
+   },
+   {
+    "action": "导入保存查询包",
+    "context": "导入保存查询时关联数据库已存在",
+    "outcome": "已存在的关联数据库被复用，不被覆盖",
+    "category": "edge",
+    "reference": "EC-4"
+   },
+   {
+    "action": "提交导入",
+    "context": "导入接口收到含密钥的表单",
+    "outcome": "请求数据不被记录到事件日志",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "导入数据集或数据库",
+    "context": "导入请求中 encrypted_extra_secrets 的值不是 dict",
+    "outcome": "返回校验错误，提示 encrypted_extra_secrets 必须将 JSONPath 表达式映射到值",
+    "category": "error",
+    "reference": "ER-2"
+   },
+   {
+    "action": "提交导入",
+    "context": "用户导入含加密密钥字段的资产包",
+    "outcome": "密钥字段被正确应用",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "执行数据集导出",
+    "context": "导出含 OAuth2 客户端信息且逐字段掩码的数据集",
+    "outcome": "导出包中的 Secure Extra 仅包含 oauth2_client_info 与嵌入式凭据块，其余引擎设置不导出",
+    "category": "happy",
+    "reference": "HP-2"
+   }
+  ]
+ },
+ {
+  "id": 816,
+  "stableKey": "导入导出密钥处理",
+  "name": "导入导出密钥处理",
+  "summary": "数据集导出携带受控 Secure Extra 块，导入时校验并填充加密密钥。",
+  "scenarios": [
+   {
+    "action": "执行导入",
+    "context": "导入请求携带敏感表单数据",
+    "outcome": "事件日志不记录请求数据",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "导出数据集包。",
+    "context": "masked_encrypted_extra 中某块被整体替换为掩码字符串而非 dict。",
+    "outcome": "该块不被携带，导出包中不出现该 Secure Extra 块。",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "执行导入。",
+    "context": "导入请求中 encrypted_extra_secrets 的某个文件值为非 dict（如字符串）。",
+    "outcome": "导入校验失败，返回 encrypted_extra_secrets 必须将 JSONPath 表达式映射到值的校验错误。",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "在导入弹窗填写私钥密钥",
+    "context": "导入含私钥的数据库配置",
+    "outcome": "私钥换行被保留，其他密钥字段隐藏显示",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "导出数据集包。",
+    "context": "数据集导出时数据库的 masked_encrypted_extra 含 oauth2_client_info 与嵌入式凭据块，且均为非空 dict。",
+    "outcome": "导出包携带这两个 Secure Extra 块（字段级掩码），不携带引擎其他配置。",
+    "category": "happy",
+    "reference": "HP-2"
+   }
+  ]
+ },
+ {
+  "id": 817,
+  "stableKey": "导入弹窗",
+  "name": "导入弹窗",
+  "summary": "导入弹窗识别私钥字段并保留其换行，其他密钥字段保持隐藏。",
+  "scenarios": [
+   {
+    "action": "渲染导入弹窗的加密额外字段。",
+    "context": "加密额外字段路径为 privatekey_body 或 privatekey_pass。",
+    "outcome": "私钥字段渲染为多行文本，私钥密码渲染为密码输入框。",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "在导入弹窗中粘贴私钥",
+    "context": "导入需要填写私钥的加密字段",
+    "outcome": "私钥换行被保留，其他密钥字段保持隐藏",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "查看导入弹窗中的密码提示。",
+    "context": "用户导入数据集且数据库密码缺失。",
+    "outcome": "提示说明数据库密码为必需，且仅指出 \"Certificate\" 部分不在导出文件中、需导入后手动添加，不再提及 \"Secure Extra\"。",
+    "category": "happy",
+    "reference": "HP-2"
+   },
+   {
+    "action": "触发数据集导入并查看密码提示",
+    "context": "用户导入数据集且数据库密码缺失",
+    "outcome": "提示仅说明 \"Certificate\" 部分不在导出文件中、需导入后手动添加，不再提及 \"Secure Extra\"",
+    "category": "happy",
+    "reference": "HP-3"
+   }
+  ]
+ },
+ {
+  "id": 818,
+  "stableKey": "嵌入 sdk",
+  "name": "嵌入 SDK",
+  "summary": "提供将 Superset 仪表盘嵌入宿主应用的 SDK，管理 iframe 通道、访客令牌刷新与宿主回调。",
+  "scenarios": [
+   {
+    "action": "新文档加载",
+    "context": "嵌入仪表盘内部导航到新文档",
+    "outcome": "建立新通道、握手确认后重新获取访客令牌并重放主题与宿主方法",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "等待刷新周期",
+    "context": "访客令牌获取失败或超时",
+    "outcome": "记录日志并按重试间隔重新获取",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "等待调用返回",
+    "context": "iframe 导航或仪表盘卸载时仍有未完成调用",
+    "outcome": "以 PortClosedError 拒绝",
+    "category": "error",
+    "reference": "ER-2"
+   },
+   {
+    "action": "调用 embedDashboard 并提供 fetchGuestToken",
+    "context": "宿主应用嵌入仪表盘",
+    "outcome": "iframe 挂载并收到访客令牌",
+    "category": "happy",
+    "reference": "HP-1"
+   }
+  ]
+ },
+ {
+  "id": 819,
+  "stableKey": "嵌入式 sdk",
+  "name": "嵌入式 SDK",
+  "summary": "嵌入式 SDK 的构建工具链与测试文档。",
+  "scenarios": [
+   {
+    "action": "安装 devDependencies 并执行构建。",
+    "context": "维护者构建 superset-embedded-sdk。",
+    "outcome": "使用 @babel/core 8.0.10 完成构建，SDK 运行时行为不变。",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "运行 npm install 与 npm run build。",
+    "context": "开发者安装 superset-embedded-sdk 的开发依赖并执行构建。",
+    "outcome": "@babel/core 解析为 ^8.0.10 范围内的版本，构建流程正常完成，SDK 对外 API 与运行时行为不变。",
+    "category": "happy",
+    "reference": "HP-2"
+   },
+   {
+    "action": "查看 SDK 类型定义",
+    "context": "使用 superset-embedded-sdk 的开发者查阅类型文档",
+    "outcome": "获得完整的 JSDoc 类型说明",
+    "category": "happy",
+    "reference": "HP-3"
+   }
+  ]
+ },
+ {
+  "id": 820,
+  "stableKey": "嵌入式仪表盘",
+  "name": "嵌入式仪表盘",
+  "summary": "通过 @superset-ui/embedded-sdk 与访客令牌将仪表盘嵌入宿主应用，支持 UI 配置、回调与安全限制。",
+  "scenarios": [
+   {
+    "action": "提供 resolvePermalinkUrl 回调",
+    "context": "宿主需要自定义复制链接的地址",
+    "outcome": "返回宿主域名 URL，返回 null 时使用 Superset 默认链接",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "SDK 安排令牌刷新",
+    "context": "访客令牌有效期很长",
+    "outcome": "按令牌有效期安排刷新",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "访问 Explore 表单或永久链接端点",
+    "context": "访客请求未授权的查询数据源",
+    "outcome": "返回 HTTP 403",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "调用 embedDashboard 并提供 fetchGuestToken",
+    "context": "宿主应用需要嵌入 Superset 仪表盘",
+    "outcome": "仪表盘在宿主页面中渲染",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "使用 embedDashboard 并配置访客令牌获取函数",
+    "context": "外部应用需要嵌入仪表盘",
+    "outcome": "仪表盘在外部应用中加载",
+    "category": "happy",
+    "reference": "HP-2"
+   },
+   {
+    "action": "启用 EMBEDDED_CREDENTIAL_FALLBACK 并配置回退凭据",
+    "context": "OAuth2 连接需要服务嵌入式访客",
+    "outcome": "访客请求使用专用回退凭据访问数据",
+    "category": "happy",
+    "reference": "HP-3"
+   }
+  ]
+ },
+ {
+  "id": 821,
+  "stableKey": "嵌入式访客凭据回退",
+  "name": "嵌入式访客凭据回退",
+  "summary": "OAuth2 连接支持嵌入式专用回退凭据。",
+  "scenarios": [
+   {
+    "action": "访客请求图表缩略图。",
+    "context": "嵌入访客令牌携带空用户名。",
+    "outcome": "访客身份被正确识别，缩略图摘要按访客键隔离。",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "嵌入式访客查询",
+    "context": "连接开启模拟登录用户但无 OAuth2 客户端且无可用凭据",
+    "outcome": "查询被拒绝，访客看到连接未为嵌入式仪表盘配置的提示，服务端日志记录连接与修复方法",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "调用 is_guest_user。",
+    "context": "请求未携带 JWT 与 guest token，且处于鉴权前的错误处理路径。",
+    "outcome": "捕获 NoAuthorizationError 并返回 False，不再抛出未处理异常。",
+    "category": "edge",
+    "reference": "EC-3"
+   },
+   {
+    "action": "生成缩略图摘要。",
+    "context": "THUMBNAIL_EXECUTORS 配置不含 CURRENT_USER，且执行器无法解析。",
+    "outcome": "返回 None，不生成摘要。",
+    "category": "edge",
+    "reference": "EC-4"
+   },
+   {
+    "action": "保存连接",
+    "context": "凭据只有用户名或只有密码/私钥，或用户名为纯空白",
+    "outcome": "校验失败，凭据被拒绝",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "在连接表单中查看字段顺序。",
+    "context": "用户配置 OAuth2 连接的数据库。",
+    "outcome": "表单展示 embedded_credentials 嵌入式凭据输入项。",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "发起嵌入式查询",
+    "context": "嵌入式访客访问使用 OAuth2 的连接",
+    "outcome": "使用仅嵌入式回退凭据完成访问",
+    "category": "happy",
+    "reference": "HP-2"
+   },
+   {
+    "action": "嵌入式访客查询该连接上的图表",
+    "context": "启用 EMBEDDED_SUPERSET 与 EMBEDDED_CREDENTIAL_FALLBACK，Snowflake 连接配置 OAuth2 客户端、开启模拟登录用户并保存嵌入式访客凭据",
+    "outcome": "查询以配置的专用数据库账号执行，结果使用独立缓存分区",
+    "category": "happy",
+    "reference": "HP-3"
+   },
+   {
+    "action": "加载嵌入式仪表盘。",
+    "context": "嵌入式仪表盘以访客身份访问，访客用户名取值为空或特殊值。",
+    "outcome": "访客身份保持独立且稳定，不随 username 取值变化而改变或失效。",
+    "category": "happy",
+    "reference": "HP-4"
+   },
+   {
+    "action": "加载嵌入式仪表盘。",
+    "context": "嵌入式仪表盘以访客身份访问，用户名取值为任意值。",
+    "outcome": "访客身份保持独立，不因用户名取值改变。",
+    "category": "happy",
+    "reference": "HP-5"
+   },
+   {
+    "action": "调用 is_guest_user 判断当前用户是否为访客。",
+    "context": "嵌入式仪表盘请求携带 guest token，token 中用户名为空。",
+    "outcome": "返回 True，请求被识别为嵌入式访客。",
+    "category": "happy",
+    "reference": "HP-6"
+   },
+   {
+    "action": "生成仪表盘或图表缩略图摘要。",
+    "context": "THUMBNAIL_EXECUTORS 配置包含 CURRENT_USER，当前用户为用户名无法解析的嵌入式访客。",
+    "outcome": "回退为以访客自身为执行器，访客的 RLS 规则计入摘要。",
+    "category": "happy",
+    "reference": "HP-7"
+   }
+  ]
+ },
+ {
+  "id": 822,
+  "stableKey": "嵌入式访客回退凭据",
+  "name": "嵌入式访客回退凭据",
+  "summary": "允许 OAuth2 数据库连接携带仅用于嵌入式访客请求的用户名与密码或密钥对，登录用户仍按用户 OAuth2 认证。",
+  "scenarios": [
+   {
+    "action": "嵌入式访客查询",
+    "context": "连接开启模拟登录用户但无 OAuth2 客户端且无可用凭据",
+    "outcome": "查询被拒绝，访客看到连接未为嵌入式仪表盘配置的提示，服务端日志记录连接与修复方法",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "保存连接",
+    "context": "凭据只有用户名或只有密码/私钥，或用户名为纯空白",
+    "outcome": "校验失败，凭据被拒绝",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "嵌入式访客查询该连接上的图表",
+    "context": "启用 EMBEDDED_SUPERSET 与 EMBEDDED_CREDENTIAL_FALLBACK，Snowflake 连接配置 OAuth2 客户端、开启模拟登录用户并保存嵌入式访客凭据",
+    "outcome": "查询以配置的专用数据库账号执行，结果使用独立缓存分区",
+    "category": "happy",
+    "reference": "HP-1"
+   }
+  ]
+ },
+ {
+  "id": 823,
+  "stableKey": "归档列表与恢复",
+  "name": "归档列表与恢复",
+  "summary": "提供 Recently Archived 列表，按类型浏览已归档的图表、仪表盘与数据集，并支持恢复与永久删除。",
+  "scenarios": [
+   {
+    "action": "查看归档行。",
+    "context": "用户只有读权限。",
+    "outcome": "不显示操作列，悬停提示需先恢复才能打开。",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "从 Chart 切换到 Dashboard。",
+    "context": "用户切换归档类型。",
+    "outcome": "排序与分页参数被清除，新类型使用自身默认排序。",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "点击浏览器后退。",
+    "context": "用户切换归档类型后希望返回之前的类型视图。",
+    "outcome": "由于使用 history.push，浏览器返回到切换前的类型视图。",
+    "category": "edge",
+    "reference": "EC-3"
+   },
+   {
+    "action": "点击 Recover。",
+    "context": "恢复请求返回 404（对象已被他人恢复）。",
+    "outcome": "显示恢复失败提示，列表不崩溃且行保留。",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "浏览已归档图表。",
+    "context": "用户打开 Recently Archived 列表。",
+    "outcome": "列表显示名称、类型、归档时间与归档人，默认按归档时间倒序。",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "点击 Recover。",
+    "context": "用户对已归档图表点击恢复。",
+    "outcome": "调用该类型恢复接口，成功后显示带链接的恢复提示并刷新列表。",
+    "category": "happy",
+    "reference": "HP-2"
+   },
+   {
+    "action": "按 Tab 聚焦恢复按钮并按 Enter。",
+    "context": "键盘用户聚焦归档行操作。",
+    "outcome": "操作按钮可见且恢复请求被触发。",
+    "category": "happy",
+    "reference": "HP-3"
+   },
+   {
+    "action": "在 Type 下拉框选择另一类型。",
+    "context": "用户在最近归档列表中切换归档对象类型。",
+    "outcome": "URL 中 type 更新，sortColumn、sortOrder、pageIndex 被清除，并通过 history.push 新增历史记录，列表按新类型默认排序与分页展示。",
+    "category": "happy",
+    "reference": "HP-4"
+   }
+  ]
+ },
+ {
+  "id": 824,
+  "stableKey": "数据导入导出",
+  "name": "数据导入导出",
+  "summary": "支持以 YAML/JSON/ZIP 导入导出数据库、数据集、图表、仪表盘与保存查询，并处理密码、SSH 隧道与加密额外字段等敏感值。",
+  "scenarios": [
+   {
+    "action": "执行导入且未选择 overwrite_all",
+    "context": "导入资产包含关联数据库",
+    "outcome": "关联数据库被复用而非覆盖",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "记录导入事件日志",
+    "context": "导入请求携带敏感表单数据",
+    "outcome": "请求数据不被记录",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "在导入弹窗填写所需密钥",
+    "context": "用户导入含加密额外字段的数据库配置",
+    "outcome": "导入完成，私钥字段保留换行",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "执行导入。",
+    "context": "导入的数据集或保存查询引用的数据库在目标环境已存在。",
+    "outcome": "复用已有数据库，不覆盖其配置，数据集或保存查询关联到该数据库。",
+    "category": "happy",
+    "reference": "HP-2"
+   }
+  ]
+ },
+ {
+  "id": 825,
+  "stableKey": "数据库连接配置",
+  "name": "数据库连接配置",
+  "summary": "数据库连接的创建与更新校验，以及加密字段在连接对话框中的呈现。",
+  "scenarios": [
+   {
+    "action": "保存数据库连接",
+    "context": "嵌入式凭据配置不完整",
+    "outcome": "校验提示嵌入式凭据不完整",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "保存连接。",
+    "context": "Athena 连接既未填写 s3_staging_dir 也未填写 work_group。",
+    "outcome": "连接参数不满足至少提供其一的要求。",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "构建该数据库引擎规范的 parameters_json_schema。",
+    "context": "数据库连接参数中包含 EncryptedField 类型字段，OpenAPI 版本为 3。",
+    "outcome": "该字段带 x-encrypted-extra: true 标记，连接对话框将其值放入 masked_encrypted_extra。",
+    "category": "edge",
+    "reference": "EC-3"
+   },
+   {
+    "action": "查看该字段。",
+    "context": "Athena 连接未填写 S3 query results location。",
+    "outcome": "字段标注为可选（Work Group 已设置结果位置时），不强制必填。",
+    "category": "edge",
+    "reference": "EC-4"
+   },
+   {
+    "action": "保存或校验连接参数。",
+    "context": "Athena 连接既未填 s3_staging_dir 也未填 work_group。",
+    "outcome": "返回缺少 s3_staging_dir、work_group 的警告。",
+    "category": "edge",
+    "reference": "EC-5"
+   },
+   {
+    "action": "保存连接",
+    "context": "Athena 连接既未填 s3_staging_dir 也未填 work_group",
+    "outcome": "校验提示至少需要其中一项",
+    "category": "edge",
+    "reference": "EC-6"
+   },
+   {
+    "action": "PUT /api/v1/database/{pk}。",
+    "context": "调用方提交不合法的数据库更新请求体。",
+    "outcome": "返回 400，message 为校验错误信息。",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "在数据库连接表单中填写嵌入式凭据字段并保存",
+    "context": "启用 EMBEDDED_CREDENTIAL_FALLBACK 且连接使用 OAuth2",
+    "outcome": "连接保存嵌入式专用用户名与密码或密钥对，登录用户仍按 OAuth2 认证",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "查看表单字段。",
+    "context": "用户打开数据库连接配置表单。",
+    "outcome": "表单按 FormFieldOrder 渲染，包含 embedded_credentials 嵌入式凭据字段。",
+    "category": "happy",
+    "reference": "HP-2"
+   },
+   {
+    "action": "在连接表单中填写 AWS Access Key ID、AWS Secret Access Key、Region、S3 query result location、Schema name 与 Work group。",
+    "context": "管理员配置 Athena 连接。",
+    "outcome": "字段按 Athena 动态参数 schema 渲染，AWS 密钥以密码输入框呈现。",
+    "category": "happy",
+    "reference": "HP-3"
+   },
+   {
+    "action": "PUT /api/v1/database/{pk}，请求体通过 DatabasePutSchema(database_id=pk) 校验。",
+    "context": "管理员更新一个已存在的数据库连接，请求体合法。",
+    "outcome": "返回 200 及更新后的连接信息，sqlalchemy_uri 与加密字段按掩码返回。",
+    "category": "happy",
+    "reference": "HP-4"
+   },
+   {
+    "action": "在连接表单中填写 AWS Access Key ID、AWS Secret Access Key、Region、S3 query result location 与 Work group",
+    "context": "管理员配置 Athena 数据库连接",
+    "outcome": "表单按 FormFieldOrder 渲染这些字段，AWS 密钥以密码输入框呈现并可保存",
+    "category": "happy",
+    "reference": "HP-5"
+   },
+   {
+    "action": "提交数据库连接配置。",
+    "context": "管理员为 Athena 连接填写 AWS Access Key ID、AWS Secret Access Key、Region、S3 query results location、Schema 与 Work Group。",
+    "outcome": "这些参数随连接参数提交，AWS Secret Access Key 以密码输入框呈现。",
+    "category": "happy",
+    "reference": "HP-6"
+   },
+   {
+    "action": "在连接表单填写 AWS Access Key ID、Secret、Region、S3 暂存目录或 Work Group 并保存。",
+    "context": "管理员为 Amazon Athena 配置连接。",
+    "outcome": "表单字段被转换为 Athena SQLAlchemy URI 并保存。",
+    "category": "happy",
+    "reference": "HP-7"
+   },
+   {
+    "action": "打开连接表单。",
+    "context": "管理员编辑已有 Athena 连接。",
+    "outcome": "URI 被解析回各表单字段，额外查询参数保留在 query 字段中。",
+    "category": "happy",
+    "reference": "HP-8"
+   },
+   {
+    "action": "在连接表单填写 AWS Access Key ID、Secret Access Key、Region、S3 staging dir 与 work group",
+    "context": "用户配置 Athena 连接",
+    "outcome": "表单按 Athena 动态参数 schema 渲染并保存这些字段",
+    "category": "happy",
+    "reference": "HP-9"
+   }
+  ]
+ },
+ {
+  "id": 826,
+  "stableKey": "数据源连接",
+  "name": "数据源连接",
+  "summary": "支持连接几乎所有 SQL 数据库或数据引擎，需具备 Python DB-API 驱动与 SQLAlchemy 方言。",
+  "scenarios": [
+   {
+    "action": "启用 EMBEDDED_CREDENTIAL_FALLBACK 并配置嵌入回退凭据",
+    "context": "OAuth2 按用户认证的数据库连接需要服务嵌入访客",
+    "outcome": "嵌入访客请求使用回退凭据，登录用户仍按用户认证",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "调用数据库参数校验。",
+    "context": "校验数据源参数时配置了不完整的嵌入式凭据。",
+    "outcome": "校验结果包含嵌入式凭据不完整的错误。",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "尝试连接",
+    "context": "目标数据引擎缺少 Python DB-API 驱动或 SQLAlchemy 方言",
+    "outcome": "无法作为数据源使用",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "嵌入式访客请求该连接的图表数据",
+    "context": "启用 EMBEDDED_CREDENTIAL_FALLBACK 但连接未配置嵌入式凭据或凭据不完整",
+    "outcome": "拒绝连接并返回 DATABASE_SECURITY_ACCESS_ERROR，不回退到连接自身凭据",
+    "category": "error",
+    "reference": "ER-2"
+   },
+   {
+    "action": "添加受支持的数据库",
+    "context": "管理员配置数据库连接",
+    "outcome": "成功连接并可查询",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "嵌入式访客请求该连接的图表数据",
+    "context": "启用 EMBEDDED_CREDENTIAL_FALLBACK 且连接配置了完整的嵌入式访客凭据",
+    "outcome": "使用嵌入式凭据连接，并使用独立缓存分区",
+    "category": "happy",
+    "reference": "HP-2"
+   },
+   {
+    "action": "填写 AWS 凭据、区域与 work group 并保存。",
+    "context": "管理员配置 Athena 数据源。",
+    "outcome": "连接参数按 Athena 动态 schema 校验并保存。",
+    "category": "happy",
+    "reference": "HP-3"
+   },
+   {
+    "action": "保存并测试连接",
+    "context": "Athena 连接仅配置 work_group 而未配置 s3_staging_dir",
+    "outcome": "连接可保存，查询结果位置由 work group 定义或使用托管查询结果",
+    "category": "happy",
+    "reference": "HP-4"
+   },
+   {
+    "action": "保存并测试连接。",
+    "context": "Athena 连接配置了 AWS 凭据、区域与 Work Group。",
+    "outcome": "连接参数按动态表单 schema 提交，连接可正常建立。",
+    "category": "happy",
+    "reference": "HP-5"
+   },
+   {
+    "action": "提交创建数据库请求。",
+    "context": "用户创建 OAuth2 数据源，连接测试通过但权限同步时管理员尚无 OAuth2 令牌。",
+    "outcome": "数据库创建成功并返回，权限同步错误被忽略，不再返回 422。",
+    "category": "happy",
+    "reference": "HP-6"
+   }
+  ]
+ },
+ {
+  "id": 827,
+  "stableKey": "数据集列表管理",
+  "name": "数据集列表管理",
+  "summary": "提供数据集列表的浏览、搜索、排序、筛选、创建、导入、导出、复制、删除与批量操作，并支持语义视图混合展示。",
+  "scenarios": [
+   {
+    "action": "进入批量选择模式",
+    "context": "用户批量选择物理或虚拟数据集与语义视图",
+    "outcome": "标签同时标明数据集与语义视图选择",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "返回上一列表状态",
+    "context": "用户使用浏览器前进/后退切换列表历史",
+    "outcome": "排序、页码与搜索过滤一并恢复，表头排序指示同步",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "打开数据集列表",
+    "context": "数据集 _info 接口返回 403",
+    "outcome": "批量选择等操作被隐藏",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "在数据集列表执行删除。",
+    "context": "数据集被语义视图引用，用户尝试删除该数据集。",
+    "outcome": "删除被拒绝，并仅列出阻塞删除的语义视图名称。",
+    "category": "error",
+    "reference": "ER-2"
+   },
+   {
+    "action": "浏览列表并按名称、数据库或修改时间排序",
+    "context": "管理员打开数据集列表",
+    "outcome": "列表按所选列排序并重新请求数据",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "点击删除并在弹窗输入 DELETE 确认",
+    "context": "用户需要删除数据集",
+    "outcome": "数据集被删除、显示成功提示并刷新列表",
+    "category": "happy",
+    "reference": "HP-2"
+   },
+   {
+    "action": "点击复制并输入新名称提交",
+    "context": "用户需要复制虚拟数据集",
+    "outcome": "虚拟数据集被复制且列表刷新",
+    "category": "happy",
+    "reference": "HP-3"
+   },
+   {
+    "action": "打开删除确认弹窗。",
+    "context": "数据集被图表与仪表盘依赖。",
+    "outcome": "文案分别列出关联的图表数与仪表盘数。",
+    "category": "happy",
+    "reference": "HP-4"
+   },
+   {
+    "action": "打开数据集删除确认弹窗。",
+    "context": "数据集被 3 个图表和 2 个仪表盘引用。",
+    "outcome": "提示文案为“is linked to 3 charts and 2 dashboards.”。",
+    "category": "happy",
+    "reference": "HP-5"
+   },
+   {
+    "action": "打开删除确认。",
+    "context": "用户查看数据集删除确认弹窗，该数据集关联 3 个图表与 2 个仪表盘。",
+    "outcome": "弹窗显示“is linked to 3 charts and 2 dashboards.”。",
+    "category": "happy",
+    "reference": "HP-6"
+   },
+   {
+    "action": "打开删除确认弹窗。",
+    "context": "用户删除被图表和仪表盘引用的数据集。",
+    "outcome": "弹窗显示“is linked to N charts and M dashboards”的影响提示。",
+    "category": "happy",
+    "reference": "HP-7"
+   }
+  ]
+ },
+ {
+  "id": 828,
+  "stableKey": "版本历史恢复",
+  "name": "版本历史恢复",
+  "summary": "在图表与仪表盘的版本历史中预览、恢复版本或从版本创建新对象，恢复前提示将移除的仪表盘图表。",
+  "scenarios": [
+   {
+    "action": "打开恢复确认弹窗",
+    "context": "恢复影响计数请求失败",
+    "outcome": "弹窗仍可展示，不因计数失败阻塞恢复流程",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "查看恢复确认弹窗。",
+    "context": "移除计数请求尚未返回。",
+    "outcome": "显示“Checking which charts will be removed…”，恢复按钮禁用。",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "查看恢复确认弹窗。",
+    "context": "用户切换到另一个版本后旧计数请求才返回。",
+    "outcome": "过期响应被忽略，不显示旧版本的移除数量。",
+    "category": "edge",
+    "reference": "EC-3"
+   },
+   {
+    "action": "再次请求恢复。",
+    "context": "用户先打开某版本的恢复确认弹窗，随后切换到另一版本或另一实体。",
+    "outcome": "确认弹窗因 key 变化重新挂载，不保留上一目标的确认状态。",
+    "category": "edge",
+    "reference": "EC-4"
+   },
+   {
+    "action": "确认恢复",
+    "context": "用户确认恢复前另一用户修改了仪表盘成员",
+    "outcome": "实际移除的图表可能与弹窗计数不同，恢复按确认时的成员执行",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "查看恢复确认弹窗。",
+    "context": "移除计数请求失败或超时。",
+    "outcome": "提示无法检查将移除的图表，恢复按钮仍可用。",
+    "category": "error",
+    "reference": "ER-2"
+   },
+   {
+    "action": "打开恢复确认弹窗",
+    "context": "用户打开仪表盘版本历史并选择某版本恢复",
+    "outcome": "弹窗显示当前成员中不属于该版本的图表数量，并提示恢复会移除这些图表但不删除图表本身",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "打开恢复确认弹窗",
+    "context": "目标版本包含当前全部成员图表",
+    "outcome": "不显示移除警告，可直接确认恢复",
+    "category": "happy",
+    "reference": "HP-2"
+   },
+   {
+    "action": "打开恢复确认弹窗。",
+    "context": "用户对仪表盘某历史版本点击恢复。",
+    "outcome": "弹窗显示当前成员中不属于该版本的图表数量，并说明图表本身不会被删除。",
+    "category": "happy",
+    "reference": "HP-3"
+   },
+   {
+    "action": "打开恢复确认弹窗。",
+    "context": "目标版本包含当前全部成员图表。",
+    "outcome": "不显示移除警告，恢复按钮可用。",
+    "category": "happy",
+    "reference": "HP-4"
+   },
+   {
+    "action": "打开恢复确认弹窗。",
+    "context": "用户对图表版本点击恢复。",
+    "outcome": "不请求仪表盘成员计数，不显示移除警告。",
+    "category": "happy",
+    "reference": "HP-5"
+   },
+   {
+    "action": "打开恢复确认弹窗。",
+    "context": "用户在版本历史中选择某个版本并请求恢复。",
+    "outcome": "弹窗以 entityType、uuid、目标版本 versionUuid 作为 key 重新挂载，并携带 entityUuid，展示对应版本的恢复确认内容。",
+    "category": "happy",
+    "reference": "HP-6"
+   }
+  ]
+ },
+ {
+  "id": 829,
+  "stableKey": "版本历史恢复影响提示",
+  "name": "版本历史恢复影响提示",
+  "summary": "仪表盘恢复确认对话框在恢复前统计并提示将被移除的当前成员图表数量。",
+  "scenarios": [
+   {
+    "action": "打开恢复确认对话框。",
+    "context": "当前成员包含已归档或未放置的图表。",
+    "outcome": "计数包含这些成员，因为它们仍属于仪表盘并可被解除关联。",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "打开恢复确认对话框。",
+    "context": "恢复影响计数请求失败。",
+    "outcome": "对话框提示移除数量未知。",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "打开恢复确认对话框。",
+    "context": "用户选择较早的仪表盘版本并点击恢复。",
+    "outcome": "对话框显示当前成员中不属于该版本的图表数量，并说明恢复会将其从仪表盘移除但不删除图表。",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "打开恢复确认对话框。",
+    "context": "所选版本包含当前全部成员图表。",
+    "outcome": "移除数量为 0，不显示移除警告。",
+    "category": "happy",
+    "reference": "HP-2"
+   }
+  ]
+ },
+ {
+  "id": 830,
+  "stableKey": "版本历史恢复警告",
+  "name": "版本历史恢复警告",
+  "summary": "仪表盘恢复确认弹窗统计当前成员中不属于目标版本的图表数量，并警告恢复将移除这些图表。",
+  "scenarios": [
+   {
+    "action": "打开恢复确认弹窗",
+    "context": "目标版本包含当前全部成员图表",
+    "outcome": "不显示移除警告",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "打开恢复确认弹窗",
+    "context": "恢复影响计数请求失败",
+    "outcome": "弹窗仍可确认恢复，不阻塞操作",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "打开恢复确认弹窗",
+    "context": "用户选择恢复仪表盘历史版本",
+    "outcome": "弹窗显示将被移除的图表数量并警告",
+    "category": "happy",
+    "reference": "HP-1"
+   }
+  ]
+ },
+ {
+  "id": 831,
+  "stableKey": "缓存层",
+  "name": "缓存层",
+  "summary": "提供轻量可配置的缓存层以降低数据库负载。",
+  "scenarios": [
+   {
+    "action": "启用并配置缓存",
+    "context": "数据库查询负载较高",
+    "outcome": "查询结果被缓存以减轻数据库压力",
+    "category": "happy",
+    "reference": "HP-1"
+   }
+  ]
+ },
+ {
+  "id": 832,
+  "stableKey": "语义层",
+  "name": "语义层",
+  "summary": "轻量语义层用于快速定义自定义维度与指标。",
+  "scenarios": [
+   {
+    "action": "读取有界响应体",
+    "context": "语义层提供方运行在缺少 read1 的旧版 urllib3 上",
+    "outcome": "响应体被完整读取",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "在语义层中定义维度与指标",
+    "context": "用户需要复用自定义维度与指标",
+    "outcome": "定义可在分析中复用",
+    "category": "happy",
+    "reference": "HP-1"
+   }
+  ]
+ },
+ {
+  "id": 833,
+  "stableKey": "语义层提供方传输",
+  "name": "语义层提供方传输",
+  "summary": "语义层提供方响应传输完整性。",
+  "scenarios": [
+   {
+    "action": "获取提供方响应",
+    "context": "环境使用旧版 urllib3 调用语义层提供方",
+    "outcome": "响应内容完整，不被截断",
+    "category": "happy",
+    "reference": "HP-1"
+   }
+  ]
+ },
+ {
+  "id": 834,
+  "stableKey": "语义视图创建结果解析",
+  "name": "语义视图创建结果解析",
+  "summary": "解析批量创建响应，区分已创建、已存在与校验失败，并生成对应错误信息。",
+  "scenarios": [
+   {
+    "action": "解析响应",
+    "context": "响应体不是文档化的批量结果结构",
+    "outcome": "不消费任意传输错误，按空结果处理",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "提交批量添加",
+    "context": "创建过程中发生非 400/422 的传输错误",
+    "outcome": "错误被重新抛出，由上层统一处理",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "解析响应",
+    "context": "批量创建返回包含 created 与 errors 的结果体",
+    "outcome": "按结果统计成功与失败数量并展示对应提示",
+    "category": "happy",
+    "reference": "HP-1"
+   }
+  ]
+ },
+ {
+  "id": 835,
+  "stableKey": "语义视图批量删除",
+  "name": "语义视图批量删除",
+  "summary": "在数据集列表中批量删除语义视图，被依赖阻止时按视图展示阻止原因。",
+  "scenarios": [
+   {
+    "action": "确认批量删除",
+    "context": "批量删除中部分视图被依赖阻塞",
+    "outcome": "拒绝对话框逐个列出被阻塞视图、可见依赖资产与不可见资产数量，其余视图需单独确认删除",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "提交批量删除。",
+    "context": "批量删除的所选视图中没有任何视图存在依赖。",
+    "outcome": "blocked_views 为空，blocked_view_ids 为空列表，删除流程按无依赖继续。",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "确认删除",
+    "context": "批量删除中部分视图被依赖资产阻断",
+    "outcome": "整批删除被拒绝，拒绝对话框逐个列出被阻断的视图、可见依赖资产与不可见资产数量",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "提交删除",
+    "context": "批量删除语义视图返回 403/404/422 或网络错误",
+    "outcome": "以 danger toast 报告删除失败，不展示依赖阻止对话框",
+    "category": "error",
+    "reference": "ER-2"
+   },
+   {
+    "action": "确认删除",
+    "context": "用户批量删除若干语义视图且均无依赖",
+    "outcome": "视图被删除",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "确认批量删除",
+    "context": "用户选择多个无依赖的语义视图",
+    "outcome": "所选视图被删除",
+    "category": "happy",
+    "reference": "HP-2"
+   },
+   {
+    "action": "提交批量删除。",
+    "context": "批量删除多个语义视图，其中部分视图存在依赖资产。",
+    "outcome": "删除被拒绝，错误响应仅列出有依赖的视图及其 total、dependents、inaccessible_count、archived_count。",
+    "category": "happy",
+    "reference": "HP-3"
+   },
+   {
+    "action": "提交删除",
+    "context": "批量选择数据集与多个语义视图并确认删除",
+    "outcome": "数据集被删除，被依赖阻止的语义视图在“Cannot delete semantic views”对话框中按视图分别列出其依赖资产",
+    "category": "happy",
+    "reference": "HP-4"
+   }
+  ]
+ },
+ {
+  "id": 836,
+  "stableKey": "语义视图批量添加",
+  "name": "语义视图批量添加",
+  "summary": "在添加语义视图弹窗中选择语义层与视图，批量提交创建，并处理成功、部分失败与整批被拒等结果。",
+  "scenarios": [
+   {
+    "action": "提交批量添加",
+    "context": "所选视图数量超过宿主配置的批量上限（默认 100 或自定义上限）",
+    "outcome": "弹窗内 alert 与 danger toast 展示宿主返回的具体上限原因，已选视图保留且按钮仍可点击以便裁剪重试",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "提交批量添加",
+    "context": "批量请求被拒但响应体不含字符串 message（如仅含 detail 或为字符串）",
+    "outcome": "回退展示通用错误“An error occurred while adding semantic views”，不泄露响应体内容",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "等待旧请求返回 400 拒绝",
+    "context": "批量请求进行中用户关闭并重新打开弹窗，随后旧请求被拒",
+    "outcome": "过期响应被忽略，不弹出 toast，也不在重开的弹窗中显示 alert",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "点击“add N view(s)”提交",
+    "context": "用户打开添加语义视图弹窗并选择语义层与若干视图",
+    "outcome": "视图被创建，展示成功提示并回调 onSuccess",
+    "category": "happy",
+    "reference": "HP-1"
+   }
+  ]
+ },
+ {
+  "id": 837,
+  "stableKey": "资产导入导出",
+  "name": "资产导入导出",
+  "summary": "导出携带被掩码的 OAuth2 客户端与嵌入式凭据块，导入时复用相关数据库并按需索取密钥。",
+  "scenarios": [
+   {
+    "action": "执行导入",
+    "context": "覆盖连接时文件中的 OAuth2 客户端或嵌入式凭据用户名与已存储的不同",
+    "outcome": "索取对应密钥，而不是与已存储密钥配对",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "执行仪表盘导入。",
+    "context": "导入仪表盘包，同时指定覆盖与 overwrite_all。",
+    "outcome": "关联数据库被覆盖，schema 要求提供存储连接无法揭示的密钥。",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "执行仪表盘导入。",
+    "context": "导入仪表盘包，未指定 overwrite_all。",
+    "outcome": "关联数据库被复用而非覆盖。",
+    "category": "edge",
+    "reference": "EC-3"
+   },
+   {
+    "action": "执行导入",
+    "context": "导入文件含被掩码的 Secure Extra 值而目标无对应存储密钥",
+    "outcome": "导入失败并提示 Must provide value for masked_encrypted_extra field 或索取 encrypted_extra_secrets",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "执行导入",
+    "context": "导入包含相关数据库的仪表盘、图表或数据集包",
+    "outcome": "相关数据库被复用而非覆盖",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "执行图表导入。",
+    "context": "导入图表包，包内关联数据库已存在于目标实例。",
+    "outcome": "关联数据库被复用，原有连接配置不被覆盖。",
+    "category": "happy",
+    "reference": "HP-2"
+   }
+  ]
+ },
+ {
+  "id": 838,
+  "stableKey": "软删除归档体验",
+  "name": "软删除归档体验",
+  "summary": "软删除归档提示、依赖计数、恢复链接与键盘可达性的修复。",
+  "scenarios": [
+   {
+    "action": "切换 Type 选择器。",
+    "context": "用户在归档列表中切换对象类型。",
+    "outcome": "浏览器历史新增一条记录，Back 可返回上一类型。",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "在图表卡片上悬停删除菜单项。",
+    "context": "软删除特性关闭，用户非图表编辑者。",
+    "outcome": "提示文案为「You must be a chart editor in order to delete...」。",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "点击恢复链接。",
+    "context": "归档通知中的恢复链接在子路径部署下生成。",
+    "outcome": "链接包含应用根路径，正确跳转到归档列表。",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "查看成功提示。",
+    "context": "用户归档图表或仪表盘成功。",
+    "outcome": "提示包含指向 Recently Archived 的恢复链接，链接遵循部署 URL 前缀。",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "悬停或通过键盘聚焦该通知。",
+    "context": "含链接的归档成功通知显示在页面上。",
+    "outcome": "通知保持打开直至用户关闭。",
+    "category": "happy",
+    "reference": "HP-2"
+   },
+   {
+    "action": "按 Tab 聚焦 More Options 按钮。",
+    "context": "非编辑者查看图表或仪表盘卡片。",
+    "outcome": "在打开菜单前读到编辑或归档不可用的原因。",
+    "category": "happy",
+    "reference": "HP-3"
+   },
+   {
+    "action": "完成归档。",
+    "context": "用户对列表项执行软删除归档操作。",
+    "outcome": "显示归档提示，归档计数与版本历史正确更新，键盘操作可正常完成归档流程。",
+    "category": "happy",
+    "reference": "HP-4"
+   },
+   {
+    "action": "在图表卡片上悬停删除/归档菜单项。",
+    "context": "软删除特性开启，用户对图表有写权限但非图表编辑者。",
+    "outcome": "提示文案为「You must be a chart editor in order to archive...」，菜单项禁用。",
+    "category": "happy",
+    "reference": "HP-5"
+   }
+  ]
+ },
+ {
+  "id": 839,
+  "stableKey": "软删除归档提示",
+  "name": "软删除归档提示",
+  "summary": "归档成功提示中的恢复链接保持到用户关闭，链接遵循部署 URL 前缀，归档列表分页与排序保留浏览历史。",
+  "scenarios": [
+   {
+    "action": "查看归档确认文案。",
+    "context": "数据集归档影响提示中图表与仪表盘数量均非零。",
+    "outcome": "文案为“linked to N charts and M dashboards”。",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "按 Tab 键导航。",
+    "context": "用户使用键盘聚焦归档提示中的链接。",
+    "outcome": "链接可被聚焦且提示不自动消失。",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "操作分页或排序控件。",
+    "context": "用户在归档列表中切换分页或排序。",
+    "outcome": "URL 以 push 方式更新，浏览器后退可回到上一状态。",
+    "category": "edge",
+    "reference": "EC-3"
+   },
+   {
+    "action": "点击恢复链接",
+    "context": "部署配置了 URL 前缀",
+    "outcome": "链接指向带前缀的归档页",
+    "category": "edge",
+    "reference": "EC-4"
+   },
+   {
+    "action": "等待通知超时",
+    "context": "通知文本包含 HTML 链接",
+    "outcome": "通知保持显示直到用户关闭",
+    "category": "edge",
+    "reference": "EC-5"
+   },
+   {
+    "action": "悬停仪表盘卡片菜单中的编辑或删除项。",
+    "context": "当前用户是仪表盘编辑者或管理员。",
+    "outcome": "不显示权限提示，菜单项可正常操作。",
+    "category": "edge",
+    "reference": "EC-6"
+   },
+   {
+    "action": "打开归档确认弹窗。",
+    "context": "数据集被图表和仪表盘引用，软删除功能开启。",
+    "outcome": "弹窗显示归档影响说明，列出依赖的图表与仪表盘数量，文案与改前一致。",
+    "category": "edge",
+    "reference": "EC-7"
+   },
+   {
+    "action": "查看成功提示。",
+    "context": "用户归档图表或仪表盘成功。",
+    "outcome": "提示包含指向 Recently Archived 的恢复链接，链接使用部署根路径。",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "确认归档。",
+    "context": "用户对列表项执行软删除归档操作。",
+    "outcome": "显示归档提示，计数与历史记录同步更新，键盘操作行为正确。",
+    "category": "happy",
+    "reference": "HP-10"
+   },
+   {
+    "action": "用户悬停或键盘聚焦该提示。",
+    "context": "含链接的归档成功提示出现。",
+    "outcome": "提示保持打开直到被显式关闭。",
+    "category": "happy",
+    "reference": "HP-2"
+   },
+   {
+    "action": "查看归档成功提示。",
+    "context": "用户归档一个图表或仪表盘。",
+    "outcome": "提示包含指向 Recently Archived 的恢复链接，并保持到用户关闭。",
+    "category": "happy",
+    "reference": "HP-3"
+   },
+   {
+    "action": "点击归档提示中的恢复链接。",
+    "context": "部署配置了 URL 前缀。",
+    "outcome": "链接包含部署 URL 前缀并正确跳转。",
+    "category": "happy",
+    "reference": "HP-4"
+   },
+   {
+    "action": "执行归档",
+    "context": "用户归档图表或仪表盘",
+    "outcome": "成功提示包含指向归档页的恢复链接",
+    "category": "happy",
+    "reference": "HP-5"
+   },
+   {
+    "action": "悬停仪表盘卡片菜单中的删除/归档项。",
+    "context": "当前用户不是仪表盘编辑者且软删除特性开启。",
+    "outcome": "显示提示「You must be a dashboard editor in order to archive...」。",
+    "category": "happy",
+    "reference": "HP-6"
+   },
+   {
+    "action": "悬停仪表盘卡片菜单中的删除项。",
+    "context": "当前用户不是仪表盘编辑者且软删除特性关闭。",
+    "outcome": "显示提示「You must be a dashboard editor in order to delete...」。",
+    "category": "happy",
+    "reference": "HP-7"
+   },
+   {
+    "action": "悬停仪表盘卡片菜单中的编辑项。",
+    "context": "当前用户不是仪表盘编辑者。",
+    "outcome": "显示提示「You must be a dashboard editor in order to edit...」，编辑项处于禁用状态。",
+    "category": "happy",
+    "reference": "HP-8"
+   },
+   {
+    "action": "打开删除确认弹窗。",
+    "context": "软删除功能关闭时，用户删除一个被图表和仪表盘引用的数据集。",
+    "outcome": "弹窗显示“The <dataset> <table_name> is linked to N charts and M dashboards. Are you sure you want to continue? Deleting the dataset will break those objects.”。",
+    "category": "happy",
+    "reference": "HP-9"
+   }
+  ]
+ },
+ {
+  "id": 840,
+  "stableKey": "软删除归档通知",
+  "name": "软删除归档通知",
+  "summary": "归档与恢复操作的通知文案、恢复链接与通知停留行为。",
+  "scenarios": [
+   {
+    "action": "查看弹窗文案",
+    "context": "数据集删除确认弹窗展示依赖数量",
+    "outcome": "文案为“linked to N charts and M dashboards”",
+    "category": "edge",
+    "reference": "EC-1"
+   },
+   {
+    "action": "通知展示。",
+    "context": "普通通知无 action、无链接且 duration > 0。",
+    "outcome": "按 duration 自动关闭。",
+    "category": "edge",
+    "reference": "EC-2"
+   },
+   {
+    "action": "完成恢复。",
+    "context": "恢复的对象没有可用链接。",
+    "outcome": "提示为纯文本“<name> restored successfully”，不包含链接。",
+    "category": "edge",
+    "reference": "EC-3"
+   },
+   {
+    "action": "键盘聚焦图表或仪表盘卡片的更多操作按钮",
+    "context": "用户无编辑权限",
+    "outcome": "先读到权限提示，再打开菜单",
+    "category": "error",
+    "reference": "ER-1"
+   },
+   {
+    "action": "确认归档",
+    "context": "用户归档图表或仪表盘",
+    "outcome": "成功提示包含指向 Recently Archived 的恢复链接，链接按部署 URL 前缀生成",
+    "category": "happy",
+    "reference": "HP-1"
+   },
+   {
+    "action": "用户悬停或键盘聚焦该通知",
+    "context": "含链接的归档成功通知出现",
+    "outcome": "通知保持打开直到用户手动关闭",
+    "category": "happy",
+    "reference": "HP-2"
+   },
+   {
+    "action": "通知展示。",
+    "context": "通知 allowHtml 为真且文本包含 <a 链接，无 action，duration > 0。",
+    "outcome": "不设置自动关闭定时器，通知保持可见直到用户关闭。",
+    "category": "happy",
+    "reference": "HP-3"
+   },
+   {
+    "action": "完成恢复。",
+    "context": "应用部署在非根路径下，用户恢复一个带链接的已归档对象。",
+    "outcome": "恢复成功提示中的“View <type>”链接 href 为应用根路径加对象 URL，点击可正确跳转。",
+    "category": "happy",
+    "reference": "HP-4"
+   }
+  ]
+ }
+]
