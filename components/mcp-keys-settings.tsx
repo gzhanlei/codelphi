@@ -85,6 +85,10 @@ export function McpKeysSettings({ initialKeys, canManage }: { initialKeys: McpKe
     <section className="overview-panel mcp-keys-panel">
       <div className="overview-panel-heading"><span>06</span><h2>MCP 集成</h2></div>
       <p>组织级只读 API key，供 Claude / ChatGPT 等 AI 客户端经 MCP 读取产品规格与行为变化（每条结论附证据链接）。撤销后立即失效。</p>
+      <div className="mcp-keys-endpoint">
+        <span className="mcp-key-meta">MCP 端点（Streamable HTTP，Authorization: Bearer &lt;key&gt;）：<code>{typeof window !== "undefined" ? `${window.location.origin}/api/mcp` : "/api/mcp"}</code></span>
+        <span className="mcp-key-meta">Claude Code 连接示例：<code>claude mcp add --transport http codelphi &lt;端点&gt; --header "Authorization: Bearer &lt;key&gt;"</code></span>
+      </div>
       {canManage ? (
         <div className="mcp-keys-create">
           <input

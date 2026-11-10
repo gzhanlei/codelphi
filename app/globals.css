@@ -398,3 +398,5 @@ p { line-height: 1.7; }
 .feature-connection strong { font-size: 12px; }
 .feature-connection-file { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin: 5px 0 0; }
 .feature-connection-file code { font-size: 11px; }
+.mcp-keys-endpoint { display: grid; gap: 3px; margin: 6px 0 10px; }
+.mcp-keys-endpoint code { font-size: 11px; word-break: break-all; color: #4a6659; }
