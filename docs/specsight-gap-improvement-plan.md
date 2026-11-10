@@ -384,6 +384,7 @@
 | 2026-11-10 | v1.6。ChatGPT benchmark v1.0 提案对账收编：新增 `docs/benchmark-phase1.md`（Phase 1 评测规格：两级标注制、增量指标组、变更矩阵裁剪、S0–S3 分层、报告格式；首轮为基线测量，验收线基线后冻结）；本簿新增 §11 Benchmark 工单 BM-1..3；11-08 盲评冻结件从 /tmp 抢救入库 `docs/benchmark/frozen/superset-2026-11-08/`。 |
 | 2026-11-10 | v1.7。**BM-1 当日完成**（真增量窗口两轮 run 64/65，均 incremental-carry）：FUR=0 红线守住、AFR-行为 8/8、NFR 7/7；新发现 P0 缺陷「stable key 身份劫持」及跨域放置/特性内重复/场景位移三模式 → 新增工单 BM-4..8；报告 `docs/benchmark/bm1-incremental-blind-eval-2026-11-10.md`，预标与判定明细冻结入库；判定脚本 `scripts/bm1-{judge,run,reset}.ts`。 |
 | 2026-11-10 | v1.8。**BM-4/BM-5/BM-7 当日落地并重放验证**（run 66/67 同窗口）：BM-4 身份门禁（carried 键 AI 写入丢弃+账本计数）run 66 拦截同键 2 次、run 67 拦截 5 次（含 3 个新键）；BM-5 category 放宽去重；BM-7 单功能坍缩护栏 run 67 捕获语义视图批量删除 17→7 与数据源连接 18→12。FUR 四轮全 0；报告 §9 四轮对照表；工单簿 BM-4/5/7 收口，BM-6/8 待做。 |
+| 2026-11-10 | v1.9。**BM-6/BM-8 当日落地**（run 68 五轮对照）：BM-6 detectMisplacedScenarios（他键归属档进账本，纯外扩归人工）run 68 检出 9 条并**破案三轮坍缩悬案**——语义视图批量删除被删场景全部归属数据集列表管理证据面（顶位非丢失）；BM-8 infra 证据集（CI/lockfile）进行为集排除，证伪门禁自然折叠 CI-only 功能，B1 分母不动。FUR 五轮全 0；报告 §9 五轮对照。**当日已部署生产 7b8e243（BM-4/5/7 + R1/W0-9/W0-10），生产 run 214 实证护栏抓到 R1 功能 37→17 静默位移**；BM-6/8 本次提交待下次部署。 |
 
 ## 9. 外部评审采纳的下一轮工单（2026-11-10，ChatGPT 管线评审）
 
@@ -409,6 +410,6 @@ P0 已当轮处理（diff 覆盖指标 migration 058、枚举完整性状态、�
 | BM-3 | Evidence Support 标注进验收模板 | `pilot-acceptance-template.md` 增两个字段：①证据支持描述（描述正确性，≥95% 参照线）；②预标重要程度 core/normal/internal（高风险召回口径的地基） | 模板更新 + 下一轮盲评报告含该指标 |
 | BM-4 | **stable key 身份完整性门禁（P0）** | 合并层对「既有键 + summary 身份漂移」组合拒绝覆盖或降级为新键（最小约束：功能名/简介语义不变才允许原键写入）——run #1 `databricks sql lab` 被整体置换为 SQL Lab RLS、`图表构建与可视化` 两轮被置换为 XY 时序 | **✅ 2026-11-10 当日落地**（`lib/spec-versions.ts`：增量模式下命中 carried 键的 AI 特征丢弃，计数入账本 mergeIntegrity=partial；测试 3 例）。同窗口重放 run 66 实证：与 run #1 同键的两次劫持尝试全被拦截、carried 逐字保全、FUR 仍为 0（报告 §9） |
 | BM-5 | 跨通道场景去重 | 重提取/枚举产物与 carried 场景集之间复用 `scenarioBehaviorEqual`；特性内新增场景彼此去重（REST API EC-1..5 五条近似重复实例） | **✅ 2026-11-10 部分落地**：`scenarioBehaviorEqual` 放宽 category 要求（同触发/操作/结果即同一行为，run 64 ER-1/EC-5 同文异标实例）——确定性可修的部分已修；语义近似重复（措辞不同）与键分裂属模型侧，归 BM-6/BM-8 |
-| BM-6 | 跨域放置校验 | 新场景归属功能时校验证据文件与功能既有证据面交集（restore_impact→REST API、缩略图隔离→嵌入式访客凭据回退 实例） | 放置错误实例重放归零或转显式披露 |
-| BM-7 | 单功能坍缩护栏 + 未变改写告警 | 总护栏 >30% 之外增加单功能级降幅/删除数阈值；机械命中但行为未变功能的改写告警（语义视图批量删除 三轮 8/10 删 3 改复现实例） | **✅ 2026-11-10 当日落地**（`lib/spec-versions.ts` detectFeatureCollapses：按 stable key 逐功能对比，prev≥4 且（降幅过 0.7 或无等价删除≥3）告警；账本 mergeIntegrity.featureCollapses partial + 通知逐功能警告行）。run 67 实证：捕获语义视图批量删除 17→7（4/4 复现实例）+ 数据源连接 18→12（本轮新位移）；改写类残余（行为是否真变不可机械判定）归人工核实签发 |
-| BM-8 | 噪音分类增强 | CI/组件名类条目（`CI 与许可证检查`、`KebabMenuButton`）降级 reviewed；patch-scan 噪音面扩展 | 噪音键重放不再进功能层 |
+| BM-6 | 跨域放置校验 | 新场景归属功能时校验证据文件与功能既有证据面交集（restore_impact→REST API、缩略图隔离→嵌入式访客凭据回退 实例） | **✅ 2026-11-10 当日落地**（`lib/spec-versions.ts` detectMisplacedScenarios：场景全部证据路径在自身面外且被其他既有功能主张 → 违规；纯外扩不可机械判定归人工）。run 68 实证 9 条，**破案三轮悬案：语义视图批量删除被删场景全部归属数据集列表管理证据面（顶位而非丢失）** |
+| BM-7 | 单功能坍缩护栏 + 未变改写告警 | 总护栏 >30% 之外增加单功能级降幅/删除数阈值；机械命中但行为未变功能的改写告警（语义视图批量删除 三轮 8/10 删 3 改复现实例） | **✅ 2026-11-10 当日落地**（`lib/spec-versions.ts` detectFeatureCollapses：按 stable key 逐功能对比，prev≥4 且（降幅过 0.7 或无等价删除≥3）告警；账本 mergeIntegrity.featureCollapses partial + 通知逐功能警告行）。run 67 实证：捕获语义视图批量删除 17→7（4/4 复现实例）+ 数据源连接 18→12（本轮新位移）；run 68 再抓 2（5/5 可复现）。改写类残余（行为是否真变不可机械判定）归人工核实签发 |
+| BM-8 | 噪音分类增强 | CI/组件名类条目（`CI 与许可证检查`、`KebabMenuButton`）降级 reviewed；patch-scan 噪音面扩展 | **✅ 2026-11-10 确定性部分落地**（`lib/evidence.ts` isInfrastructureEvidence：.github/**、.gitlab-ci.yml、.circleci/**、Jenkinsfile、.travis.yml、LICENSE、六种 lockfile → behavioralChangePaths 排除 → 证伪门禁自然折叠 CI-only 功能；不动 evidenceKind 保持 B1 分母稳定；单测锁定）。组件名类不可机械判定，归人工核实 |
