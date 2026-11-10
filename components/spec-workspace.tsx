@@ -62,6 +62,8 @@ export function SpecWorkspace({ slug, productBase, tree, feature, scenarios, mod
         <p className="coverage-disclosure" title="证据覆盖率按本规格版本对应的完整实现面计算">
           证据覆盖率 {(coverage.coverageRatio * 100).toFixed(1)}%（装配 {coverage.implFilesAssembled}/{coverage.implFilesTotal} 个实现文件，{coverage.partitionsUsed} 趟提取）
           {coverage.partitionsCapped ? "；本规格未覆盖全部实现面（提取趟数触顶），未覆盖部分不产生结论。" : ""}
+          {/* R6：静态提取盲区的人工补充入口要可发现——指向数据说明页（边界声明）与页内编辑器 */}
+          。运行时开关与数据依赖行为静态提取不可见（<a href="/data-notice" target="_blank" rel="noreferrer">边界说明</a>）；发现缺口请在左侧功能树进入功能页，用「编辑/新增场景」人工补充并标记核实。
         </p>
       ) : null}
       </div>
