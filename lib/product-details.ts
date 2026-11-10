@@ -8,6 +8,7 @@ import { annotateSuspectedRenames } from "./spec-rename";
 import { diffSpecWithFolded, type FoldedSpecChange, type SpecScenario } from "./spec-diff";
 import { loadBaseVersionMap, loadVersionFeatureMap } from "./spec-versions";
 import { loadCoverageReceipt } from "./analysis-coverage";
+import { loadCompletenessLedgerBySpecVersion } from "./completeness-ledger";
 import type { BehaviorChangeRow, ChangeRow, FeatureRow, FoldedBehaviorChangeRow, ReleaseRow, ScenarioRow } from "./types";
 
 interface EvidenceSource {
@@ -176,6 +177,8 @@ export async function getProductDetails(slug: string, organizationId?: number) {
   // B1 覆盖披露：最新发布对应的覆盖率回执（migration 054 之前的历史版本无回执，为 null）
   const latestSpecVersionId = releases[0]?.specVersionId ?? null;
   const coverage = latestSpecVersionId === null ? null : await loadCoverageReceipt(db.execute.bind(db) as (sql: string, params?: unknown[]) => Promise<unknown>, latestSpecVersionId);
+  // R1 分析完整性账本：与覆盖率回执同源同点加载（run 级 best-effort 写入，历史版本为 null）
+  const completeness = latestSpecVersionId === null ? null : await loadCompletenessLedgerBySpecVersion(db.execute.bind(db) as (sql: string, params?: unknown[]) => Promise<unknown>, latestSpecVersionId);
 
   const repository = (repositories as Array<{ provider?: string; owner: string; name: string; defaultBranch: string }>)[0];
   const afterSha = (runs as Array<{ status: string; errorMessage?: string; afterSha?: string | null }>)[0]?.afterSha;
@@ -194,6 +197,7 @@ export async function getProductDetails(slug: string, organizationId?: number) {
     regressionTasks,
     foldedChanges: foldedChanges.map((change) => ({ ...change, before: decorateSubject(change.before, source), after: decorateSubject(change.after, source) })),
     coverage,
+    completeness,
     driftCount: features.filter((feature) => feature.staleSince).length + scenarios.filter((scenario) => scenario.staleSince).length,
   };
 }

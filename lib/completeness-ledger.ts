@@ -232,3 +232,29 @@ export async function loadCompletenessLedger(execute: (sql: string, params?: unk
     details: row.details,
   };
 }
+
+/** 按规格版本读账本（经 spec_versions.analysis_run_id 关联；历史版本或写入失败返回 null——best-effort 语义）。 */
+export async function loadCompletenessLedgerBySpecVersion(execute: (sql: string, params?: unknown[]) => Promise<unknown>, specVersionId: number): Promise<CompletenessLedgerRow | null> {
+  const result = await execute(
+    `SELECT l.run_id AS runId, l.source_coverage AS sourceCoverage, l.behavioral_enumeration AS behavioralEnumeration,
+            l.extraction_completion AS extractionCompletion, l.evidence_integrity AS evidenceIntegrity,
+            l.merge_integrity AS mergeIntegrity, l.verification, l.overall, l.details
+     FROM analysis_completeness_ledger l JOIN spec_versions v ON v.analysis_run_id = l.run_id
+     WHERE v.id = ?`,
+    [specVersionId],
+  );
+  const rows = (Array.isArray(result) ? result[0] : result) as Array<Record<string, unknown>>;
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    runId: Number(row.runId),
+    sourceCoverage: String(row.sourceCoverage),
+    behavioralEnumeration: String(row.behavioralEnumeration),
+    extractionCompletion: String(row.extractionCompletion),
+    evidenceIntegrity: String(row.evidenceIntegrity),
+    mergeIntegrity: String(row.mergeIntegrity),
+    verification: String(row.verification),
+    overall: String(row.overall),
+    details: row.details,
+  };
+}

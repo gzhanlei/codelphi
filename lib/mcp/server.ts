@@ -1,5 +1,6 @@
 import { searchSpec } from "../spec-search";
 import { loadCoverageReceipt } from "../analysis-coverage";
+import { loadCompletenessLedgerBySpecVersion } from "../completeness-ledger";
 import { defaultExecute, type Execute } from "../db";
 import type { McpKeyIdentity } from "./api-keys";
 
@@ -156,6 +157,8 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
     );
     const latestRelease = releaseRows[0] ?? null;
     const coverage = latestRelease?.specVersionId ? await loadCoverageReceipt(execute as unknown as (sql: string, params?: unknown[]) => Promise<unknown>, latestRelease.specVersionId) : null;
+    // R1 分析完整性账本（run 级 best-effort，历史版本为 null）
+    const completeness = latestRelease?.specVersionId ? await loadCompletenessLedgerBySpecVersion(execute as unknown as (sql: string, params?: unknown[]) => Promise<unknown>, latestRelease.specVersionId) : null;
     return {
       slug: product.slug,
       name: product.name,
@@ -163,6 +166,15 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
       featureCount: Number(featureCounts[0]?.count ?? 0),
       latestRelease: latestRelease ? { id: latestRelease.id, title: latestRelease.title, sha: latestRelease.sha, committedAt: latestRelease.committedAt } : null,
       evidenceCoverage: coverage,
+      completeness: completeness ? {
+        overall: completeness.overall,
+        sourceCoverage: completeness.sourceCoverage,
+        behavioralEnumeration: completeness.behavioralEnumeration,
+        extractionCompletion: completeness.extractionCompletion,
+        evidenceIntegrity: completeness.evidenceIntegrity,
+        mergeIntegrity: completeness.mergeIntegrity,
+        verification: completeness.verification,
+      } : null,
     };
   }
 

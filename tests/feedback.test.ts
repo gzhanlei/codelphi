@@ -26,6 +26,7 @@ const details = {
   architecture: undefined,
   regressionTasks: [],
   releaseTotal: 0,
+  completeness: null,
 } as NonNullable<Awaited<ReturnType<typeof import("../lib/product-details").getProductDetails>>>;
 
 import { analysisFeedbackLabel } from "../components/analysis-feedback-button";

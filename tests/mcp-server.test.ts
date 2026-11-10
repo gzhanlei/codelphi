@@ -65,12 +65,15 @@ describe("mcp server (A1)", () => {
       if (String(sql).includes("COUNT(*) AS count FROM features")) return [[{ count: 14 }]];
       if (String(sql).includes("FROM releases")) return [[{ id: 6, title: "v1", sha: "abc", committedAt: new Date(), specVersionId: 44 }]];
       if (String(sql).includes("FROM analysis_coverage_receipts")) return [[{ specVersionId: 44, implFilesAssembled: 30, implFilesTotal: 60, implBytesAssembled: 80_000, implBytesTotal: 200_000, coverageRatio: 0.4, partitionsUsed: 2, partitionsCapped: 0 }]];
+      if (String(sql).includes("analysis_completeness_ledger")) return [[{ runId: 12, sourceCoverage: "partial", behavioralEnumeration: "complete", extractionCompletion: "complete", evidenceIntegrity: "complete", mergeIntegrity: "partial", verification: "not_applicable", overall: "partial", details: {} }]];
       return [[]];
     });
     const response = await handleMcpRpc(runtime, rpc("tools/call", { name: "get_project_summary", arguments: { slug: "radar" } }));
-    const summary = (response?.result as { structuredContent: { evidenceCoverage: { coverageRatio: number }; featureCount: number } }).structuredContent;
+    const summary = (response?.result as { structuredContent: { evidenceCoverage: { coverageRatio: number }; completeness: { overall: string; sourceCoverage: string } | null; featureCount: number } }).structuredContent;
     expect(summary.featureCount).toBe(14);
     expect(summary.evidenceCoverage.coverageRatio).toBe(0.4);
+    // R1 账本随 summary 暴露（整体状态 + 六维度），诚实披露不合并成单一百分比
+    expect(summary.completeness).toMatchObject({ overall: "partial", sourceCoverage: "partial" });
   });
 
   it("rejects unknown tools and methods with JSON-RPC errors", async () => {
