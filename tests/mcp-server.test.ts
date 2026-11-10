@@ -120,6 +120,25 @@ describe("mcp server (A1)", () => {
     expect(result.audienceCounts).toEqual({ support: 1, sales: 0, marketing: 1 });
   });
 
+  it("returns deterministic feature connections scoped to the product", async () => {
+    execute.mockImplementation(async (sql: string) => {
+      if (String(sql).includes("FROM products WHERE organization_id")) return [[{ id: 9, slug: "radar", name: "Radar", description: "d" }]];
+      if (String(sql).includes("FROM scenarios s JOIN features f")) {
+        return [[
+          { id: 1, featureId: 1, featureName: "统一登录", reference: "HP-1", evidence: [{ path: "lib/auth.ts" }] },
+          { id: 2, featureId: 2, featureName: "规格导出", reference: "HP-1", evidence: [{ path: "lib/auth.ts" }] },
+        ]];
+      }
+      return [[]];
+    });
+    const response = await handleMcpRpc(runtime, rpc("tools/call", { name: "get_feature_connections", arguments: { slug: "radar" } }));
+    const result = (response?.result as { structuredContent: { connections: Array<{ featureName: string; connections: Array<{ targetFeatureName: string; sharedFiles: Array<{ path: string }> }> }> } }).structuredContent;
+    expect(result.connections).toHaveLength(2);
+    const login = result.connections.find((entry) => entry.featureName === "统一登录")!;
+    expect(login.connections[0].targetFeatureName).toBe("规格导出");
+    expect(login.connections[0].sharedFiles[0].path).toBe("lib/auth.ts");
+  });
+
   it("never exposes write tools", () => {
     const names = MCP_TOOLS.map((tool) => tool.name);
     for (const forbidden of ["create_project", "edit_scenario", "invite_member", "update_billing", "publish_release_notes"]) {
