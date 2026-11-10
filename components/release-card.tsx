@@ -156,7 +156,7 @@ function BehaviorList({ slug, release, changes, tasks, canEdit }: {
 
 function AiChangeList({ changes }: { changes: ChangeRow[] }) {
   if (changes.length === 0) return null;
-  return <div className="ai-change-section"><h3>发布说明（AI）</h3>{changes.map((change) => <ChangeItem change={change} key={change.id} />)}</div>;
+  return <div className="ai-change-section"><h3>变更说明（AI）</h3>{changes.map((change) => <ChangeItem change={change} key={change.id} />)}</div>;
 }
 
 export function ReleaseCard({ slug, release, changes, behaviorChanges, foldedChanges = [], tasks = [], canEdit = false, defaultOpen = false }: {
@@ -184,7 +184,7 @@ export function ReleaseCard({ slug, release, changes, behaviorChanges, foldedCha
       {hasDetails ? (
         <details className="release-details" open={defaultOpen}>
           <summary>
-            <span>行为变化 {releaseBehaviorChanges.length} 条 · 发布说明 {releaseChanges.length} 条</span>
+            <span>行为变化 {releaseBehaviorChanges.length} 条 · 变更说明 {releaseChanges.length} 条</span>
             <span className="release-details-toggle">{defaultOpen ? "收起" : "展开"}</span>
           </summary>
           <BehaviorList slug={slug} release={release} changes={releaseBehaviorChanges} tasks={releaseTasks} canEdit={canEdit} />
