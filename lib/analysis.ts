@@ -14,7 +14,7 @@ import { resolveAnalysisMode } from "./incremental";
 import { compareIncrementalShadow } from "./incremental-shadow";
 import { analysisMaxPartitions, incrementalShadowEnabled } from "./env";
 import type { BehavioralEnumerationMetrics } from "./behavioral-enumeration";
-import { computeCoverageReceipt, loadCoverageReceipt, enumerateImplementationSurface, saveCoverageReceipt, type AnalysisCoverageReceipt } from "./analysis-coverage";
+import { computeCoverageReceipt, loadInheritedCoverageReceipt, enumerateImplementationSurface, saveCoverageReceipt, type AnalysisCoverageReceipt } from "./analysis-coverage";
 import { mergeChunkResults, type ExtractionChunk } from "./extraction-merge";
 import { behavioralEnumerationEnabled } from "./env";
 import { behavioralChangePaths } from "./patch-scan";
@@ -429,18 +429,15 @@ async function runAnalysisBody(run: RunContext) {
       changes: [],
       features: previousSpec?.features ?? [],
     };
-    // 继承上一版回执（含 diff 面字段，AnalysisCoverageReceipt 形状）
-    const [inherited] = await executeWrapper(
-      `SELECT impl_files_assembled AS implFilesAssembled, impl_files_total AS implFilesTotal,
-              impl_bytes_assembled AS implBytesAssembled, impl_bytes_total AS implBytesTotal,
-              coverage_ratio AS coverageRatio, partitions_used AS partitionsUsed, partitions_capped AS partitionsCapped,
-              diff_total_paths AS diffTotalPaths, diff_selected_paths AS diffSelectedPaths, diff_omitted_paths AS diffOmittedPaths
-       FROM analysis_coverage_receipts WHERE spec_version_id = ?`,
-      [previousSpec.specVersionId],
-    );
-    coverage = ((Array.isArray(inherited) ? inherited[0] : inherited) as Array<AnalysisCoverageReceipt>)[0] ?? null;
-    if (!coverage) {
-      // 历史基线无回执（migration 054 之前）：按零装配如实披露
+    // 继承回执（BM-10 修复）：沿版本链向上取最近有效回执——上一版可能是回填快照或
+    // 本身就是沿用版本（无有效回执），单点查询会落空链式产出合成零回执。
+    const inherited = await loadInheritedCoverageReceipt(executeWrapper as unknown as (sql: string, params: unknown[]) => Promise<unknown>, run.repositoryId, previousSpec.specVersionId);
+    if (inherited) {
+      coverage = inherited.receipt;
+      console.log("[analysis] inherited coverage receipt from version chain", { runId: run.id, fromSpecVersionId: inherited.fromSpecVersionId, versionsScanned: inherited.versionsScanned, coverageRatio: inherited.receipt.coverageRatio, implFilesTotal: inherited.receipt.implFilesTotal });
+    } else {
+      // 整链无回执（首次接入 / migration 054 之前）：按零装配如实披露，并留下诊断日志
+      console.warn("[analysis] no effective coverage receipt found up the version chain; writing honest zero receipt", { runId: run.id, previousSpecVersionId: previousSpec.specVersionId, diffFiles: change.files.length });
       coverage = { implFilesAssembled: 0, implFilesTotal: 0, implBytesAssembled: 0, implBytesTotal: 0, coverageRatio: 0, partitionsUsed: 0, partitionsCapped: false, diffTotalPaths: change.files.length, diffSelectedPaths: 0, diffOmittedPaths: change.files.length };
     }
     console.log("[analysis] no-behavioral-change window; previous spec carried verbatim", { runId: run.id, diffFiles: change.files.length, carriedFeatures: result.features.length, specVersionId: previousSpec?.specVersionId ?? null });

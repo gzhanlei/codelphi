@@ -605,6 +605,34 @@ describe("analysis orchestration", () => {
     expect(vi.mocked(capture)).toHaveBeenCalled();
   });
 
+  it("inherits the nearest effective coverage receipt on a no-behavioral window (BM-10 链式继承修复)", async () => {
+    // 生产 run 220 根因复现：上一版是回填快照（无回执），写侧须沿链向上继承而非落合成零回执
+    adapter.getChangeContext.mockResolvedValue({
+      message: "docs: clarify pipeline contract\n\nbody",
+      committedAt: "2026-11-01T00:00:00Z",
+      url: "https://github.com/commit/docs",
+      files: [{ path: "docs/analysis-pipeline.md", status: "modified", patch: "+文档内容不是行为。" }],
+    });
+    execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("JOIN repositories repo")) return [runRows];
+      if (sql.includes("source_roots")) return [sourceRows];
+      if (sql.includes("FROM spec_versions WHERE repository_id = ? AND id <")) return [[{ id: 40 }]];
+      if (sql.includes("FROM analysis_coverage_receipts WHERE spec_version_id")) {
+        return [[{ implFilesAssembled: 12, implFilesTotal: 28, implBytesAssembled: 8000, implBytesTotal: 20000, coverageRatio: 0.4, partitionsUsed: 2, partitionsCapped: 0, diffTotalPaths: null, diffSelectedPaths: null, diffOmittedPaths: null }]];
+      }
+      return [{}];
+    });
+    await runAnalysis(8);
+    expect(partitionedSourcesMock).not.toHaveBeenCalled();
+    const receiptCall = connection.execute.mock.calls.find(([sql]) => String(sql).includes("analysis_coverage_receipts"));
+    expect(receiptCall).toBeDefined();
+    const params = receiptCall?.[1] as unknown[];
+    expect(params[0]).toBe(44);
+    expect(params[1]).toBe(12);
+    expect(params[2]).toBe(28);
+    expect(params[5]).toBe(0.4);
+  });
+
   it("records a readable failure when loading the run fails", async () => {
     loadError = new Error("load failed");
     await runAnalysis(8);

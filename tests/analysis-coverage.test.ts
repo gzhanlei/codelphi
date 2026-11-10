@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { computeCoverageReceipt, enumerateImplementationSurface, isCoverageCapped } from "../lib/analysis-coverage";
+import { describe, expect, it, vi } from "vitest";
+import { computeCoverageReceipt, enumerateImplementationSurface, isCoverageCapped, loadInheritedCoverageReceipt } from "../lib/analysis-coverage";
 import type { AnalysisPartition, } from "../lib/remote-analysis";
 import type { OpenedRemoteSourceRevision, SourceTreeListing } from "../lib/remote-source-index";
 
@@ -89,5 +89,56 @@ describe("computeCoverageReceipt", () => {
     const receipt = computeCoverageReceipt({ index, partitions: [], maxPartitions: 6 });
     expect(receipt.implFilesAssembled).toBe(0);
     expect(receipt.coverageRatio).toBe(0);
+  });
+});
+
+describe("loadInheritedCoverageReceipt (BM-10 修复：写侧继承与读侧同构沿链)", () => {
+  const walkExecute = (chain: Array<{ id: number; receipt: Record<string, unknown> | null }>) =>
+    vi.fn(async (sql: string, params?: unknown[]) => {
+      if (sql.includes("FROM spec_versions WHERE repository_id")) {
+        const before = Number(params?.[1]);
+        // fake 须模拟 SQL 的 LIMIT 语义，否则「链走封顶」断言失真
+        const limitMatch = /LIMIT (\d+)/.exec(sql);
+        const limit = limitMatch ? Number(limitMatch[1]) : chain.length;
+        return [chain.filter((item) => item.id < before).slice(0, limit).map((item) => ({ id: item.id }))];
+      }
+      const versionId = Number(params?.[0]);
+      const found = chain.find((item) => item.id === versionId);
+      return [found?.receipt ? [found.receipt] : []];
+    });
+
+  const realReceipt = { implFilesAssembled: 12, implFilesTotal: 28, implBytesAssembled: 8000, implBytesTotal: 20000, coverageRatio: 0.4, partitionsUsed: 2, partitionsCapped: 0, diffTotalPaths: 5, diffSelectedPaths: 5, diffOmittedPaths: 0 };
+
+  it("skips zero/missing receipts and inherits the nearest effective one up the chain", async () => {
+    // v44 合成零回执、v43 无回执行、v42 有效 → 继承 v42（生产 run 220 形态：上一版是回填快照）
+    const execute = walkExecute([
+      { id: 44, receipt: { ...realReceipt, implFilesTotal: 0, implFilesAssembled: 0, coverageRatio: 0 } },
+      { id: 43, receipt: null },
+      { id: 42, receipt: realReceipt },
+    ]);
+    const inherited = await loadInheritedCoverageReceipt(execute, 3, 45);
+    expect(inherited?.fromSpecVersionId).toBe(42);
+    expect(inherited?.versionsScanned).toBe(3);
+    expect(inherited?.receipt.implFilesTotal).toBe(28);
+    expect(inherited?.receipt.partitionsCapped).toBe(false);
+    expect(inherited?.receipt.diffOmittedPaths).toBe(0);
+  });
+
+  it("returns null when the whole chain lacks an effective receipt (首次接入如实零回执)", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const execute = walkExecute([{ id: 30, receipt: null }]);
+      expect(await loadInheritedCoverageReceipt(execute, 3, 31)).toBeNull();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("caps the chain walk at maxVersions", async () => {
+    const chain = Array.from({ length: 15 }, (_, index) => ({ id: 15 - index, receipt: null as Record<string, unknown> | null }));
+    const execute = walkExecute(chain);
+    const inherited = await loadInheritedCoverageReceipt(execute, 3, 20, 10);
+    expect(inherited).toBeNull();
+    expect(execute.mock.calls.filter(([sql]) => String(sql).includes("analysis_coverage_receipts")).length).toBe(10);
   });
 });

@@ -129,3 +129,59 @@ export async function loadCoverageReceipt(execute: (sql: string, params?: unknow
   const rows = (Array.isArray(result) ? result[0] : result) as unknown as Array<CoverageReceiptRow>;
   return rows?.[0] ?? null;
 }
+
+/**
+ * 沿版本链向上取最近有效回执（BM-10 修复，生产 run 220 根因：写侧继承只查上一版，
+ * 上一版是回填快照或本身就是沿用版本时无有效回执 → 落合成零回执 → 账本 source_coverage
+ * 误报 failed；读侧本就沿链跳过零回执，写侧与之同构）。有效 = implFilesTotal > 0
+ * （合成零回执的 implFilesTotal = 0，视为无）；最多回看 maxVersions 版，全空返回 null。
+ */
+export async function loadInheritedCoverageReceipt(
+  execute: (sql: string, params: unknown[]) => Promise<unknown>,
+  repositoryId: number,
+  beforeSpecVersionId: number,
+  maxVersions = 10,
+): Promise<{ receipt: AnalysisCoverageReceipt; fromSpecVersionId: number; versionsScanned: number } | null> {
+  const versionsResult = await execute(
+    `SELECT id FROM spec_versions WHERE repository_id = ? AND id < ? ORDER BY id DESC LIMIT ${maxVersions}`,
+    [repositoryId, beforeSpecVersionId],
+  );
+  const versionRows = (Array.isArray(versionsResult) ? versionsResult[0] : versionsResult) as unknown as Array<{ id: number | string }>;
+  const chain = Array.isArray(versionRows) ? versionRows : [];
+  let scanned = 0;
+  for (const row of chain) {
+    const versionId = Number(row.id);
+    if (!Number.isFinite(versionId)) continue;
+    scanned += 1;
+    const receiptResult = await execute(
+      `SELECT impl_files_assembled AS implFilesAssembled, impl_files_total AS implFilesTotal,
+              impl_bytes_assembled AS implBytesAssembled, impl_bytes_total AS implBytesTotal,
+              coverage_ratio AS coverageRatio, partitions_used AS partitionsUsed, partitions_capped AS partitionsCapped,
+              diff_total_paths AS diffTotalPaths, diff_selected_paths AS diffSelectedPaths, diff_omitted_paths AS diffOmittedPaths
+       FROM analysis_coverage_receipts WHERE spec_version_id = ?`,
+      [versionId],
+    );
+    const receiptRows = (Array.isArray(receiptResult) ? receiptResult[0] : receiptResult) as unknown as Array<AnalysisCoverageReceipt>;
+    const receipt = receiptRows?.[0];
+    if (receipt && Number(receipt.implFilesTotal) > 0) {
+      return {
+        receipt: {
+          ...receipt,
+          implFilesAssembled: Number(receipt.implFilesAssembled),
+          implFilesTotal: Number(receipt.implFilesTotal),
+          implBytesAssembled: Number(receipt.implBytesAssembled),
+          implBytesTotal: Number(receipt.implBytesTotal),
+          coverageRatio: Number(receipt.coverageRatio),
+          partitionsUsed: Number(receipt.partitionsUsed),
+          partitionsCapped: Boolean(receipt.partitionsCapped),
+          diffTotalPaths: receipt.diffTotalPaths === null || receipt.diffTotalPaths === undefined ? null : Number(receipt.diffTotalPaths),
+          diffSelectedPaths: receipt.diffSelectedPaths === null || receipt.diffSelectedPaths === undefined ? null : Number(receipt.diffSelectedPaths),
+          diffOmittedPaths: receipt.diffOmittedPaths === null || receipt.diffOmittedPaths === undefined ? null : Number(receipt.diffOmittedPaths),
+        },
+        fromSpecVersionId: versionId,
+        versionsScanned: scanned,
+      };
+    }
+  }
+  return null;
+}
