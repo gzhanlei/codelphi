@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { buildDraftBlocks, validateDraft, canPublish, publishOrder, type ReleaseNoteChange } from "../lib/release-notes";
+import {
+  applySummaryOverride,
+  buildDraftBlocks,
+  validateDraft,
+  canPublish,
+  publishOrder,
+  releaseNotePublicUrl,
+  renderReleaseNoteMarkdown,
+  type ReleaseNoteChange,
+} from "../lib/release-notes";
 
 const change = (overrides: Partial<ReleaseNoteChange> & { id: number }): ReleaseNoteChange => ({
   kind: "changed",
@@ -56,5 +65,43 @@ describe("release notes (A2)", () => {
   it("passes validation for well-anchored blocks", () => {
     const blocks = buildDraftBlocks([change({ id: 101 })]);
     expect(validateDraft(blocks, [change({ id: 101 })]).ok).toBe(true);
+  });
+
+  it("applies summary override only when non-blank (真块级改写：空值回退原文)", () => {
+    expect(applySummaryOverride("原文", " 人工措辞 ")).toEqual({ summary: "人工措辞", overridden: true });
+    expect(applySummaryOverride("原文", "   ")).toEqual({ summary: "原文", overridden: false });
+    expect(applySummaryOverride("原文", null)).toEqual({ summary: "原文", overridden: false });
+  });
+
+  it("builds the public url from appUrl base and returns null without token", () => {
+    expect(releaseNotePublicUrl("https://codelphi.com/", "abc123")).toBe("https://codelphi.com/share/notes/abc123");
+    expect(releaseNotePublicUrl("https://codelphi.com", null)).toBeNull();
+    expect(releaseNotePublicUrl("https://codelphi.com", "  ")).toBeNull();
+  });
+
+  it("renders markdown with effective summaries, emphasis and public url", () => {
+    const markdown = renderReleaseNoteMarkdown({
+      productName: "SalesBuddy",
+      releaseTitle: "助理聊天支持可点链接",
+      releaseSha: "3142b9688bbe19f98a422d0756d219e7cb887794",
+      releaseUrl: "https://github.com/gzhanlei/SalesBuddy/compare/a...b",
+      emphasis: "定价问句已收口",
+      publicUrl: "https://codelphi.com/share/notes/tok",
+      blocks: [
+        { position: 1, specChangeId: 11, featureName: "助理聊天", kind: "added", entityType: "scenario", scenarioReference: "HP-2", summary: "URL 自动渲染为可点链接", overridden: false, highlightType: "News", evidencePaths: ["lib/chat.ts"], emphasis: "" },
+        { position: 2, specChangeId: 12, featureName: "定价答复", kind: "changed", entityType: "scenario", scenarioReference: "EC-1", summary: "人工校对后的措辞", overridden: true, highlightType: null, evidencePaths: [], emphasis: "" },
+      ],
+    });
+    expect(markdown).toContain("# 发布说明 · 助理聊天支持可点链接");
+    expect(markdown).toContain("- 公开页：https://codelphi.com/share/notes/tok");
+    expect(markdown).toContain("> 定价问句已收口");
+    expect(markdown).toContain("## 新增 · 助理聊天 · HP-2（News）");
+    expect(markdown).toContain("人工校对后的措辞");
+    expect(markdown).toContain("证据：lib/chat.ts");
+  });
+
+  it("renders an explicit empty note when no blocks are selected", () => {
+    const markdown = renderReleaseNoteMarkdown({ productName: "p", releaseTitle: "t", releaseSha: "abcdef1234", blocks: [] });
+    expect(markdown).toContain("没有勾选任何要宣布的行为变化");
   });
 });

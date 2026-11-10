@@ -3,44 +3,48 @@ import { getSessionUser } from "@/lib/session";
 import { requireProductAccess } from "@/lib/product-access";
 import { getDb } from "@/lib/db";
 import { randomBytes } from "node:crypto";
-import { buildDraftBlocks, canPublish, validateDraft, type ReleaseNoteChange } from "@/lib/release-notes";
+import { buildDraftBlocks, canPublish, publishOrder, releaseNotePublicUrl, validateDraft } from "@/lib/release-notes";
+import { loadBlockViews, loadNoteByRelease, releaseChanges, releaseOwned } from "@/lib/release-notes-service";
+import { appUrl } from "@/lib/env";
 
 /**
  * A2 Release notes 草稿与发布（docs/specsight-gap-improvement-plan.md §4.3）。
- * 角色门槛：editor/owner 才能起草；人工 POST publish 才发布（R1 门禁）；
- * 生成阶段做引用存在性校验——锚定缺失 / 越界证据的草稿直接 400，不落库。
+ * GET：viewer 可读——无稿返回候选变更（不自动全选），有稿返回块视图（含人工 override）。
+ * POST：editor/owner 起草；生成阶段做引用存在性校验（锚定缺失 / 越界证据直接 400，R1 门禁）。
+ * 加固（GTM 桥面批次 1）：release 归属按产品校验；已发布稿拒绝重新生成（409，公开页只读）；
+ * blocks 重写包进事务；share_token 仅首次插入生成，重生成不换公开链接。
  */
-async function releaseChanges(execute: ReturnType<typeof getDb>["execute"], releaseId: number): Promise<ReleaseNoteChange[]> {
-  const [rows] = await execute(
-    `SELECT c.id, c.kind, c.entity_type AS entityType, c.feature_name AS featureName,
-            c.scenario_reference AS scenarioReference, c.summary, c.highlight_type AS highlightType,
-            c.before_json AS beforeJson, c.after_json AS afterJson
-     FROM spec_changes c
-     JOIN releases r ON r.spec_version_id = c.spec_version_id
-     WHERE r.id = ? AND c.wording_only = 0 ORDER BY c.id`,
-    [releaseId],
-  );
-  const changes = rows as Array<{ id: number; kind: string; entityType: string; featureName: string; scenarioReference: string; summary: string; highlightType: string | null; beforeJson: unknown; afterJson: unknown }>;
-  return changes.map((row) => ({
-    id: row.id,
-    kind: row.kind,
-    entityType: row.entityType,
-    featureName: row.featureName,
-    scenarioReference: row.scenarioReference,
-    summary: row.summary,
-    highlightType: row.highlightType,
-    evidencePaths: [...collectEvidencePaths(row.beforeJson), ...collectEvidencePaths(row.afterJson)],
-  }));
-}
 
-function collectEvidencePaths(subject: unknown): string[] {
-  if (typeof subject !== "object" || subject === null) return [];
-  const scenarios = (subject as { scenarios?: unknown }).scenarios;
-  if (!Array.isArray(scenarios)) return [];
-  return scenarios.flatMap((scenario) => {
-    const evidence = (scenario as { evidence?: unknown }).evidence;
-    if (!Array.isArray(evidence)) return [];
-    return evidence.map((item) => String((item as { path?: string }).path ?? "")).filter(Boolean);
+export async function GET(_request: NextRequest, context: { params: Promise<{ slug: string; id: string }> }) {
+  const { slug, id } = await context.params;
+  const user = await getSessionUser();
+  if (!user) return NextResponse.json({ error: "未登录" }, { status: 401 });
+  const access = await requireProductAccess(user, slug, "viewer");
+  if (!access) return NextResponse.json({ error: "产品不存在或无访问权限" }, { status: 404 });
+  const releaseId = Number(id);
+  if (!Number.isInteger(releaseId) || releaseId <= 0) return NextResponse.json({ error: "发布不存在" }, { status: 404 });
+  const db = getDb();
+  if (!(await releaseOwned(db.execute.bind(db), releaseId, access.product.id))) {
+    return NextResponse.json({ error: "发布不存在" }, { status: 404 });
+  }
+  const note = await loadNoteByRelease(db.execute.bind(db), releaseId);
+  const candidates = publishOrder(await releaseChanges(db.execute.bind(db), releaseId));
+  if (!note) {
+    return NextResponse.json({ note: null, blocks: [], candidates });
+  }
+  return NextResponse.json({
+    note: {
+      id: note.id,
+      status: note.status,
+      emphasis: note.emphasis ?? "",
+      voiceId: note.voiceId,
+      shareToken: note.shareToken,
+      publicUrl: releaseNotePublicUrl(appUrl(), note.shareToken),
+      publishedAt: note.publishedAt,
+      unpublishedAt: note.unpublishedAt,
+    },
+    blocks: await loadBlockViews(db.execute.bind(db), note.id),
+    candidates,
   });
 }
 
@@ -51,8 +55,17 @@ export async function POST(request: NextRequest) {
   const slug = String(body.slug ?? "");
   const releaseId = Number(body.releaseId ?? 0);
   const access = await requireProductAccess(user, slug, "editor");
-  if (!access || !releaseId) return NextResponse.json({ error: "产品不存在或无编辑权限" }, { status: access ? 404 : 403 });
+  if (!access || !releaseId) return NextResponse.json({ error: "产品不存在或无编辑权限" }, { status: 404 });
   const db = getDb();
+  // 归属校验：release 必须属于该产品，防止把别的产品的发布挂进草稿。
+  if (!(await releaseOwned(db.execute.bind(db), releaseId, access.product.id))) {
+    return NextResponse.json({ error: "发布不存在" }, { status: 404 });
+  }
+  const existing = await loadNoteByRelease(db.execute.bind(db), releaseId);
+  // 已发布只读（R1）：重新生成会 DELETE+重建全部块、公开页随之变化，必须先下线。
+  if (existing?.status === "published") {
+    return NextResponse.json({ error: "已发布只读：先下线才能重新生成" }, { status: 409 });
+  }
   const changes = await releaseChanges(db.execute.bind(db), releaseId);
   const blocks = buildDraftBlocks(changes, body.selectedIds);
   // 生成阶段引用存在性校验（§4.3 验收第 2 条，类似 assertEvidence 的引用校验）
@@ -61,21 +74,32 @@ export async function POST(request: NextRequest) {
   const publishGate = canPublish(blocks, new Set(changes.map((change) => change.id)));
   if (publishGate) return NextResponse.json({ error: publishGate }, { status: 400 });
 
-  const shareToken = randomBytes(16).toString("hex");
-  const [noteResult] = await db.execute(
-    `INSERT INTO release_notes (product_id, release_id, voice_id, emphasis, status, share_token, created_by)
-     VALUES (?, ?, ?, ?, 'draft', ?, (SELECT id FROM users WHERE chandler_sub = ? LIMIT 1))
-     ON DUPLICATE KEY UPDATE emphasis = VALUES(emphasis), voice_id = VALUES(voice_id), updated_at = NOW(3)`,
-    [access.product.id, releaseId, body.voiceId ?? null, String(body.emphasis ?? ""), shareToken, user.sub],
-  );
-  const noteId = Number((noteResult as { insertId: number }).insertId);
-  await db.execute("DELETE FROM release_note_blocks WHERE release_note_id = ?", [noteId]);
-  for (const block of blocks) {
-    await db.execute(
-      `INSERT INTO release_note_blocks (release_note_id, position, spec_change_id, emphasis) VALUES (?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE emphasis = VALUES(emphasis)`,
-      [noteId, block.position, block.specChangeId, block.emphasis],
+  const shareToken = existing?.shareToken ?? randomBytes(16).toString("hex");
+  const connection = await db.getConnection();
+  try {
+    await connection.beginTransaction();
+    await connection.execute(
+      `INSERT INTO release_notes (product_id, release_id, voice_id, emphasis, status, share_token, created_by)
+       VALUES (?, ?, ?, ?, 'draft', ?, (SELECT id FROM users WHERE chandler_sub = ? LIMIT 1))
+       ON DUPLICATE KEY UPDATE emphasis = VALUES(emphasis), voice_id = VALUES(voice_id), updated_at = NOW(3)`,
+      [access.product.id, releaseId, body.voiceId ?? null, String(body.emphasis ?? ""), shareToken, user.sub],
     );
+    const [idRows] = await connection.execute("SELECT id FROM release_notes WHERE release_id = ?", [releaseId]);
+    const noteId = Number((idRows as Array<{ id: number }>)[0]?.id ?? 0);
+    await connection.execute("DELETE FROM release_note_blocks WHERE release_note_id = ?", [noteId]);
+    for (const block of blocks) {
+      await connection.execute(
+        `INSERT INTO release_note_blocks (release_note_id, position, spec_change_id, emphasis, summary_override)
+         VALUES (?, ?, ?, ?, NULL)`,
+        [noteId, block.position, block.specChangeId, block.emphasis],
+      );
+    }
+    await connection.commit();
+    return NextResponse.json({ noteId, status: "draft", shareToken, publicUrl: releaseNotePublicUrl(appUrl(), shareToken) });
+  } catch (cause) {
+    await connection.rollback();
+    throw cause;
+  } finally {
+    connection.release();
   }
-  return NextResponse.json({ noteId, blocks });
 }

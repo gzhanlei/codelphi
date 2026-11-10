@@ -310,3 +310,25 @@ p { line-height: 1.7; }
 .spec-disclosures { grid-column: 1 / -1; display: grid; gap: 6px; margin-bottom: 14px; font-size: 13px; line-height: 1.7; }
 .coverage-disclosure { margin: 0; color: #94a19c; }
 .completeness-disclosure { margin: 0; }
+
+/* 发布稿动线（release-card 内：勾选生成 → 块级校对 → 发布/公开链接） */
+.release-notes-section h3 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.release-notes-status { font-size: 11px; border-radius: 4px; padding: 2px 7px; background: #f0f4f1; color: #94a19c; }
+.release-notes-status.published { background: #e6f2ea; color: var(--green); }
+.release-notes-status.unpublished { background: #fdf3e0; color: #b07d2b; }
+.release-notes-pick { display: grid; gap: 6px; margin: 8px 0; }
+.release-notes-pick-item { display: flex; gap: 8px; align-items: flex-start; font-size: 12px; color: #3d4b44; cursor: pointer; }
+.release-notes-pick-item input { margin-top: 3px; }
+.release-notes-pick-item strong { display: block; font-size: 12px; }
+.release-notes-pick-summary { display: block; color: #94a19c; }
+.release-notes-block { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 10px 12px; margin: 8px 0; }
+.release-notes-block-head { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.release-notes-block-head strong { font-size: 12px; }
+.release-notes-reset { border: 0; background: none; color: var(--green); cursor: pointer; font: inherit; padding: 0; text-decoration: underline; }
+.release-notes-summary { width: 100%; min-height: 56px; margin: 6px 0; border: 1px solid #ccd8d1; border-radius: 8px; background: #fbfcfb; padding: 8px 10px; font: inherit; font-size: 12px; box-sizing: border-box; resize: vertical; }
+.release-notes-summary:focus { border-color: var(--green); outline: none; background: #fff; }
+.release-notes-emphasis { display: grid; gap: 4px; margin: 8px 0; font-size: 12px; color: var(--muted); }
+.release-notes-emphasis input { height: 34px; border: 1px solid #ccd8d1; border-radius: 8px; background: #fbfcfb; padding: 0 10px; font: inherit; font-size: 12px; box-sizing: border-box; }
+.release-notes-emphasis input:focus { border-color: var(--green); outline: none; background: #fff; }
+.release-notes-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+.release-notes-notice { color: var(--green); }

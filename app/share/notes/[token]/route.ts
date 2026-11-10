@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
+import { enforceExportRateLimit } from "@/lib/rate-limit";
+import { applySummaryOverride } from "@/lib/release-notes";
 
 /**
  * A2 公开只读页（M11 扩展）：匿名访问，按 share_token 定位。
  * 隐私边界（R5）：只展示行为变化与证据路径，不展示代码内容；
  * 页面明确说明「链接对无权限者不可达」。已下线（unpublished）的稿同 URL 不再展示。
+ * 限流（GTM 桥面批次 1）：匿名导出面，套用与回归导出一致的固定窗口限流；
+ * 块正文优先渲染人工 summary_override，无 override 时渲染 spec_changes 原文。
  */
 function esc(value: string) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -19,8 +23,10 @@ interface BlockRow {
   evidencePaths: string[];
 }
 
-export async function GET(_request: NextRequest, context: { params: Promise<{ token: string }> }) {
+export async function GET(request: NextRequest, context: { params: Promise<{ token: string }> }) {
   const { token } = await context.params;
+  const limited = await enforceExportRateLimit(request, null, { anonymous: 10, user: 60 });
+  if (limited) return limited;
   const db = getDb();
   const [noteRows] = await db.execute(
     `SELECT n.id, n.published_at AS publishedAt, p.name AS productName
@@ -31,18 +37,19 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ to
   const note = (noteRows as Array<{ id: number; publishedAt: Date; productName: string }>)[0];
   if (!note) return NextResponse.json({ error: "发布稿不存在或已下线" }, { status: 404 });
   const [blockRows] = await db.execute(
-    `SELECT b.spec_change_id, c.kind, c.feature_name AS featureName, c.scenario_reference AS scenarioReference,
+    `SELECT b.spec_change_id, b.summary_override AS summaryOverride,
+            c.kind, c.feature_name AS featureName, c.scenario_reference AS scenarioReference,
             c.summary, c.highlight_type AS highlightType, c.before_json AS beforeJson, c.after_json AS afterJson
      FROM release_note_blocks b
      JOIN spec_changes c ON c.id = b.spec_change_id
      WHERE b.release_note_id = ? ORDER BY b.position`,
     [note.id],
   );
-  const blocks = (blockRows as Array<{ spec_change_id: number; kind: string; featureName: string; scenarioReference: string; summary: string; highlightType: string | null; beforeJson: unknown; afterJson: unknown }>).map((row) => ({
+  const blocks = (blockRows as Array<{ spec_change_id: number; summaryOverride: string | null; kind: string; featureName: string; scenarioReference: string; summary: string; highlightType: string | null; beforeJson: unknown; afterJson: unknown }>).map((row) => ({
     kind: row.kind,
     featureName: row.featureName,
     scenarioReference: row.scenarioReference,
-    summary: row.summary,
+    ...applySummaryOverride(row.summary, row.summaryOverride),
     highlightType: row.highlightType,
     evidencePaths: [
       ...evidencePathsOf(row.beforeJson),

@@ -7,6 +7,7 @@ import { hitTypeLabels, regressionStatusLabels, type RegressionTaskStatus, type 
 import { errorMessage } from "@/lib/error-message";
 import { BehaviorChangeItem } from "./behavior-change-item";
 import { ChangeItem } from "./change-item";
+import { ReleaseNotesPanel } from "./release-notes-panel";
 import { useDemoGuard } from "./demo-mode";
 
 function QuietRelease({ specVersionId }: { specVersionId: number | null }) {
@@ -188,6 +189,7 @@ export function ReleaseCard({ slug, release, changes, behaviorChanges, foldedCha
           </summary>
           <BehaviorList slug={slug} release={release} changes={releaseBehaviorChanges} tasks={releaseTasks} canEdit={canEdit} />
           <AiChangeList changes={releaseChanges} />
+          <ReleaseNotesPanel slug={slug} releaseId={release.id} canEdit={canEdit} />
         </details>
       ) : (
         <BehaviorList slug={slug} release={release} changes={releaseBehaviorChanges} tasks={releaseTasks} canEdit={canEdit} />
