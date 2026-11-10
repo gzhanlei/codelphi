@@ -22,7 +22,7 @@ describe("mcp server (A1)", () => {
   it("lists the read-only tool surface with JSON schemas", async () => {
     const response = await handleMcpRpc(runtime, rpc("tools/list"));
     const tools = (response?.result as { tools: Array<{ name: string }> }).tools;
-    expect(tools.map((tool) => tool.name)).toEqual(["list_projects", "get_project_summary", "get_feature", "get_scenario", "search_scenarios", "list_releases", "get_release", "get_feature_connections", "get_release_notes", "get_digest", "send_feedback"]);
+    expect(tools.map((tool) => tool.name)).toEqual(["list_projects", "get_project_summary", "get_feature", "get_scenario", "search_scenarios", "list_releases", "get_release", "get_knowledge_health", "get_feature_connections", "get_release_notes", "get_digest", "send_feedback"]);
   });
 
   it("returns no response for notifications (no id)", async () => {
@@ -137,6 +137,21 @@ describe("mcp server (A1)", () => {
     const login = result.connections.find((entry) => entry.featureName === "统一登录")!;
     expect(login.connections[0].targetFeatureName).toBe("规格导出");
     expect(login.connections[0].sharedFiles[0].path).toBe("lib/auth.ts");
+  });
+
+  it("exposes fact-only knowledge health via MCP", async () => {
+    execute.mockImplementation(async (sql: string) => {
+      if (String(sql).includes("FROM products WHERE organization_id")) return [[{ id: 9, slug: "radar", name: "Radar", description: "d" }]];
+      if (String(sql).includes("FROM features WHERE product_id")) return [[{ id: 1, name: "统一登录", staleSince: new Date("2026-11-01"), verifiedAt: null, lastEditedBy: "alice", lastEditedAt: new Date("2026-11-06") }]];
+      if (String(sql).includes("FROM scenarios s JOIN features f")) return [[]];
+      if (String(sql).includes("FROM regression_tasks t")) return [[{ taskId: 1, releaseId: 9, status: "passed", checkedBy: "bob", checkedAt: new Date(), skipReason: null, failureNote: null, primaryChangeId: null, featureName: "统一登录", reference: "HP-1", subject: { kind: "scenario", scenarioId: 1 }, reasons: [], sources: [] }]];
+      return [[]];
+    });
+    const response = await handleMcpRpc(runtime, rpc("tools/call", { name: "get_knowledge_health", arguments: { slug: "radar" } }));
+    const report = (response?.result as { structuredContent: { report: { staleCount: number; maintenance: Array<{ editor: string }>; regression: { total: number } } } }).structuredContent.report;
+    expect(report.staleCount).toBe(1);
+    expect(report.maintenance[0].editor).toBe("alice");
+    expect(report.regression.total).toBe(1);
   });
 
   it("never exposes write tools", () => {

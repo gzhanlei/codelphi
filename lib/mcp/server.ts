@@ -1,5 +1,7 @@
 import { searchSpec } from "../spec-search";
 import { loadFeatureConnections } from "../feature-connections";
+import { buildKnowledgeHealth } from "../knowledge-health";
+import { loadRegressionTasks } from "../regression-tasks";
 import { loadCoverageReceipt } from "../analysis-coverage";
 import { loadCompletenessLedgerBySpecVersion } from "../completeness-ledger";
 import { defaultExecute, type Execute } from "../db";
@@ -78,6 +80,7 @@ export const MCP_TOOLS: McpToolDef[] = [
   { name: "search_scenarios", description: "按关键词检索规格原文（命中条目 = 已过证据校验的原文，未覆盖时明确返回空）", inputSchema: { type: "object", properties: { slug: { type: "string" }, query: { type: "string" } }, required: ["slug", "query"] } },
   { name: "list_releases", description: "列产品的发布（时间倒序，默认 10 条）", inputSchema: { type: "object", properties: { slug: { type: "string" }, limit: { type: "number" } }, required: ["slug"] } },
   { name: "get_release", description: "单条发布的行为变化清单（含前后差异摘要与证据链接）", inputSchema: { type: "object", properties: { slug: { type: "string" }, releaseId: { type: "number" } }, required: ["slug", "releaseId"] } },
+  { name: "get_knowledge_health", description: "知识健康事实统计（漂移清单/核实覆盖/回归四态/维护分布；无综合分、无 Bus Factor）", inputSchema: { type: "object", properties: { slug: { type: "string" } }, required: ["slug"] } },
   { name: "get_feature_connections", description: "功能间的确定性连接（共享证据文件面；每条带依据文件清单，无 LLM 推断）", inputSchema: { type: "object", properties: { slug: { type: "string" } }, required: ["slug"] } },
   { name: "get_release_notes", description: "单条发布的人工发布稿（块级、含 override 后文案与证据路径；未生成返回空）", inputSchema: { type: "object", properties: { slug: { type: "string" }, releaseId: { type: "number" } }, required: ["slug", "releaseId"] } },
   { name: "get_digest", description: "最近一期周期行为摘要（滚动 7 天分桶：support/sales/marketing；无则返回空）", inputSchema: { type: "object", properties: { slug: { type: "string" } }, required: ["slug"] } },
@@ -254,6 +257,18 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
         afterJson: undefined,
       })),
     };
+  }
+
+  if (name === "get_knowledge_health") {
+    const [features, scenarios] = await Promise.all([
+      queryRows<{ id: number; name: string; staleSince: Date | null; verifiedAt: Date | null; lastEditedBy: string | null; lastEditedAt: Date | null }>(
+        execute("SELECT id, name, stale_since AS staleSince, verified_at AS verifiedAt, last_edited_by AS lastEditedBy, last_edited_at AS lastEditedAt FROM features WHERE product_id = ? AND active = 1", [product.id]),
+      ),
+      queryRows<{ id: number; featureId: number; reference: string; staleSince: Date | null; verifiedAt: Date | null; lastEditedBy: string | null; lastEditedAt: Date | null }>(
+        execute("SELECT s.id, s.feature_id AS featureId, s.reference, s.stale_since AS staleSince, s.verified_at AS verifiedAt, s.last_edited_by AS lastEditedBy, s.last_edited_at AS lastEditedAt FROM scenarios s JOIN features f ON f.id = s.feature_id WHERE f.product_id = ? AND s.active = 1 AND f.active = 1", [product.id]),
+      ),
+    ]);
+    return { report: buildKnowledgeHealth({ features, scenarios, regressionTasks: await loadRegressionTasks(product.id, execute) }) };
   }
 
   if (name === "get_feature_connections") {
