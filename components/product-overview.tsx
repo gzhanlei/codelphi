@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { EditDescriptionButton } from "./edit-description-button";
 import { IntroMaterialPanel } from "./intro-material-panel";
+import { KnowledgeHealthPanel } from "./knowledge-health-panel";
 import { changeGroupLabel, type ProductOverviewData } from "@/lib/product-overview";
 
 function OverviewHero({ data, canEdit }: { data: ProductOverviewData; canEdit: boolean }) {
@@ -94,6 +95,7 @@ export function ProductOverview({ data, canEdit = false }: { data: ProductOvervi
       <OverviewHero data={data} canEdit={canEdit} />
       <div className="overview-grid"><CapabilitiesPanel data={data} /><ChangesPanel data={data} /><TrustPanel data={data} /></div>
       <IntroMaterialPanel slug={data.slug} canEdit={canEdit} />
+      <KnowledgeHealthPanel slug={data.slug} />
     </div>
   );
 }
