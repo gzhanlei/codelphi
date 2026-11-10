@@ -1,3 +1,4 @@
+import type { PoolConnection } from "mysql2/promise";
 import type { AnalysisCoverageReceipt } from "./analysis-coverage";
 import type { BehavioralEnumerationMetrics } from "./behavioral-enumeration";
 
@@ -116,9 +117,9 @@ export interface ExtractionPassInfo {
   allCandidatesRejected: boolean;
 }
 
-export function deriveExtractionCompletion(partitions: number, passes: ExtractionPassInfo[]): ExtractionCompletionDimension {
+export function deriveExtractionCompletion(partitions: number, passes: Array<{ retries: number; empty: boolean }>): ExtractionCompletionDimension {
   const retries = passes.reduce((total, pass) => total + pass.retries, 0);
-  const emptyPasses = passes.filter((pass) => pass.emptyAfterSanitize).length;
+  const emptyPasses = passes.filter((pass) => pass.empty).length;
   let state: LedgerState = "complete";
   if (retries > 0 || emptyPasses > 0) state = "partial";
   return { state, partitions, passes: passes.length, retries, emptyPasses };
@@ -165,5 +166,62 @@ export function deriveVerification(input: { outcomeConflicts: number; shadowRan:
     shadowConsistent: input.shadowConsistent ?? null,
     /** 人工核实在外部核实生命周期追踪，不在 run 级账本内。 */
     humanVerification: "external",
+  };
+}
+
+/** 账本与 run 关联落库（run 成功后 best-effort 写入，失败只告警不回滚分析）。 */
+export async function saveCompletenessLedger(connection: Pick<PoolConnection, "execute">, ledger: AnalysisCompletenessLedger) {
+  await connection.execute(
+    `INSERT INTO analysis_completeness_ledger
+      (run_id, source_coverage, behavioral_enumeration, extraction_completion, evidence_integrity, merge_integrity, verification, overall, details)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      ledger.runId,
+      ledger.sourceCoverage.state,
+      ledger.behavioralEnumeration.state,
+      ledger.extractionCompletion.state,
+      ledger.evidenceIntegrity.state,
+      ledger.mergeIntegrity.state,
+      ledger.verification.state,
+      ledger.overall,
+      JSON.stringify(ledger),
+    ],
+  );
+}
+
+export interface CompletenessLedgerRow {
+  runId: number;
+  sourceCoverage: string;
+  behavioralEnumeration: string;
+  extractionCompletion: string;
+  evidenceIntegrity: string;
+  mergeIntegrity: string;
+  verification: string;
+  overall: string;
+  details: unknown;
+}
+
+/** 读取某 run 的完整性账本（无记录返回 null：R1 之前的历史 run）。 */
+export async function loadCompletenessLedger(execute: (sql: string, params?: unknown[]) => Promise<unknown>, runId: number): Promise<CompletenessLedgerRow | null> {
+  const result = await execute(
+    `SELECT run_id AS runId, source_coverage AS sourceCoverage, behavioral_enumeration AS behavioralEnumeration,
+            extraction_completion AS extractionCompletion, evidence_integrity AS evidenceIntegrity,
+            merge_integrity AS mergeIntegrity, verification, overall, details
+     FROM analysis_completeness_ledger WHERE run_id = ?`,
+    [runId],
+  );
+  const rows = (Array.isArray(result) ? result[0] : result) as Array<Record<string, unknown>>;
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    runId: Number(row.runId),
+    sourceCoverage: String(row.sourceCoverage),
+    behavioralEnumeration: String(row.behavioralEnumeration),
+    extractionCompletion: String(row.extractionCompletion),
+    evidenceIntegrity: String(row.evidenceIntegrity),
+    mergeIntegrity: String(row.mergeIntegrity),
+    verification: String(row.verification),
+    overall: String(row.overall),
+    details: row.details,
   };
 }

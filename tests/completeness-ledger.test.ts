@@ -66,8 +66,8 @@ describe("deriveBehavioralEnumeration", () => {
 describe("deriveExtractionCompletion", () => {
   it("complete when all passes clean on first try", () => {
     const dim = deriveExtractionCompletion(6, [
-      { retries: 0, emptyAfterSanitize: false, allCandidatesRejected: false },
-      { retries: 0, emptyAfterSanitize: false, allCandidatesRejected: false },
+      { retries: 0, empty: false },
+      { retries: 0, empty: false },
     ]);
     expect(dim.state).toBe("complete");
     expect(dim.passes).toBe(2);
@@ -75,8 +75,8 @@ describe("deriveExtractionCompletion", () => {
 
   it("partial when any pass retried or sanitized empty", () => {
     const dim = deriveExtractionCompletion(6, [
-      { retries: 1, emptyAfterSanitize: false, allCandidatesRejected: false },
-      { retries: 0, emptyAfterSanitize: true, allCandidatesRejected: false },
+      { retries: 1, empty: false },
+      { retries: 0, empty: true },
     ]);
     expect(dim.state).toBe("partial");
     expect(dim.retries).toBe(1);

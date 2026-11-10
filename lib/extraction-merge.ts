@@ -25,7 +25,7 @@ export function nextReference(used: string[], reference: string) {
   return `${prefix}-${max + 1}`;
 }
 
-export function mergeChunkResults(chunks: ExtractionChunk[]): AnalysisResult {
+export function mergeChunkResults(chunks: ExtractionChunk[], onStats?: (stats: { changesTruncated: number; scenariosDeduped: number }) => void): AnalysisResult {
   if (chunks.length === 0) throw new Error("mergeChunkResults requires at least one chunk");
   const first = chunks[0].result;
 
@@ -37,6 +37,7 @@ export function mergeChunkResults(chunks: ExtractionChunk[]): AnalysisResult {
     references: string[];
   }
   const groups = new Map<string, FeatureGroup>();
+  let scenariosDeduped = 0;
   for (const { result } of chunks) {
     for (const feature of result.features) {
       const key = specFeatureKey(feature.name);
@@ -52,7 +53,10 @@ export function mergeChunkResults(chunks: ExtractionChunk[]): AnalysisResult {
       }
       for (const scenario of feature.scenarios) {
         // 行为等价去重：同分类 + 情境/操作/结果同义（措辞漂移不算新场景）
-        if (group.scenarios.some((existing) => scenarioBehaviorEqual(existing, scenario))) continue;
+        if (group.scenarios.some((existing) => scenarioBehaviorEqual(existing, scenario))) {
+          scenariosDeduped += 1;
+          continue;
+        }
         // 引用冲突：同引用已存在但行为不同 → 前缀重编号（spec_scenarios 唯一键 (feature, reference)）
         const reference = group.references.includes(scenario.reference) ? nextReference(group.references, scenario.reference) : scenario.reference;
         group.references.push(reference);
@@ -82,8 +86,12 @@ export function mergeChunkResults(chunks: ExtractionChunk[]): AnalysisResult {
     // changes 截断到 schema 上限：分区越多越容易超；发布页 changelog 取去重后的前 150 条。
     // 截断必须日志可查（W0-4）：不静默丢弃，runId 级排查靠这条日志对账。
     changes: (() => {
-      if (changes.length <= 150) return changes;
+      if (changes.length <= 150) {
+        onStats?.({ changesTruncated: 0, scenariosDeduped });
+        return changes;
+      }
       console.log("[extraction-merge] changes truncated", { before: changes.length, after: 150, dropped: changes.length - 150 });
+      onStats?.({ changesTruncated: changes.length - 150, scenariosDeduped });
       return changes.slice(0, 150);
     })(),
     features,

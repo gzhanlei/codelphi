@@ -13,12 +13,14 @@ import { loadAffectedFeatureKeys, rebuildSpecFileIndex } from "./spec-file-index
 import { resolveAnalysisMode } from "./incremental";
 import { compareIncrementalShadow } from "./incremental-shadow";
 import { analysisMaxPartitions, incrementalShadowEnabled } from "./env";
+import type { BehavioralEnumerationMetrics } from "./behavioral-enumeration";
 import { computeCoverageReceipt, enumerateImplementationSurface, saveCoverageReceipt, type AnalysisCoverageReceipt } from "./analysis-coverage";
 import { mergeChunkResults, type ExtractionChunk } from "./extraction-merge";
 import { behavioralEnumerationEnabled } from "./env";
 import { behavioralChangePaths } from "./patch-scan";
 import { enumerateBehavioralChunks } from "./behavioral-enumeration";
 import { detectOutcomeConflicts } from "./spec-consistency";
+import { deriveBehavioralEnumeration, deriveEvidenceIntegrity, deriveExtractionCompletion, deriveMergeIntegrity, deriveSourceCoverage, deriveVerification, deriveOverallState, saveCompletenessLedger, type EvidenceSanitizeSummary } from "./completeness-ledger";
 import type { SpecFeature } from "./spec-diff";
 import type { SpecAnchorFeature } from "./spec-versions";
 import { markSpecDrift } from "./spec-drift";
@@ -50,7 +52,7 @@ export interface RunContext {
  * 进规格的事实必须带可追溯证据）。清洗后为空 = 本趟无行为变化窗口，按既有语义接受
  * （空版本由坍缩护栏下游告警），不在此处抛错。
  */
-export function sanitizeEvidence(result: AnalysisResult, sources: Set<string>, label: string) {
+export function sanitizeEvidence(result: AnalysisResult, sources: Set<string>, label: string): EvidenceSanitizeSummary {
   const hadCandidates = result.features.length > 0 || result.changes.length > 0;
   const droppedPaths = new Set<string>();
   const keep = (items: AnalysisResult["product"]["evidence"]) =>
@@ -64,6 +66,7 @@ export function sanitizeEvidence(result: AnalysisResult, sources: Set<string>, l
     change.evidence = keep(change.evidence);
     return change.evidence.length > 0;
   });
+  const beforeScenarioCount = result.features.reduce((total, feature) => total + feature.scenarios.length, 0);
   result.features = result.features.filter((feature) => {
     feature.scenarios = feature.scenarios.filter((scenario) => {
       scenario.evidence = keep(scenario.evidence);
@@ -71,13 +74,23 @@ export function sanitizeEvidence(result: AnalysisResult, sources: Set<string>, l
     });
     return feature.scenarios.length > 0;
   });
+  const afterScenarioCount = result.features.reduce((total, feature) => total + feature.scenarios.length, 0);
   if (droppedPaths.size > 0) {
     console.warn("[analysis] dropped evidence-untraceable claims", { label, paths: [...droppedPaths], keptFeatures: result.features.length });
   }
   // W0-9 评审采纳（空结果三态）：候选全部被清洗 ≠ 无行为变化——独立告警，不得伪装成正常空结果
-  if (hadCandidates && result.features.length === 0 && result.changes.length === 0) {
+  const allCandidatesRejected = hadCandidates && result.features.length === 0 && result.changes.length === 0;
+  if (allCandidatesRejected) {
     console.error("[analysis] all_candidates_rejected", { label, paths: [...droppedPaths] });
   }
+  return {
+    droppedClaims: beforeScenarioCount - afterScenarioCount,
+    droppedScenarios: beforeScenarioCount - afterScenarioCount,
+    droppedFeatures: beforeScenarioCount - afterScenarioCount > 0 ? result.features.length === 0 ? 1 : 0 : 0,
+    allCandidatesRejected,
+    empty: result.features.length === 0,
+    keptClaims: afterScenarioCount,
+  };
 }
 
 /** 分区局部证据允许集：AI 只能引用本分区窗口与 diff 文件（逐趟口径校验）。 */
@@ -99,20 +112,21 @@ async function extractPassWithRetry(options: {
   context: Parameters<typeof analyzeWithAI>[2];
   allowSet: Set<string>;
   label: string;
-}): Promise<AnalysisResult> {
+  }): Promise<{ result: AnalysisResult; pass: { retries: number; sanitize: EvidenceSanitizeSummary } }> {
+  let retries = 0;
+  let result: AnalysisResult;
   try {
-    const result = await analyzeWithAI(options.sources, options.change, options.context);
-    sanitizeEvidence(result, options.allowSet, options.label);
-    return result;
+    result = await analyzeWithAI(options.sources, options.change, options.context);
   } catch (firstError) {
+    retries = 1;
     console.warn("[analysis] extraction pass failed; retrying once", {
       label: options.label,
       error: firstError instanceof Error ? firstError.message.slice(0, 200) : String(firstError),
     });
-    const result = await analyzeWithAI(options.sources, options.change, options.context);
-    sanitizeEvidence(result, options.allowSet, `${options.label}/retry`);
-    return result;
+    result = await analyzeWithAI(options.sources, options.change, options.context);
   }
+  const sanitize = sanitizeEvidence(result, options.allowSet, options.label);
+  return { result, pass: { retries, sanitize } };
 }
 
 export async function assertLatestRun(connection: PoolConnection, run: RunContext) {
@@ -377,6 +391,8 @@ async function runAnalysisBody(run: RunContext) {
   let singleWindowSources: AnalysisPartition["sources"] | null = null;
   // W0-8 行为面枚举：patch-scan 行为文件清单（跨模式共享，RC2 与定向枚举共用）
   const chunks: ExtractionChunk[] = [];
+  const passInfos: Array<{ retries: number; sanitize: EvidenceSanitizeSummary }> = [];
+  let mergeStats = { changesTruncated: 0, scenariosDeduped: 0 };
 
   const knownFeatureNames = new Set(previousFeatureNames);
   const { partitions, index: sourceIndex } = await getPartitionedAnalysisSources(remoteAnalysisRequest, { planner, budgets: analysisSliceBudgets }, { maxPartitions: analysisMaxPartitions() });
@@ -393,7 +409,7 @@ async function runAnalysisBody(run: RunContext) {
   if (partitions.length === 1) {
     const single = partitions[0];
     singleWindowSources = single.sources;
-    result = await extractPassWithRetry({
+    const extracted = await extractPassWithRetry({
       sources: single.sources,
       change,
       context: {
@@ -405,11 +421,13 @@ async function runAnalysisBody(run: RunContext) {
       allowSet: evidenceAllowSet(single, change),
       label: `single/${run.id}`,
     });
+    result = extracted.result;
+    passInfos.push(extracted.pass);
     for (const feature of result.features) knownFeatureNames.add(feature.name);
     chunks.push({ result });
   } else {
     for (const [index, partition] of partitions.entries()) {
-      const chunkResult = await extractPassWithRetry({
+      const extracted = await extractPassWithRetry({
         sources: partition.sources,
         change,
         context: {
@@ -422,15 +440,25 @@ async function runAnalysisBody(run: RunContext) {
         allowSet: evidenceAllowSet(partition, change),
         label: `pass${index + 1}/${run.id}`,
       });
-      for (const feature of chunkResult.features) knownFeatureNames.add(feature.name);
-      chunks.push({ result: chunkResult });
+      for (const feature of extracted.result.features) knownFeatureNames.add(feature.name);
+      chunks.push({ result: extracted.result });
+      passInfos.push(extracted.pass);
     }
-    result = mergeChunkResults(chunks);
+    result = mergeChunkResults(chunks, (stats) => { mergeStats = stats; });
   }
   // W0-8 行为面枚举：行为文件逐组定向提问（每文件显式回答行为/无行为），把召回从
   // 注意力问题变枚举问题。枚举是增强层：组硬失败重试一次后跳过，不阻塞主提取产出。
+  let enumerationMetrics: BehavioralEnumerationMetrics = {
+    pathsTotal: behavioralPaths.length,
+    pathsEnumerated: 0,
+    pathsOmitted: behavioralPaths.length,
+    groupsTotal: 0,
+    groupsCompleted: 0,
+    groupsFailed: 0,
+    status: "not_applicable",
+  };
   if (behavioralEnumerationEnabled() && behavioralPaths.length > 0) {
-    const { chunks: enumeratedChunks, metrics: enumerationMetrics } = await enumerateBehavioralChunks({
+    const { chunks: enumeratedChunks, metrics } = await enumerateBehavioralChunks({
       behavioralPaths,
       files: change.files,
       index: sourceIndex,
@@ -438,11 +466,12 @@ async function runAnalysisBody(run: RunContext) {
       knownFeatureNames: [...knownFeatureNames],
       billing: { runId: run.id, accountId: run.accountId ?? null, chargeComponent: "main" },
     });
+    enumerationMetrics = metrics;
     for (const { result: chunk } of enumeratedChunks) {
       for (const feature of chunk.features) knownFeatureNames.add(feature.name);
       chunks.push({ result: chunk });
     }
-    result = mergeChunkResults(chunks);
+    result = mergeChunkResults(chunks, (stats) => { mergeStats = stats; });
     // W0-9 评审采纳：枚举完整性状态结构化留痕（complete/partial/failed/not_applicable）——
     // 增强层失败不得被误认为完整成功
     console.log("[analysis] behavioral enumeration", { runId: run.id, ...enumerationMetrics });
@@ -456,6 +485,7 @@ async function runAnalysisBody(run: RunContext) {
       conflicts: conflicts.map((c) => ({ feature: c.feature, token: c.token, negated: c.negated.reference, affirmative: c.affirmative.reference })),
     });
   }
+
   // 坍缩护栏：新版场景数骤降只告警不阻断（版本 append-only，可回溯）；通知带警告供人工核实。
   if (collapse) {
     console.error("[spec] suspected spec collapse", { runId: run.id, specVersionId, ...collapse });
@@ -489,7 +519,10 @@ async function runAnalysisBody(run: RunContext) {
   // M9 影子对比：增量落库成功后额外跑一次全量提取，只对比不落库（放行门槛 ≥98% 一致率的数据来源）。
   // 对比对象必须是 carry-forward 合并后的完整规格——增量 AI 输出本就只含受影响功能，
   // 直接与全量输出比较会恒等失败（missingKeys = 全部未受影响功能）。
+  let shadowConsistent: boolean | null = null;
+  let shadowRan = false;
   if (affectedKeys && incrementalShadowEnabled()) {
+    shadowRan = true;
     try {
       // 影子对比保持单窗口径（W0-6 要点 5）：单窗 run 直接复用提取时的窗口；
       // 增量多趟 run 没有单一窗口，显式另取一份单窗切片，不得静默用空输入。
@@ -511,10 +544,48 @@ async function runAnalysisBody(run: RunContext) {
           shadow: shadow.features,
         }));
       }
-      console.log("[incremental-shadow]", JSON.stringify(compareIncrementalShadow({ features: mergedFeatures, changes: result.changes }, shadow)));
+      const shadowComparison = compareIncrementalShadow({ features: mergedFeatures, changes: result.changes }, shadow);
+      shadowConsistent = shadowComparison.consistent;
+      console.log("[incremental-shadow]", JSON.stringify(shadowComparison));
     } catch (error) {
       console.error("[incremental-shadow] shadow analysis failed", error);
     }
+  }
+  // R1 分析完整性账本：六维度分状态落库（best-effort，失败只告警不回滚分析）
+  try {
+    const ledger = {
+      runId: run.id,
+      specVersionId,
+      sourceCoverage: deriveSourceCoverage(coverage),
+      behavioralEnumeration: deriveBehavioralEnumeration(enumerationMetrics ?? {
+        pathsTotal: behavioralPaths.length, pathsEnumerated: 0, pathsOmitted: behavioralPaths.length,
+        groupsTotal: 0, groupsCompleted: 0, groupsFailed: 0, status: "not_applicable" as const,
+      }),
+      extractionCompletion: deriveExtractionCompletion(partitions.length, passInfos.map((pass) => ({ retries: pass.retries, empty: pass.sanitize.empty }))),
+      evidenceIntegrity: deriveEvidenceIntegrity(passInfos.map((pass) => pass.sanitize)),
+      mergeIntegrity: deriveMergeIntegrity({ changesTruncated: mergeStats.changesTruncated, scenariosDeduped: mergeStats.scenariosDeduped, outcomeConflicts: conflicts.length, collapse: Boolean(collapse) }),
+      verification: deriveVerification({ outcomeConflicts: conflicts.length, shadowRan, shadowConsistent }),
+    } as const;
+    const overall = deriveOverallState([
+      ledger.sourceCoverage.state,
+      ledger.behavioralEnumeration.state,
+      ledger.extractionCompletion.state,
+      ledger.evidenceIntegrity.state,
+      ledger.mergeIntegrity.state,
+      ledger.verification.state,
+    ]);
+    const fullLedger = { ...ledger, overall };
+    console.log("[analysis] completeness ledger", { runId: run.id, overall, dimensions: {
+      sourceCoverage: fullLedger.sourceCoverage.state,
+      behavioralEnumeration: fullLedger.behavioralEnumeration.state,
+      extractionCompletion: fullLedger.extractionCompletion.state,
+      evidenceIntegrity: fullLedger.evidenceIntegrity.state,
+      mergeIntegrity: fullLedger.mergeIntegrity.state,
+      verification: fullLedger.verification.state,
+    } });
+    await saveCompletenessLedger(getDb(), fullLedger);
+  } catch (error) {
+    console.error("[analysis] completeness ledger write failed", error);
   }
 }
 

@@ -489,6 +489,12 @@ describe("analysis orchestration", () => {
     // 枚举产出的功能进入合并规格
     const savedResult = vi.mocked(insertSpecVersion).mock.calls[0][2] as AnalysisResult;
     expect(savedResult.features.map((feature) => feature.name)).toContain("审计日志");
+    // R1 完整性账本落库：六维度 + overall
+    const ledgerCall = execute.mock.calls.find(([sql]) => String(sql).includes("INSERT INTO analysis_completeness_ledger"));
+    expect(ledgerCall).toBeDefined();
+    const ledgerParams = ledgerCall![1] as unknown[];
+    expect(ledgerParams[0]).toBe(8);
+    expect(String(ledgerParams[7])).toMatch(/complete|partial|failed|not_applicable/);
   });
 
   it("accepts a sanitized-empty pass as a no-change window (collapse detection downstream)", async () => {
