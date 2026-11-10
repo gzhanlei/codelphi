@@ -44,7 +44,7 @@ describe("release card collapse", () => {
     expect(html).toContain("release-details");
     expect(html).toContain(' open');
     expect(html).toContain("行为变化 2 条");
-    expect(html).toContain("发布说明 1 条");
+    expect(html).toContain("变更说明 1 条");
   });
 
   it("renders older releases collapsed", () => {

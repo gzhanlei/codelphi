@@ -8,6 +8,7 @@ import { VerifySpecButton } from "./verify-spec-button";
 import { ScenarioWorkspace } from "./scenario-workspace";
 import { FormError } from "./form-feedback";
 import { FeatureHistory } from "./feature-history";
+import { FeatureConnectionsPanel } from "./feature-connections-panel";
 
 function ImplementationFiles({ scenarios }: { scenarios?: ScenarioRow[] }) {
   const files = aggregateImplementationFiles(scenarios ?? []);
@@ -51,6 +52,7 @@ export function FeatureDetail({ slug, productBase, feature, scenarios, implement
       <ChildFeatureAction feature={feature} onCreateChild={onCreateChild} />
       <ImplementationFiles scenarios={implementationScenarios} />
       <FeatureHistory slug={slug} featureId={feature.id} featureName={feature.name} />
+      <FeatureConnectionsPanel slug={slug} featureId={feature.id} />
       <nav className="feature-view-tabs" aria-label="功能视图"><Link scroll={false} className={featureTabClass(mode, "spec")} href={featureHref(feature.id)}>场景 <span>{scenarios.length}</span></Link><Link scroll={false} className={featureTabClass(mode, "flow")} href={featureHref(feature.id, "flow")}>流程图</Link></nav>
       <FormError message={error} />
       {mode === "flow" ? <FeatureFlow featureName={feature.name} scenarios={scenarios} /> : <ScenarioWorkspace key={feature.id} slug={slug} featureId={feature.id} scenarios={scenarios} />}
