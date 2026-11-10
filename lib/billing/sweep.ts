@@ -10,6 +10,7 @@ import { queryChandlerOrder } from "../chandler-pay";
 import { deliverPendingBillingNotifications, enqueueBillingNotification, ownerEmailForAccount } from "./notifications";
 import { runDailyReconcileOnce } from "./reconcile";
 import { runAnalysisTriggerSweepOnce } from "../analysis-trigger";
+import { runDigestSweepOnce } from "../digest-sweep";
 import { DEADLOCK_RETRIES, FIRST_RUN_UNITS, HEARTBEAT_FRESH_WINDOW_MINUTES, RESERVATION_TTL_MINUTES, SWEEP_RESERVATION_INTERVAL_MS } from "./constants";
 
 /**
@@ -145,6 +146,12 @@ export async function runAnalysisTriggerSweepJob(): Promise<JobResult> {
   return { executed: true, detail: { ...outcome } };
 }
 
+/** Digest 周报作业（A2 §4.3）：滚动 7 天窗口，每小时检查一次，本期已生成则跳过。 */
+export async function runDigestWeeklyJob(): Promise<JobResult> {
+  const outcome = await runDigestSweepOnce();
+  return { executed: true, detail: { ...outcome } };
+}
+
 /** 调度入口（instrumentation.ts 调用一次）：幂等启动，重复调用直接返回。 */
 export function startBillingSweeps() {
   if (process.env.BILLING_SWEEP_ENABLED === "false") return { started: false };
@@ -156,6 +163,7 @@ export function startBillingSweeps() {
   scheduleJob("rate-limit-cleanup", 60 * 60 * 1_000, () => runRateLimitCleanupOnce(3600));
   scheduleJob("queued-run-recovery", 60 * 1_000, runQueuedRunRecoveryOnce);
   scheduleJob("analysis-trigger", 60 * 60 * 1_000, runAnalysisTriggerSweepJob);
+  scheduleJob("digest-weekly", 60 * 60 * 1_000, runDigestWeeklyJob);
   return { started: true, jobs: [...startedJobs] };
 }
 

@@ -288,3 +288,41 @@ export async function sendNotificationChannelTest(channelId: number, productName
 }
 
 // 影子场景漂移排查注释(带 INCREMENTAL_SHADOW_DEBUG dump)。
+
+/**
+ * Digest 周报投递（A2 §4.3）：渠道 + 邮件与行为变化通知同机制（解密目标、Chandler 发信），
+ * 但不挂 analysis_run——digest 无 run 语义，投递状态不进 notification_deliveries（表以
+ * analysis_run_id 为锚）。best-effort：单渠道失败不阻断其余投递。
+ */
+export async function deliverDigestNotifications(input: { productId: number; productName: string; subject: string; text: string; webhookPayload: string }, dependencies: NotificationDependencies = {}) {
+  const execute = dependencies.execute ?? defaultExecute;
+  const post = dependencies.post ?? postJson;
+  const secret = notificationSecret();
+  const [channelRows] = await execute(
+    "SELECT id, kind, target_encrypted FROM notification_channels WHERE product_id = ? AND enabled = 1 ORDER BY id",
+    [input.productId],
+  ) as [Array<{ id: number; kind: NotificationChannelKind; target_encrypted: string }>, unknown];
+  for (const row of channelRows) {
+    const target = decryptSecret(row.target_encrypted, secret);
+    const body = row.kind === "slack" ? JSON.stringify({ text: input.subject }) : input.webhookPayload;
+    try {
+      await post(target, body);
+    } catch (error) {
+      console.error("[notifications] digest channel delivery failed", { productId: input.productId, channelId: row.id, error });
+    }
+  }
+  const [prefRows] = await execute(
+    `SELECT p.user_id AS userId, u.email FROM user_email_prefs p JOIN users u ON u.id = p.user_id
+     WHERE p.product_id = ? AND p.email_enabled = 1 AND u.email IS NOT NULL AND u.email != ''
+     ORDER BY p.user_id`,
+    [input.productId],
+  ) as [Array<{ userId: number; email: string }>, unknown];
+  const sendEmail = dependencies.sendEmail ?? sendEmailNotification;
+  for (const pref of prefRows) {
+    try {
+      await sendEmail(pref.email, input.subject, input.text);
+    } catch (error) {
+      console.error("[notifications] digest email delivery failed", { productId: input.productId, email: pref.email, error });
+    }
+  }
+}
