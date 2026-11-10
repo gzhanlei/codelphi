@@ -20,6 +20,19 @@ describe("detectOutcomeConflicts", () => {
     expect(conflicts[0].affirmative.reference).toBe("ER-2");
   });
 
+  it("requires tight adjacency for negation (否定别的动作不算否定 token)", () => {
+    const conflicts = detectOutcomeConflicts([
+      {
+        name: "SQL Lab",
+        scenarios: [
+          scenario("HP-1", "查询超时 → 返回 504 与超时错误信息"),
+          scenario("ER-1", "上游不可用 → 不再重试，直接返回 504"),
+        ],
+      },
+    ]);
+    expect(conflicts).toHaveLength(0);
+  });
+
   it("does not flag when the same token appears only negated or only affirmative", () => {
     const conflicts = detectOutcomeConflicts([
       {

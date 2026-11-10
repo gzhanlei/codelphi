@@ -26,12 +26,16 @@ function errorTokens(outcome: string): string[] {
   return [...tokens];
 }
 
-/** 「不再」出现在 token 之前 → 该陈述是否定性的（修改后的行为：不再发生）。 */
+/** 「不再」紧邻 token（中间无句读）→ 否定性陈述（修改后的行为：不再发生）；
+ *  「不再重试，直接返回 504」这类否定的是别的动作（重试）不算。 */
 function isNegated(outcome: string, token: string): boolean {
   const index = outcome.indexOf(token);
   if (index === -1) return false;
-  const prefix = outcome.slice(Math.max(0, index - 24), index);
-  return prefix.includes("不再") || prefix.includes("不再返回") || prefix.includes("不再报");
+  const window = outcome.slice(Math.max(0, index - 16), index);
+  const at = window.lastIndexOf("不再");
+  if (at === -1) return false;
+  const between = window.slice(at + "不再".length);
+  return !/[。；！？→，、]/.test(between);
 }
 
 export function detectOutcomeConflicts(features: Array<{ name: string; scenarios: ConsistencyScenario[] }>): OutcomeConflict[] {
