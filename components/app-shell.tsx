@@ -8,6 +8,7 @@ export const MAIN_NAV_ITEMS = [
   { href: "/organizations", icon: "◈", label: "我的工作区" },
   { href: "/admin/feedback", icon: "◌", label: "反馈管理" },
   { href: "/admin/pay", icon: "¥", label: "支付管理" },
+  { href: "/admin/costs", icon: "≈", label: "成本观测" },
   { href: "/integrations", icon: "⌘", label: "代码仓库" },
   { href: "/settings", icon: "⚙", label: "设置" },
   { href: "/pricing", icon: "◇", label: "套餐与定价" },
