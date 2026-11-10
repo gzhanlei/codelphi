@@ -1,0 +1,1433 @@
+{
+  "summary": {
+    "version": {
+      "from": 48,
+      "to": 49,
+      "runId": 64
+    },
+    "rollup": {
+      "affected": {
+        "kept": 2,
+        "changed": 6,
+        "dropped": 0,
+        "newKeys": 0
+      },
+      "unaffected": {
+        "kept": 24,
+        "changed": 5,
+        "dropped": 0,
+        "newKeys": 0
+      },
+      "unknown": {
+        "kept": 0,
+        "changed": 2,
+        "dropped": 0,
+        "newKeys": 0
+      },
+      "not_in_gt": {
+        "newKeys": 21
+      }
+    },
+    "upFailures": [
+      "Databricks SQL Lab [databricks sql lab] summaryExact=false changed=[HP-1(rewritten)] added=[ER-1] removed=[EC-1]",
+      "图表构建与可视化 [图表构建与可视化] summaryExact=false changed=[HP-1(rewritten)] added=[] removed=[EC-1]",
+      "安全依赖管理 [安全依赖管理] summaryExact=true changed=[HP-2(rewritten),HP-3(rewritten),HP-4(rewritten),HP-5(rewritten)] added=[EC-2,HP-6,HP-7,HP-8,HP-9] removed=[]",
+      "嵌入式访客凭据回退 [嵌入式访客凭据回退] summaryExact=true changed=[] added=[EC-1,EC-2,ER-1] removed=[]",
+      "语义视图批量删除 [语义视图批量删除] summaryExact=true changed=[EC-2(rewritten),HP-2(rewritten),HP-3(rewritten)] added=[] removed=[EC-3,EC-4,EC-5,EC-6,ER-3,HP-4,HP-5,HP-6,HP-7,HP-8]"
+    ],
+    "changedAffectedKeys": [
+      "sql 编辑器",
+      "仪表盘",
+      "发布流程工具",
+      "安全角色与认证",
+      "数据库连接配置",
+      "数据源连接"
+    ],
+    "gtSanity": {
+      "affectedTotal": 8,
+      "unaffectedTotal": 29,
+      "unknownTotal": 2,
+      "mechanicalPredicted": 11
+    },
+    "changesCount": 144
+  },
+  "changes": [
+    {
+      "id": 1338,
+      "entityType": "feature",
+      "kind": "added",
+      "featureKey": "athena 数据库连接配置",
+      "featureName": "Athena 数据库连接配置",
+      "scenarioRef": "",
+      "summary": "新增功能「Athena 数据库连接配置」"
+    },
+    {
+      "id": 1339,
+      "entityType": "feature",
+      "kind": "added",
+      "featureKey": "athena 连接表单",
+      "featureName": "Athena 连接表单",
+      "scenarioRef": "",
+      "summary": "新增功能「Athena 连接表单」"
+    },
+    {
+      "id": 1340,
+      "entityType": "feature",
+      "kind": "changed",
+      "featureKey": "databricks sql lab",
+      "featureName": "Databricks SQL Lab",
+      "scenarioRef": "",
+      "summary": "更新功能「Databricks SQL Lab」"
+    },
+    {
+      "id": 1341,
+      "entityType": "scenario",
+      "kind": "removed",
+      "featureKey": "databricks sql lab",
+      "featureName": "Databricks SQL Lab",
+      "scenarioRef": "EC-1",
+      "summary": "「Databricks SQL Lab」移除场景 EC-1"
+    },
+    {
+      "id": 1342,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "databricks sql lab",
+      "featureName": "Databricks SQL Lab",
+      "scenarioRef": "ER-1",
+      "summary": "「Databricks SQL Lab」新增场景 ER-1"
+    },
+    {
+      "id": 1343,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "databricks sql lab",
+      "featureName": "Databricks SQL Lab",
+      "scenarioRef": "HP-1",
+      "summary": "「Databricks SQL Lab」更新场景 HP-1"
+    },
+    {
+      "id": 1344,
+      "entityType": "feature",
+      "kind": "added",
+      "featureKey": "mcp 语义表图表更新",
+      "featureName": "MCP 语义表图表更新",
+      "scenarioRef": "",
+      "summary": "新增功能「MCP 语义表图表更新」"
+    },
+    {
+      "id": 1345,
+      "entityType": "feature",
+      "kind": "added",
+      "featureKey": "mcp 语义表字段重选",
+      "featureName": "MCP 语义表字段重选",
+      "scenarioRef": "",
+      "summary": "新增功能「MCP 语义表字段重选」"
+    },
+    {
+      "id": 1346,
+      "entityType": "feature",
+      "kind": "added",
+      "featureKey": "mcp 语义表重选",
+      "featureName": "MCP 语义表重选",
+      "scenarioRef": "",
+      "summary": "新增功能「MCP 语义表重选」"
+    },
+    {
+      "id": 1347,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "rest api",
+      "featureName": "REST API",
+      "scenarioRef": "EC-1",
+      "summary": "「REST API」新增场景 EC-1"
+    },
+    {
+      "id": 1348,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "rest api",
+      "featureName": "REST API",
+      "scenarioRef": "EC-2",
+      "summary": "「REST API」新增场景 EC-2"
+    },
+    {
+      "id": 1349,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "rest api",
+      "featureName": "REST API",
+      "scenarioRef": "EC-3",
+      "summary": "「REST API」新增场景 EC-3"
+    },
+    {
+      "id": 1350,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "rest api",
+      "featureName": "REST API",
+      "scenarioRef": "EC-4",
+      "summary": "「REST API」新增场景 EC-4"
+    },
+    {
+      "id": 1351,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "rest api",
+      "featureName": "REST API",
+      "scenarioRef": "EC-5",
+      "summary": "「REST API」新增场景 EC-5"
+    },
+    {
+      "id": 1352,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "rest api",
+      "featureName": "REST API",
+      "scenarioRef": "ER-1",
+      "summary": "「REST API」新增场景 ER-1"
+    },
+    {
+      "id": 1353,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "rest api",
+      "featureName": "REST API",
+      "scenarioRef": "HP-2",
+      "summary": "「REST API」新增场景 HP-2"
+    },
+    {
+      "id": 1354,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "rest api",
+      "featureName": "REST API",
+      "scenarioRef": "HP-3",
+      "summary": "「REST API」新增场景 HP-3"
+    },
+    {
+      "id": 1355,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "rest api",
+      "featureName": "REST API",
+      "scenarioRef": "HP-4",
+      "summary": "「REST API」新增场景 HP-4"
+    },
+    {
+      "id": 1356,
+      "entityType": "feature",
+      "kind": "added",
+      "featureKey": "sql lab",
+      "featureName": "SQL Lab",
+      "scenarioRef": "",
+      "summary": "新增功能「SQL Lab」"
+    },
+    {
+      "id": 1357,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "sql 编辑器",
+      "featureName": "SQL 编辑器",
+      "scenarioRef": "EC-1",
+      "summary": "「SQL 编辑器」新增场景 EC-1"
+    },
+    {
+      "id": 1358,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "sql 编辑器",
+      "featureName": "SQL 编辑器",
+      "scenarioRef": "EC-10",
+      "summary": "「SQL 编辑器」新增场景 EC-10"
+    },
+    {
+      "id": 1359,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "sql 编辑器",
+      "featureName": "SQL 编辑器",
+      "scenarioRef": "EC-11",
+      "summary": "「SQL 编辑器」新增场景 EC-11"
+    },
+    {
+      "id": 1360,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "sql 编辑器",
+      "featureName": "SQL 编辑器",
+      "scenarioRef": "EC-12",
+      "summary": "「SQL 编辑器」新增场景 EC-12"
+    },
+    {
+      "id": 1361,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "sql 编辑器",
+      "featureName": "SQL 编辑器",
+      "scenarioRef": "EC-2",
+      "summary": "「SQL 编辑器」新增场景 EC-2"
+    },
+    {
+      "id": 1362,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "sql 编辑器",
+      "featureName": "SQL 编辑器",
+      "scenarioRef": "EC-3",
+      "summary": "「SQL 编辑器」新增场景 EC-3"
+    },
+    {
+      "id": 1363,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "sql 编辑器",
+      "featureName": "SQL 编辑器",
+      "scenarioRef": "EC-4",
+      "summary": "「SQL 编辑器」新增场景 EC-4"
+    },
+    {
+      "id": 1364,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "sql 编辑器",
+      "featureName": "SQL 编辑器",
+      "scenarioRef": "EC-5",
+      "summary": "「SQL 编辑器」新增场景 EC-5"
+    },
+    {
+      "id": 1365,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "sql 编辑器",
+      "featureName": "SQL 编辑器",
+      "scenarioRef": "EC-6",
+      "summary": "「SQL 编辑器」新增场景 EC-6"
+    },
+    {
+      "id": 1366,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "sql 编辑器",
+      "featureName": "SQL 编辑器",
+      "scenarioRef": "EC-7",
+      "summary": "「SQL 编辑器」新增场景 EC-7"
+    },
+    {
+      "id": 1367,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "sql 编辑器",
+      "featureName": "SQL 编辑器",
+      "scenarioRef": "EC-8",
+      "summary": "「SQL 编辑器」新增场景 EC-8"
+    },
+    {
+      "id": 1368,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "sql 编辑器",
+      "featureName": "SQL 编辑器",
+      "scenarioRef": "EC-9",
+      "summary": "「SQL 编辑器」新增场景 EC-9"
+    },
+    {
+      "id": 1369,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "sql 编辑器",
+      "featureName": "SQL 编辑器",
+      "scenarioRef": "ER-2",
+      "summary": "「SQL 编辑器」新增场景 ER-2"
+    },
+    {
+      "id": 1370,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "sql 编辑器",
+      "featureName": "SQL 编辑器",
+      "scenarioRef": "ER-3",
+      "summary": "「SQL 编辑器」新增场景 ER-3"
+    },
+    {
+      "id": 1371,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "sql 编辑器",
+      "featureName": "SQL 编辑器",
+      "scenarioRef": "HP-3",
+      "summary": "「SQL 编辑器」新增场景 HP-3"
+    },
+    {
+      "id": 1372,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "sql 编辑器",
+      "featureName": "SQL 编辑器",
+      "scenarioRef": "HP-4",
+      "summary": "「SQL 编辑器」新增场景 HP-4"
+    },
+    {
+      "id": 1373,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "sql 编辑器",
+      "featureName": "SQL 编辑器",
+      "scenarioRef": "HP-5",
+      "summary": "「SQL 编辑器」新增场景 HP-5"
+    },
+    {
+      "id": 1374,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "sql 编辑器",
+      "featureName": "SQL 编辑器",
+      "scenarioRef": "HP-6",
+      "summary": "「SQL 编辑器」新增场景 HP-6"
+    },
+    {
+      "id": 1375,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "sql 编辑器",
+      "featureName": "SQL 编辑器",
+      "scenarioRef": "HP-7",
+      "summary": "「SQL 编辑器」新增场景 HP-7"
+    },
+    {
+      "id": 1376,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "仪表盘",
+      "featureName": "仪表盘",
+      "scenarioRef": "EC-2",
+      "summary": "「仪表盘」更新场景 EC-2"
+    },
+    {
+      "id": 1377,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "仪表盘",
+      "featureName": "仪表盘",
+      "scenarioRef": "EC-3",
+      "summary": "「仪表盘」更新场景 EC-3"
+    },
+    {
+      "id": 1378,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "仪表盘",
+      "featureName": "仪表盘",
+      "scenarioRef": "EC-4",
+      "summary": "「仪表盘」更新场景 EC-4"
+    },
+    {
+      "id": 1379,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "仪表盘",
+      "featureName": "仪表盘",
+      "scenarioRef": "ER-1",
+      "summary": "「仪表盘」新增场景 ER-1"
+    },
+    {
+      "id": 1380,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "仪表盘",
+      "featureName": "仪表盘",
+      "scenarioRef": "ER-2",
+      "summary": "「仪表盘」新增场景 ER-2"
+    },
+    {
+      "id": 1381,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "仪表盘",
+      "featureName": "仪表盘",
+      "scenarioRef": "ER-3",
+      "summary": "「仪表盘」新增场景 ER-3"
+    },
+    {
+      "id": 1382,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "仪表盘",
+      "featureName": "仪表盘",
+      "scenarioRef": "HP-3",
+      "summary": "「仪表盘」新增场景 HP-3"
+    },
+    {
+      "id": 1383,
+      "entityType": "feature",
+      "kind": "added",
+      "featureKey": "列表排序与历史状态",
+      "featureName": "列表排序与历史状态",
+      "scenarioRef": "",
+      "summary": "新增功能「列表排序与历史状态」"
+    },
+    {
+      "id": 1384,
+      "entityType": "feature",
+      "kind": "added",
+      "featureKey": "列表排序与历史状态恢复",
+      "featureName": "列表排序与历史状态恢复",
+      "scenarioRef": "",
+      "summary": "新增功能「列表排序与历史状态恢复」"
+    },
+    {
+      "id": 1385,
+      "entityType": "feature",
+      "kind": "added",
+      "featureKey": "列表排序与键盘可达性",
+      "featureName": "列表排序与键盘可达性",
+      "scenarioRef": "",
+      "summary": "新增功能「列表排序与键盘可达性」"
+    },
+    {
+      "id": 1386,
+      "entityType": "feature",
+      "kind": "added",
+      "featureKey": "列表视图排序与历史状态",
+      "featureName": "列表视图排序与历史状态",
+      "scenarioRef": "",
+      "summary": "新增功能「列表视图排序与历史状态」"
+    },
+    {
+      "id": 1387,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "发布流程工具",
+      "featureName": "发布流程工具",
+      "scenarioRef": "EC-2",
+      "summary": "「发布流程工具」新增场景 EC-2"
+    },
+    {
+      "id": 1388,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "发布流程工具",
+      "featureName": "发布流程工具",
+      "scenarioRef": "EC-3",
+      "summary": "「发布流程工具」新增场景 EC-3"
+    },
+    {
+      "id": 1389,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "发布流程工具",
+      "featureName": "发布流程工具",
+      "scenarioRef": "ER-2",
+      "summary": "「发布流程工具」新增场景 ER-2"
+    },
+    {
+      "id": 1390,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "发布流程工具",
+      "featureName": "发布流程工具",
+      "scenarioRef": "ER-3",
+      "summary": "「发布流程工具」新增场景 ER-3"
+    },
+    {
+      "id": 1391,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "发布流程工具",
+      "featureName": "发布流程工具",
+      "scenarioRef": "ER-4",
+      "summary": "「发布流程工具」新增场景 ER-4"
+    },
+    {
+      "id": 1392,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "发布流程工具",
+      "featureName": "发布流程工具",
+      "scenarioRef": "ER-5",
+      "summary": "「发布流程工具」新增场景 ER-5"
+    },
+    {
+      "id": 1393,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "发布流程工具",
+      "featureName": "发布流程工具",
+      "scenarioRef": "HP-3",
+      "summary": "「发布流程工具」更新场景 HP-3"
+    },
+    {
+      "id": 1394,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "发布流程工具",
+      "featureName": "发布流程工具",
+      "scenarioRef": "HP-4",
+      "summary": "「发布流程工具」更新场景 HP-4"
+    },
+    {
+      "id": 1395,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "发布流程工具",
+      "featureName": "发布流程工具",
+      "scenarioRef": "HP-5",
+      "summary": "「发布流程工具」更新场景 HP-5"
+    },
+    {
+      "id": 1396,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "发布流程工具",
+      "featureName": "发布流程工具",
+      "scenarioRef": "HP-6",
+      "summary": "「发布流程工具」更新场景 HP-6"
+    },
+    {
+      "id": 1397,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "发布流程工具",
+      "featureName": "发布流程工具",
+      "scenarioRef": "HP-7",
+      "summary": "「发布流程工具」新增场景 HP-7"
+    },
+    {
+      "id": 1398,
+      "entityType": "feature",
+      "kind": "added",
+      "featureKey": "图表与仪表盘卡片菜单",
+      "featureName": "图表与仪表盘卡片菜单",
+      "scenarioRef": "",
+      "summary": "新增功能「图表与仪表盘卡片菜单」"
+    },
+    {
+      "id": 1399,
+      "entityType": "feature",
+      "kind": "changed",
+      "featureKey": "图表构建与可视化",
+      "featureName": "图表构建与可视化",
+      "scenarioRef": "",
+      "summary": "更新功能「图表构建与可视化」"
+    },
+    {
+      "id": 1400,
+      "entityType": "scenario",
+      "kind": "removed",
+      "featureKey": "图表构建与可视化",
+      "featureName": "图表构建与可视化",
+      "scenarioRef": "EC-1",
+      "summary": "「图表构建与可视化」移除场景 EC-1"
+    },
+    {
+      "id": 1401,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "图表构建与可视化",
+      "featureName": "图表构建与可视化",
+      "scenarioRef": "HP-1",
+      "summary": "「图表构建与可视化」更新场景 HP-1"
+    },
+    {
+      "id": 1402,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "安全依赖管理",
+      "featureName": "安全依赖管理",
+      "scenarioRef": "EC-2",
+      "summary": "「安全依赖管理」新增场景 EC-2"
+    },
+    {
+      "id": 1403,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "安全依赖管理",
+      "featureName": "安全依赖管理",
+      "scenarioRef": "HP-2",
+      "summary": "「安全依赖管理」更新场景 HP-2"
+    },
+    {
+      "id": 1404,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "安全依赖管理",
+      "featureName": "安全依赖管理",
+      "scenarioRef": "HP-3",
+      "summary": "「安全依赖管理」更新场景 HP-3"
+    },
+    {
+      "id": 1405,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "安全依赖管理",
+      "featureName": "安全依赖管理",
+      "scenarioRef": "HP-4",
+      "summary": "「安全依赖管理」更新场景 HP-4"
+    },
+    {
+      "id": 1406,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "安全依赖管理",
+      "featureName": "安全依赖管理",
+      "scenarioRef": "HP-5",
+      "summary": "「安全依赖管理」更新场景 HP-5"
+    },
+    {
+      "id": 1407,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "安全依赖管理",
+      "featureName": "安全依赖管理",
+      "scenarioRef": "HP-6",
+      "summary": "「安全依赖管理」新增场景 HP-6"
+    },
+    {
+      "id": 1408,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "安全依赖管理",
+      "featureName": "安全依赖管理",
+      "scenarioRef": "HP-7",
+      "summary": "「安全依赖管理」新增场景 HP-7"
+    },
+    {
+      "id": 1409,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "安全依赖管理",
+      "featureName": "安全依赖管理",
+      "scenarioRef": "HP-8",
+      "summary": "「安全依赖管理」新增场景 HP-8"
+    },
+    {
+      "id": 1410,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "安全依赖管理",
+      "featureName": "安全依赖管理",
+      "scenarioRef": "HP-9",
+      "summary": "「安全依赖管理」新增场景 HP-9"
+    },
+    {
+      "id": 1411,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "安全角色与认证",
+      "featureName": "安全角色与认证",
+      "scenarioRef": "EC-1",
+      "summary": "「安全角色与认证」更新场景 EC-1"
+    },
+    {
+      "id": 1412,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "安全角色与认证",
+      "featureName": "安全角色与认证",
+      "scenarioRef": "EC-2",
+      "summary": "「安全角色与认证」更新场景 EC-2"
+    },
+    {
+      "id": 1413,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "安全角色与认证",
+      "featureName": "安全角色与认证",
+      "scenarioRef": "EC-3",
+      "summary": "「安全角色与认证」更新场景 EC-3"
+    },
+    {
+      "id": 1414,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "安全角色与认证",
+      "featureName": "安全角色与认证",
+      "scenarioRef": "EC-4",
+      "summary": "「安全角色与认证」新增场景 EC-4"
+    },
+    {
+      "id": 1415,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "安全角色与认证",
+      "featureName": "安全角色与认证",
+      "scenarioRef": "EC-5",
+      "summary": "「安全角色与认证」新增场景 EC-5"
+    },
+    {
+      "id": 1416,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "安全角色与认证",
+      "featureName": "安全角色与认证",
+      "scenarioRef": "EC-6",
+      "summary": "「安全角色与认证」新增场景 EC-6"
+    },
+    {
+      "id": 1417,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "安全角色与认证",
+      "featureName": "安全角色与认证",
+      "scenarioRef": "EC-7",
+      "summary": "「安全角色与认证」新增场景 EC-7"
+    },
+    {
+      "id": 1418,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "安全角色与认证",
+      "featureName": "安全角色与认证",
+      "scenarioRef": "EC-8",
+      "summary": "「安全角色与认证」新增场景 EC-8"
+    },
+    {
+      "id": 1419,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "安全角色与认证",
+      "featureName": "安全角色与认证",
+      "scenarioRef": "ER-2",
+      "summary": "「安全角色与认证」更新场景 ER-2"
+    },
+    {
+      "id": 1420,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "安全角色与认证",
+      "featureName": "安全角色与认证",
+      "scenarioRef": "ER-3",
+      "summary": "「安全角色与认证」更新场景 ER-3"
+    },
+    {
+      "id": 1421,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "安全角色与认证",
+      "featureName": "安全角色与认证",
+      "scenarioRef": "HP-3",
+      "summary": "「安全角色与认证」更新场景 HP-3"
+    },
+    {
+      "id": 1422,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "安全角色与认证",
+      "featureName": "安全角色与认证",
+      "scenarioRef": "HP-4",
+      "summary": "「安全角色与认证」新增场景 HP-4"
+    },
+    {
+      "id": 1423,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "安全角色与认证",
+      "featureName": "安全角色与认证",
+      "scenarioRef": "HP-5",
+      "summary": "「安全角色与认证」新增场景 HP-5"
+    },
+    {
+      "id": 1424,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "嵌入式访客凭据回退",
+      "featureName": "嵌入式访客凭据回退",
+      "scenarioRef": "EC-1",
+      "summary": "「嵌入式访客凭据回退」新增场景 EC-1"
+    },
+    {
+      "id": 1425,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "嵌入式访客凭据回退",
+      "featureName": "嵌入式访客凭据回退",
+      "scenarioRef": "EC-2",
+      "summary": "「嵌入式访客凭据回退」新增场景 EC-2"
+    },
+    {
+      "id": 1426,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "嵌入式访客凭据回退",
+      "featureName": "嵌入式访客凭据回退",
+      "scenarioRef": "ER-1",
+      "summary": "「嵌入式访客凭据回退」新增场景 ER-1"
+    },
+    {
+      "id": 1427,
+      "entityType": "feature",
+      "kind": "added",
+      "featureKey": "嵌入式访客身份识别",
+      "featureName": "嵌入式访客身份识别",
+      "scenarioRef": "",
+      "summary": "新增功能「嵌入式访客身份识别」"
+    },
+    {
+      "id": 1428,
+      "entityType": "feature",
+      "kind": "added",
+      "featureKey": "归档通知与键盘可达性",
+      "featureName": "归档通知与键盘可达性",
+      "scenarioRef": "",
+      "summary": "新增功能「归档通知与键盘可达性」"
+    },
+    {
+      "id": 1429,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "数据库连接配置",
+      "featureName": "数据库连接配置",
+      "scenarioRef": "EC-2",
+      "summary": "「数据库连接配置」更新场景 EC-2"
+    },
+    {
+      "id": 1430,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "数据库连接配置",
+      "featureName": "数据库连接配置",
+      "scenarioRef": "EC-3",
+      "summary": "「数据库连接配置」新增场景 EC-3"
+    },
+    {
+      "id": 1431,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "数据库连接配置",
+      "featureName": "数据库连接配置",
+      "scenarioRef": "EC-4",
+      "summary": "「数据库连接配置」新增场景 EC-4"
+    },
+    {
+      "id": 1432,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "数据库连接配置",
+      "featureName": "数据库连接配置",
+      "scenarioRef": "EC-5",
+      "summary": "「数据库连接配置」新增场景 EC-5"
+    },
+    {
+      "id": 1433,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "数据库连接配置",
+      "featureName": "数据库连接配置",
+      "scenarioRef": "EC-6",
+      "summary": "「数据库连接配置」新增场景 EC-6"
+    },
+    {
+      "id": 1434,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "数据库连接配置",
+      "featureName": "数据库连接配置",
+      "scenarioRef": "HP-10",
+      "summary": "「数据库连接配置」新增场景 HP-10"
+    },
+    {
+      "id": 1435,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "数据库连接配置",
+      "featureName": "数据库连接配置",
+      "scenarioRef": "HP-11",
+      "summary": "「数据库连接配置」新增场景 HP-11"
+    },
+    {
+      "id": 1436,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "数据库连接配置",
+      "featureName": "数据库连接配置",
+      "scenarioRef": "HP-3",
+      "summary": "「数据库连接配置」更新场景 HP-3"
+    },
+    {
+      "id": 1437,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "数据库连接配置",
+      "featureName": "数据库连接配置",
+      "scenarioRef": "HP-4",
+      "summary": "「数据库连接配置」更新场景 HP-4"
+    },
+    {
+      "id": 1438,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "数据库连接配置",
+      "featureName": "数据库连接配置",
+      "scenarioRef": "HP-5",
+      "summary": "「数据库连接配置」更新场景 HP-5"
+    },
+    {
+      "id": 1439,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "数据库连接配置",
+      "featureName": "数据库连接配置",
+      "scenarioRef": "HP-6",
+      "summary": "「数据库连接配置」更新场景 HP-6"
+    },
+    {
+      "id": 1440,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "数据库连接配置",
+      "featureName": "数据库连接配置",
+      "scenarioRef": "HP-7",
+      "summary": "「数据库连接配置」新增场景 HP-7"
+    },
+    {
+      "id": 1441,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "数据库连接配置",
+      "featureName": "数据库连接配置",
+      "scenarioRef": "HP-8",
+      "summary": "「数据库连接配置」新增场景 HP-8"
+    },
+    {
+      "id": 1442,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "数据库连接配置",
+      "featureName": "数据库连接配置",
+      "scenarioRef": "HP-9",
+      "summary": "「数据库连接配置」新增场景 HP-9"
+    },
+    {
+      "id": 1443,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "数据源连接",
+      "featureName": "数据源连接",
+      "scenarioRef": "EC-2",
+      "summary": "「数据源连接」更新场景 EC-2"
+    },
+    {
+      "id": 1444,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "数据源连接",
+      "featureName": "数据源连接",
+      "scenarioRef": "EC-3",
+      "summary": "「数据源连接」更新场景 EC-3"
+    },
+    {
+      "id": 1445,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "数据源连接",
+      "featureName": "数据源连接",
+      "scenarioRef": "EC-4",
+      "summary": "「数据源连接」更新场景 EC-4"
+    },
+    {
+      "id": 1446,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "数据源连接",
+      "featureName": "数据源连接",
+      "scenarioRef": "EC-5",
+      "summary": "「数据源连接」更新场景 EC-5"
+    },
+    {
+      "id": 1447,
+      "entityType": "scenario",
+      "kind": "removed",
+      "featureKey": "数据源连接",
+      "featureName": "数据源连接",
+      "scenarioRef": "ER-3",
+      "summary": "「数据源连接」移除场景 ER-3"
+    },
+    {
+      "id": 1448,
+      "entityType": "scenario",
+      "kind": "removed",
+      "featureKey": "数据源连接",
+      "featureName": "数据源连接",
+      "scenarioRef": "ER-4",
+      "summary": "「数据源连接」移除场景 ER-4"
+    },
+    {
+      "id": 1449,
+      "entityType": "scenario",
+      "kind": "removed",
+      "featureKey": "数据源连接",
+      "featureName": "数据源连接",
+      "scenarioRef": "ER-5",
+      "summary": "「数据源连接」移除场景 ER-5"
+    },
+    {
+      "id": 1450,
+      "entityType": "scenario",
+      "kind": "removed",
+      "featureKey": "数据源连接",
+      "featureName": "数据源连接",
+      "scenarioRef": "ER-6",
+      "summary": "「数据源连接」移除场景 ER-6"
+    },
+    {
+      "id": 1451,
+      "entityType": "scenario",
+      "kind": "removed",
+      "featureKey": "数据源连接",
+      "featureName": "数据源连接",
+      "scenarioRef": "ER-7",
+      "summary": "「数据源连接」移除场景 ER-7"
+    },
+    {
+      "id": 1452,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "数据源连接",
+      "featureName": "数据源连接",
+      "scenarioRef": "HP-3",
+      "summary": "「数据源连接」更新场景 HP-3"
+    },
+    {
+      "id": 1453,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "数据源连接",
+      "featureName": "数据源连接",
+      "scenarioRef": "HP-4",
+      "summary": "「数据源连接」更新场景 HP-4"
+    },
+    {
+      "id": 1454,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "数据源连接",
+      "featureName": "数据源连接",
+      "scenarioRef": "HP-5",
+      "summary": "「数据源连接」更新场景 HP-5"
+    },
+    {
+      "id": 1455,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "数据源连接",
+      "featureName": "数据源连接",
+      "scenarioRef": "HP-6",
+      "summary": "「数据源连接」更新场景 HP-6"
+    },
+    {
+      "id": 1456,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "数据集列表管理",
+      "featureName": "数据集列表管理",
+      "scenarioRef": "EC-2",
+      "summary": "「数据集列表管理」新增场景 EC-2"
+    },
+    {
+      "id": 1457,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "数据集列表管理",
+      "featureName": "数据集列表管理",
+      "scenarioRef": "EC-3",
+      "summary": "「数据集列表管理」新增场景 EC-3"
+    },
+    {
+      "id": 1458,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "数据集列表管理",
+      "featureName": "数据集列表管理",
+      "scenarioRef": "HP-4",
+      "summary": "「数据集列表管理」更新场景 HP-4"
+    },
+    {
+      "id": 1459,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "数据集列表管理",
+      "featureName": "数据集列表管理",
+      "scenarioRef": "HP-5",
+      "summary": "「数据集列表管理」更新场景 HP-5"
+    },
+    {
+      "id": 1460,
+      "entityType": "scenario",
+      "kind": "added",
+      "featureKey": "数据集列表管理",
+      "featureName": "数据集列表管理",
+      "scenarioRef": "HP-6",
+      "summary": "「数据集列表管理」新增场景 HP-6"
+    },
+    {
+      "id": 1461,
+      "entityType": "feature",
+      "kind": "added",
+      "featureKey": "最近归档列表",
+      "featureName": "最近归档列表",
+      "scenarioRef": "",
+      "summary": "新增功能「最近归档列表」"
+    },
+    {
+      "id": 1462,
+      "entityType": "feature",
+      "kind": "added",
+      "featureKey": "版本历史恢复",
+      "featureName": "版本历史恢复",
+      "scenarioRef": "",
+      "summary": "新增功能「版本历史恢复」"
+    },
+    {
+      "id": 1463,
+      "entityType": "feature",
+      "kind": "added",
+      "featureKey": "版本历史恢复提示",
+      "featureName": "版本历史恢复提示",
+      "scenarioRef": "",
+      "summary": "新增功能「版本历史恢复提示」"
+    },
+    {
+      "id": 1464,
+      "entityType": "feature",
+      "kind": "added",
+      "featureKey": "版本历史恢复警告",
+      "featureName": "版本历史恢复警告",
+      "scenarioRef": "",
+      "summary": "新增功能「版本历史恢复警告」"
+    },
+    {
+      "id": 1465,
+      "entityType": "feature",
+      "kind": "added",
+      "featureKey": "访客缩略图缓存隔离",
+      "featureName": "访客缩略图缓存隔离",
+      "scenarioRef": "",
+      "summary": "新增功能「访客缩略图缓存隔离」"
+    },
+    {
+      "id": 1466,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "语义视图批量删除",
+      "featureName": "语义视图批量删除",
+      "scenarioRef": "EC-2",
+      "summary": "「语义视图批量删除」更新场景 EC-2"
+    },
+    {
+      "id": 1467,
+      "entityType": "scenario",
+      "kind": "removed",
+      "featureKey": "语义视图批量删除",
+      "featureName": "语义视图批量删除",
+      "scenarioRef": "EC-3",
+      "summary": "「语义视图批量删除」移除场景 EC-3"
+    },
+    {
+      "id": 1468,
+      "entityType": "scenario",
+      "kind": "removed",
+      "featureKey": "语义视图批量删除",
+      "featureName": "语义视图批量删除",
+      "scenarioRef": "EC-4",
+      "summary": "「语义视图批量删除」移除场景 EC-4"
+    },
+    {
+      "id": 1469,
+      "entityType": "scenario",
+      "kind": "removed",
+      "featureKey": "语义视图批量删除",
+      "featureName": "语义视图批量删除",
+      "scenarioRef": "EC-5",
+      "summary": "「语义视图批量删除」移除场景 EC-5"
+    },
+    {
+      "id": 1470,
+      "entityType": "scenario",
+      "kind": "removed",
+      "featureKey": "语义视图批量删除",
+      "featureName": "语义视图批量删除",
+      "scenarioRef": "EC-6",
+      "summary": "「语义视图批量删除」移除场景 EC-6"
+    },
+    {
+      "id": 1471,
+      "entityType": "scenario",
+      "kind": "removed",
+      "featureKey": "语义视图批量删除",
+      "featureName": "语义视图批量删除",
+      "scenarioRef": "ER-3",
+      "summary": "「语义视图批量删除」移除场景 ER-3"
+    },
+    {
+      "id": 1472,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "语义视图批量删除",
+      "featureName": "语义视图批量删除",
+      "scenarioRef": "HP-2",
+      "summary": "「语义视图批量删除」更新场景 HP-2"
+    },
+    {
+      "id": 1473,
+      "entityType": "scenario",
+      "kind": "changed",
+      "featureKey": "语义视图批量删除",
+      "featureName": "语义视图批量删除",
+      "scenarioRef": "HP-3",
+      "summary": "「语义视图批量删除」更新场景 HP-3"
+    },
+    {
+      "id": 1474,
+      "entityType": "scenario",
+      "kind": "removed",
+      "featureKey": "语义视图批量删除",
+      "featureName": "语义视图批量删除",
+      "scenarioRef": "HP-4",
+      "summary": "「语义视图批量删除」移除场景 HP-4"
+    },
+    {
+      "id": 1475,
+      "entityType": "scenario",
+      "kind": "removed",
+      "featureKey": "语义视图批量删除",
+      "featureName": "语义视图批量删除",
+      "scenarioRef": "HP-5",
+      "summary": "「语义视图批量删除」移除场景 HP-5"
+    },
+    {
+      "id": 1476,
+      "entityType": "scenario",
+      "kind": "removed",
+      "featureKey": "语义视图批量删除",
+      "featureName": "语义视图批量删除",
+      "scenarioRef": "HP-6",
+      "summary": "「语义视图批量删除」移除场景 HP-6"
+    },
+    {
+      "id": 1477,
+      "entityType": "scenario",
+      "kind": "removed",
+      "featureKey": "语义视图批量删除",
+      "featureName": "语义视图批量删除",
+      "scenarioRef": "HP-7",
+      "summary": "「语义视图批量删除」移除场景 HP-7"
+    },
+    {
+      "id": 1478,
+      "entityType": "scenario",
+      "kind": "removed",
+      "featureKey": "语义视图批量删除",
+      "featureName": "语义视图批量删除",
+      "scenarioRef": "HP-8",
+      "summary": "「语义视图批量删除」移除场景 HP-8"
+    },
+    {
+      "id": 1479,
+      "entityType": "feature",
+      "kind": "added",
+      "featureKey": "软删除归档体验",
+      "featureName": "软删除归档体验",
+      "scenarioRef": "",
+      "summary": "新增功能「软删除归档体验」"
+    },
+    {
+      "id": 1480,
+      "entityType": "feature",
+      "kind": "added",
+      "featureKey": "软删除归档提示",
+      "featureName": "软删除归档提示",
+      "scenarioRef": "",
+      "summary": "新增功能「软删除归档提示」"
+    },
+    {
+      "id": 1481,
+      "entityType": "feature",
+      "kind": "added",
+      "featureKey": "软删除归档通知",
+      "featureName": "软删除归档通知",
+      "scenarioRef": "",
+      "summary": "新增功能「软删除归档通知」"
+    }
+  ],
+  "receipt": [
+    {
+      "id": 7,
+      "spec_version_id": 49,
+      "impl_files_assembled": 38,
+      "impl_files_total": 2150,
+      "impl_bytes_assembled": 913973,
+      "impl_bytes_total": 79967550,
+      "coverage_ratio": "0.0114",
+      "partitions_used": 6,
+      "partitions_capped": 1,
+      "created_at": "2026-11-10T20:39:15.903Z",
+      "diff_total_paths": 99,
+      "diff_selected_paths": 58,
+      "diff_omitted_paths": 41
+    }
+  ],
+  "ledger": [
+    {
+      "overall": "partial",
+      "details": {
+        "runId": 64,
+        "overall": "partial",
+        "verification": {
+          "state": "not_applicable",
+          "shadowRan": false,
+          "outcomeConflicts": 0,
+          "shadowConsistent": null,
+          "humanVerification": "external"
+        },
+        "specVersionId": 49,
+        "mergeIntegrity": {
+          "state": "complete",
+          "collapse": false,
+          "changesTruncated": 0,
+          "outcomeConflicts": 0,
+          "scenariosDeduped": 227
+        },
+        "sourceCoverage": {
+          "state": "partial",
+          "coverageRatio": 0.011429298509207797,
+          "diffTotalPaths": 99,
+          "implFilesTotal": 2150,
+          "diffOmittedPaths": 41,
+          "partitionsCapped": true,
+          "diffSelectedPaths": 58,
+          "implFilesAssembled": 38
+        },
+        "evidenceIntegrity": {
+          "state": "complete",
+          "droppedClaims": 0,
+          "droppedFeatures": 0,
+          "droppedScenarios": 0,
+          "allCandidatesRejectedPasses": 0
+        },
+        "extractionCompletion": {
+          "state": "complete",
+          "passes": 6,
+          "retries": 0,
+          "partitions": 6,
+          "emptyPasses": 0
+        },
+        "behavioralEnumeration": {
+          "state": "partial",
+          "status": "partial",
+          "pathsTotal": 52,
+          "groupsTotal": 9,
+          "groupsFailed": 0,
+          "pathsOmitted": 4,
+          "groupsCompleted": 8,
+          "pathsEnumerated": 48
+        }
+      }
+    }
+  ],
+  "llm": [
+    {
+      "calls": 22,
+      "cost": "0.116193"
+    }
+  ]
+}

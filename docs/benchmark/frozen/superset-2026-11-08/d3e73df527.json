@@ -1,0 +1,185 @@
+{
+  "sha": "d3e73df527140c3b1e93dde45b45d0c3d39b9a00",
+  "node_id": "C_kwDOAlosUtoAKGQzZTczZGY1MjcxNDBjM2IxZTkzZGRlNDViNDVkMGMzZDM5YjlhMDA",
+  "commit": {
+    "author": {
+      "name": "Mike Bridge",
+      "email": "michael.bridge@preset.io",
+      "date": "2026-11-06T06:45:40Z"
+    },
+    "committer": {
+      "name": "GitHub",
+      "email": "noreply@github.com",
+      "date": "2026-11-06T06:45:40Z"
+    },
+    "message": "fix(datasource): clarify creation and mixed selection labels (#46013)",
+    "tree": {
+      "sha": "7325f815ef10aa4e070ce7c6d7fe7093e954ac5d",
+      "url": "https://api.github.com/repos/apache/superset/git/trees/7325f815ef10aa4e070ce7c6d7fe7093e954ac5d"
+    },
+    "url": "https://api.github.com/repos/apache/superset/git/commits/d3e73df527140c3b1e93dde45b45d0c3d39b9a00",
+    "comment_count": 0,
+    "verification": {
+      "verified": true,
+      "reason": "valid",
+      "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJq7XeUCRC1aQ7uu5UhlAAAwY4QACnsK7OMeK+16p2xrwk/CZIe\niFSwzLm8ODjfvs54LQmx00Ml9hXXhTJxIvv63CQzS3xMzbkxwlXR+hox/r4oMk4b\nXN3mZhEUYvn0ouOq/PU5+alcNZnU+fgU+8S1xpM6RtvyJaJ5gbVNcytaZKRI18N0\nmP9kGZMtVWpOnKEPt0+8Bxr9SAH/z+ks/Bsu22zK9ems86P/JKJNA+L16otjYqNh\nqQwifbaV3zMWdJMeTAKz9dGEFLC8TS1nFK94zkOXDZZCreMQBwmJeKcQkvLYwjq6\nP0re69dBkV/5FHYJ1LMdezVW670IqIOisGwWnPfIZJKwOWvt2zLPWlszF0OQgUA4\nPySNaWKniSKIhiWb6eLAeVjNJhXLOm6xBZXJrjd9C9Tftk+brgPyPHyQnSjfAFLV\ngBFt1IJ3/iy/el1mGlyEATQY3ULstK5gD0MG4Ix7tV26KYTvXYYo3Ixj8RSWEjqq\nGvRcYpSYvnPiY6454hinMKfUlSnpv9xrs7cI/5x0um78dxvmNS7WC4CBOQk0HKtK\nEs9Y29q4G6qU7SgmTdiItEz5dALTzO+PKx6XCs6EIBQAxonCsjfkwpNLfnKmDEhT\nBmm3VjrPeOpLa0UkVUPQzPYjBl+9Ka/Mv58HPuDWQbcuume89/9/ww9PXr367U6l\nOEP89kXmOOW9Z1tuqQBr\n=86t6\n-----END PGP SIGNATURE-----\n",
+      "payload": "tree 7325f815ef10aa4e070ce7c6d7fe7093e954ac5d\nparent 957eb449efcdb1eebb7ff236665eb328f2128414\nauthor Mike Bridge <michael.bridge@preset.io> 1793947540 -0600\ncommitter GitHub <noreply@github.com> 1793947540 +0000\n\nfix(datasource): clarify creation and mixed selection labels (#46013)",
+      "verified_at": "2026-11-06T06:45:41Z"
+    }
+  },
+  "url": "https://api.github.com/repos/apache/superset/commits/d3e73df527140c3b1e93dde45b45d0c3d39b9a00",
+  "html_url": "https://github.com/apache/superset/commit/d3e73df527140c3b1e93dde45b45d0c3d39b9a00",
+  "comments_url": "https://api.github.com/repos/apache/superset/commits/d3e73df527140c3b1e93dde45b45d0c3d39b9a00/comments",
+  "author": {
+    "login": "mikebridge",
+    "id": 213273,
+    "node_id": "MDQ6VXNlcjIxMzI3Mw==",
+    "avatar_url": "https://avatars.githubusercontent.com/u/213273?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/mikebridge",
+    "html_url": "https://github.com/mikebridge",
+    "followers_url": "https://api.github.com/users/mikebridge/followers",
+    "following_url": "https://api.github.com/users/mikebridge/following{/other_user}",
+    "gists_url": "https://api.github.com/users/mikebridge/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/mikebridge/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/mikebridge/subscriptions",
+    "organizations_url": "https://api.github.com/users/mikebridge/orgs",
+    "repos_url": "https://api.github.com/users/mikebridge/repos",
+    "events_url": "https://api.github.com/users/mikebridge/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/mikebridge/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "committer": {
+    "login": "web-flow",
+    "id": 19864447,
+    "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+    "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/web-flow",
+    "html_url": "https://github.com/web-flow",
+    "followers_url": "https://api.github.com/users/web-flow/followers",
+    "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+    "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+    "organizations_url": "https://api.github.com/users/web-flow/orgs",
+    "repos_url": "https://api.github.com/users/web-flow/repos",
+    "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/web-flow/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "parents": [
+    {
+      "sha": "957eb449efcdb1eebb7ff236665eb328f2128414",
+      "url": "https://api.github.com/repos/apache/superset/commits/957eb449efcdb1eebb7ff236665eb328f2128414",
+      "html_url": "https://github.com/apache/superset/commit/957eb449efcdb1eebb7ff236665eb328f2128414"
+    }
+  ],
+  "stats": {
+    "total": 168,
+    "additions": 160,
+    "deletions": 8
+  },
+  "files": [
+    {
+      "sha": "5fee0d3c937d3c8760ada097c71a9506b4d97b8d",
+      "filename": "docs/docs/using-superset/creating-your-first-dashboard.mdx",
+      "status": "modified",
+      "additions": 5,
+      "deletions": 0,
+      "changes": 5,
+      "blob_url": "https://github.com/apache/superset/blob/d3e73df527140c3b1e93dde45b45d0c3d39b9a00/docs%2Fdocs%2Fusing-superset%2Fcreating-your-first-dashboard.mdx",
+      "raw_url": "https://github.com/apache/superset/raw/d3e73df527140c3b1e93dde45b45d0c3d39b9a00/docs%2Fdocs%2Fusing-superset%2Fcreating-your-first-dashboard.mdx",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/docs%2Fdocs%2Fusing-superset%2Fcreating-your-first-dashboard.mdx?ref=d3e73df527140c3b1e93dde45b45d0c3d39b9a00",
+      "patch": "@@ -116,6 +116,11 @@ we register the **cleaned_sales_data** table from the **examples** database.\n \n To finish, click the **Add** button in the bottom right corner. You should now see your dataset in the list of datasets.\n \n+When Semantic Layers is enabled, the chart creation page calls datasets and semantic views\n+**datasources**. Its **Add a datasource** link opens the Datasources list, where **New**\n+offers both kinds. The adjacent **create a semantic view** link opens that creation form\n+directly. With Semantic Layers disabled, the link opens the dataset creation form.\n+\n ### Organizing Datasets into Folders\n \n The Datasets list view supports **folders** for organizing datasets into groups. To create and manage folders:"
+    },
+    {
+      "sha": "fac3275da41f2591c783059e10e898f336269dc2",
+      "filename": "superset-frontend/src/pages/ChartCreation/ChartCreation.test.tsx",
+      "status": "modified",
+      "additions": 16,
+      "deletions": 3,
+      "changes": 19,
+      "blob_url": "https://github.com/apache/superset/blob/d3e73df527140c3b1e93dde45b45d0c3d39b9a00/superset-frontend%2Fsrc%2Fpages%2FChartCreation%2FChartCreation.test.tsx",
+      "raw_url": "https://github.com/apache/superset/raw/d3e73df527140c3b1e93dde45b45d0c3d39b9a00/superset-frontend%2Fsrc%2Fpages%2FChartCreation%2FChartCreation.test.tsx",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/superset-frontend%2Fsrc%2Fpages%2FChartCreation%2FChartCreation.test.tsx?ref=d3e73df527140c3b1e93dde45b45d0c3d39b9a00",
+      "patch": "@@ -178,6 +178,15 @@ test('renders dataset help text when user has dataset write permissions', async\n   expect(screen.queryByText('view instructions')).toBeInTheDocument();\n });\n \n+test('offers dataset creation only when semantic layers are disabled', async () => {\n+  await renderComponent(mockUserWithDatasetWrite);\n+  expect(screen.getByTestId('add-chart-new-dataset')).toHaveAttribute(\n+    'href',\n+    '/dataset/add/',\n+  );\n+  expect(screen.queryByTestId('add-chart-new-semantic-view')).toBeNull();\n+});\n+\n test('renders create chart button', async () => {\n   await renderComponent();\n   expect(\n@@ -638,7 +647,7 @@ test('shows a failed datasource load as an error, then recovers on the next sear\n   );\n });\n \n-test('uses generic picker terminology without changing the dataset action', async () => {\n+test('uses datasource terminology and offers both creation paths', async () => {\n   enableSemanticLayers();\n   fetchMock.get(/\\/api\\/v1\\/datasource\\/\\?q=.*/, {\n     body: { result: combinedDatasourceFixtures, count: 2 },\n@@ -651,8 +660,12 @@ test('uses generic picker terminology without changing the dataset action', asyn\n     screen.getByRole('combobox', { name: 'Datasource' }),\n   ).toBeInTheDocument();\n   expect(screen.getAllByText('Choose a datasource')).toHaveLength(2);\n-  const addDatasetLink = screen.getByRole('link', { name: 'Add a dataset' });\n-  expect(addDatasetLink).toHaveAttribute('href', '/dataset/add/');\n+  expect(\n+    screen.getByRole('link', { name: 'Add a datasource' }),\n+  ).toHaveAttribute('href', '/tablemodelview/list/');\n+  expect(\n+    screen.getByRole('link', { name: 'create a semantic view' }),\n+  ).toHaveAttribute('href', '/tablemodelview/list/?create=semantic_view');\n });\n \n test('keeps the legacy dataset-only picker when semantic layers are disabled', async () => {"
+    },
+    {
+      "sha": "e8edd9239c2c28dfe36e5d63a5aa9816bb64e85f",
+      "filename": "superset-frontend/src/pages/ChartCreation/index.tsx",
+      "status": "modified",
+      "additions": 16,
+      "deletions": 2,
+      "changes": 18,
+      "blob_url": "https://github.com/apache/superset/blob/d3e73df527140c3b1e93dde45b45d0c3d39b9a00/superset-frontend%2Fsrc%2Fpages%2FChartCreation%2Findex.tsx",
+      "raw_url": "https://github.com/apache/superset/raw/d3e73df527140c3b1e93dde45b45d0c3d39b9a00/superset-frontend%2Fsrc%2Fpages%2FChartCreation%2Findex.tsx",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/superset-frontend%2Fsrc%2Fpages%2FChartCreation%2Findex.tsx?ref=d3e73df527140c3b1e93dde45b45d0c3d39b9a00",
+      "patch": "@@ -345,9 +345,23 @@ export const ChartCreation = ({ user }: ChartCreationProps) => {\n   const VIEW_INSTRUCTIONS_TEXT = t('view instructions');\n   const datasetHelpText = canCreateDataset ? (\n     <span data-test=\"dataset-write\">\n-      <Link to=\"/dataset/add/\" data-test=\"add-chart-new-dataset\">\n-        {t('Add a dataset')}\n+      <Link\n+        to={semanticLayersEnabled ? '/tablemodelview/list/' : '/dataset/add/'}\n+        data-test=\"add-chart-new-dataset\"\n+      >\n+        {semanticLayersEnabled ? t('Add a datasource') : t('Add a dataset')}\n       </Link>{' '}\n+      {semanticLayersEnabled && (\n+        <>\n+          {t('or')}{' '}\n+          <Link\n+            to=\"/tablemodelview/list/?create=semantic_view\"\n+            data-test=\"add-chart-new-semantic-view\"\n+          >\n+            {t('create a semantic view')}\n+          </Link>{' '}\n+        </>\n+      )}\n       {t('or')}{' '}\n       <a\n         href=\"https://superset.apache.org/docs/creating-charts-dashboards/creating-your-first-dashboard/#registering-a-new-table\""
+    },
+    {
+      "sha": "093d53ad07d1aaa2066a195fe7b0c02ab116314a",
+      "filename": "superset-frontend/src/pages/DatasetList/DatasetList.listview.test.tsx",
+      "status": "modified",
+      "additions": 33,
+      "deletions": 0,
+      "changes": 33,
+      "blob_url": "https://github.com/apache/superset/blob/d3e73df527140c3b1e93dde45b45d0c3d39b9a00/superset-frontend%2Fsrc%2Fpages%2FDatasetList%2FDatasetList.listview.test.tsx",
+      "raw_url": "https://github.com/apache/superset/raw/d3e73df527140c3b1e93dde45b45d0c3d39b9a00/superset-frontend%2Fsrc%2Fpages%2FDatasetList%2FDatasetList.listview.test.tsx",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/superset-frontend%2Fsrc%2Fpages%2FDatasetList%2FDatasetList.listview.test.tsx?ref=d3e73df527140c3b1e93dde45b45d0c3d39b9a00",
+      "patch": "@@ -2008,6 +2008,39 @@ test('bulk select shows \"N Selected (Physical)\" for physical-only selection', as\n   );\n }, 30000);\n \n+test.each(['physical', 'virtual'] as const)(\n+  'bulk select names both %s and semantic-view selections',\n+  async kind => {\n+    const dataset = mockDatasets.find(d => d.kind === kind)!;\n+    const semanticView = {\n+      ...dataset,\n+      id: 999,\n+      table_name: 'semantic_sales',\n+      kind: 'semantic_view',\n+    };\n+    mockDatasetListEndpoints({\n+      result: [dataset, semanticView],\n+      count: 2,\n+    });\n+\n+    renderDatasetList(mockAdminUser);\n+    const table = await screen.findByTestId('listview-table');\n+    await userEvent.click(screen.getByRole('button', { name: /bulk select/i }));\n+    await within(table).findAllByRole('checkbox');\n+    for (const name of [dataset.table_name, semanticView.table_name]) {\n+      const row = screen.getByText(name).closest('tr')!;\n+      await userEvent.click(within(row).getByRole('checkbox'));\n+    }\n+\n+    await waitFor(() =>\n+      expect(screen.getByTestId('bulk-select-copy')).toHaveTextContent(\n+        `2 Selected (1 ${kind === 'physical' ? 'Physical' : 'Virtual'}, 1 Semantic View)`,\n+      ),\n+    );\n+  },\n+  30000,\n+);\n+\n test('bulk select shows mixed count for virtual and physical selection', async () => {\n   // Use a small mixed set - 1 physical + 1 virtual\n   const mixedDatasets = ["
+    },
+    {
+      "sha": "47dcd06631f7d3fe0335080d30c106e154e235e1",
+      "filename": "superset-frontend/src/pages/DatasetList/DatasetList.test.tsx",
+      "status": "modified",
+      "additions": 62,
+      "deletions": 0,
+      "changes": 62,
+      "blob_url": "https://github.com/apache/superset/blob/d3e73df527140c3b1e93dde45b45d0c3d39b9a00/superset-frontend%2Fsrc%2Fpages%2FDatasetList%2FDatasetList.test.tsx",
+      "raw_url": "https://github.com/apache/superset/raw/d3e73df527140c3b1e93dde45b45d0c3d39b9a00/superset-frontend%2Fsrc%2Fpages%2FDatasetList%2FDatasetList.test.tsx",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/superset-frontend%2Fsrc%2Fpages%2FDatasetList%2FDatasetList.test.tsx?ref=d3e73df527140c3b1e93dde45b45d0c3d39b9a00",
+      "patch": "@@ -21,6 +21,7 @@ import userEvent from '@testing-library/user-event';\n import rison from 'rison';\n import { FeatureFlag } from '@superset-ui/core';\n import fetchMock from 'fetch-mock';\n+import { useLocation } from 'react-router-dom';\n import {\n   setupMocks,\n   renderDatasetList,\n@@ -31,10 +32,16 @@ import {\n   mockDatasets,\n   mockApiError403,\n   mockDatasetListEndpoints,\n+  setupApiPermissions,\n   API_ENDPOINTS,\n   RisonFilter,\n } from './DatasetList.testHelpers';\n \n+function LocationSearch() {\n+  const { search } = useLocation();\n+  return <output data-test=\"location-search\">{search}</output>;\n+}\n+\n // Increase default timeout for tests that involve multiple async operations\n jest.setTimeout(15000);\n \n@@ -650,3 +657,58 @@ test.each([false, true])(\n     }\n   },\n );\n+\n+test('semantic-view creation link opens the semantic-view modal', async () => {\n+  const previousFlags = window.featureFlags;\n+  window.featureFlags = {\n+    ...previousFlags,\n+    [FeatureFlag.SemanticLayers]: true,\n+  };\n+  try {\n+    fetchMock.get(API_ENDPOINTS.SEMANTIC_LAYERS, { result: [], count: 0 });\n+    renderDatasetList(\n+      mockAdminUser,\n+      {},\n+      {},\n+      '/tablemodelview/list/?create=semantic_view',\n+      <LocationSearch />,\n+    );\n+    expect(await screen.findByText('Add Semantic View')).toBeInTheDocument();\n+    await waitFor(() =>\n+      expect(\n+        new URLSearchParams(\n+          screen.getByTestId('location-search').textContent ?? '',\n+        ).has('create'),\n+      ).toBe(false),\n+    );\n+  } finally {\n+    window.featureFlags = previousFlags;\n+  }\n+});\n+\n+test.each([\n+  ['Semantic Layers disabled', false, ['can_read', 'can_write']],\n+  ['dataset write denied', true, ['can_read']],\n+])(\n+  'semantic-view creation link stays closed when %s',\n+  async (_, enabled, permissions) => {\n+    const previousFlags = window.featureFlags;\n+    window.featureFlags = {\n+      ...previousFlags,\n+      [FeatureFlag.SemanticLayers]: enabled,\n+    };\n+    try {\n+      setupApiPermissions(permissions);\n+      renderDatasetList(\n+        mockAdminUser,\n+        {},\n+        {},\n+        '/tablemodelview/list/?create=semantic_view',\n+      );\n+      await screen.findByRole('table');\n+      expect(screen.queryByText('Add Semantic View')).not.toBeInTheDocument();\n+    } finally {\n+      window.featureFlags = previousFlags;\n+    }\n+  },\n+);"
+    },
+    {
+      "sha": "c0b8d556d847e700a15744b7005db29075260f7b",
+      "filename": "superset-frontend/src/pages/DatasetList/DatasetList.testHelpers.tsx",
+      "status": "modified",
+      "additions": 5,
+      "deletions": 1,
+      "changes": 6,
+      "blob_url": "https://github.com/apache/superset/blob/d3e73df527140c3b1e93dde45b45d0c3d39b9a00/superset-frontend%2Fsrc%2Fpages%2FDatasetList%2FDatasetList.testHelpers.tsx",
+      "raw_url": "https://github.com/apache/superset/raw/d3e73df527140c3b1e93dde45b45d0c3d39b9a00/superset-frontend%2Fsrc%2Fpages%2FDatasetList%2FDatasetList.testHelpers.tsx",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/superset-frontend%2Fsrc%2Fpages%2FDatasetList%2FDatasetList.testHelpers.tsx?ref=d3e73df527140c3b1e93dde45b45d0c3d39b9a00",
+      "patch": "@@ -20,6 +20,7 @@\n import fetchMock from 'fetch-mock';\n import { render, screen } from 'spec/helpers/testing-library';\n import { Provider } from 'react-redux';\n+import type { ReactNode } from 'react';\n import { MemoryRouter } from 'react-router-dom';\n import { configureStore } from '@reduxjs/toolkit';\n import { QueryParamProvider } from 'use-query-params';\n@@ -414,6 +415,8 @@ export const renderDatasetList = (\n   user: UserState,\n   props: Partial<DatasetListPropsOverrides> = {},\n   storeState: Partial<StoreState> = {},\n+  initialPath = '/',\n+  routerChild?: ReactNode,\n ) => {\n   const defaultStoreState = createDefaultStoreState(user);\n   const storeStateWithUser = {\n@@ -426,9 +429,10 @@ export const renderDatasetList = (\n \n   return render(\n     <Provider store={store}>\n-      <MemoryRouter>\n+      <MemoryRouter initialEntries={[initialPath]}>\n         <QueryParamProvider adapter={ReactRouter5Adapter}>\n           <DatasetList user={user} {...props} />\n+          {routerChild}\n         </QueryParamProvider>\n       </MemoryRouter>\n     </Provider>,"
+    },
+    {
+      "sha": "77291e76d2f1b842ae115b2364c387a7a07bc294",
+      "filename": "superset-frontend/src/pages/DatasetList/index.tsx",
+      "status": "modified",
+      "additions": 17,
+      "deletions": 2,
+      "changes": 19,
+      "blob_url": "https://github.com/apache/superset/blob/d3e73df527140c3b1e93dde45b45d0c3d39b9a00/superset-frontend%2Fsrc%2Fpages%2FDatasetList%2Findex.tsx",
+      "raw_url": "https://github.com/apache/superset/raw/d3e73df527140c3b1e93dde45b45d0c3d39b9a00/superset-frontend%2Fsrc%2Fpages%2FDatasetList%2Findex.tsx",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/superset-frontend%2Fsrc%2Fpages%2FDatasetList%2Findex.tsx?ref=d3e73df527140c3b1e93dde45b45d0c3d39b9a00",
+      "patch": "@@ -30,6 +30,7 @@ import {\n   useState,\n   useMemo,\n   useCallback,\n+  useEffect,\n   useRef,\n   Key,\n } from 'react';\n@@ -703,6 +704,20 @@ const DatasetList: FunctionComponent<DatasetListProps> = ({\n   const canDuplicate = hasPerm('can_duplicate');\n   const canExport = hasPerm('can_export');\n \n+  useEffect(() => {\n+    if (\n+      canCreate &&\n+      isFeatureEnabled(SEMANTIC_LAYERS_FLAG) &&\n+      new URLSearchParams(history.location.search).get('create') ===\n+        'semantic_view'\n+    ) {\n+      const params = new URLSearchParams(history.location.search);\n+      params.delete('create');\n+      history.replace({ ...history.location, search: params.toString() });\n+      setSemanticSetup('view');\n+    }\n+  }, [canCreate, history]);\n+\n   const initialSort = SORT_BY;\n \n   const openDatasetEditModal = useCallback(\n@@ -1906,14 +1921,14 @@ const DatasetList: FunctionComponent<DatasetListProps> = ({\n                 if (!selected.length) {\n                   return t('0 Selected');\n                 }\n-                if (virtualCount && !physicalCount) {\n+                if (virtualCount && !physicalCount && !semanticViewCount) {\n                   return t(\n                     '%s Selected (Virtual)',\n                     selected.length,\n                     virtualCount,\n                   );\n                 }\n-                if (physicalCount && !virtualCount) {\n+                if (physicalCount && !virtualCount && !semanticViewCount) {\n                   return t(\n                     '%s Selected (Physical)',\n                     selected.length,"
+    },
+    {
+      "sha": "394195fc3ff00c50fe7eeb3a880667f04d9e6545",
+      "filename": "superset/translations/messages.pot",
+      "status": "modified",
+      "additions": 6,
+      "deletions": 0,
+      "changes": 6,
+      "blob_url": "https://github.com/apache/superset/blob/d3e73df527140c3b1e93dde45b45d0c3d39b9a00/superset%2Ftranslations%2Fmessages.pot",
+      "raw_url": "https://github.com/apache/superset/raw/d3e73df527140c3b1e93dde45b45d0c3d39b9a00/superset%2Ftranslations%2Fmessages.pot",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/superset%2Ftranslations%2Fmessages.pot?ref=d3e73df527140c3b1e93dde45b45d0c3d39b9a00",
+      "patch": "@@ -1291,6 +1291,9 @@ msgstr \"\"\n msgid \"Add a dataset\"\n msgstr \"\"\n \n+msgid \"Add a datasource\"\n+msgstr \"\"\n+\n msgid \"Add a new tab\"\n msgstr \"\"\n \n@@ -18187,6 +18190,9 @@ msgstr \"\"\n msgid \"create a new chart\"\n msgstr \"\"\n \n+msgid \"create a semantic view\"\n+msgstr \"\"\n+\n msgid \"create dataset from SQL query\"\n msgstr \"\"\n "
+    }
+  ]
+}

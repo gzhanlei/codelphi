@@ -1,0 +1,185 @@
+{
+  "sha": "5abdb20986d52a3a63cd5d34cbb6555a4bf7a415",
+  "node_id": "C_kwDOAlosUtoAKDVhYmRiMjA5ODZkNTJhM2E2M2NkNWQzNGNiYjY1NTVhNGJmN2E0MTU",
+  "commit": {
+    "author": {
+      "name": "Mike Bridge",
+      "email": "michael.bridge@preset.io",
+      "date": "2026-11-06T18:33:13Z"
+    },
+    "committer": {
+      "name": "GitHub",
+      "email": "noreply@github.com",
+      "date": "2026-11-06T18:33:13Z"
+    },
+    "message": "fix(chart): include semantic views in datasource filter (#46021)",
+    "tree": {
+      "sha": "befe8c7db438cd4f80882aa9db1d8a80253e08af",
+      "url": "https://api.github.com/repos/apache/superset/git/trees/befe8c7db438cd4f80882aa9db1d8a80253e08af"
+    },
+    "url": "https://api.github.com/repos/apache/superset/git/commits/5abdb20986d52a3a63cd5d34cbb6555a4bf7a415",
+    "comment_count": 0,
+    "verification": {
+      "verified": true,
+      "reason": "valid",
+      "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJq7h1pCRC1aQ7uu5UhlAAAZbgQACniF3SGOfQoyEfoo1C2RzG4\nLaatTKxvCDX+J9mPvvyk7ymiD1Ba2hj12+xTj4ZXA0lY12XoOGn2v1kZlRzbytjr\n33ZTQsBhu+IsW5NXL+zgX/jcXzmf6k+bFdJjgBsyTrt6nCfyVoR8fM+d5Ykt/lae\nBTYWDf0vynzb71u9WFZdcMib3ROkEjCaf5tQ/kI/BNFs0kAuPnfqz599CNdxT7pV\nn1KYzMDXPNdEWZu111uwvucFkeIQbB0PAprSy8317BuycUlXJ7r/+KVeycLHEkas\nxvPtFHdzXkKvCdFvNBPbOoucgqpDRn1421mGA/3kKnKD39K7RSHnS4eSui9ZtBAs\n1jZOCD/K00amU8sz3ctiBqYRZT43q62eVbR5NWOeVnMoh/nuaPAy1KwDFBC3CWpP\nC4Cz6gpT9V3q8zhoPvP8S8o3KPiC+z+crQpSkeo6pyqh8LsyLEt1GK19fLipJq2p\n5mzLT8CZCyzKiXoUjZ6J8V4VB5+BXKrlb/k3ChWDF2uLy58sc55nIkt5bj/FHL07\n+6r02BXaxdhcqPVOWqsFR3mnsZymOTYj+kFVY/eukN77grpR2gu/urB8Ad7ildKx\nRwEuLWrDNywZKKh3iDsLqQq7SAnQ1VJ/pzLcx6wzNr3pybxZzZAOL7ZKEXkaDNes\nILEslSdrj0C39UoBOi0y\n=lfUZ\n-----END PGP SIGNATURE-----\n",
+      "payload": "tree befe8c7db438cd4f80882aa9db1d8a80253e08af\nparent 9ad39c0bff717bbd7069c81f465b3b7055a2d238\nauthor Mike Bridge <michael.bridge@preset.io> 1793989993 -0600\ncommitter GitHub <noreply@github.com> 1793989993 -0300\n\nfix(chart): include semantic views in datasource filter (#46021)",
+      "verified_at": "2026-11-06T18:33:14Z"
+    }
+  },
+  "url": "https://api.github.com/repos/apache/superset/commits/5abdb20986d52a3a63cd5d34cbb6555a4bf7a415",
+  "html_url": "https://github.com/apache/superset/commit/5abdb20986d52a3a63cd5d34cbb6555a4bf7a415",
+  "comments_url": "https://api.github.com/repos/apache/superset/commits/5abdb20986d52a3a63cd5d34cbb6555a4bf7a415/comments",
+  "author": {
+    "login": "mikebridge",
+    "id": 213273,
+    "node_id": "MDQ6VXNlcjIxMzI3Mw==",
+    "avatar_url": "https://avatars.githubusercontent.com/u/213273?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/mikebridge",
+    "html_url": "https://github.com/mikebridge",
+    "followers_url": "https://api.github.com/users/mikebridge/followers",
+    "following_url": "https://api.github.com/users/mikebridge/following{/other_user}",
+    "gists_url": "https://api.github.com/users/mikebridge/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/mikebridge/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/mikebridge/subscriptions",
+    "organizations_url": "https://api.github.com/users/mikebridge/orgs",
+    "repos_url": "https://api.github.com/users/mikebridge/repos",
+    "events_url": "https://api.github.com/users/mikebridge/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/mikebridge/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "committer": {
+    "login": "web-flow",
+    "id": 19864447,
+    "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+    "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/web-flow",
+    "html_url": "https://github.com/web-flow",
+    "followers_url": "https://api.github.com/users/web-flow/followers",
+    "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+    "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+    "organizations_url": "https://api.github.com/users/web-flow/orgs",
+    "repos_url": "https://api.github.com/users/web-flow/repos",
+    "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/web-flow/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "parents": [
+    {
+      "sha": "9ad39c0bff717bbd7069c81f465b3b7055a2d238",
+      "url": "https://api.github.com/repos/apache/superset/commits/9ad39c0bff717bbd7069c81f465b3b7055a2d238",
+      "html_url": "https://github.com/apache/superset/commit/9ad39c0bff717bbd7069c81f465b3b7055a2d238"
+    }
+  ],
+  "stats": {
+    "total": 273,
+    "additions": 268,
+    "deletions": 5
+  },
+  "files": [
+    {
+      "sha": "2c9f056692507bc6691fddc9eb4b4dd786f8d4e5",
+      "filename": "docs/docs/using-superset/creating-your-first-dashboard.mdx",
+      "status": "modified",
+      "additions": 5,
+      "deletions": 0,
+      "changes": 5,
+      "blob_url": "https://github.com/apache/superset/blob/5abdb20986d52a3a63cd5d34cbb6555a4bf7a415/docs%2Fdocs%2Fusing-superset%2Fcreating-your-first-dashboard.mdx",
+      "raw_url": "https://github.com/apache/superset/raw/5abdb20986d52a3a63cd5d34cbb6555a4bf7a415/docs%2Fdocs%2Fusing-superset%2Fcreating-your-first-dashboard.mdx",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/docs%2Fdocs%2Fusing-superset%2Fcreating-your-first-dashboard.mdx?ref=5abdb20986d52a3a63cd5d34cbb6555a4bf7a415",
+      "patch": "@@ -178,6 +178,11 @@ You can also certify metrics if you'd like for your team in this view.\n - [Blog: Unlocking the Power of Virtual Datasets](https://preset.io/blog/unlocking-the-power-of-virtual-datasets-in-apache-superset/)\n   :::\n \n+### Finding charts by semantic view\n+\n+With Semantic Layers enabled, the **Datasource** filter on the Charts list includes\n+semantic views as well as datasets. Select a view to find charts built from it.\n+\n ### Integer precision in semantic views\n \n Semantic-view chart-data responses preserve signed 64-bit integer values even when the same"
+    },
+    {
+      "sha": "387b0762c90f2d47fae1f2ab9f86712488449d9c",
+      "filename": "superset-frontend/src/components/ListView/types.ts",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 0,
+      "changes": 1,
+      "blob_url": "https://github.com/apache/superset/blob/5abdb20986d52a3a63cd5d34cbb6555a4bf7a415/superset-frontend%2Fsrc%2Fcomponents%2FListView%2Ftypes.ts",
+      "raw_url": "https://github.com/apache/superset/raw/5abdb20986d52a3a63cd5d34cbb6555a4bf7a415/superset-frontend%2Fsrc%2Fcomponents%2FListView%2Ftypes.ts",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/superset-frontend%2Fsrc%2Fcomponents%2FListView%2Ftypes.ts?ref=5abdb20986d52a3a63cd5d34cbb6555a4bf7a415",
+      "patch": "@@ -127,6 +127,7 @@ export enum ListViewFilterOperator {\n   NameOrDescription = 'name_or_description',\n   AllText = 'all_text',\n   ChartAllText = 'chart_all_text',\n+  ChartDatasource = 'chart_datasource',\n   DatasetIsNullOrEmpty = 'dataset_is_null_or_empty',\n   Between = 'between',\n   DashboardIsFav = 'dashboard_is_favorite',"
+    },
+    {
+      "sha": "f3b529f56e8b769be35aca714241920f266b2eb6",
+      "filename": "superset-frontend/src/pages/ChartList/ChartList.test.tsx",
+      "status": "modified",
+      "additions": 86,
+      "deletions": 1,
+      "changes": 87,
+      "blob_url": "https://github.com/apache/superset/blob/5abdb20986d52a3a63cd5d34cbb6555a4bf7a415/superset-frontend%2Fsrc%2Fpages%2FChartList%2FChartList.test.tsx",
+      "raw_url": "https://github.com/apache/superset/raw/5abdb20986d52a3a63cd5d34cbb6555a4bf7a415/superset-frontend%2Fsrc%2Fpages%2FChartList%2FChartList.test.tsx",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/superset-frontend%2Fsrc%2Fpages%2FChartList%2FChartList.test.tsx?ref=5abdb20986d52a3a63cd5d34cbb6555a4bf7a415",
+      "patch": "@@ -17,13 +17,15 @@\n  * under the License.\n  */\n import fetchMock from 'fetch-mock';\n+import rison from 'rison';\n import {\n   screen,\n   waitFor,\n   fireEvent,\n+  userEvent,\n   within,\n } from 'spec/helpers/testing-library';\n-import { isFeatureEnabled } from '@superset-ui/core';\n+import { FeatureFlag, isFeatureEnabled } from '@superset-ui/core';\n import {\n   API_ENDPOINTS,\n   mockCharts,\n@@ -318,6 +320,89 @@ describe('ChartList - Global Filter Interactions', () => {\n     });\n   });\n \n+  test('Datasource filter offers semantic views and sends their typed identity', async () => {\n+    (\n+      isFeatureEnabled as jest.MockedFunction<typeof isFeatureEnabled>\n+    ).mockImplementation(flag => flag === FeatureFlag.SemanticLayers);\n+    fetchMock.removeRoutes({ names: [API_ENDPOINTS.CATCH_ALL] });\n+    fetchMock.get('glob:*/api/v1/datasource/?q=*', {\n+      result: [\n+        { id: 7, table_name: 'orders', kind: 'physical' },\n+        { id: 7, table_name: 'orders', kind: 'semantic_view' },\n+      ],\n+      count: 2,\n+    });\n+\n+    renderChartList(mockUser);\n+    await screen.findByTestId('listview-table');\n+    await userEvent.click(findFilterByLabel('Datasource')!);\n+    await userEvent.type(screen.getByPlaceholderText('Search'), 'orders');\n+    await waitFor(() =>\n+      expect(\n+        fetchMock.callHistory.calls().some(call => {\n+          if (!call.url.includes('/api/v1/datasource/?q=')) return false;\n+          const query = rison.decode(\n+            decodeURIComponent(call.url.split('?q=')[1]),\n+          ) as { filters: Array<{ col: string; opr: string; value: string }> };\n+          return query.filters.some(\n+            filter =>\n+              filter.col === 'table_name' &&\n+              filter.opr === 'ct' &&\n+              filter.value === 'orders',\n+          );\n+        }),\n+      ).toBe(true),\n+    );\n+    await waitFor(() =>\n+      expect(\n+        screen.queryAllByRole('option').map(option => option.textContent),\n+      ).toContain('orders (Semantic View)'),\n+    );\n+    const semanticOption = await screen.findByRole('option', {\n+      name: 'orders (Semantic View)',\n+    });\n+    expect(\n+      screen.getByRole('option', { name: 'orders (Dataset)' }),\n+    ).toBeInTheDocument();\n+    await userEvent.click(semanticOption);\n+\n+    await waitFor(() => {\n+      const chartCalls = fetchMock.callHistory\n+        .calls()\n+        .filter(call => call.url.includes('/api/v1/chart/?'));\n+      const query = rison.decode(\n+        decodeURIComponent(chartCalls.at(-1)!.url.split('?q=')[1]),\n+      ) as { filters: Array<{ col: string; opr: string; value: string }> };\n+      expect(query.filters).toContainEqual({\n+        col: 'datasource_id',\n+        opr: 'chart_datasource',\n+        value: '7__semantic_view',\n+      });\n+    });\n+  });\n+\n+  test('Dataset filter keeps the dataset-only endpoint when semantic layers are off', async () => {\n+    (\n+      isFeatureEnabled as jest.MockedFunction<typeof isFeatureEnabled>\n+    ).mockReturnValue(false);\n+    renderChartList(mockUser);\n+    await screen.findByTestId('listview-table');\n+    await userEvent.click(findFilterByLabel('Dataset')!);\n+\n+    await waitFor(() =>\n+      expect(\n+        fetchMock.callHistory\n+          .calls()\n+          .some(call => call.url.includes('/api/v1/dataset/?q=')),\n+      ).toBe(true),\n+    );\n+    expect(\n+      fetchMock.callHistory\n+        .calls()\n+        .some(call => call.url.includes('/api/v1/datasource/?q=')),\n+    ).toBe(false);\n+  });\n+\n   test('renders Tags filter when TAGGING_SYSTEM is enabled', async () => {\n     // Mock feature flag to enable tags\n     ("
+    },
+    {
+      "sha": "9a56f1b08284ac61234f1d03b1af2d56737762bf",
+      "filename": "superset-frontend/src/pages/ChartList/ChartList.testHelpers.tsx",
+      "status": "modified",
+      "additions": 5,
+      "deletions": 1,
+      "changes": 6,
+      "blob_url": "https://github.com/apache/superset/blob/5abdb20986d52a3a63cd5d34cbb6555a4bf7a415/superset-frontend%2Fsrc%2Fpages%2FChartList%2FChartList.testHelpers.tsx",
+      "raw_url": "https://github.com/apache/superset/raw/5abdb20986d52a3a63cd5d34cbb6555a4bf7a415/superset-frontend%2Fsrc%2Fpages%2FChartList%2FChartList.testHelpers.tsx",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/superset-frontend%2Fsrc%2Fpages%2FChartList%2FChartList.testHelpers.tsx?ref=5abdb20986d52a3a63cd5d34cbb6555a4bf7a415",
+      "patch": "@@ -346,5 +346,9 @@ export const setupMocks = (\n     count: 0,\n   });\n \n-  fetchMock.get(API_ENDPOINTS.CATCH_ALL, { result: [], count: 0 });\n+  fetchMock.get(\n+    API_ENDPOINTS.CATCH_ALL,\n+    { result: [], count: 0 },\n+    { name: API_ENDPOINTS.CATCH_ALL },\n+  );\n };"
+    },
+    {
+      "sha": "7fcb9c45ec58422c618695e62b419b1791cce4b5",
+      "filename": "superset-frontend/src/pages/ChartList/index.tsx",
+      "status": "modified",
+      "additions": 22,
+      "deletions": 1,
+      "changes": 23,
+      "blob_url": "https://github.com/apache/superset/blob/5abdb20986d52a3a63cd5d34cbb6555a4bf7a415/superset-frontend%2Fsrc%2Fpages%2FChartList%2Findex.tsx",
+      "raw_url": "https://github.com/apache/superset/raw/5abdb20986d52a3a63cd5d34cbb6555a4bf7a415/superset-frontend%2Fsrc%2Fpages%2FChartList%2Findex.tsx",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/superset-frontend%2Fsrc%2Fpages%2FChartList%2Findex.tsx?ref=5abdb20986d52a3a63cd5d34cbb6555a4bf7a415",
+      "patch": "@@ -96,6 +96,7 @@ import { QueryObjectColumns } from 'src/views/CRUD/types';\n import { WIDER_DROPDOWN_WIDTH } from 'src/components/ListView/utils';\n import { Tag } from 'src/components/Tag';\n import { datasetLabel } from 'src/features/semanticLayers/label';\n+import { fetchDatasourceList } from 'src/features/datasets/fetchDatasourceList';\n import { isUserEditorOrAdmin } from 'src/dashboard/util/permissionUtils';\n import type { CellProps } from 'react-table';\n \n@@ -210,6 +211,24 @@ const createFetchDatasets = async (\n   page: number,\n   pageSize: number,\n ) => {\n+  if (isFeatureEnabled(FeatureFlag.SemanticLayers)) {\n+    const { result, count } = await fetchDatasourceList(\n+      filterValue,\n+      page,\n+      pageSize,\n+    );\n+    return {\n+      data: result.map(({ id, kind, table_name: tableName }) => {\n+        const semanticView = kind === 'semantic_view';\n+        return {\n+          label: `${tableName} (${semanticView ? t('Semantic View') : t('Dataset')})`,\n+          value: `${id}__${semanticView ? 'semantic_view' : 'table'}`,\n+        };\n+      }),\n+      totalCount: count,\n+    };\n+  }\n+\n   // add filters if filterValue\n   const filters = filterValue\n     ? { filters: [{ col: 'table_name', opr: 'sw', value: filterValue }] }\n@@ -837,7 +856,9 @@ function ChartList(props: ChartListProps) {\n         key: 'dataset',\n         id: 'datasource_id',\n         input: 'select',\n-        operator: FilterOperator.Equals,\n+        operator: isFeatureEnabled(FeatureFlag.SemanticLayers)\n+          ? FilterOperator.ChartDatasource\n+          : FilterOperator.Equals,\n         unfilteredLabel: t('All'),\n         fetchSelects: createFetchDatasets,\n         paginate: true,"
+    },
+    {
+      "sha": "2211d2fdc020495316cbb6f1c0ae21c774faec56",
+      "filename": "superset/charts/api.py",
+      "status": "modified",
+      "additions": 2,
+      "deletions": 0,
+      "changes": 2,
+      "blob_url": "https://github.com/apache/superset/blob/5abdb20986d52a3a63cd5d34cbb6555a4bf7a415/superset%2Fcharts%2Fapi.py",
+      "raw_url": "https://github.com/apache/superset/raw/5abdb20986d52a3a63cd5d34cbb6555a4bf7a415/superset%2Fcharts%2Fapi.py",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/superset%2Fcharts%2Fapi.py?ref=5abdb20986d52a3a63cd5d34cbb6555a4bf7a415",
+      "patch": "@@ -53,6 +53,7 @@\n     ChartAllTextFilter,\n     ChartCertifiedFilter,\n     ChartCreatedByMeFilter,\n+    ChartDatasourceFilter,\n     ChartDeletedRecencyFilter,\n     ChartDeletedStateFilter,\n     ChartEditableFilter,\n@@ -381,6 +382,7 @@ def ensure_thumbnails_enabled(self) -> Optional[Response]:\n             ChartOwnedCreatedFavoredByMeFilter,\n         ],\n         \"slice_name\": [ChartAllTextFilter],\n+        \"datasource_id\": [ChartDatasourceFilter],\n         \"created_by\": [ChartHasCreatedByFilter, ChartCreatedByMeFilter],\n         \"tags\": [ChartTagNameFilter, ChartTagIdFilter],\n     }"
+    },
+    {
+      "sha": "6fd7600f433b89d683b79781e01c349485905b03",
+      "filename": "superset/charts/filters.py",
+      "status": "modified",
+      "additions": 40,
+      "deletions": 2,
+      "changes": 42,
+      "blob_url": "https://github.com/apache/superset/blob/5abdb20986d52a3a63cd5d34cbb6555a4bf7a415/superset%2Fcharts%2Ffilters.py",
+      "raw_url": "https://github.com/apache/superset/raw/5abdb20986d52a3a63cd5d34cbb6555a4bf7a415/superset%2Fcharts%2Ffilters.py",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/superset%2Fcharts%2Ffilters.py?ref=5abdb20986d52a3a63cd5d34cbb6555a4bf7a415",
+      "patch": "@@ -14,11 +14,11 @@\n # KIND, either express or implied.  See the License for the\n # specific language governing permissions and limitations\n # under the License.\n-from typing import Any\n+from typing import Any, ClassVar\n \n from flask import current_app\n from flask_babel import lazy_gettext as _\n-from sqlalchemy import and_, or_\n+from sqlalchemy import and_, false, or_\n from sqlalchemy.orm import aliased\n from sqlalchemy.orm.query import Query\n from sqlalchemy.sql.elements import ColumnElement\n@@ -68,6 +68,44 @@ def apply(self, query: Query, value: Any) -> Query:\n         )\n \n \n+class ChartDatasourceFilter(BaseFilter):  # pylint: disable=too-few-public-methods\n+    \"\"\"Match a chart's datasource by both type and ID.\"\"\"\n+\n+    name: ClassVar[str] = _(\"Datasource\")\n+    arg_name: ClassVar[str] = \"chart_datasource\"\n+\n+    def apply(self, query: Query, value: object) -> Query:\n+        \"\"\"Keep malformed identities from widening the chart list.\"\"\"\n+        # Saved Charts URLs used integer dataset IDs before typed identities.\n+        if isinstance(value, int) and not isinstance(value, bool):\n+            value = f\"{value}__table\"\n+        if not isinstance(value, str):\n+            return query.filter(false())\n+\n+        parts: list[str] = value.split(\"__\")\n+        if (\n+            len(parts) != 2\n+            or parts[1] not in {\"table\", \"semantic_view\"}\n+            or not parts[0].isascii()\n+            or not parts[0].isdigit()\n+        ):\n+            return query.filter(false())\n+\n+        try:\n+            datasource_id: int = int(parts[0])\n+        except ValueError:\n+            return query.filter(false())\n+        if datasource_id > 2**63 - 1:\n+            return query.filter(false())\n+\n+        return query.filter(\n+            and_(\n+                self.model.datasource_id == datasource_id,\n+                self.model.datasource_type == parts[1],\n+            )\n+        )\n+\n+\n class ChartFavoriteFilter(BaseFavoriteFilter):  # pylint: disable=too-few-public-methods\n     \"\"\"\n     Custom filter for the GET list that filters all charts that a user has favored"
+    },
+    {
+      "sha": "92ba93f44d39c43d00ec9fb5e252edc023b4a82c",
+      "filename": "tests/unit_tests/charts/test_filters.py",
+      "status": "modified",
+      "additions": 107,
+      "deletions": 0,
+      "changes": 107,
+      "blob_url": "https://github.com/apache/superset/blob/5abdb20986d52a3a63cd5d34cbb6555a4bf7a415/tests%2Funit_tests%2Fcharts%2Ftest_filters.py",
+      "raw_url": "https://github.com/apache/superset/raw/5abdb20986d52a3a63cd5d34cbb6555a4bf7a415/tests%2Funit_tests%2Fcharts%2Ftest_filters.py",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/tests%2Funit_tests%2Fcharts%2Ftest_filters.py?ref=5abdb20986d52a3a63cd5d34cbb6555a4bf7a415",
+      "patch": "@@ -20,9 +20,116 @@\n from typing import Any\n from unittest.mock import MagicMock\n \n+import prison\n import pytest\n+from flask.testing import FlaskClient\n from pytest_mock import MockerFixture\n from sqlalchemy import create_engine\n+from sqlalchemy.orm import Session\n+from werkzeug.test import TestResponse\n+\n+\n+@pytest.mark.parametrize(\"datasource_type\", [\"table\", \"semantic_view\"])\n+def test_chart_datasource_filter_matches_id_and_type(datasource_type: str) -> None:\n+    \"\"\"Same-numbered tables and semantic views must remain distinct.\"\"\"\n+    from superset.charts.filters import ChartDatasourceFilter\n+    from superset.models.slice import Slice\n+\n+    query: MagicMock = MagicMock()\n+    filt: ChartDatasourceFilter = ChartDatasourceFilter.__new__(ChartDatasourceFilter)\n+    filt.model = Slice\n+\n+    filt.apply(query, f\"7__{datasource_type}\")\n+\n+    clause: Any = query.filter.call_args.args[0]\n+    compiled: str = str(\n+        clause.compile(\n+            create_engine(\"sqlite://\"), compile_kwargs={\"literal_binds\": True}\n+        )\n+    )\n+    assert \"datasource_id = 7\" in compiled\n+    assert f\"datasource_type = '{datasource_type}'\" in compiled\n+\n+\n+@pytest.mark.parametrize(\n+    \"identity\",\n+    [\n+        \"7__unknown\",\n+        \"-7__table\",\n+        \"7__table__extra\",\n+        \"99999999999999999999__table\",\n+        None,\n+        True,\n+        -7,\n+        7.0,\n+    ],\n+)\n+def test_chart_datasource_filter_rejects_malformed_identity(identity: object) -> None:\n+    \"\"\"Malformed filter values must not turn into an unfiltered chart list.\"\"\"\n+    from superset.charts.filters import ChartDatasourceFilter\n+    from superset.models.slice import Slice\n+\n+    query: MagicMock = MagicMock()\n+    filt: ChartDatasourceFilter = ChartDatasourceFilter.__new__(ChartDatasourceFilter)\n+    filt.model = Slice\n+\n+    filt.apply(query, identity)\n+\n+    clause: Any = query.filter.call_args.args[0]\n+    compiled: str = str(\n+        clause.compile(\n+            create_engine(\"sqlite://\"), compile_kwargs={\"literal_binds\": True}\n+        )\n+    )\n+    assert compiled == \"0\"\n+\n+\n+@pytest.mark.parametrize(\n+    \"identity, expected\",\n+    [\n+        (7, \"table chart\"),\n+        (\"7__table\", \"table chart\"),\n+        (\"7__semantic_view\", \"semantic chart\"),\n+    ],\n+)\n+def test_chart_list_datasource_identity(\n+    client: FlaskClient,\n+    full_api_access: None,\n+    mocker: MockerFixture,\n+    session: Session,\n+    semantic_layers_enabled: None,\n+    identity: int | str,\n+    expected: str,\n+) -> None:\n+    \"\"\"The registered list operator separates same-ID sources and accepts old links.\"\"\"\n+    # Avoid app-init imports: models and API registration need the app fixture.\n+    from superset.charts.api import ChartRestApi\n+    from superset.models.slice import Slice\n+\n+    mocker.patch.object(ChartRestApi.datamodel, \"_session\", session)\n+    mocker.patch(\n+        \"superset.security_manager.can_access_all_datasources\", return_value=True\n+    )\n+    Slice.metadata.create_all(session.get_bind())\n+    table_chart: Slice = Slice(\n+        slice_name=\"table chart\", datasource_id=7, datasource_type=\"table\"\n+    )\n+    semantic_chart: Slice = Slice(\n+        slice_name=\"semantic chart\", datasource_id=7, datasource_type=\"semantic_view\"\n+    )\n+    session.add_all([table_chart, semantic_chart])\n+    session.flush()\n+    query: str = prison.dumps(\n+        {\n+            \"columns\": [\"id\", \"slice_name\"],\n+            \"filters\": [\n+                {\"col\": \"datasource_id\", \"opr\": \"chart_datasource\", \"value\": identity}\n+            ],\n+        }\n+    )\n+    response: TestResponse = client.get(\"/api/v1/chart/\", query_string={\"q\": query})\n+    assert response.status_code == 200\n+    assert [row[\"slice_name\"] for row in response.json[\"result\"]] == [expected]\n \n \n def test_chart_filter_scopes_guest_to_token_dashboards(mocker: MockerFixture) -> None:"
+    }
+  ]
+}

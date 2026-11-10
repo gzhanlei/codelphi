@@ -1,0 +1,113 @@
+{
+  "sha": "51a71563e17ca032c3a20b30bef5036e5c606d87",
+  "node_id": "C_kwDOAlosUtoAKDUxYTcxNTYzZTE3Y2EwMzJjM2EyMGIzMGJlZjUwMzZlNWM2MDZkODc",
+  "commit": {
+    "author": {
+      "name": "dependabot[bot]",
+      "email": "49699333+dependabot[bot]@users.noreply.github.com",
+      "date": "2026-11-06T18:22:44Z"
+    },
+    "committer": {
+      "name": "GitHub",
+      "email": "noreply@github.com",
+      "date": "2026-11-06T18:22:44Z"
+    },
+    "message": "chore(deps-dev): bump @babel/core from 8.0.9 to 8.0.10 in /superset-embedded-sdk in the babel group across 1 directory (#46051)\n\nSigned-off-by: dependabot[bot] <support@github.com>\nCo-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>",
+    "tree": {
+      "sha": "a1e406e5f8d3bb5d9994751f9ceaa9873cbf0519",
+      "url": "https://api.github.com/repos/apache/superset/git/trees/a1e406e5f8d3bb5d9994751f9ceaa9873cbf0519"
+    },
+    "url": "https://api.github.com/repos/apache/superset/git/commits/51a71563e17ca032c3a20b30bef5036e5c606d87",
+    "comment_count": 0,
+    "verification": {
+      "verified": true,
+      "reason": "valid",
+      "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJq7hr0CRC1aQ7uu5UhlAAAwzoQAF91syTOIqLPRLXnD/shEAHU\n99a+vFqi/OMZ4VwykylA8OJ+0Y5X4jp5NUUknpswlMQZFi9JawUSKnVp6S5mCU4e\nInbNmOQzaoP724Zdf1oXhMVTtiU3sl1ai0dfMOH7wdAmjCvztreUnF9JqjP4nK1l\n8Y2GNfDddvIphiC6zLuoKNs3KFZo6zJI290BB8TFfACTwkRdH6mp7+9H3xy42T9v\nCPi8sqa4kg7n2GEcomAOt6Nk5+jAhx3ePYVgx7RZffRQi27wRgtv2CgE/iGOjTVv\nivXv8J2z7nZHim05tqo+p0HI6PBE3/mkuuBmzzfTxQlRjFTyMsRBefFrN3wVEAd3\nDNNsvQNCW/mujZGacxG0d4qNU3Zgi659xvGB+bTgo/Vc1+4zmeBXqiJROZ7XsOgP\nKt4rcwnRf2gtuDPxfx5NJ51eN0cqM1cUz/lL54Zia/q2XYIGNbEDGfIwnuG2qlG9\nihbqJTNmolmI2s0wWDEJx3pfHotWsRFrhBw1T8KvSR2J9Jp/RQHoletdltkirjtq\nWM3/Jtr5RTfWuxSAIBdwZZRK2yY+oe0lzED4arN7bXxgkS+rwA1rY7B3FCUQm+UP\njpKyuCBA4KNIkNtBLb6nQ3oKLqo3BSLIvvcQZq+9uyegT2E42nHmH4TddhDR00B7\njF2Q56MtyG1v7VvAB/sD\n=FsCd\n-----END PGP SIGNATURE-----\n",
+      "payload": "tree a1e406e5f8d3bb5d9994751f9ceaa9873cbf0519\nparent 3782f325aa9e2a36e367d82a846f0ed89909c947\nauthor dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> 1793989364 -0800\ncommitter GitHub <noreply@github.com> 1793989364 -0800\n\nchore(deps-dev): bump @babel/core from 8.0.9 to 8.0.10 in /superset-embedded-sdk in the babel group across 1 directory (#46051)\n\nSigned-off-by: dependabot[bot] <support@github.com>\nCo-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>",
+      "verified_at": "2026-11-06T18:22:44Z"
+    }
+  },
+  "url": "https://api.github.com/repos/apache/superset/commits/51a71563e17ca032c3a20b30bef5036e5c606d87",
+  "html_url": "https://github.com/apache/superset/commit/51a71563e17ca032c3a20b30bef5036e5c606d87",
+  "comments_url": "https://api.github.com/repos/apache/superset/commits/51a71563e17ca032c3a20b30bef5036e5c606d87/comments",
+  "author": {
+    "login": "dependabot[bot]",
+    "id": 49699333,
+    "node_id": "MDM6Qm90NDk2OTkzMzM=",
+    "avatar_url": "https://avatars.githubusercontent.com/in/29110?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/dependabot%5Bbot%5D",
+    "html_url": "https://github.com/apps/dependabot",
+    "followers_url": "https://api.github.com/users/dependabot%5Bbot%5D/followers",
+    "following_url": "https://api.github.com/users/dependabot%5Bbot%5D/following{/other_user}",
+    "gists_url": "https://api.github.com/users/dependabot%5Bbot%5D/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/dependabot%5Bbot%5D/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/dependabot%5Bbot%5D/subscriptions",
+    "organizations_url": "https://api.github.com/users/dependabot%5Bbot%5D/orgs",
+    "repos_url": "https://api.github.com/users/dependabot%5Bbot%5D/repos",
+    "events_url": "https://api.github.com/users/dependabot%5Bbot%5D/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/dependabot%5Bbot%5D/received_events",
+    "type": "Bot",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "committer": {
+    "login": "web-flow",
+    "id": 19864447,
+    "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+    "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/web-flow",
+    "html_url": "https://github.com/web-flow",
+    "followers_url": "https://api.github.com/users/web-flow/followers",
+    "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+    "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+    "organizations_url": "https://api.github.com/users/web-flow/orgs",
+    "repos_url": "https://api.github.com/users/web-flow/repos",
+    "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/web-flow/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "parents": [
+    {
+      "sha": "3782f325aa9e2a36e367d82a846f0ed89909c947",
+      "url": "https://api.github.com/repos/apache/superset/commits/3782f325aa9e2a36e367d82a846f0ed89909c947",
+      "html_url": "https://github.com/apache/superset/commit/3782f325aa9e2a36e367d82a846f0ed89909c947"
+    }
+  ],
+  "stats": {
+    "total": 64,
+    "additions": 32,
+    "deletions": 32
+  },
+  "files": [
+    {
+      "sha": "332bf4b9afb961ff731aa323042b1229e4306ad5",
+      "filename": "superset-embedded-sdk/package-lock.json",
+      "status": "modified",
+      "additions": 31,
+      "deletions": 31,
+      "changes": 62,
+      "blob_url": "https://github.com/apache/superset/blob/51a71563e17ca032c3a20b30bef5036e5c606d87/superset-embedded-sdk%2Fpackage-lock.json",
+      "raw_url": "https://github.com/apache/superset/raw/51a71563e17ca032c3a20b30bef5036e5c606d87/superset-embedded-sdk%2Fpackage-lock.json",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/superset-embedded-sdk%2Fpackage-lock.json?ref=51a71563e17ca032c3a20b30bef5036e5c606d87",
+      "patch": "@@ -14,7 +14,7 @@\n       },\n       \"devDependencies\": {\n         \"@babel/cli\": \"^8.1.0\",\n-        \"@babel/core\": \"^8.0.9\",\n+        \"@babel/core\": \"^8.0.10\",\n         \"@babel/preset-env\": \"^8.0.7\",\n         \"@babel/preset-typescript\": \"^8.0.7\",\n         \"@types/node\": \"^26.6.6\",\n@@ -109,20 +109,20 @@\n       }\n     },\n     \"node_modules/@babel/core\": {\n-      \"version\": \"8.0.9\",\n-      \"resolved\": \"https://registry.npmjs.org/@babel/core/-/core-8.0.9.tgz\",\n-      \"integrity\": \"sha512-wXtyKlpR/pXf/u0vmib+OBakQaIzLglLcRoKpWxCHW/whqq7YfQYPD0IAAl9H/evi40MyLIjYYdvb6N+9DI2yA==\",\n+      \"version\": \"8.0.10\",\n+      \"resolved\": \"https://registry.npmjs.org/@babel/core/-/core-8.0.10.tgz\",\n+      \"integrity\": \"sha512-T6dEcoMJ3L1hyLuNfRXcVlqQrN79kU/SB5bDygVgQNIOUgStdyEGzigtRA9K+9Coh7SZUSt543oWRBxvqYdyuQ==\",\n       \"dev\": true,\n       \"license\": \"MIT\",\n       \"dependencies\": {\n         \"@babel/code-frame\": \"^8.0.6\",\n-        \"@babel/generator\": \"^8.0.6\",\n+        \"@babel/generator\": \"^8.0.10\",\n         \"@babel/helper-compilation-targets\": \"^8.0.7\",\n-        \"@babel/helpers\": \"^8.0.8\",\n-        \"@babel/parser\": \"^8.0.8\",\n+        \"@babel/helpers\": \"^8.0.10\",\n+        \"@babel/parser\": \"^8.0.10\",\n         \"@babel/template\": \"^8.0.0\",\n-        \"@babel/traverse\": \"^8.0.7\",\n-        \"@babel/types\": \"^8.0.8\",\n+        \"@babel/traverse\": \"^8.0.10\",\n+        \"@babel/types\": \"^8.0.10\",\n         \"@types/gensync\": \"^1.0.5\",\n         \"convert-source-map\": \"^2.0.0\",\n         \"empathic\": \"^2.0.1\",\n@@ -141,14 +141,14 @@\n       }\n     },\n     \"node_modules/@babel/generator\": {\n-      \"version\": \"8.0.6\",\n-      \"resolved\": \"https://registry.npmjs.org/@babel/generator/-/generator-8.0.6.tgz\",\n-      \"integrity\": \"sha512-/pcanjdRsonCexCuxgGD8fKnBLLzk2i9uM4kmcmGyyev2R5YDs+rafMYZ89RvaGY1mW8T7C5au0TyYaEeHBGng==\",\n+      \"version\": \"8.0.10\",\n+      \"resolved\": \"https://registry.npmjs.org/@babel/generator/-/generator-8.0.10.tgz\",\n+      \"integrity\": \"sha512-iC9p3U4Y3vp0qKjRcfFeNzpj+kkK8BVYZTbQepBWVD7vOBLH6ji0drNzKPTPtumFd2w2r/hbEKYjG4pscKa4bg==\",\n       \"dev\": true,\n       \"license\": \"MIT\",\n       \"dependencies\": {\n-        \"@babel/parser\": \"^8.0.6\",\n-        \"@babel/types\": \"^8.0.6\",\n+        \"@babel/parser\": \"^8.0.10\",\n+        \"@babel/types\": \"^8.0.10\",\n         \"@jridgewell/gen-mapping\": \"0.4.0-beta.0\",\n         \"@jridgewell/trace-mapping\": \"^0.3.31\",\n         \"@types/jsesc\": \"^2.5.0\",\n@@ -435,27 +435,27 @@\n       }\n     },\n     \"node_modules/@babel/helpers\": {\n-      \"version\": \"8.0.8\",\n-      \"resolved\": \"https://registry.npmjs.org/@babel/helpers/-/helpers-8.0.8.tgz\",\n-      \"integrity\": \"sha512-FBmhiDWs625wHg03OKiLQDeT6LOc2lWBbW97Yqs2iI1tZcucjpmYnO29NHsQ83XxKvredcvUymW/AAn2UtnakA==\",\n+      \"version\": \"8.0.10\",\n+      \"resolved\": \"https://registry.npmjs.org/@babel/helpers/-/helpers-8.0.10.tgz\",\n+      \"integrity\": \"sha512-tBG9yuaR26JJWFafcl/Dk4eib6bkRJ9H5e6lENcwZqFudA9ImNCuMXLjB3/t+Ub7/DOZv2Rmi5LCOi8q2DCekQ==\",\n       \"dev\": true,\n       \"license\": \"MIT\",\n       \"dependencies\": {\n         \"@babel/template\": \"^8.0.0\",\n-        \"@babel/types\": \"^8.0.8\"\n+        \"@babel/types\": \"^8.0.10\"\n       },\n       \"engines\": {\n         \"node\": \"^22.18.0 || >=24.11.0\"\n       }\n     },\n     \"node_modules/@babel/parser\": {\n-      \"version\": \"8.0.8\",\n-      \"resolved\": \"https://registry.npmjs.org/@babel/parser/-/parser-8.0.8.tgz\",\n-      \"integrity\": \"sha512-Gq65JogAr0S2p0BzvfSJboyuiRnxDQApyOqHkKmkrvm+VlLK4gC3pKsiOKEdnhFBemrFbSnOu90mZZWDpiJnmQ==\",\n+      \"version\": \"8.0.10\",\n+      \"resolved\": \"https://registry.npmjs.org/@babel/parser/-/parser-8.0.10.tgz\",\n+      \"integrity\": \"sha512-h+ah2Kg0ne1Vii892dShj9gky9I5jPzkd8x4s/3xgN/P2bMWmHS3qq59tum3mCVjCBXI8uqfYyYtrfp1Mz6+1w==\",\n       \"dev\": true,\n       \"license\": \"MIT\",\n       \"dependencies\": {\n-        \"@babel/types\": \"^8.0.8\"\n+        \"@babel/types\": \"^8.0.10\"\n       },\n       \"bin\": {\n         \"parser\": \"bin/babel-parser.js\"\n@@ -1582,28 +1582,28 @@\n       }\n     },\n     \"node_modules/@babel/traverse\": {\n-      \"version\": \"8.0.7\",\n-      \"resolved\": \"https://registry.npmjs.org/@babel/traverse/-/traverse-8.0.7.tgz\",\n-      \"integrity\": \"sha512-bVV0brinsTWgc6ptSIoQo3GbITtl0VZAqEUJbHHcyfDPEu+q/fEvlYEa+6H85HoK8IdksKBFtKJbJFZ6Kff+zg==\",\n+      \"version\": \"8.0.10\",\n+      \"resolved\": \"https://registry.npmjs.org/@babel/traverse/-/traverse-8.0.10.tgz\",\n+      \"integrity\": \"sha512-t5DaGzMi9WlhMSFT2YavI8gl8yGihoQymSQUkIq9+MUh5tO3Vx9KHwr5gMCzeBdYkvs00xNvr18PxtQTRayucA==\",\n       \"dev\": true,\n       \"license\": \"MIT\",\n       \"dependencies\": {\n         \"@babel/code-frame\": \"^8.0.6\",\n-        \"@babel/generator\": \"^8.0.6\",\n+        \"@babel/generator\": \"^8.0.10\",\n         \"@babel/helper-globals\": \"^8.0.6\",\n-        \"@babel/parser\": \"^8.0.7\",\n+        \"@babel/parser\": \"^8.0.10\",\n         \"@babel/template\": \"^8.0.0\",\n-        \"@babel/types\": \"^8.0.6\",\n+        \"@babel/types\": \"^8.0.10\",\n         \"obug\": \"^3.0.0\"\n       },\n       \"engines\": {\n         \"node\": \"^22.18.0 || >=24.11.0\"\n       }\n     },\n     \"node_modules/@babel/types\": {\n-      \"version\": \"8.0.8\",\n-      \"resolved\": \"https://registry.npmjs.org/@babel/types/-/types-8.0.8.tgz\",\n-      \"integrity\": \"sha512-iXSSZAKQWmaeAwGtFw10v9fg5hUiUs0L+w+Z2K11kym3pDNK+SF0VcAQPsEFvWcTSZ7LMgClMXDBvTbH0IlICg==\",\n+      \"version\": \"8.0.10\",\n+      \"resolved\": \"https://registry.npmjs.org/@babel/types/-/types-8.0.10.tgz\",\n+      \"integrity\": \"sha512-KV8Y+teoRsmXeEPS4sCJY1kwV+hcPzHP1qQqgCxrjKOehLdBaxpsFBfoJ8MXWFV80y6Jw56+TM95wR0Per8dYw==\",\n       \"dev\": true,\n       \"license\": \"MIT\",\n       \"dependencies\": {"
+    },
+    {
+      "sha": "378f5c12367bb19c4d37e44b6b9fe19f1ceb38d2",
+      "filename": "superset-embedded-sdk/package.json",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "changes": 2,
+      "blob_url": "https://github.com/apache/superset/blob/51a71563e17ca032c3a20b30bef5036e5c606d87/superset-embedded-sdk%2Fpackage.json",
+      "raw_url": "https://github.com/apache/superset/raw/51a71563e17ca032c3a20b30bef5036e5c606d87/superset-embedded-sdk%2Fpackage.json",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/superset-embedded-sdk%2Fpackage.json?ref=51a71563e17ca032c3a20b30bef5036e5c606d87",
+      "patch": "@@ -38,7 +38,7 @@\n   },\n   \"devDependencies\": {\n     \"@babel/cli\": \"^8.1.0\",\n-    \"@babel/core\": \"^8.0.9\",\n+    \"@babel/core\": \"^8.0.10\",\n     \"@babel/preset-env\": \"^8.0.7\",\n     \"@babel/preset-typescript\": \"^8.0.7\",\n     \"@types/node\": \"^26.6.6\","
+    }
+  ]
+}

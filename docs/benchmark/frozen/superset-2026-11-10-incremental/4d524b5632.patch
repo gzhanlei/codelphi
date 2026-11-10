@@ -1,0 +1,713 @@
+==FILE== docs/docs/using-superset/version-history.mdx
+@@ -286,6 +286,13 @@ respects.
+ 
+ ## Restoring a version
+ 
++Before a dashboard restore, the confirmation dialog counts current member charts
++that were not members of the selected version. It warns that restoring will
++remove those charts from the dashboard, without deleting the charts themselves.
++The count includes archived and unplaced members, reflects membership when the
++dialog checks it, and may change if another user edits the dashboard before you
++confirm. If the check fails, the dialog warns that the removal count is unknown.
++
+ **Restore** rewrites the entity back to the selected version. Two things are
+ worth knowing:
+ 
+==FILE== docs/static/resources/openapi.json
+@@ -22012,6 +22012,15 @@
+               "format": "uuid",
+               "type": "string"
+             }
++          },
++          {
++            "description": "Include the current count of charts a restore would detach",
++            "in": "query",
++            "name": "include_restore_impact",
++            "schema": {
++              "default": false,
++              "type": "boolean"
++            }
+           }
+         ],
+         "responses": {
+@@ -22023,6 +22032,16 @@
+                     "result": {
+                       "description": "The dashboard's scalar fields at the target version (entity-specific keys), plus a `_version` block with the version-level metadata.",
+                       "properties": {
++                        "_restore_impact": {
++                          "description": "Current membership impact when requested",
++                          "properties": {
++                            "removed_chart_count": {
++                              "minimum": 0,
++                              "type": "integer"
++                            }
++                          },
++                          "type": "object"
++                        },
+                         "_version": {
+                           "$ref": "#/components/schemas/VersionListItemSchema"
+                         }
+==FILE== superset-frontend/src/features/versionHistory/RestoreConfirmModal.test.tsx
+@@ -0,0 +1,152 @@
++/**
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ *
++ *   http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing,
++ * software distributed under the License is distributed on an
++ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
++ * KIND, either express or implied.  See the License for the
++ * specific language governing permissions and limitations
++ * under the License.
++ */
++import { act, render, screen, waitFor } from 'spec/helpers/testing-library';
++import RestoreConfirmModal from './RestoreConfirmModal';
++import { fetchDashboardRestoreRemovalCount } from './api';
++
++jest.mock('./api', () => ({ fetchDashboardRestoreRemovalCount: jest.fn() }));
++const fetchCount = jest.mocked(fetchDashboardRestoreRemovalCount);
++const target = {
++  versionUuid: 'saved',
++  headline: 'Earlier version',
++  issuedAt: '2026-07-01T00:00:00Z',
++};
++const props = {
++  entityType: 'dashboard' as const,
++  entityUuid: 'dashboard',
++  target,
++  isRestoring: false,
++  onCancel: jest.fn(),
++  onConfirm: jest.fn(),
++};
++beforeEach(() => {
++  jest.clearAllMocks();
++});
++
++test('warns with the number of charts removed from the dashboard, not deleted', async () => {
++  fetchCount.mockResolvedValue(2);
++  render(<RestoreConfirmModal {...props} />);
++  expect(
++    await screen.findByText(
++      'Restoring will remove 2 charts added after this version from this dashboard. The charts themselves will not be deleted.',
++    ),
++  ).toBeInTheDocument();
++  expect(fetchCount).toHaveBeenCalledWith('dashboard', 'saved');
++});
++
++test('does not warn when no current members will be removed', async () => {
++  fetchCount.mockResolvedValue(0);
++  render(<RestoreConfirmModal {...props} />);
++  await waitFor(() =>
++    expect(
++      screen.getByRole('button', { name: 'Restore this version' }),
++    ).toBeEnabled(),
++  );
++  expect(screen.queryByText(/Restoring will remove/)).not.toBeInTheDocument();
++});
++
++test('does not request dashboard membership for a chart restore', () => {
++  render(<RestoreConfirmModal {...props} entityType="chart" />);
++  expect(fetchCount).not.toHaveBeenCalled();
++  expect(screen.queryByText(/Restoring will remove/)).not.toBeInTheDocument();
++});
++
++test('waits for the count before enabling confirmation', async () => {
++  let finish: (count: number) => void = () => {};
++  fetchCount.mockReturnValue(
++    new Promise(resolve => {
++      finish = resolve;
++    }),
++  );
++  render(<RestoreConfirmModal {...props} />);
++  expect(
++    screen.getByRole('button', { name: 'Restore this version' }),
++  ).toBeDisabled();
++  await act(async () => {
++    finish(1);
++  });
++  expect(
++    screen.getByText(
++      'Restoring will remove 1 chart added after this version from this dashboard. The chart itself will not be deleted.',
++    ),
++  ).toBeInTheDocument();
++  expect(
++    screen.getByRole('button', { name: 'Restore this version' }),
++  ).toBeEnabled();
++});
++
++test('warns that removal could not be checked when the read fails', async () => {
++  fetchCount.mockRejectedValue(new Error('unavailable'));
++  render(<RestoreConfirmModal {...props} />);
++  expect(
++    await screen.findByText(
++      'Could not check which charts will be removed. Restoring may remove charts added after this version.',
++    ),
++  ).toBeInTheDocument();
++  expect(
++    screen.getByRole('button', { name: 'Restore this version' }),
++  ).toBeEnabled();
++});
++
++test('ignores a late response for the previous target', async () => {
++  let finishOld: (count: number) => void = () => {};
++  fetchCount
++    .mockReturnValueOnce(
++      new Promise(resolve => {
++        finishOld = resolve;
++      }),
++    )
++    .mockResolvedValueOnce(0);
++  const { rerender } = render(<RestoreConfirmModal {...props} />);
++  rerender(
++    <RestoreConfirmModal
++      {...props}
++      target={{ ...target, versionUuid: 'different' }}
++    />,
++  );
++  await waitFor(() =>
++    expect(
++      screen.getByRole('button', { name: 'Restore this version' }),
++    ).toBeEnabled(),
++  );
++  await act(async () => {
++    finishOld(99);
++  });
++  expect(
++    screen.getByRole('button', { name: 'Restore this version' }),
++  ).toBeEnabled();
++  expect(screen.queryByText(/Restoring will remove/)).not.toBeInTheDocument();
++});
++
++test('checks membership again when the same target is reopened', async () => {
++  fetchCount.mockResolvedValueOnce(2).mockResolvedValueOnce(0);
++  const { rerender } = render(<RestoreConfirmModal {...props} />);
++  expect(
++    await screen.findByText(/Restoring will remove 2 chart/),
++  ).toBeInTheDocument();
++  rerender(<RestoreConfirmModal {...props} target={null} />);
++  rerender(<RestoreConfirmModal {...props} />);
++  await waitFor(() =>
++    expect(
++      screen.getByRole('button', { name: 'Restore this version' }),
++    ).toBeEnabled(),
++  );
++  expect(fetchCount).toHaveBeenCalledTimes(2);
++  expect(screen.queryByText(/Restoring will remove/)).not.toBeInTheDocument();
++});
+==FILE== superset-frontend/src/features/versionHistory/RestoreConfirmModal.tsx
+@@ -16,14 +16,17 @@
+  * specific language governing permissions and limitations
+  * under the License.
+  */
+-import { t } from '@apache-superset/core/translation';
++import { useEffect, useState } from 'react';
++import { t, tn } from '@apache-superset/core/translation';
+ import { Modal } from '@superset-ui/core/components';
+ import type { VersionedEntityType } from './types';
+ import type { VersionActionTarget } from './useVersionActions';
+ import { formatVersionDateTime } from './display';
++import { fetchDashboardRestoreRemovalCount } from './api';
+ 
+ export interface RestoreConfirmModalProps {
+   entityType: VersionedEntityType;
++  entityUuid?: string;
+   target: VersionActionTarget | null;
+   isRestoring: boolean;
+   onCancel: () => void;
+@@ -32,11 +35,39 @@ export interface RestoreConfirmModalProps {
+ 
+ export default function RestoreConfirmModal({
+   entityType,
++  entityUuid,
+   target,
+   isRestoring,
+   onCancel,
+   onConfirm,
+ }: RestoreConfirmModalProps) {
++  const versionUuid = target?.versionUuid;
++  const requestKey = `${entityUuid}/${versionUuid}`;
++  const [impact, setImpact] = useState<{
++    key: string;
++    count: number | null;
++  } | null>(null);
++  const needsImpact =
++    entityType === 'dashboard' && !!entityUuid && !!versionUuid;
++  const isChecking = needsImpact && impact?.key !== requestKey;
++  useEffect(() => {
++    if (!needsImpact || !entityUuid || !versionUuid) {
++      setImpact(null);
++      return undefined;
++    }
++    let active = true;
++    fetchDashboardRestoreRemovalCount(entityUuid, versionUuid).then(
++      count => {
++        if (active) setImpact({ key: requestKey, count });
++      },
++      () => {
++        if (active) setImpact({ key: requestKey, count: null });
++      },
++    );
++    return () => {
++      active = false;
++    };
++  }, [entityUuid, versionUuid, needsImpact, requestKey]);
+   if (!target) {
+     return null;
+   }
+@@ -50,6 +81,7 @@ export default function RestoreConfirmModal({
+       responsive={false}
+       primaryButtonName={t('Restore this version')}
+       primaryButtonLoading={isRestoring}
++      disablePrimaryButton={isChecking}
+       onHandledPrimaryAction={onConfirm}
+       name="restore-version-modal"
+     >
+@@ -58,6 +90,27 @@ export default function RestoreConfirmModal({
+           ? t('This chart will be restored to the following version:')
+           : t('This dashboard will be restored to the following version:')}
+       </p>
++      {isChecking && <p>{t('Checking which charts will be removed…')}</p>}
++      {needsImpact && !isChecking && impact?.count === null && (
++        <p role="alert">
++          {t(
++            'Could not check which charts will be removed. Restoring may remove charts added after this version.',
++          )}
++        </p>
++      )}
++      {needsImpact &&
++        !isChecking &&
++        impact?.count != null &&
++        impact.count > 0 && (
++          <p role="alert">
++            {tn(
++              'Restoring will remove %s chart added after this version from this dashboard. The chart itself will not be deleted.',
++              'Restoring will remove %s charts added after this version from this dashboard. The charts themselves will not be deleted.',
++              impact.count,
++              impact.count,
++            )}
++          </p>
++        )}
+       <p data-test="restore-version-name">
+         <strong>{target.headline}</strong>
+         {dateLabel !== target.headline && <> · {dateLabel}</>}
+==FILE== superset-frontend/src/features/versionHistory/api.test.ts
+@@ -21,6 +21,7 @@ import {
+   createChartFromSnapshot,
+   createDashboardFromSnapshot,
+   fetchActivity,
++  fetchDashboardRestoreRemovalCount,
+ } from './api';
+ import type {
+   ChartVersionSnapshot,
+@@ -231,3 +232,53 @@ test('createChartFromSnapshot rejects a version with no viz type or dataset', as
+   ).rejects.toThrow(/does not record a visualization type and dataset/);
+   expect(fetchMock.callHistory.calls('glob:*/api/v1/chart/')).toHaveLength(0);
+ });
++
++test.each([0, 2])(
++  'fetches the current restore removal count: %s',
++  async count => {
++    const endpoint =
++      'glob:*/api/v1/dashboard/dash/versions/saved/?include_restore_impact=true';
++    fetchMock.get(endpoint, {
++      result: { _restore_impact: { removed_chart_count: count } },
++    });
++    await expect(
++      fetchDashboardRestoreRemovalCount('dash', 'saved'),
++    ).resolves.toBe(count);
++  },
++);
++
++test.each([undefined, null, '2', -1, 1.5])(
++  'rejects an invalid restore count: %s',
++  async count => {
++    fetchMock.get(
++      'glob:*/api/v1/dashboard/dash/versions/saved/?include_restore_impact=true',
++      {
++        result: { _restore_impact: { removed_chart_count: count } },
++      },
++    );
++    await expect(
++      fetchDashboardRestoreRemovalCount('dash', 'saved'),
++    ).rejects.toThrow('Invalid restore impact response');
++  },
++);
++
++test('bounds a stalled restore-impact request so confirmation can recover', async () => {
++  jest.useFakeTimers();
++  try {
++    fetchMock.get(
++      'glob:*/api/v1/dashboard/dash/versions/saved/?include_restore_impact=true',
++      () => new Promise(() => {}),
++    );
++    let failure: unknown;
++    const request = fetchDashboardRestoreRemovalCount('dash', 'saved').catch(
++      error => {
++        failure = error;
++      },
++    );
++    await jest.advanceTimersByTimeAsync(10000);
++    expect(failure).toMatchObject({ statusText: 'timeout' });
++    await request;
++  } finally {
++    jest.useRealTimers();
++  }
++});
+==FILE== superset-frontend/src/features/versionHistory/api.ts
+@@ -105,6 +105,22 @@ export async function fetchVersionSnapshot(
+   return (json as { result: VersionSnapshot }).result;
+ }
+ 
++/** Read-only advisory count; no chart names or IDs are returned. */
++export async function fetchDashboardRestoreRemovalCount(
++  uuid: string,
++  versionUuid: string,
++): Promise<number> {
++  const { json } = await SupersetClient.get({
++    endpoint: `/api/v1/dashboard/${encodeURIComponent(uuid)}/versions/${encodeURIComponent(versionUuid)}/?include_restore_impact=true`,
++    timeout: 10000,
++  });
++  const count: unknown = json.result?._restore_impact?.removed_chart_count;
++  if (typeof count !== 'number' || !Number.isInteger(count) || count < 0) {
++    throw new Error('Invalid restore impact response');
++  }
++  return count;
++}
++
+ export async function restoreVersion(
+   entityType: VersionedEntityType,
+   uuid: string,
+==FILE== superset-frontend/src/features/versionHistory/useVersionActions.tsx
+@@ -312,7 +312,9 @@ export function useVersionActions(
+ 
+   const restoreModal = (
+     <RestoreConfirmModal
++      key={`${entityType}:${uuid}:${restoreTarget?.versionUuid ?? ''}`}
+       entityType={entityType}
++      entityUuid={uuid}
+       target={restoreTarget}
+       isRestoring={isRestoring}
+       onCancel={cancelRestore}
+==FILE== superset/dashboards/api.py
+@@ -3649,6 +3649,12 @@ def get_version(self, uuid_str: str, version_uuid_str: str) -> Response:
+               format: uuid
+             name: version_uuid_str
+             description: Version UUID as returned by the list endpoint
++          - in: query
++            name: include_restore_impact
++            schema:
++              type: boolean
++              default: false
++            description: Include the current count of charts a restore would detach
+           responses:
+             200:
+               description: Snapshot of the dashboard at the target version
+@@ -3664,6 +3670,13 @@ def get_version(self, uuid_str: str, version_uuid_str: str) -> Response:
+                           (entity-specific keys), plus a `_version` block
+                           with the version-level metadata.
+                         properties:
++                          _restore_impact:
++                            type: object
++                            description: Current membership impact when requested
++                            properties:
++                              removed_chart_count:
++                                type: integer
++                                minimum: 0
+                           _version:
+                             $ref: '#/components/schemas/VersionListItemSchema'
+             400:
+@@ -3675,7 +3688,13 @@ def get_version(self, uuid_str: str, version_uuid_str: str) -> Response:
+             404:
+               $ref: '#/components/responses/404'
+         """
+-        return get_version_endpoint(self, Dashboard, uuid_str, version_uuid_str)
++        return get_version_endpoint(
++            self,
++            Dashboard,
++            uuid_str,
++            version_uuid_str,
++            include_restore_impact=request.args.get("include_restore_impact") == "true",
++        )
+ 
+     @expose("/<uuid_str>/activity/", methods=("GET",))
+     @protect()
+==FILE== superset/translations/messages.pot
+@@ -3420,6 +3420,9 @@ msgstr ""
+ msgid "Checking for affected charts and dashboards…"
+ msgstr ""
+ 
++msgid "Checking which charts will be removed…"
++msgstr ""
++
+ msgid "Checks up to 50 rows per selected partition. Sampling cannot verify every row or future ingestion."
+ msgstr ""
+ 
+@@ -4307,6 +4310,9 @@ msgstr ""
+ msgid "Could not check which charts and dashboards depend on the selected %s. Deleting them may break charts and dashboards."
+ msgstr ""
+ 
++msgid "Could not check which charts will be removed. Restoring may remove charts added after this version."
++msgstr ""
++
+ #, python-format
+ msgid "Could not connect to database: \"%(database)s\""
+ msgstr ""
+@@ -11824,6 +11830,12 @@ msgstr ""
+ msgid "Restoring creates a new version. Your existing version history will not be lost."
+ msgstr ""
+ 
++#, python-format
++msgid "Restoring will remove %s chart added after this version from this dashboard. The chart itself will not be deleted."
++msgid_plural "Restoring will remove %s charts added after this version from this dashboard. The charts themselves will not be deleted."
++msgstr[0] ""
++msgstr[1] ""
++
+ msgid "Results"
+ msgstr ""
+ 
+==FILE== superset/versioning/api_helpers.py
+@@ -446,6 +446,8 @@ def get_version_endpoint(
+     model_cls: type[Model],
+     uuid_str: str,
+     version_uuid_str: str,
++    *,
++    include_restore_impact: bool = False,
+ ) -> Response:
+     """Body of ``GET /api/v1/{resource}/<uuid>/versions/<version_uuid>/``."""
+     try:
+@@ -469,17 +471,31 @@ def get_version_endpoint(
+             version_uuid,
+         )
+         return api.response_404()
++    if include_restore_impact:
++        # Defer model imports until the app has initialized.
++        from superset.models.dashboard import Dashboard
++        from superset.versioning.membership import dashboard_restore_removal_count
++
++        if model_cls is Dashboard:
++            snapshot["_restore_impact"] = {
++                "removed_chart_count": dashboard_restore_removal_count(
++                    entity.id, snapshot["_version"]["transaction_id"]
++                )
++            }
+     # Normalize the version-level block through the schema; the entity
+     # scalar fields stay as the DAO shaped them (their keys are
+     # entity-specific by design).
+     if "_version" in snapshot:
+         snapshot["_version"] = _version_item_schema.dump(snapshot["_version"])
+-    return set_version_etag_by_uuid(
++    response: Response = set_version_etag_by_uuid(
+         api.response(200, result=snapshot),
+         model_cls,
+         entity_uuid,
+         entity_id=entity.id,
+     )
++    if include_restore_impact:
++        response.cache_control.no_store = True
++    return response
+ 
+ 
+ def restore_version_endpoint(
+==FILE== superset/versioning/membership.py
+@@ -100,3 +100,28 @@ def chart_attachment_windows_for_dashboard(
+         .all()
+     )
+     return attachment_windows([(row[0], row[1], row[2]) for row in rows])
++
++
++def dashboard_restore_removal_count(dashboard_id: int, transaction_id: int) -> int:
++    """Count current associations absent at the target, without reading names.
++
++    Use the same attachment windows as restore, not the layout: archived or
++    unplaced members still belong to the dashboard and can be detached.
++    This is advisory; membership may change before the user confirms.
++    """
++    # Defer the model graph until the app has initialized.
++    from superset.models.dashboard import dashboard_slices
++
++    target_ids: set[int] = {
++        chart_id
++        for chart_id, window in chart_attachment_windows_for_dashboard(dashboard_id)
++        if window.contains(transaction_id)
++    }
++    current_ids: set[int] = set(
++        db.session.execute(
++            sa.select(dashboard_slices.c.slice_id).where(
++                dashboard_slices.c.dashboard_id == dashboard_id
++            )
++        ).scalars()
++    )
++    return len(current_ids - target_ids)
+==FILE== tests/unit_tests/versioning/test_restore_warning.py
+@@ -0,0 +1,164 @@
++# Licensed to the Apache Software Foundation (ASF) under one
++# or more contributor license agreements.  See the NOTICE file
++# distributed with this work for additional information
++# regarding copyright ownership.  The ASF licenses this file
++# to you under the Apache License, Version 2.0 (the
++# "License"); you may not use this file except in compliance
++# with the License.  You may obtain a copy of the License at
++#
++#   http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing,
++# software distributed under the License is distributed on an
++# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
++# KIND, either express or implied.  See the License for the
++# specific language governing permissions and limitations
++# under the License.
++
++"""Restore membership warning counts."""
++
++from __future__ import annotations
++
++from unittest.mock import MagicMock
++
++import pytest
++from pytest_mock import MockerFixture
++
++from superset.versioning.activity.kinds import Window
++
++
++@pytest.mark.parametrize(("transaction_id", "expected"), [(5, 2), (10, 1), (20, 2)])
++def test_restore_removal_count_uses_membership_windows(
++    mocker: MockerFixture, transaction_id: int, expected: int
++) -> None:
++    """Count current members absent at the target, including detach/re-attach."""
++    from superset.versioning.membership import dashboard_restore_removal_count
++
++    session: MagicMock = mocker.patch("superset.versioning.membership.db.session")
++    session.execute.return_value.scalars.return_value = [1, 2, 3]
++    mocker.patch(
++        "superset.versioning.membership.chart_attachment_windows_for_dashboard",
++        return_value=[(1, Window(1, None)), (2, Window(10, 20)), (2, Window(30, None))],
++    )
++    assert dashboard_restore_removal_count(7, transaction_id) == expected
++
++
++def test_restore_removal_count_excludes_nonmembers(mocker: MockerFixture) -> None:
++    """A historical chart absent from current membership is not a removal."""
++    from superset.versioning.membership import dashboard_restore_removal_count
++
++    session: MagicMock = mocker.patch("superset.versioning.membership.db.session")
++    session.execute.return_value.scalars.return_value = [1]
++    mocker.patch(
++        "superset.versioning.membership.chart_attachment_windows_for_dashboard",
++        return_value=[(1, Window(1, None)), (99, Window(1, None))],
++    )
++    assert dashboard_restore_removal_count(7, 5) == 0
++
++
++@pytest.mark.parametrize("requested", [False, True])
++@pytest.mark.parametrize("dashboard", [False, True])
++def test_snapshot_removal_count_is_opt_in_and_dashboard_only(
++    app: object, mocker: MockerFixture, requested: bool, dashboard: bool
++) -> None:
++    """Only an authorized dashboard snapshot can opt into the count."""
++    from types import SimpleNamespace
++    from uuid import UUID
++
++    from flask import jsonify, Response
++
++    from superset.models.dashboard import Dashboard
++    from superset.models.slice import Slice
++    from superset.versioning import api_helpers
++
++    entity_uuid: UUID = UUID("00000000-0000-4000-8000-000000000001")
++    api: MagicMock = MagicMock()
++    api.response.side_effect = lambda status, **values: jsonify(values)
++    mocker.patch.object(
++        api_helpers,
++        "resolve_endpoint_path_entity",
++        return_value=(SimpleNamespace(id=7), entity_uuid),
++    )
++    mocker.patch.object(
++        api_helpers.VersionDAO,
++        "get_version",
++        return_value={
++            "_version": {"transaction_id": 5},
++        },
++    )
++    mocker.patch.object(
++        api_helpers,
++        "set_version_etag_by_uuid",
++        side_effect=lambda response, *args, **kwargs: response,
++    )
++    count: MagicMock = mocker.patch(
++        "superset.versioning.membership.dashboard_restore_removal_count", return_value=2
++    )
++    response: Response = api_helpers.get_version_endpoint(
++        api,
++        Dashboard if dashboard else Slice,
++        str(entity_uuid),
++        str(entity_uuid),
++        include_restore_impact=requested,
++    )
++    if requested and dashboard:
++        assert response.json["result"]["_restore_impact"] == {"removed_chart_count": 2}
++        assert response.cache_control.no_store
++        count.assert_called_once_with(7, 5)
++    else:
++        assert "_restore_impact" not in response.json["result"]
++        count.assert_not_called()
++
++
++def test_snapshot_refusal_does_not_read_restore_impact(mocker: MockerFixture) -> None:
++    """The existing editorship gate runs before membership is read."""
++    from flask import Response
++
++    from superset.models.dashboard import Dashboard
++    from superset.versioning import api_helpers
++
++    refusal: Response = Response(status=403)
++    mocker.patch.object(
++        api_helpers,
++        "resolve_endpoint_path_entity",
++        side_effect=api_helpers.PathEntityResponseError(refusal),
++    )
++    count: MagicMock = mocker.patch(
++        "superset.versioning.membership.dashboard_restore_removal_count"
++    )
++    assert (
++        api_helpers.get_version_endpoint(
++            MagicMock(), Dashboard, "id", "version", include_restore_impact=True
++        )
++        is refusal
++    )
++    count.assert_not_called()
++
++
++def test_removal_count_reads_only_the_dashboards_associations(
++    mocker: MockerFixture,
++) -> None:
++    """Count unplaced/archived associations without joining visible charts."""
++    import sqlalchemy as sa
++    from sqlalchemy.orm import Session
++
++    from superset.versioning.membership import dashboard_restore_removal_count
++
++    engine: sa.Engine = sa.create_engine("sqlite:///:memory:")
++    try:
++        with engine.begin() as connection:
++            connection.exec_driver_sql(
++                "CREATE TABLE dashboard_slices (dashboard_id INTEGER, slice_id INTEGER)"
++            )
++            connection.exec_driver_sql(
++                "INSERT INTO dashboard_slices VALUES (7, 1), (7, 2), (7, 3), (8, 99)"
++            )
++        with Session(engine) as session:
++            mocker.patch("superset.versioning.membership.db.session", session)
++            mocker.patch(
++                "superset.versioning.membership.chart_attachment_windows_for_dashboard",
++                return_value=[(1, Window(1, None))],
++            )
++            assert dashboard_restore_removal_count(7, 5) == 2
++    finally:
++        engine.dispose()

@@ -1,0 +1,125 @@
+{
+  "sha": "b92fcb206166a394742740fa8a2a5162bfaad4be",
+  "node_id": "C_kwDOAlosUtoAKGI5MmZjYjIwNjE2NmEzOTQ3NDI3NDBmYThhMmE1MTYyYmZhYWQ0YmU",
+  "commit": {
+    "author": {
+      "name": "John",
+      "email": "nextjohnp7@gmail.com",
+      "date": "2026-11-07T03:32:02Z"
+    },
+    "committer": {
+      "name": "GitHub",
+      "email": "noreply@github.com",
+      "date": "2026-11-07T03:32:02Z"
+    },
+    "message": "feat(superset-embedded-sdk): add comprehensive test suite and JSDoc type documentation (#45957)",
+    "tree": {
+      "sha": "345ae6c926529969cd55c708c102eb5d58ed9e98",
+      "url": "https://api.github.com/repos/apache/superset/git/trees/345ae6c926529969cd55c708c102eb5d58ed9e98"
+    },
+    "url": "https://api.github.com/repos/apache/superset/git/commits/b92fcb206166a394742740fa8a2a5162bfaad4be",
+    "comment_count": 0,
+    "verification": {
+      "verified": true,
+      "reason": "valid",
+      "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJq7puyCRC1aQ7uu5UhlAAAYqkQAET1YPLgIRC8Qh8HYU7R2qCO\nhM580hmkoWncqkCJM7Arkim0vURyXJPKa3t7gO8CZ7lyzhB6eziXnc3C+9t8fRXY\nTYyL/EPeTQ3rjzmUqrEQDZBJOR8plAi/Omzi9Bcu6uTvwp9ncB4QAC8dEXGoy5St\nclc5bo1sPMFdSQmlwgMdj2OurMIgZf+W4p5NDSb5jNlB9NseVcyicqSS91rXeWDn\nRmHIU+N6JEbCIGxM5DlrJDVaHa1t0+lYEfW2CSewgP0SVRLLqQwHlYnmmvAscrr0\nvnZK7w/gjR+z6v/uDJsfW+Q/KV8R1/wt5A8MVrX352Rpei5sujuZjkN0J0y+zO0v\npcx1ph+eCCXiXX1ECI1T2DvuLiYVI++oNtFpysjlLfKrLxzIMPyfni6N+FZlAiXU\nrxKVnxQ3KEehDdr/XeJTmZVmjASWDPiW56vhnTpawokcA83llfh15nXD1YkUBGaA\nhjWK9U2I2edvI9oZAYAc3yh8TpRV9p9hJeJfu2s+hLWfwRmLyJXewtl2EcBccaXT\n6BrrV3yFRVGJtdOI/jaIFmbmAVfKNXf3jQPB/A+eHpuQLMKw4EQZ3IvTMWwzgzKE\nKXvKUbP/AwBtSjF2YBes2rzDn5zNAFWVZaIf+u/R45j26rNnAluuuIdg8ypc+PLs\n4Vze2btmzFzCP2X16NyX\n=/+KB\n-----END PGP SIGNATURE-----\n",
+      "payload": "tree 345ae6c926529969cd55c708c102eb5d58ed9e98\nparent 9e7fad6a9d3690422af41f607658e9a049b6df51\nauthor John <nextjohnp7@gmail.com> 1794022322 +0700\ncommitter GitHub <noreply@github.com> 1794022322 +0700\n\nfeat(superset-embedded-sdk): add comprehensive test suite and JSDoc type documentation (#45957)",
+      "verified_at": "2026-11-07T03:32:02Z"
+    }
+  },
+  "url": "https://api.github.com/repos/apache/superset/commits/b92fcb206166a394742740fa8a2a5162bfaad4be",
+  "html_url": "https://github.com/apache/superset/commit/b92fcb206166a394742740fa8a2a5162bfaad4be",
+  "comments_url": "https://api.github.com/repos/apache/superset/commits/b92fcb206166a394742740fa8a2a5162bfaad4be/comments",
+  "author": {
+    "login": "nextjohnp7",
+    "id": 259619942,
+    "node_id": "U_kgDOD3l8Zg",
+    "avatar_url": "https://avatars.githubusercontent.com/u/259619942?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/nextjohnp7",
+    "html_url": "https://github.com/nextjohnp7",
+    "followers_url": "https://api.github.com/users/nextjohnp7/followers",
+    "following_url": "https://api.github.com/users/nextjohnp7/following{/other_user}",
+    "gists_url": "https://api.github.com/users/nextjohnp7/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/nextjohnp7/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/nextjohnp7/subscriptions",
+    "organizations_url": "https://api.github.com/users/nextjohnp7/orgs",
+    "repos_url": "https://api.github.com/users/nextjohnp7/repos",
+    "events_url": "https://api.github.com/users/nextjohnp7/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/nextjohnp7/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "committer": {
+    "login": "web-flow",
+    "id": 19864447,
+    "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+    "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/web-flow",
+    "html_url": "https://github.com/web-flow",
+    "followers_url": "https://api.github.com/users/web-flow/followers",
+    "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+    "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+    "organizations_url": "https://api.github.com/users/web-flow/orgs",
+    "repos_url": "https://api.github.com/users/web-flow/repos",
+    "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/web-flow/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "parents": [
+    {
+      "sha": "9e7fad6a9d3690422af41f607658e9a049b6df51",
+      "url": "https://api.github.com/repos/apache/superset/commits/9e7fad6a9d3690422af41f607658e9a049b6df51",
+      "html_url": "https://github.com/apache/superset/commit/9e7fad6a9d3690422af41f607658e9a049b6df51"
+    }
+  ],
+  "stats": {
+    "total": 144,
+    "additions": 143,
+    "deletions": 1
+  },
+  "files": [
+    {
+      "sha": "11247f52ff7d52ababa28ffd778ba028fdbc9139",
+      "filename": "superset-embedded-sdk/src/guestTokenRefresh.test.ts",
+      "status": "modified",
+      "additions": 40,
+      "deletions": 0,
+      "changes": 40,
+      "blob_url": "https://github.com/apache/superset/blob/b92fcb206166a394742740fa8a2a5162bfaad4be/superset-embedded-sdk%2Fsrc%2FguestTokenRefresh.test.ts",
+      "raw_url": "https://github.com/apache/superset/raw/b92fcb206166a394742740fa8a2a5162bfaad4be/superset-embedded-sdk%2Fsrc%2FguestTokenRefresh.test.ts",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/superset-embedded-sdk%2Fsrc%2FguestTokenRefresh.test.ts?ref=b92fcb206166a394742740fa8a2a5162bfaad4be",
+      "patch": "@@ -122,4 +122,44 @@ describe(\"guest token refresh\", () => {\n     expect(DEFAULT_TOKEN_REFRESH_RETRY_MS).toBe(10000);\n     expect(DEFAULT_TOKEN_REFRESH_RETRY_MS).toBeGreaterThan(0);\n   });\n+\n+  it(\"schedules refresh with very long TTL\", () => {\n+    const exp = Date.now() / 1000 + 86400;\n+    const fakeToken = makeFakeJWT({ exp });\n+    const timing = getGuestTokenRefreshTiming(fakeToken);\n+    expect(timing).toBeGreaterThan(MIN_REFRESH_WAIT_MS);\n+  });\n+\n+  it(\"schedules refresh with TTL just above minimum\", () => {\n+    const ttlMs = MIN_REFRESH_WAIT_MS + REFRESH_TIMING_BUFFER_MS + 1;\n+    const ttl = ttlMs / 1000;\n+    const exp = Date.now() / 1000 + ttl;\n+    const fakeToken = makeFakeJWT({ exp });\n+    const timing = getGuestTokenRefreshTiming(fakeToken);\n+    expect(timing).toBeGreaterThanOrEqual(MIN_REFRESH_WAIT_MS);\n+  });\n+\n+  it(\"handles time travel - system time moves forward\", () => {\n+    const ttl = 1300;\n+    const exp = Date.now() / 1000 + ttl;\n+    const fakeToken = makeFakeJWT({ exp });\n+    const timing = getGuestTokenRefreshTiming(fakeToken);\n+    expect(timing).toBeGreaterThan(MIN_REFRESH_WAIT_MS);\n+    expect(timing).toBe(ttl * 1000 - REFRESH_TIMING_BUFFER_MS);\n+  });\n+\n+  it(\"returns minimum wait when token expires immediately\", () => {\n+    const exp = Date.now() / 1000;\n+    const fakeToken = makeFakeJWT({ exp });\n+    const timing = getGuestTokenRefreshTiming(fakeToken);\n+    expect(timing).toBe(MIN_REFRESH_WAIT_MS - REFRESH_TIMING_BUFFER_MS);\n+  });\n+\n+  it(\"capitalizes on buffer period for nearly-expired tokens\", () => {\n+    const ttl = 1;\n+    const exp = Date.now() / 1000 + ttl;\n+    const fakeToken = makeFakeJWT({ exp });\n+    const timing = getGuestTokenRefreshTiming(fakeToken);\n+    expect(timing).toBe(MIN_REFRESH_WAIT_MS - REFRESH_TIMING_BUFFER_MS);\n+  });\n });"
+    },
+    {
+      "sha": "e689bf62fb6550d602bff691ad83e063bb9f6276",
+      "filename": "superset-embedded-sdk/src/index.test.ts",
+      "status": "modified",
+      "additions": 90,
+      "deletions": 1,
+      "changes": 91,
+      "blob_url": "https://github.com/apache/superset/blob/b92fcb206166a394742740fa8a2a5162bfaad4be/superset-embedded-sdk%2Fsrc%2Findex.test.ts",
+      "raw_url": "https://github.com/apache/superset/raw/b92fcb206166a394742740fa8a2a5162bfaad4be/superset-embedded-sdk%2Fsrc%2Findex.test.ts",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/superset-embedded-sdk%2Fsrc%2Findex.test.ts?ref=b92fcb206166a394742740fa8a2a5162bfaad4be",
+      "patch": "@@ -19,9 +19,10 @@\n \n // @vitest-environment jsdom\n \n-import { afterEach, beforeEach, describe, expect, test, vi } from \"vitest\";\n+import { afterEach, beforeEach, describe, expect, it, test, vi } from \"vitest\";\n import { Switchboard } from \"@superset-ui/switchboard\";\n import { embedDashboard, PortClosedError } from \"./index\";\n+import { DEFAULT_TOKEN_REFRESH_RETRY_MS } from \"./guestTokenRefresh\";\n \n vi.mock(\"@superset-ui/switchboard\");\n \n@@ -537,4 +538,92 @@ describe(\"embedDashboard\", () => {\n     expect(mountPoint.querySelector(\"iframe\")).toBeNull();\n     expect(ports[0].close).toHaveBeenCalled();\n   });\n+\n+  it(\"a refresh whose fetch fails is retried after the retry delay\", async () => {\n+    vi.useFakeTimers();\n+    const mockFetchGuestToken = vi\n+      .fn()\n+      .mockResolvedValueOnce(fakeToken())\n+      .mockRejectedValueOnce(new Error(\"token expired\"))\n+      .mockImplementationOnce(() => Promise.resolve(fakeToken()));\n+    const embedding = embedDashboard({\n+      id: \"test-id\",\n+      supersetDomain: \"https://superset.example.com\",\n+      mountPoint,\n+      fetchGuestToken: mockFetchGuestToken,\n+    });\n+    await vi.advanceTimersByTimeAsync(0);\n+    const dashboard = await embedding;\n+    expect(mockFetchGuestToken).toHaveBeenCalledTimes(1);\n+\n+    await vi.advanceTimersByTimeAsync(300_000);\n+    expect(mockFetchGuestToken).toHaveBeenCalledTimes(2);\n+    expect(mockSwitchboard.emit).toHaveBeenCalledTimes(1);\n+\n+    await vi.advanceTimersByTimeAsync(DEFAULT_TOKEN_REFRESH_RETRY_MS);\n+    expect(mockFetchGuestToken).toHaveBeenCalledTimes(3);\n+    expect(mockSwitchboard.emit).toHaveBeenCalledTimes(2);\n+\n+    dashboard.unmount();\n+    vi.useRealTimers();\n+  });\n+\n+  it(\"handles unmount during token refresh\", async () => {\n+    const mockFetch = vi.fn().mockResolvedValue(\"token-1\");\n+\n+    const result = await embedDashboard({\n+      id: \"test-dashboard\",\n+      supersetDomain: \"http://localhost:8200\",\n+      mountPoint,\n+      fetchGuestToken: mockFetch,\n+    });\n+\n+    result.unmount();\n+\n+    expect(mountPoint.querySelector(\"iframe\")).toBeNull();\n+    expect(ports[0].close).toHaveBeenCalled();\n+  });\n+\n+  test(\"a refresh that resolves after unmount sends nothing\", async () => {\n+    vi.useFakeTimers();\n+    const refresh = deferred<string>();\n+    const fakeToken = makeFakeJWT({ exp: Date.now() / 1000 + 300 });\n+    const mockFetchGuestToken = vi\n+      .fn()\n+      .mockResolvedValueOnce(fakeToken)\n+      .mockReturnValueOnce(refresh.promise);\n+    const embedding = embedDashboard({\n+      id: \"test-id\",\n+      supersetDomain: \"https://superset.example.com\",\n+      mountPoint,\n+      fetchGuestToken: mockFetchGuestToken,\n+    });\n+    await vi.advanceTimersByTimeAsync(0);\n+    const dashboard = await embedding;\n+    await vi.advanceTimersByTimeAsync(300_000);\n+    expect(mockFetchGuestToken).toHaveBeenCalledTimes(2);\n+    dashboard.unmount();\n+    refresh.resolve(fakeToken);\n+    await vi.advanceTimersByTimeAsync(0);\n+    expect(mockSwitchboard.emit).toHaveBeenCalledTimes(1);\n+    vi.useRealTimers();\n+  });\n+\n+  it(\"hands the iframe its end of the message channel\", async () => {\n+    const fakeToken = makeFakeJWT({ exp: Date.now() / 1000 + 300 });\n+    const dashboard = await embedDashboard({\n+      id: \"test-id\",\n+      supersetDomain: \"https://superset.example.com\",\n+      mountPoint,\n+      fetchGuestToken: vi.fn().mockResolvedValue(fakeToken),\n+    });\n+\n+    const iframe = mountPoint.querySelector(\"iframe\")!;\n+    expect(iframe.contentWindow!.postMessage).toHaveBeenCalledWith(\n+      expect.objectContaining({ handshake: \"port transfer\" }),\n+      \"https://superset.example.com\",\n+      [expect.anything()],\n+    );\n+    dashboard.unmount();\n+  });\n });"
+    },
+    {
+      "sha": "f8f28649ef63b77643c3bfbeb173a37ae1838ac8",
+      "filename": "superset-embedded-sdk/src/index.ts",
+      "status": "modified",
+      "additions": 13,
+      "deletions": 0,
+      "changes": 13,
+      "blob_url": "https://github.com/apache/superset/blob/b92fcb206166a394742740fa8a2a5162bfaad4be/superset-embedded-sdk%2Fsrc%2Findex.ts",
+      "raw_url": "https://github.com/apache/superset/raw/b92fcb206166a394742740fa8a2a5162bfaad4be/superset-embedded-sdk%2Fsrc%2Findex.ts",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/superset-embedded-sdk%2Fsrc%2Findex.ts?ref=b92fcb206166a394742740fa8a2a5162bfaad4be",
+      "patch": "@@ -37,6 +37,10 @@ import { withTimeout } from \"./withTimeout\";\n  */\n export type GuestTokenFetchFn = () => Promise<string>;\n \n+/**\n+ * Configuration options for the Superset dashboard UI.\n+ * Controls which elements are visible/hidden in the embedded dashboard.\n+ */\n export type UiConfigType = {\n   hideTitle?: boolean;\n   hideTab?: boolean;\n@@ -67,6 +71,9 @@ const HANDSHAKE_PROBE_METHOD = \"supersetEmbeddedSdkHandshake\";\n /** How long that document has to answer the handshake probe. */\n const HANDSHAKE_PROBE_TIMEOUT_MS = 5_000;\n \n+/**\n+ * Parameters for embedding a Superset dashboard.\n+ */\n export type EmbedDashboardParams = {\n   /** The id provided by the embed configuration UI in Superset */\n   id: string;\n@@ -97,6 +104,9 @@ export type EmbedDashboardParams = {\n   guestTokenFetchTimeoutMs?: number;\n };\n \n+/**\n+ * Dimensions of the embedded iframe.\n+ */\n export type Size = {\n   width: number;\n   height: number;\n@@ -108,6 +118,9 @@ export type ObserveDataMaskCallbackFn = (\n     nativeFiltersChanged: boolean;\n   },\n ) => void;\n+/**\n+ * Theme mode for the embedded dashboard.\n+ */\n export type ThemeMode = \"default\" | \"dark\" | \"system\";\n \n /**"
+    }
+  ]
+}

@@ -1,0 +1,101 @@
+{
+  "sha": "4c8ec9e65c987683e79fcb08ea1552bb7c10afc4",
+  "node_id": "C_kwDOAlosUtoAKDRjOGVjOWU2NWM5ODc2ODNlNzlmY2IwOGVhMTU1MmJiN2MxMGFmYzQ",
+  "commit": {
+    "author": {
+      "name": "David",
+      "email": "39565245+dmunozv04@users.noreply.github.com",
+      "date": "2026-11-07T03:06:06Z"
+    },
+    "committer": {
+      "name": "GitHub",
+      "email": "noreply@github.com",
+      "date": "2026-11-07T03:06:06Z"
+    },
+    "message": "fix(i18n): add missing labeler language rules (#46011)",
+    "tree": {
+      "sha": "81c6ce4e7e08c8ed4836c0fc0e8e6aad1dc4f760",
+      "url": "https://api.github.com/repos/apache/superset/git/trees/81c6ce4e7e08c8ed4836c0fc0e8e6aad1dc4f760"
+    },
+    "url": "https://api.github.com/repos/apache/superset/git/commits/4c8ec9e65c987683e79fcb08ea1552bb7c10afc4",
+    "comment_count": 0,
+    "verification": {
+      "verified": true,
+      "reason": "valid",
+      "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJq7pWeCRC1aQ7uu5UhlAAA4kYQAD+jFUyUOCpzFaUS9z+Ji59N\nOtPnRvOOB6QVPgf2QB8Ix9x/IreEyX5261VR8y5GFnruIfIu/06IZVqHRQLWKV9m\nqBzpCpmlY3QfuJNpNyCYXCQ7qksrfrwMYfpCDExOxyUr/MSqlgZhwyWtJN3M6LKH\nZ0gaHzKc86R+NZZXRsHzuQLyadJiwenxAMptQRE+qnaIJiSVF3uWITJ/07LOZIzj\nroHqHp7JRqEiPtAwOlmkZq2mP8of3GFYO8uYGl0K9VOzTf7S29ywllVgEYLb1xhh\nd+8lWmjqGcC+aSciZ5dtVGmgVzZKTb7gMl7udTpJcFXe+pRoU7UxAqxpIHZWGVfQ\np85ZCMD2Z0jvo4dpPAhprEDXl7i71sZm3/vzjSSnTH1n3BFue0JJ42+af4YTBeUu\nNQMHcg7btJedjEzM+OTJQV3Q9BlmZUKDOzFejNqTXUL6FTEdTEZBD/9auNXL68zP\nD6cBzQW923eQI2eX+7JiPPm+DVdE+NMdYhLqN2KXMsIisjx4Lt5qwIjkxEoTfEux\nDw2at+JS5bFFRGRG4KeVA2ed4Ejw7ZPfr/1xmx1msE1ltC5ry9yh2Bh0+VYtsgrZ\noURlNuHqc83E+DLGkYn5dZWzf229Wy+AHNC1JuG7+9/mkCqzquGCNstxPYeu3SMg\nmDMRduXkVDCFgK0QZBdK\n=e70k\n-----END PGP SIGNATURE-----\n",
+      "payload": "tree 81c6ce4e7e08c8ed4836c0fc0e8e6aad1dc4f760\nparent 3807a4d7433eb824c758b4a5e801e58351e0b0e2\nauthor David <39565245+dmunozv04@users.noreply.github.com> 1794020766 +0100\ncommitter GitHub <noreply@github.com> 1794020766 +0700\n\nfix(i18n): add missing labeler language rules (#46011)",
+      "verified_at": "2026-11-07T03:06:06Z"
+    }
+  },
+  "url": "https://api.github.com/repos/apache/superset/commits/4c8ec9e65c987683e79fcb08ea1552bb7c10afc4",
+  "html_url": "https://github.com/apache/superset/commit/4c8ec9e65c987683e79fcb08ea1552bb7c10afc4",
+  "comments_url": "https://api.github.com/repos/apache/superset/commits/4c8ec9e65c987683e79fcb08ea1552bb7c10afc4/comments",
+  "author": {
+    "login": "dmunozv04",
+    "id": 39565245,
+    "node_id": "MDQ6VXNlcjM5NTY1MjQ1",
+    "avatar_url": "https://avatars.githubusercontent.com/u/39565245?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/dmunozv04",
+    "html_url": "https://github.com/dmunozv04",
+    "followers_url": "https://api.github.com/users/dmunozv04/followers",
+    "following_url": "https://api.github.com/users/dmunozv04/following{/other_user}",
+    "gists_url": "https://api.github.com/users/dmunozv04/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/dmunozv04/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/dmunozv04/subscriptions",
+    "organizations_url": "https://api.github.com/users/dmunozv04/orgs",
+    "repos_url": "https://api.github.com/users/dmunozv04/repos",
+    "events_url": "https://api.github.com/users/dmunozv04/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/dmunozv04/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "committer": {
+    "login": "web-flow",
+    "id": 19864447,
+    "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+    "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/web-flow",
+    "html_url": "https://github.com/web-flow",
+    "followers_url": "https://api.github.com/users/web-flow/followers",
+    "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+    "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+    "organizations_url": "https://api.github.com/users/web-flow/orgs",
+    "repos_url": "https://api.github.com/users/web-flow/repos",
+    "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/web-flow/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "parents": [
+    {
+      "sha": "3807a4d7433eb824c758b4a5e801e58351e0b0e2",
+      "url": "https://api.github.com/repos/apache/superset/commits/3807a4d7433eb824c758b4a5e801e58351e0b0e2",
+      "html_url": "https://github.com/apache/superset/commit/3807a4d7433eb824c758b4a5e801e58351e0b0e2"
+    }
+  ],
+  "stats": {
+    "total": 84,
+    "additions": 72,
+    "deletions": 12
+  },
+  "files": [
+    {
+      "sha": "ca5e2db12a3c7df81770a2b1796d8d7e848fbde7",
+      "filename": ".github/labeler.yml",
+      "status": "modified",
+      "additions": 72,
+      "deletions": 12,
+      "changes": 84,
+      "blob_url": "https://github.com/apache/superset/blob/4c8ec9e65c987683e79fcb08ea1552bb7c10afc4/.github%2Flabeler.yml",
+      "raw_url": "https://github.com/apache/superset/raw/4c8ec9e65c987683e79fcb08ea1552bb7c10afc4/.github%2Flabeler.yml",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/.github%2Flabeler.yml?ref=4c8ec9e65c987683e79fcb08ea1552bb7c10afc4",
+      "patch": "@@ -77,11 +77,21 @@\n   - any-glob-to-any-file:\n     - 'superset/translations/**'\n \n+\"i18n:arabic\":\n+- changed-files:\n+  - any-glob-to-any-file:\n+    - 'superset/translations/ar/**'\n+\n \"i18n:brazilian\":\n - changed-files:\n   - any-glob-to-any-file:\n     - 'superset/translations/pt_BR/**'\n \n+\"i18n:catalan\":\n+- changed-files:\n+  - any-glob-to-any-file:\n+    - 'superset/translations/ca/**'\n+\n \"i18n:chinese\":\n - changed-files:\n   - any-glob-to-any-file:\n@@ -92,21 +102,26 @@\n   - any-glob-to-any-file:\n     - 'superset/translations/cs/**'\n \n-\"i18n:traditional-chinese\":\n+\"i18n:dutch\":\n - changed-files:\n   - any-glob-to-any-file:\n-    - 'superset/translations/zh_TW/**'\n+    - 'superset/translations/nl/**'\n \n-\"i18n:dutch\":\n+\"i18n:finnish\":\n - changed-files:\n   - any-glob-to-any-file:\n-    - 'superset/translations/nl/**'\n+    - 'superset/translations/fi/**'\n \n \"i18n:french\":\n - changed-files:\n   - any-glob-to-any-file:\n     - 'superset/translations/fr/**'\n \n+\"i18n:german\":\n+- changed-files:\n+  - any-glob-to-any-file:\n+    - 'superset/translations/de/**'\n+\n \"i18n:italian\":\n - changed-files:\n   - any-glob-to-any-file:\n@@ -122,40 +137,85 @@\n   - any-glob-to-any-file:\n     - 'superset/translations/ko/**'\n \n+\"i18n:latvian\":\n+- changed-files:\n+  - any-glob-to-any-file:\n+    - 'superset/translations/lv/**'\n+\n+\"i18n:maori\":\n+- changed-files:\n+  - any-glob-to-any-file:\n+    - 'superset/translations/mi/**'\n+\n+\"i18n:persian\":\n+- changed-files:\n+  - any-glob-to-any-file:\n+    - 'superset/translations/fa/**'\n+\n \"i18n:portuguese\":\n - changed-files:\n   - any-glob-to-any-file:\n     - 'superset/translations/pt/**'\n \n+\"i18n:romanian\":\n+- changed-files:\n+  - any-glob-to-any-file:\n+    - 'superset/translations/ro/**'\n+\n \"i18n:russian\":\n - changed-files:\n   - any-glob-to-any-file:\n     - 'superset/translations/ru/**'\n \n-\"i18n:slovak\":\n+\"i18n:serbian\":\n - changed-files:\n   - any-glob-to-any-file:\n-    - 'superset/translations/sk/**'\n+    - 'superset/translations/sr/**'\n \n-\"i18n:latvian\":\n+\"i18n:serbian-latin\":\n - changed-files:\n   - any-glob-to-any-file:\n-    - 'superset/translations/lv/**'\n+    - 'superset/translations/sr_Latn/**'\n \n-\"i18n:ukrainian\":\n+\"i18n:slovak\":\n - changed-files:\n   - any-glob-to-any-file:\n-    - 'superset/translations/uk/**'\n+    - 'superset/translations/sk/**'\n+\n+\"i18n:slovenian\":\n+- changed-files:\n+  - any-glob-to-any-file:\n+    - 'superset/translations/sl/**'\n \n \"i18n:spanish\":\n - changed-files:\n   - any-glob-to-any-file:\n     - 'superset/translations/es/**'\n \n-\"i18n:persian\":\n+\"i18n:tamil\":\n - changed-files:\n   - any-glob-to-any-file:\n-    - 'superset/translations/fa/**'\n+    - 'superset/translations/ta/**'\n+\n+\"i18n:thai\":\n+- changed-files:\n+  - any-glob-to-any-file:\n+    - 'superset/translations/th/**'\n+\n+\"i18n:traditional-chinese\":\n+- changed-files:\n+  - any-glob-to-any-file:\n+    - 'superset/translations/zh_TW/**'\n+\n+\"i18n:turkish\":\n+- changed-files:\n+  - any-glob-to-any-file:\n+    - 'superset/translations/tr/**'\n+\n+\"i18n:ukrainian\":\n+- changed-files:\n+  - any-glob-to-any-file:\n+    - 'superset/translations/uk/**'\n \n ############################################\n # Sub-projects and monorepo packages"
+    }
+  ]
+}

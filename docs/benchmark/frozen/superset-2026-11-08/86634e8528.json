@@ -1,0 +1,113 @@
+{
+  "sha": "86634e85289cee232fa83b38494ff1328b06f629",
+  "node_id": "C_kwDOAlosUtoAKDg2NjM0ZTg1Mjg5Y2VlMjMyZmE4M2IzODQ5NGZmMTMyOGIwNmY2Mjk",
+  "commit": {
+    "author": {
+      "name": "Mike Bridge",
+      "email": "michael.bridge@preset.io",
+      "date": "2026-11-06T07:02:05Z"
+    },
+    "committer": {
+      "name": "GitHub",
+      "email": "noreply@github.com",
+      "date": "2026-11-06T07:02:05Z"
+    },
+    "message": "fix(tests): release unit-test sessions after version capture (#45987)\n\nCo-authored-by: Mike Bridge <michael.bridge@ext.preset.io>",
+    "tree": {
+      "sha": "93ee8d736e6b7506d1febb89612d09effceb897a",
+      "url": "https://api.github.com/repos/apache/superset/git/trees/93ee8d736e6b7506d1febb89612d09effceb897a"
+    },
+    "url": "https://api.github.com/repos/apache/superset/git/commits/86634e85289cee232fa83b38494ff1328b06f629",
+    "comment_count": 0,
+    "verification": {
+      "verified": true,
+      "reason": "valid",
+      "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJq7XttCRC1aQ7uu5UhlAAAY14QAIrKM1Aq7f9gv+mu42sugNyo\nicLXRSrrZTIYOD1jq0ehi7MdFzHDQYIYKIPLS9jVDg9Jo649F66pIOXIw13gyVz3\nFhBI7TOVpg14fNcFtdnmwI6vUbnhtEzSAKGCq2qZfcu+FkXz70m/CPAQ2RsD9ea6\n7LOObZbo10qgqYCcqyl565LIVQHfkOv5/nFUL3RR9ocdHeskYenjfLH2pYqF/Wxn\ng1aK9pQTpRDVqCePVy3+I9MsV4Ebn/cF9uvrzkjxvcF6S49RH0kfhIXxezBvaNAp\nyhlFsNJmJbOv2YtM6YGxkjGHrDkjx5mxDSyU51Dz96Mle4QU1X7OIfNr5XBkGgGJ\nTdscVbpXXvINeESM8bJGpuoS6uXd18qEYjYO8PbAOrRW7ZBkupF3qQKG1MSUFvrg\n2z0mLcj2q0/oSEuLA9K6S6LXHBx6d3AvYpWk+GHTJYu6HAedmgCABNiEnmkCBMAx\ntv9HfF3q3L6pWPYD+Z+Bt+fC22llxZ18NRW4T88eeiqrIBmTICyGUETmPYHBqwD0\nxX2xkwjiIFiwvcd7aDSZ8SXkw8Vefz7ZMIuMrXCukV4Ud6F6ga1hLlzYbRJcgpFG\nD1FO8/McXFzoDOWgNEMeLP768OAUdwul7HmWcCvo3U+JRQq0JP0NKcBvBKGr1sCK\nGffEPxTQi7T/ZLel5ZGR\n=VPKY\n-----END PGP SIGNATURE-----\n",
+      "payload": "tree 93ee8d736e6b7506d1febb89612d09effceb897a\nparent 8248f6bd3512caa267465bc06bd2c3a8d9bda028\nauthor Mike Bridge <michael.bridge@preset.io> 1793948525 -0600\ncommitter GitHub <noreply@github.com> 1793948525 +0000\n\nfix(tests): release unit-test sessions after version capture (#45987)\n\nCo-authored-by: Mike Bridge <michael.bridge@ext.preset.io>",
+      "verified_at": "2026-11-06T07:02:05Z"
+    }
+  },
+  "url": "https://api.github.com/repos/apache/superset/commits/86634e85289cee232fa83b38494ff1328b06f629",
+  "html_url": "https://github.com/apache/superset/commit/86634e85289cee232fa83b38494ff1328b06f629",
+  "comments_url": "https://api.github.com/repos/apache/superset/commits/86634e85289cee232fa83b38494ff1328b06f629/comments",
+  "author": {
+    "login": "mikebridge",
+    "id": 213273,
+    "node_id": "MDQ6VXNlcjIxMzI3Mw==",
+    "avatar_url": "https://avatars.githubusercontent.com/u/213273?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/mikebridge",
+    "html_url": "https://github.com/mikebridge",
+    "followers_url": "https://api.github.com/users/mikebridge/followers",
+    "following_url": "https://api.github.com/users/mikebridge/following{/other_user}",
+    "gists_url": "https://api.github.com/users/mikebridge/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/mikebridge/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/mikebridge/subscriptions",
+    "organizations_url": "https://api.github.com/users/mikebridge/orgs",
+    "repos_url": "https://api.github.com/users/mikebridge/repos",
+    "events_url": "https://api.github.com/users/mikebridge/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/mikebridge/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "committer": {
+    "login": "web-flow",
+    "id": 19864447,
+    "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+    "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/web-flow",
+    "html_url": "https://github.com/web-flow",
+    "followers_url": "https://api.github.com/users/web-flow/followers",
+    "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+    "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+    "organizations_url": "https://api.github.com/users/web-flow/orgs",
+    "repos_url": "https://api.github.com/users/web-flow/repos",
+    "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/web-flow/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "parents": [
+    {
+      "sha": "8248f6bd3512caa267465bc06bd2c3a8d9bda028",
+      "url": "https://api.github.com/repos/apache/superset/commits/8248f6bd3512caa267465bc06bd2c3a8d9bda028",
+      "html_url": "https://github.com/apache/superset/commit/8248f6bd3512caa267465bc06bd2c3a8d9bda028"
+    }
+  ],
+  "stats": {
+    "total": 79,
+    "additions": 71,
+    "deletions": 8
+  },
+  "files": [
+    {
+      "sha": "3c0e98a638c2deb1810204478800e53076a49223",
+      "filename": "tests/unit_tests/conftest.py",
+      "status": "modified",
+      "additions": 18,
+      "deletions": 8,
+      "changes": 26,
+      "blob_url": "https://github.com/apache/superset/blob/86634e85289cee232fa83b38494ff1328b06f629/tests%2Funit_tests%2Fconftest.py",
+      "raw_url": "https://github.com/apache/superset/raw/86634e85289cee232fa83b38494ff1328b06f629/tests%2Funit_tests%2Fconftest.py",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/tests%2Funit_tests%2Fconftest.py?ref=86634e85289cee232fa83b38494ff1328b06f629",
+      "patch": "@@ -20,6 +20,7 @@\n import os\n import unittest.mock\n from collections.abc import Iterator\n+from contextlib import ExitStack\n from typing import Any, Callable, Union\n from unittest.mock import patch\n \n@@ -66,21 +67,27 @@ def session_engine() -> Engine:\n \n \n @pytest.fixture\n-def get_session(mocker: MockerFixture, session_engine: Engine) -> Callable[[], Session]:\n+def get_session(\n+    mocker: MockerFixture, session_engine: Engine\n+) -> Iterator[Callable[[], Session]]:\n     \"\"\"\n-    Create an in-memory SQLite db.session.to test models.\n+    Create patched sessions and release their transactions after each test.\n     \"\"\"\n-    engine = session_engine\n+    engine: Engine = session_engine\n+    cleanup: ExitStack = ExitStack()\n \n-    def get_session():\n-        Session_ = sessionmaker(bind=engine)  # pylint: disable=invalid-name  # noqa: N806\n-        in_memory_session = Session_()\n+    def get_session() -> Session:\n+        \"\"\"Create and patch a session owned by this fixture's cleanup stack.\"\"\"\n+        Session_: sessionmaker[Session] = sessionmaker(bind=engine)  # pylint: disable=invalid-name  # noqa: N806\n+        in_memory_session: Session = Session_()\n+        cleanup.callback(in_memory_session.close)\n+        cleanup.callback(in_memory_session.rollback)\n \n         # flask calls db.session.remove()\n         in_memory_session.remove = lambda: None\n \n         # patch session\n-        get_session = mocker.patch(\n+        get_session: unittest.mock.MagicMock = mocker.patch(\n             \"superset.security.SupersetSecurityManager.session\",\n         )\n         get_session.return_value = in_memory_session\n@@ -92,7 +99,10 @@ def get_session():\n         mocker.patch(\"superset.db.session\", in_memory_session)\n         return in_memory_session\n \n-    return get_session\n+    # Roll back before closing so version capture releases its units of work.\n+    # Track every factory call, not only the session installed in db.session.\n+    with cleanup:\n+        yield get_session\n \n \n @pytest.fixture"
+    },
+    {
+      "sha": "c3066773857156a910ee975738c474b682dcaa8b",
+      "filename": "tests/unit_tests/dao/session_cleanup_test.py",
+      "status": "added",
+      "additions": 53,
+      "deletions": 0,
+      "changes": 53,
+      "blob_url": "https://github.com/apache/superset/blob/86634e85289cee232fa83b38494ff1328b06f629/tests%2Funit_tests%2Fdao%2Fsession_cleanup_test.py",
+      "raw_url": "https://github.com/apache/superset/raw/86634e85289cee232fa83b38494ff1328b06f629/tests%2Funit_tests%2Fdao%2Fsession_cleanup_test.py",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/tests%2Funit_tests%2Fdao%2Fsession_cleanup_test.py?ref=86634e85289cee232fa83b38494ff1328b06f629",
+      "patch": "@@ -0,0 +1,53 @@\n+# Licensed to the Apache Software Foundation (ASF) under one\n+# or more contributor license agreements.  See the NOTICE file\n+# distributed with this work for additional information\n+# regarding copyright ownership.  The ASF licenses this file\n+# to you under the Apache License, Version 2.0 (the\n+# \"License\"); you may not use this file except in compliance\n+# with the License.  You may obtain a copy of the License at\n+#\n+#   http://www.apache.org/licenses/LICENSE-2.0\n+#\n+# Unless required by applicable law or agreed to in writing,\n+# software distributed under the License is distributed on an\n+# \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+# KIND, either express or implied.  See the License for the\n+# specific language governing permissions and limitations\n+# under the License.\n+\"\"\"The unit-test session factory must release version-capture state at teardown.\"\"\"\n+\n+import gc\n+import weakref\n+from collections.abc import Callable, Iterator\n+\n+import pytest\n+from sqlalchemy.orm import Session\n+\n+from superset.models.dashboard import Dashboard\n+\n+\n+@pytest.fixture(scope=\"module\")\n+def released_sessions() -> Iterator[list[weakref.ReferenceType[Session]]]:\n+    \"\"\"Module scope puts this check after all function-scoped session/mocker exits.\"\"\"\n+    references: list[weakref.ReferenceType[Session]] = []\n+    yield references\n+    gc.collect()\n+    assert all(reference() is None for reference in references), (\n+        \"unit-test sessions remain reachable after fixture teardown\"\n+    )\n+\n+\n+@pytest.mark.parametrize(\"session_count\", [1, 2])\n+def test_versioned_sessions_are_released(\n+    released_sessions: list[weakref.ReferenceType[Session]],\n+    get_session: Callable[[], Session],\n+    session_count: int,\n+) -> None:\n+    \"\"\"Flushed, uncommitted dashboards must not pin sessions via Continuum.\"\"\"\n+    for index in range(session_count):\n+        session: Session = get_session()\n+        Dashboard.metadata.create_all(session.get_bind())\n+        dashboard: Dashboard = Dashboard(dashboard_title=f\"capture_{index}\")\n+        session.add(dashboard)\n+        session.flush()\n+        released_sessions.append(weakref.ref(session))"
+    }
+  ]
+}

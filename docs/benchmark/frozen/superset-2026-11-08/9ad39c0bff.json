@@ -1,0 +1,113 @@
+{
+  "sha": "9ad39c0bff717bbd7069c81f465b3b7055a2d238",
+  "node_id": "C_kwDOAlosUtoAKDlhZDM5YzBiZmY3MTdiYmQ3MDY5YzgxZjQ2NWIzYjcwNTVhMmQyMzg",
+  "commit": {
+    "author": {
+      "name": "dependabot[bot]",
+      "email": "49699333+dependabot[bot]@users.noreply.github.com",
+      "date": "2026-11-06T18:23:24Z"
+    },
+    "committer": {
+      "name": "GitHub",
+      "email": "noreply@github.com",
+      "date": "2026-11-06T18:23:24Z"
+    },
+    "message": "chore(deps-dev): bump @types/estree from 1.0.9 to 1.0.10 in /superset-frontend (#46053)\n\nSigned-off-by: dependabot[bot] <support@github.com>\nCo-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>",
+    "tree": {
+      "sha": "116144617970888c4b3dfdd5ce6b6f0bc46d1143",
+      "url": "https://api.github.com/repos/apache/superset/git/trees/116144617970888c4b3dfdd5ce6b6f0bc46d1143"
+    },
+    "url": "https://api.github.com/repos/apache/superset/git/commits/9ad39c0bff717bbd7069c81f465b3b7055a2d238",
+    "comment_count": 0,
+    "verification": {
+      "verified": true,
+      "reason": "valid",
+      "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJq7hscCRC1aQ7uu5UhlAAARrUQAEXYYUc3DDeZYq92pCzpTPxl\neN5oYcakzUYe56/4YhCUW+hMteo0plkLwlDT9bhAFl8RGy2fQUbPvL5hQ5LBr/QG\nocOe/rBnhVsbOfVFS08h5lHmmVaIJNml9ouhLOy9uZ1d/l00QhR9NiiizgS/XJnu\nIuTjbcgLp4KzIZc4N34lMeOE0cO1l/In4bFyPLP9AKECsbyE9UciTOwyzyeEcIow\nylcseg18Cp09HRg+pqQWNr9sHQDkK/E7ZLliksx0lTsMVaTmziuLoxcb1+9AV5T9\neG5dAQJloMHwaFNGbp7Scrftm+5LP6HQAeNB/Xhc3vcaInSxIy6TwUFpf1NqHW3q\ne8z1nsIhIBbY2wUZtkgxuSfw5+siomPZgCdMUAt+1u6bVX4kOPnc5HTH6nDkvNn0\ncHv8qHD8b7Wreq5TBpcE8GpHR+wbVEDNcNnvDEM4qRuiS5/C9K+r2+pX5M1yleEm\nvbuCf8nn0KIw7cCirhZTpIVWXs7qiUpYoJ5owgl7nUOwyal1tOh8uTQzd5qoWw0f\nmPBfX0pL2U96Oayf5mPzgS3B1WrmA2qo4AWwor932vrD8G7dTXh7qYlMO1uui83B\nZA5FUuqZwKooKYVBHSn+G+NhhEDOJL5oElsaZ6jJUndSj3fpoegRSKT9q7EzvTR6\n1ZeOxlAVctJc5xiMLmj/\n=0XKY\n-----END PGP SIGNATURE-----\n",
+      "payload": "tree 116144617970888c4b3dfdd5ce6b6f0bc46d1143\nparent 09c015eef5dd011e7ad9fdbd0e38294bf23717be\nauthor dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> 1793989404 -0800\ncommitter GitHub <noreply@github.com> 1793989404 -0800\n\nchore(deps-dev): bump @types/estree from 1.0.9 to 1.0.10 in /superset-frontend (#46053)\n\nSigned-off-by: dependabot[bot] <support@github.com>\nCo-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>",
+      "verified_at": "2026-11-06T18:23:24Z"
+    }
+  },
+  "url": "https://api.github.com/repos/apache/superset/commits/9ad39c0bff717bbd7069c81f465b3b7055a2d238",
+  "html_url": "https://github.com/apache/superset/commit/9ad39c0bff717bbd7069c81f465b3b7055a2d238",
+  "comments_url": "https://api.github.com/repos/apache/superset/commits/9ad39c0bff717bbd7069c81f465b3b7055a2d238/comments",
+  "author": {
+    "login": "dependabot[bot]",
+    "id": 49699333,
+    "node_id": "MDM6Qm90NDk2OTkzMzM=",
+    "avatar_url": "https://avatars.githubusercontent.com/in/29110?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/dependabot%5Bbot%5D",
+    "html_url": "https://github.com/apps/dependabot",
+    "followers_url": "https://api.github.com/users/dependabot%5Bbot%5D/followers",
+    "following_url": "https://api.github.com/users/dependabot%5Bbot%5D/following{/other_user}",
+    "gists_url": "https://api.github.com/users/dependabot%5Bbot%5D/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/dependabot%5Bbot%5D/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/dependabot%5Bbot%5D/subscriptions",
+    "organizations_url": "https://api.github.com/users/dependabot%5Bbot%5D/orgs",
+    "repos_url": "https://api.github.com/users/dependabot%5Bbot%5D/repos",
+    "events_url": "https://api.github.com/users/dependabot%5Bbot%5D/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/dependabot%5Bbot%5D/received_events",
+    "type": "Bot",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "committer": {
+    "login": "web-flow",
+    "id": 19864447,
+    "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+    "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/web-flow",
+    "html_url": "https://github.com/web-flow",
+    "followers_url": "https://api.github.com/users/web-flow/followers",
+    "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+    "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+    "organizations_url": "https://api.github.com/users/web-flow/orgs",
+    "repos_url": "https://api.github.com/users/web-flow/repos",
+    "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/web-flow/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "parents": [
+    {
+      "sha": "09c015eef5dd011e7ad9fdbd0e38294bf23717be",
+      "url": "https://api.github.com/repos/apache/superset/commits/09c015eef5dd011e7ad9fdbd0e38294bf23717be",
+      "html_url": "https://github.com/apache/superset/commit/09c015eef5dd011e7ad9fdbd0e38294bf23717be"
+    }
+  ],
+  "stats": {
+    "total": 10,
+    "additions": 5,
+    "deletions": 5
+  },
+  "files": [
+    {
+      "sha": "f396ff312b576888152350aa11d8f78df4623c87",
+      "filename": "superset-frontend/package-lock.json",
+      "status": "modified",
+      "additions": 4,
+      "deletions": 4,
+      "changes": 8,
+      "blob_url": "https://github.com/apache/superset/blob/9ad39c0bff717bbd7069c81f465b3b7055a2d238/superset-frontend%2Fpackage-lock.json",
+      "raw_url": "https://github.com/apache/superset/raw/9ad39c0bff717bbd7069c81f465b3b7055a2d238/superset-frontend%2Fpackage-lock.json",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/superset-frontend%2Fpackage-lock.json?ref=9ad39c0bff717bbd7069c81f465b3b7055a2d238",
+      "patch": "@@ -189,7 +189,7 @@\n         \"@testing-library/user-event\": \"^14.6.8\",\n         \"@types/content-disposition\": \"^0.5.9\",\n         \"@types/dom-to-image\": \"^2.6.7\",\n-        \"@types/estree\": \"^1.0.9\",\n+        \"@types/estree\": \"^1.0.10\",\n         \"@types/jest\": \"^30.0.0\",\n         \"@types/jquery\": \"^4.0.1\",\n         \"@types/js-levenshtein\": \"^1.1.3\",\n@@ -13105,9 +13105,9 @@\n       \"license\": \"MIT\"\n     },\n     \"node_modules/@types/estree\": {\n-      \"version\": \"1.0.9\",\n-      \"resolved\": \"https://registry.npmjs.org/@types/estree/-/estree-1.0.9.tgz\",\n-      \"integrity\": \"sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==\",\n+      \"version\": \"1.0.10\",\n+      \"resolved\": \"https://registry.npmjs.org/@types/estree/-/estree-1.0.10.tgz\",\n+      \"integrity\": \"sha512-lTyOMnOcmRBzdCv6/4zUZCrEhV0xrqQiUZBZtVcbmLHBXKLnN8q89v/wKRF/Q0HbwVsqbIG3o5HDoFl9sduM+g==\",\n       \"license\": \"MIT\"\n     },\n     \"node_modules/@types/estree-jsx\": {"
+    },
+    {
+      "sha": "ec5014b1b1abcaa8cf0fe973bee89db87ec56ab4",
+      "filename": "superset-frontend/package.json",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "changes": 2,
+      "blob_url": "https://github.com/apache/superset/blob/9ad39c0bff717bbd7069c81f465b3b7055a2d238/superset-frontend%2Fpackage.json",
+      "raw_url": "https://github.com/apache/superset/raw/9ad39c0bff717bbd7069c81f465b3b7055a2d238/superset-frontend%2Fpackage.json",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/superset-frontend%2Fpackage.json?ref=9ad39c0bff717bbd7069c81f465b3b7055a2d238",
+      "patch": "@@ -265,7 +265,7 @@\n     \"@testing-library/user-event\": \"^14.6.8\",\n     \"@types/content-disposition\": \"^0.5.9\",\n     \"@types/dom-to-image\": \"^2.6.7\",\n-    \"@types/estree\": \"^1.0.9\",\n+    \"@types/estree\": \"^1.0.10\",\n     \"@types/jest\": \"^30.0.0\",\n     \"@types/jquery\": \"^4.0.1\",\n     \"@types/js-levenshtein\": \"^1.1.3\","
+    }
+  ]
+}

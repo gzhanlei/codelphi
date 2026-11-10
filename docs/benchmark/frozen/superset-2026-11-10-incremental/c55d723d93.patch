@@ -1,0 +1,2808 @@
+==FILE== docs/admin_docs/security/security.mdx
+@@ -745,6 +745,12 @@ SELECT * FROM (
+ - In **SQL Lab**, RLS is enforced only when the `RLS_IN_SQLLAB` feature flag is enabled:
+   queries run against tables that have associated datasets with RLS filters will then have
+   the appropriate predicates injected automatically.
++- When distinguishing a CTE reference from a physical table, the SQL parser folds
++  ASCII letters in unquoted names on PostgreSQL, Oracle, and Snowflake, preserving
++  quoted names. It does not guess non-ASCII case mappings, which can depend on the
++  database character set. A CTE reference differing only in non-ASCII letter case
++  may therefore receive an extra table access check or RLS filter. Use the same
++  non-ASCII spelling in the CTE declaration and its references to avoid this.
+ 
+ #### RLS Indicator in the Dataset List and Explore
+ 
+==FILE== superset/commands/sql_lab/estimate.py
+@@ -17,6 +17,7 @@
+ from __future__ import annotations
+ 
+ import logging
++from functools import cache, partial
+ from typing import Any, TypedDict
+ 
+ from flask import current_app as app
+@@ -41,7 +42,12 @@
+ from superset.models.core import Database
+ from superset.sql.parse import SQLScript
+ from superset.utils import core as utils, json
+-from superset.utils.rls import apply_rls
++from superset.utils.rls import (
++    apply_rls,
++    get_disallowed_tables,
++    get_unqualified_table_schemas,
++    has_qualified_table_entry,
++)
+ 
+ logger = logging.getLogger(__name__)
+ 
+@@ -140,12 +146,32 @@ def _apply_sql_security(self, sql: str) -> str:
+             # fall back to the runtime-resolved default.
+             effective_schema = self._schema or resolved_schema or ""
+ 
++        # A query without a schema still reads unqualified tables through the
++        # connection's search path, so RLS and schema-qualified denylist entries
++        # match each against the schema it's read from there. Looking that up
++        # connects to the database, so it runs at most once and only when a
++        # control needs it.
++        table_schemas = cache(
++            partial(
++                get_unqualified_table_schemas,
++                self._database,
++                catalog,
++                effective_schema,
++                parsed_script.statements,
++            )
++        )
++
+         if disallowed_tables:
+             # Honors schema-qualified denylist entries (e.g.
+             # ``information_schema.tables``) and reports only the tables
+             # actually referenced by the query.
+-            found_tables = parsed_script.get_disallowed_tables(
+-                disallowed_tables, effective_schema
++            found_tables = get_disallowed_tables(
++                self._database,
++                parsed_script,
++                disallowed_tables,
++                table_schemas()
++                if has_qualified_table_entry(disallowed_tables)
++                else effective_schema,
+             )
+             if found_tables:
+                 raise SupersetDisallowedSQLTableException(found_tables)
+@@ -159,7 +185,7 @@ def _apply_sql_security(self, sql: str) -> str:
+ 
+         if rls_enabled:
+             for statement in parsed_script.statements:
+-                apply_rls(self._database, catalog, effective_schema, statement)
++                apply_rls(self._database, catalog, table_schemas(), statement)
+             return parsed_script.format()
+ 
+         return sql
+==FILE== superset/connectors/sqla/models.py
+@@ -25,7 +25,7 @@
+ from dataclasses import dataclass, field
+ from datetime import datetime, timedelta
+ from functools import cache
+-from typing import Any, Callable, cast, Optional, Union
++from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
+ from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
+ 
+ import pandas as pd
+@@ -148,6 +148,9 @@
+     register_delete_listener,
+ )
+ 
++if TYPE_CHECKING:
++    from superset.utils.rls import RLSSchema
++
+ config = current_app.config  # Backward compatibility for tests
+ metadata = Model.metadata  # pylint: disable=no-member
+ logger = logging.getLogger(__name__)
+@@ -3309,7 +3312,7 @@ def get_inner_rls_cache_key(
+         self,
+         *,
+         resolve_catalog: Callable[[], str | None] | None = None,
+-        resolve_schema: Callable[[], str] | None = None,
++        resolve_schema: Callable[[], RLSSchema] | None = None,
+     ) -> list[str]:
+         """Key caches on table-bound inner RLS, with viewer isolation on failure."""
+         from superset.utils.rls import collect_rls_predicates_for_sql
+==FILE== superset/db_engine_specs/base.py
+@@ -21,7 +21,7 @@
+ import logging
+ import re
+ import warnings
+-from collections.abc import Iterator
++from collections.abc import Collection, Iterator
+ from contextlib import contextmanager
+ from datetime import datetime, timedelta
+ from inspect import signature
+@@ -1341,6 +1341,50 @@ def get_default_schema(cls, database: Database, catalog: str | None) -> str | No
+         with database.get_inspector(catalog=catalog) as inspector:
+             return inspector.default_schema_name
+ 
++    @classmethod
++    def get_catalog_reference_schema(
++        cls,
++        catalog: str,  # pylint: disable=unused-argument
++    ) -> str | None:
++        """
++        The schema a table naming a catalog but no schema (``catalog..table``) is
++        read from, whatever schema the connection is in.
++
++        Such a reference does not go through the connection's own default schema or
++        search path, which are those of the catalog the query runs in. An engine
++        that fixes the schema it reads returns it, and one that leaves it to the
++        catalog, or doesn't say, returns ``None``: the schema is then unknown, and a
++        control that matches tables by schema has to match the table in any schema.
++
++        :param catalog: The catalog the reference names
++        """
++        return None
++
++    @classmethod
++    def get_search_path(
++        cls,
++        database: Database,
++        catalog: str | None,
++        tables: Collection[str] = (),
++    ) -> tuple[list[str], dict[str, list[str]]]:
++        """
++        Resolve tables referenced without a schema the way the connection does.
++
++        Most engines look in their default schema only. An engine with a search
++        path looks in each of its schemas in order and reads the first table of
++        the name it finds, so the default schema isn't necessarily the one holding
++        a given table, and a control that matches tables by schema (RLS,
++        ``DISALLOWED_SQL_TABLES``) has to know which one does.
++
++        :param tables: The names of tables referenced without a schema
++        :returns: The schemas looked in, in order, and the schema holding each of
++            ``tables`` that one does (an engine that can't tell leaves a table
++            out, so it's taken to be in any of them)
++        :raises Exception: If the connection can't be asked
++        """
++        schema = cls.get_default_schema(database, catalog)
++        return ([schema] if schema else []), {}
++
+     @classmethod
+     def get_schema_from_engine_params(  # pylint: disable=unused-argument
+         cls,
+==FILE== superset/db_engine_specs/postgres.py
+@@ -19,6 +19,7 @@
+ 
+ import logging
+ import re
++from collections.abc import Collection
+ from datetime import datetime
+ from re import Pattern
+ from typing import Any, Callable, Optional, TYPE_CHECKING
+@@ -173,6 +174,63 @@ def _normalize_interval(v: Any) -> Optional[float]:
+     return None
+ 
+ 
++def _quote_identifier(name: str) -> str:
++    """
++    Quote a Postgres identifier, so it's read exactly as written.
++    """
++    return '"' + name.replace('"', '""') + '"'
++
++
++_ASCII_UPPER_TO_LOWER = {code: code + 32 for code in range(ord("A"), ord("Z") + 1)}
++# an identifier ``to_regclass`` reads as one name, folded the way a query's is
++_PLAIN_IDENTIFIER = re.compile(r"[^\W\d][\w$]*")
++
++
++def _table_spellings(name: str) -> list[str]:
++    """
++    The spellings of a table name to look up, each as ``to_regclass`` reads it.
++
++    A parsed reference no longer says whether its name was quoted, which decides
++    whether Postgres folds it. Folding an unquoted name lower-cases ASCII letters
++    only in a UTF-8 database, so ``str.lower`` would name a table (``venté``) the
++    query never reads (``ventÉ``). A name with other letters is also passed
++    unquoted, for Postgres to fold the way its encoding does.
++    """
++    spellings = [
++        _quote_identifier(name),
++        _quote_identifier(name.translate(_ASCII_UPPER_TO_LOWER)),
++    ]
++    if not name.isascii() and _PLAIN_IDENTIFIER.fullmatch(name):
++        spellings.append(name)
++    return utils.remove_duplicates(spellings)
++
++
++def _named_schemas(search_path: str, user: str) -> list[str]:
++    """
++    The schemas a ``search_path`` setting names, in order, as Postgres reads them.
++
++    Unlike ``current_schemas``, this includes the ones that don't exist, which a
++    script can create before reading a table from one. ``$user`` names the
++    current user's schema, an unquoted name is folded the way Postgres folds it
++    (see ``_table_spellings``), and ``pg_temp``, the session's own temporary
++    schema, is left out.
++    """
++    schemas = []
++    for name, quoted in re.findall(
++        r'\s*(?:"((?:[^"]|"")*)"|([^,]*?))\s*(?:,|$)', search_path
++    ):
++        schema = (
++            name.replace('""', '"')
++            if name
++            else quoted.strip().translate(_ASCII_UPPER_TO_LOWER)
++        )
++        if schema == "$user":
++            schema = user
++        if schema and schema != "pg_temp":
++            schemas.append(schema)
++    return utils.remove_duplicates(schemas)
++
++
+ class PostgresBaseEngineSpec(BaseEngineSpec):
+     """Abstract class for Postgres 'like' databases"""
+ 
+@@ -769,6 +827,66 @@ def get_schema_from_engine_params(
+ 
+         return None
+ 
++    @classmethod
++    def get_search_path(
++        cls,
++        database: Database,
++        catalog: str | None,
++        tables: Collection[str] = (),
++    ) -> tuple[list[str], dict[str, list[str]]]:
++        """
++        Resolve tables referenced without a schema the way the connection does.
++
++        The default schema Postgres reports is the first schema of the
++        ``search_path`` that exists (``current_schema()``), which needn't hold the
++        table: under the default ``"$user", public`` an unqualified ``sales`` in
++        ``public`` is still read when a schema named after the user exists, and a
++        ``sales`` in that schema shadows it. ``current_schemas(true)`` lists the
++        schemas Postgres searches, in order, including the ``pg_catalog`` it
++        searches first when the path doesn't name it, and ``to_regclass`` resolves
++        a table name the way a query does. A parsed reference no longer says
++        whether its name was quoted, which decides whether Postgres folds it, so
++        both spellings are looked up (see ``_table_spellings``) and every schema
++        holding either is returned. ``current_schemas`` leaves out a schema the path
++        names that doesn't exist, which a script can create before reading a table
++        from it, so those are listed after the ones searched.
++        """
++        spellings = {table: _table_spellings(table) for table in tables}
++        with database.get_raw_connection(catalog=catalog) as connection:
++            cursor = connection.cursor()
++            cursor.execute(
++                "SELECT pg_catalog.current_schemas(true)::text[], "
++                "pg_catalog.current_setting('search_path'), current_user::text"
++            )
++            row = cursor.fetchone()
++            if not row or not isinstance(row[0], list):
++                # reported as an empty path, it would match no table's rules
++                raise ValueError(f"Unexpected search path: {row!r}")
++            schemas: list[str] = utils.remove_duplicates(
++                row[0] + _named_schemas(row[1], row[2])
++            )
++            found: dict[str, str] = {}
++            if spellings:
++                cursor.execute(
++                    "SELECT spelling, n.nspname::text "
++                    "FROM unnest(%s::text[]) AS s(spelling) "
++                    "JOIN pg_catalog.pg_class AS c "
++                    "ON c.oid = pg_catalog.to_regclass(spelling) "
++                    "JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace",
++                    ([name for names in spellings.values() for name in names],),
++                )
++                found = dict(cursor.fetchall())
++
++        order = {schema: position for position, schema in enumerate(schemas)}
++        resolved = {
++            table: sorted(
++                {found[name] for name in names if name in found},
++                key=lambda schema: order.get(schema, len(order)),
++            )
++            for table, names in spellings.items()
++        }
++        return schemas, {table: found for table, found in resolved.items() if found}
++
+     @classmethod
+     def get_default_schema_for_query(
+         cls,
+==FILE== superset/db_engine_specs/snowflake.py
+@@ -578,6 +578,14 @@ def get_default_catalog(cls, database: "Database") -> str:
+         """
+         return database.url_object.database.split("/")[0]
+ 
++    @classmethod
++    def get_catalog_reference_schema(cls, catalog: str) -> str | None:
++        """
++        A two-dot name (``db..table``) reads the ``PUBLIC`` schema of the database,
++        whatever schema the session is in.
++        """
++        return "PUBLIC"
++
+     @classmethod
+     def get_catalog_names(
+         cls,
+==FILE== superset/models/core.py
+@@ -27,6 +27,7 @@
+ import threading
+ import weakref
+ from ast import literal_eval
++from collections.abc import Collection
+ from contextlib import (
+     AbstractContextManager,
+     closing,
+@@ -1066,6 +1067,16 @@ def get_default_schema(self, catalog: str | None) -> str | None:
+         """
+         return self.db_engine_spec.get_default_schema(self, catalog)
+ 
++    def get_search_path(
++        self, catalog: str | None, tables: Collection[str] = ()
++    ) -> tuple[list[str], dict[str, list[str]]]:
++        """
++        Resolve tables referenced without a schema the way the connection does.
++
++        See ``BaseEngineSpec.get_search_path``.
++        """
++        return self.db_engine_spec.get_search_path(self, catalog, tables)
++
+     def get_default_schema_for_query(
+         self, query: Query, template_params: Optional[dict[str, Any]] = None
+     ) -> str | None:
+==FILE== superset/models/helpers.py
+@@ -134,6 +134,8 @@
+     AdvancedDataTypeResponseError,
+     ColumnNotFoundException,
+     InvalidPostProcessingError,
++    OAuth2Error,
++    OAuth2RedirectError,
+     QueryClauseValidationException,
+     QueryObjectValidationError,
+     SupersetDisallowedSQLFunctionException,
+@@ -196,7 +198,18 @@
+     TimeDeltaAmbiguousError,
+ )
+ from superset.utils.dates import datetime_to_epoch
+-from superset.utils.rls import apply_rls, get_predicates_for_table, get_rls_schema
++from superset.utils.rls import (
++    apply_rls,
++    get_disallowed_tables,
++    get_predicates_for_table,
++    get_rls_schema,
++    get_unqualified_table_schemas,
++    has_qualified_table_entry,
++    qualify_table,
++    reads_unqualified_table,
++    RLSSchema,
++    SearchPath,
++)
+ 
+ 
+ class ValidationResultDict(TypedDict):
+@@ -788,8 +801,8 @@ def validate_adhoc_subquery(
+             wrapped = True
+ 
+         # enforce RLS rules in any relevant tables
+-        default_schema = get_rls_schema(database, catalog, default_schema, sql)
+-        rls_applied = apply_rls(database, catalog, default_schema, parsed_statement)
++        rls_schema = get_rls_schema(database, catalog, default_schema, sql)
++        rls_applied = apply_rls(database, catalog, rls_schema, parsed_statement)
+ 
+     # Only regenerate the SQL if RLS predicates were actually applied;
+     # unnecessary round-tripping through sqlglot can alter dialect-specific
+@@ -2350,7 +2363,12 @@ def get_sqla_row_level_filters(
+         # for datasources of type query
+         return []
+ 
+-    def _resolve_denylist_schema(self, sql: str) -> Optional[str]:
++    def _resolve_denylist_schema(
++        self,
++        sql: str,
++        disallowed_tables: Iterable[str] = (),
++        script: SQLScript | None = None,
++    ) -> RLSSchema | None:
+         """
+         Resolve the effective default schema for ``DISALLOWED_SQL_TABLES``
+         checks, memoized per datasource instance.
+@@ -2366,6 +2384,16 @@ def _resolve_denylist_schema(self, sql: str) -> Optional[str]:
+         which runs once per selected column/metric/order-by, resolves the schema
+         at most once instead of issuing a fallback inspector round-trip per
+         expression.
++
++        A datasource without a schema on a dynamic-schema engine still reads
++        unqualified tables through the connection's search path, so when the
++        denylist has a schema-qualified entry and the SQL reads an unqualified
++        table, that search path is used instead, resolving each table it's asked
++        about once (see ``get_unqualified_table_schemas``). Bare entries match
++        whatever the schema, so a bare-name denylist never connects for it.
++
++        :param disallowed_tables: The denylist entries being checked
++        :param script: The parsed SQL being checked
+         """
+         if self.schema and self.db_engine_spec.supports_dynamic_schema:
+             return self.schema
+@@ -2374,7 +2402,20 @@ def _resolve_denylist_schema(self, sql: str) -> Optional[str]:
+             self._denylist_default_schema = self.database.resolve_query_default_schema(
+                 sql, self.schema, catalog
+             )
+-        return self._denylist_default_schema
++        schema = self._denylist_default_schema
++        if (
++            schema
++            or not has_qualified_table_entry(disallowed_tables)
++            or (script is not None and not reads_unqualified_table(script.statements))
++        ):
++            return schema
++        if not hasattr(self, "_denylist_connection_schemas"):
++            self._denylist_connection_schemas = get_unqualified_table_schemas(
++                self.database,
++                self.catalog or self.database.get_default_catalog(),
++                schema,
++            )
++        return self._denylist_connection_schemas
+ 
+     def _process_sql_expression(
+         self,
+@@ -2511,9 +2552,11 @@ def _process_validated_sql_expression(  # noqa: C901
+                     # executor gate resolves them to (via the query-aware
+                     # resolver, not the static inspector default), so both
+                     # surfaces enforce the denylist consistently.
+-                    effective_schema = self._resolve_denylist_schema(sql_to_check)
+-                    found_tables = parsed.get_disallowed_tables(
+-                        disallowed_tables, effective_schema
++                    effective_schema = self._resolve_denylist_schema(
++                        sql_to_check, disallowed_tables, parsed
++                    )
++                    found_tables = get_disallowed_tables(
++                        self.database, parsed, disallowed_tables, effective_schema
+                     )
+                     if found_tables:
+                         raise SupersetDisallowedSQLTableException(found_tables)
+@@ -2824,9 +2867,11 @@ def _raise_for_disallowed_sql(self, sql: str) -> None:
+             # / executor gate resolves them to (via the query-aware resolver,
+             # not the static inspector default), so both surfaces enforce the
+             # denylist consistently.
+-            effective_schema = self._resolve_denylist_schema(sql)
+-            found_tables = parsed_script.get_disallowed_tables(
+-                disallowed_tables, effective_schema
++            effective_schema = self._resolve_denylist_schema(
++                sql, disallowed_tables, parsed_script
++            )
++            found_tables = get_disallowed_tables(
++                self.database, parsed_script, disallowed_tables, effective_schema
+             )
+             if found_tables:
+                 raise SupersetDisallowedSQLTableException(found_tables)
+@@ -4440,15 +4485,27 @@ def get_rendered_sql(
+     def text(self, clause: str) -> TextClause:
+         return self.db_engine_spec.get_text_clause(clause)
+ 
+-    def _get_rls_schema(self) -> str:
+-        """Resolve RLS tables with the same schema policy as SQL expressions."""
+-        return get_rls_schema(
++    def _get_rls_schema(self) -> RLSSchema:
++        """
++        Resolve RLS tables with the same schema policy as SQL expressions.
++
++        The search path a dataset without a schema is read through is kept on the
++        instance, so its cache key and the query itself look each table up on it
++        once between them, rather than each connecting to the database.
++        """
++        key = (self.catalog, self.schema)
++        if (cached := getattr(self, "_rls_search_path", None)) and cached[0] == key:
++            return cached[1]
++        rls_schema = get_rls_schema(
+             self.database,
+             self.catalog,
+             self.schema,
+             self.sql or "",
+             self.template_params_dict,
+         )
++        if isinstance(rls_schema, SearchPath):
++            self._rls_search_path = (key, rls_schema)
++        return rls_schema
+ 
+     def _get_filter_column(
+         self,
+@@ -4744,7 +4801,7 @@ def _get_query_rls_cache_keys(
+         query_obj: QueryObjectDict,
+         default_schema: str | None = None,
+         resolve_catalog: Callable[[], str | None] | None = None,
+-        resolve_schema: Callable[[], str] | None = None,
++        resolve_schema: Callable[[], RLSSchema] | None = None,
+     ) -> list[str]:
+         """Collect expression-only RLS rules without building or executing SQL.
+ 
+@@ -4888,6 +4945,9 @@ def get_from_clause(
+                 if rls_applied:
+                     from_sql = parsed_script.format()
+ 
++            except (OAuth2RedirectError, OAuth2Error):
++                # the user has to sign in to the database to look up the tables
++                raise
+             except Exception as ex:  # pylint: disable=broad-except
+                 # A caught DB error can leave db.session in "pending rollback"
+                 # state, which would poison unrelated queries later in this request.
+@@ -4899,10 +4959,7 @@ def get_from_clause(
+                 try:
+                     rls_required = any(
+                         get_predicates_for_table(
+-                            table.qualify(
+-                                catalog=self.catalog,
+-                                schema=default_schema,
+-                            ),
++                            candidate,
+                             self.database,
+                             self.database.get_default_catalog(),
+                             # at least as strict as apply_rls(): a dataset's
+@@ -4915,9 +4972,13 @@ def get_from_clause(
+                             include_global_guest_rls=(
+                                 not is_dataset or statement.has_subquery()
+                             ),
++                            any_schema=any_schema,
+                         )
+                         for statement in parsed_script.statements
+                         for table in statement.tables
++                        for candidate, any_schema in qualify_table(
++                            self.database, table, self.catalog, default_schema
++                        )
+                     )
+                 except Exception:  # pylint: disable=broad-except
+                     # This retry queries db.session again and rebuilds an
+==FILE== superset/models/sql_lab.py
+@@ -89,6 +89,7 @@
+ if TYPE_CHECKING:
+     from superset.connectors.sqla.models import TableColumn
+     from superset.db_engine_specs import BaseEngineSpec
++    from superset.utils.rls import RLSSchema
+ 
+ 
+ logger = logging.getLogger(__name__)
+@@ -426,7 +427,7 @@ def get_inner_rls_cache_key(
+         self,
+         *,
+         resolve_catalog: Callable[[], str | None] | None = None,
+-        resolve_schema: Callable[[], str] | None = None,
++        resolve_schema: Callable[[], "RLSSchema"] | None = None,
+     ) -> list[str]:
+         """Key query-backed caches on the RLS execution injects into inner tables."""
+         from superset.utils.rls import collect_rls_predicates_for_sql
+==FILE== superset/sql/execution/executor.py
+@@ -104,6 +104,7 @@
+     from superset.models.core import Database
+     from superset.models.sql_lab import Query
+     from superset.result_set import SupersetResultSet
++    from superset.utils.rls import RLSSchema
+ 
+ logger = logging.getLogger(__name__)
+ 
+@@ -613,12 +614,16 @@ def execute(
+ 
+         try:
+             # 1. Prepare SQL (assembly only, no security checks)
+-            original_script, transformed_script, catalog, schema = self._prepare_sql(
+-                sql, opts
+-            )
++            (
++                original_script,
++                transformed_script,
++                catalog,
++                schema,
++                table_schemas,
++            ) = self._prepare_sql(sql, opts)
+ 
+             # 2. Security checks on transformed script
+-            self._check_security(transformed_script, schema)
++            self._check_security(transformed_script, schema, table_schemas)
+ 
+             # 3. Get mutation status and format SQL
+             has_mutation = transformed_script.has_mutation()
+@@ -793,12 +798,16 @@ def execute_async(
+         opts: QueryOptionsType = options or QueryOptionsType()
+ 
+         # 1. Prepare SQL (assembly only, no security checks)
+-        original_script, transformed_script, catalog, schema = self._prepare_sql(
+-            sql, opts
+-        )
++        (
++            original_script,
++            transformed_script,
++            catalog,
++            schema,
++            table_schemas,
++        ) = self._prepare_sql(sql, opts)
+ 
+         # 2. Security checks on transformed script
+-        self._check_security(transformed_script, schema)
++        self._check_security(transformed_script, schema, table_schemas)
+ 
+         # 3. Get mutation status and format SQL
+         has_mutation = transformed_script.has_mutation()
+@@ -850,7 +859,7 @@ def _prepare_sql(
+         self,
+         sql: str,
+         opts: QueryOptions,
+-    ) -> tuple[SQLScript, SQLScript, str | None, str | None]:
++    ) -> tuple[SQLScript, SQLScript, str | None, str | None, RLSSchema]:
+         """
+         Prepare SQL for execution (no side effects, no security checks).
+ 
+@@ -866,7 +875,9 @@ def _prepare_sql(
+ 
+         :param sql: Original SQL query
+         :param opts: Query options
+-        :returns: Tuple of (original_script, transformed_script, catalog, schema)
++        :returns: Tuple of (original_script, transformed_script, catalog, schema,
++            table_schemas), where ``table_schemas`` is the schema, or search path,
++            unqualified tables resolve to (see ``get_unqualified_table_schemas``)
+         """
+         # 1. Render Jinja2 templates
+         rendered_sql = self._render_sql_template(sql, opts.template_params)
+@@ -895,21 +906,38 @@ def _prepare_sql(
+         resolved_schema = self._resolve_query_schema(sql, opts, catalog)
+         schema = opts.schema or resolved_schema
+ 
++        # A query without a schema still reads unqualified tables through the
++        # connection's search path, so RLS and schema-qualified denylist entries
++        # match each against the schema it's read from there.
++        from superset.utils.rls import get_unqualified_table_schemas
++
++        table_schemas = get_unqualified_table_schemas(
++            self.database, catalog, schema, transformed_script.statements
++        )
++
+         # 5. Apply RLS to transformed script only
+-        self._apply_rls_to_script(transformed_script, catalog, schema)
++        self._apply_rls_to_script(transformed_script, catalog, table_schemas)
+ 
+         # 6. Apply limit only if not a mutation
+         if not transformed_script.has_mutation():
+             self._apply_limit_to_script(transformed_script, opts)
+ 
+-        return original_script, transformed_script, catalog, schema
++        return original_script, transformed_script, catalog, schema, table_schemas
+ 
+-    def _check_security(self, script: SQLScript, schema: str | None = None) -> None:
++    def _check_security(
++        self,
++        script: SQLScript,
++        schema: str | None = None,
++        table_schemas: RLSSchema = "",
++    ) -> None:
+         """
+         Perform security checks on prepared SQL script.
+ 
+         :param script: Prepared SQLScript
+         :param schema: Effective schema unqualified references resolve to
++        :param table_schemas: The schema, or search path, unqualified tables
++            resolve to when the query has no schema (see
++            ``get_unqualified_table_schemas``)
+         :raises SupersetSecurityException: If security checks fail
+         """
+         # Check disallowed functions
+@@ -925,7 +953,9 @@ def _check_security(self, script: SQLScript, schema: str | None = None) -> None:
+             )
+ 
+         # Check disallowed tables
+-        if disallowed_tables := self._check_disallowed_tables(script, schema):
++        if disallowed_tables := self._check_disallowed_tables(
++            script, schema, table_schemas
++        ):
+             raise SupersetSecurityException(
+                 SupersetError(
+                     message=f"Disallowed SQL tables: {', '.join(disallowed_tables)}",
+@@ -1385,13 +1415,19 @@ def _resolve_query_schema(
+         )
+ 
+     def _check_disallowed_tables(
+-        self, script: SQLScript, schema: str | None = None
++        self,
++        script: SQLScript,
++        schema: str | None = None,
++        table_schemas: RLSSchema = "",
+     ) -> set[str] | None:
+         """
+         Check for disallowed SQL tables/views.
+ 
+         :param script: Parsed SQL script
+         :param schema: Effective schema unqualified references resolve to
++        :param table_schemas: The schema, or search path, unqualified tables
++            resolve to when the query has no schema (see
++            ``get_unqualified_table_schemas``)
+         :returns: Set of disallowed tables found, or None if none found
+         """
+         disallowed_config = app.config.get("DISALLOWED_SQL_TABLES", {})
+@@ -1405,24 +1441,32 @@ def _check_disallowed_tables(
+         # Honors schema-qualified denylist entries (e.g.
+         # ``information_schema.tables``) as well as bare names. The effective
+         # schema lets an unqualified reference that resolves to it at runtime
+-        # (via the connection ``search_path``) match too.
+-        return script.get_disallowed_tables(engine_disallowed, schema) or None
++        # (via the connection ``search_path``) match too, including the schema
++        # the search path reads it from when the query has none.
++        from superset.utils.rls import get_disallowed_tables
++
++        return (
++            get_disallowed_tables(
++                self.database, script, engine_disallowed, table_schemas or schema
++            )
++            or None
++        )
+ 
+     def _apply_rls_to_script(
+-        self, script: SQLScript, catalog: str | None, schema: str | None
++        self, script: SQLScript, catalog: str | None, schema: RLSSchema
+     ) -> None:
+         """
+         Apply Row-Level Security to SQLScript statements in place.
+ 
+         :param script: SQLScript object to modify
+         :param catalog: Catalog name
+-        :param schema: Schema name
++        :param schema: Schema, or search path, unqualified tables resolve to
+         """
+         from superset.utils.rls import apply_rls
+ 
+         # Apply RLS to each statement in the script
+         for statement in script.statements:
+-            apply_rls(self.database, catalog, schema or "", statement)
++            apply_rls(self.database, catalog, schema, statement)
+ 
+     def _create_query_record(
+         self,
+==FILE== superset/sql/parse.py
+@@ -22,9 +22,10 @@
+ import logging
+ import re
+ import urllib.parse
+-from collections.abc import Callable
++from collections.abc import Callable, Mapping
+ from dataclasses import dataclass
+ from functools import cached_property, lru_cache
++from string import ascii_lowercase, ascii_uppercase
+ from typing import Any, Generic, Optional, TYPE_CHECKING, TypeVar
+ 
+ import sqlglot
+@@ -198,6 +199,23 @@ def _check_script_length(script: str, engine: str | None) -> None:
+     "superset",
+ }
+ 
++# Dialects whose engines fold an unquoted identifier to one case before resolving
++# it, including against a CTE's name, while keeping a quoted identifier as written.
++# A CTE reference is matched to its CTE by the folded name on these engines; others
++# keep the exact name match, which reports a case-mismatched CTE reference as a
++# table read rather than risk hiding a real one.
++CTE_NAME_FOLDING_DIALECTS = {
++    Dialects.ORACLE,
++    Dialects.POSTGRES,
++    Dialects.SNOWFLAKE,
++}
++_CTE_ASCII_UPPER = str.maketrans(ascii_lowercase, ascii_uppercase)
++_CTE_ASCII_LOWER = str.maketrans(ascii_uppercase, ascii_lowercase)
++
++# Engines where a ``WITH RECURSIVE`` CTE body can read any CTE of its clause,
++# including one defined later, rather than only itself and the earlier ones.
++CTE_FORWARD_REFERENCE_ENGINES = {"postgres", "postgresql"}
++
+ 
+ @lru_cache(maxsize=None)
+ def folds_unquoted_object_names(engine: str) -> bool:
+@@ -402,18 +420,31 @@ def __init__(
+         catalog: str | None,
+         schema: str | None,
+         rules: dict[Table, list[exp.Expression]],
++        catalog_schemas: Mapping[str, str | None] | None = None,
+     ) -> None:
+         self.catalog = catalog
+         self.schema = schema
+         self.rules = rules
++        self.catalog_schemas = catalog_schemas
+ 
+     def get_predicate(self, table_node: exp.Table) -> exp.Expression | None:
+         """
+         Get the combined RLS predicate for a table.
++
++        A table naming a catalog but no schema (``catalog..table``) is read from the
++        schema its catalog gives it, when ``catalog_schemas`` says (``None`` when it
++        doesn't, which is not the schema the statement's own tables default to).
+         """
++        table_schema = table_node.db if table_node.db else self.schema
++        if (
++            not table_node.db
++            and table_node.catalog
++            and self.catalog_schemas is not None
++        ):
++            table_schema = self.catalog_schemas.get(table_node.catalog.lower())
+         table = Table(
+             table_node.name,
+-            table_node.db if table_node.db else self.schema,
++            table_schema,
+             table_node.catalog if table_node.catalog else self.catalog,
+         )
+         if predicates := self.rules.get(table):
+@@ -616,6 +647,36 @@ def __str__(self) -> str:
+ TBaseSQLStatement = TypeVar("TBaseSQLStatement")  # pylint: disable=invalid-name
+ 
+ 
++def _match_denylist_entries(
++    entries: set[str],
++    present_bare: set[str],
++    present_qualified: set[str],
++    present_by_name: set[str],
++) -> set[str]:
++    """
++    The denylist entries a statement reads.
++
++    :param entries: The entries to check for (case-insensitive)
++    :param present_bare: The lower-cased names of the tables read
++    :param present_qualified: The lower-cased qualified names of the tables read
++    :param present_by_name: The lower-cased names of the tables read from a schema
++        that isn't known, which a schema-qualified entry matches by name alone
++    :return: The matched entries, in their original denylist form
++    """
++    found: set[str] = set()
++    for entry in entries:
++        needle = entry.lower()
++        if "." in needle:
++            if (
++                needle in present_qualified
++                or needle.rsplit(".", 1)[1] in present_by_name
++            ):
++                found.add(entry)
++        elif needle in present_bare:
++            found.add(entry)
++    return found
++
++
+ class BaseSQLStatement(Generic[InternalRepresentation]):
+     """
+     Base class for SQL statements.
+@@ -808,6 +869,7 @@ def get_disallowed_tables(
+         tables: set[str],
+         default_schema: str | None = None,
+         schema_indeterminate: bool = False,
++        catalog_schemas: Mapping[str, str | None] | None = None,
+     ) -> set[str]:
+         """
+         Return the subset of ``tables`` referenced by this statement.
+@@ -818,6 +880,9 @@ def get_disallowed_tables(
+         :param schema_indeterminate: When True, unqualified references are
+             matched against schema-qualified entries too (see
+             :meth:`SQLStatement.get_disallowed_tables`)
++        :param catalog_schemas: The schema a reference naming a catalog but no
++            schema is read from, by lower-cased catalog (see
++            :meth:`SQLStatement.get_disallowed_tables`)
+         :return: The matched entries, in their original denylist form
+         """
+         raise NotImplementedError()
+@@ -911,6 +976,7 @@ def apply_rls(
+         predicates: dict[Table, list[InternalRepresentation]],
+         method: RLSMethod,
+         subquery_predicates: dict[Table, list[InternalRepresentation]] | None = None,
++        catalog_schemas: Mapping[str, str | None] | None = None,
+     ) -> bool:
+         """
+         Apply relevant RLS rules to the statement inplace.
+@@ -921,6 +987,10 @@ def apply_rls(
+         :param subquery_predicates: The rules for tables read inside a sub-query
+             (scalar, ``IN`` or ``EXISTS``), whose rows don't reach the statement's
+             output. Defaults to ``predicates``.
++        :param catalog_schemas: The schema a reference naming a catalog but no
++            schema (``catalog..table``) is read from, by lower-cased catalog, or
++            ``None`` when the catalog doesn't say. Without it such a reference
++            defaults to ``schema``, like any other table.
+         :returns: True if any rule was applied, False otherwise.
+         """
+         raise NotImplementedError()
+@@ -1772,7 +1842,11 @@ def _extract_tables_from_statement(
+         Find all referenced tables.
+         """
+         dialect = SQLGLOT_DIALECTS.get(engine)
+-        return extract_tables_from_statement(parsed, dialect)
++        return extract_tables_from_statement(
++            parsed,
++            dialect,
++            cte_forward_references=engine in CTE_FORWARD_REFERENCE_ENGINES,
++        )
+ 
+     def is_select(self) -> bool:
+         """
+@@ -2330,6 +2404,9 @@ def check_tables_present(
+             runtime (e.g. the session ``search_path`` / selected schema)
+         :return: True if any of the given tables is referenced
+         """
++        # no ``catalog_schemas``: a ``catalog..table`` reference matches a qualified
++        # entry by name in any schema, which errs toward a match (nothing in
++        # production calls this; the denylist callers use ``get_disallowed_tables``)
+         return bool(self.get_disallowed_tables(tables, default_schema))
+ 
+     @staticmethod
+@@ -2504,6 +2581,7 @@ def get_disallowed_tables(
+         tables: set[str],
+         default_schema: str | None = None,
+         schema_indeterminate: bool = False,
++        catalog_schemas: Mapping[str, str | None] | None = None,
+     ) -> set[str]:
+         """
+         Return the subset of ``tables`` referenced by this statement.
+@@ -2528,12 +2606,20 @@ def get_disallowed_tables(
+             ``SET search_path``), so an unqualified reference is matched
+             against the bare-name portion of schema-qualified entries too, to
+             avoid bypassing a qualified denylist entry
++        :param catalog_schemas: The schema a reference naming a catalog but no
++            schema (``catalog..table``) is read from, by lower-cased catalog. Such
++            a reference isn't read from ``default_schema``, which is the schema of
++            the catalog the query runs in, so it's matched against the schema its
++            catalog gives it, and against the bare-name portion of every
++            schema-qualified entry when the catalog isn't in the mapping, or has
++            no schema in it, as the schema is then unknown
+         :return: The matched entries, in their original denylist form
+         """
+         fallback = default_schema.lower() if default_schema else None
+         present_bare: set[str] = set()
+         present_qualified: set[str] = set()
+         present_unqualified: set[str] = set()
++        present_unresolved: set[str] = set()
+         for t in self.tables:
+             bare = t.table.lower()
+             present_bare.add(bare)
+@@ -2546,6 +2632,17 @@ def get_disallowed_tables(
+                     present_qualified.add(
+                         f"{t.catalog.lower()}.{t.schema.lower()}.{bare}"
+                     )
++            elif t.catalog:
++                # read from the schema its catalog gives it, not from the schema
++                # the query's own catalog defaults to
++                present_unqualified.add(bare)
++                if catalog_schema := (catalog_schemas or {}).get(t.catalog.lower()):
++                    present_qualified.add(f"{catalog_schema.lower()}.{bare}")
++                    present_qualified.add(
++                        f"{t.catalog.lower()}.{catalog_schema.lower()}.{bare}"
++                    )
++                else:
++                    present_unresolved.add(bare)
+             else:
+                 present_unqualified.add(bare)
+                 # An unqualified reference can only be resolved against a known
+@@ -2556,20 +2653,14 @@ def get_disallowed_tables(
+                 # analysis without the live search_path.
+                 if fallback:
+                     present_qualified.add(f"{fallback}.{bare}")
+-        found: set[str] = set()
+-        for entry in tables:
+-            needle = entry.lower()
+-            if "." in needle:
+-                if needle in present_qualified:
+-                    found.add(entry)
+-                elif (
+-                    schema_indeterminate
+-                    and needle.rsplit(".", 1)[1] in present_unqualified
+-                ):
+-                    found.add(entry)
+-            elif needle in present_bare:
+-                found.add(entry)
+-        return found
++        return _match_denylist_entries(
++            tables,
++            present_bare,
++            present_qualified,
++            # references a schema-qualified entry matches by table name alone
++            present_unresolved
++            | (present_unqualified if schema_indeterminate else set()),
++        )
+ 
+     def _has_limit_by(self) -> bool:
+         """
+@@ -2954,6 +3045,7 @@ def apply_rls(
+         predicates: dict[Table, list[exp.Expression]],
+         method: RLSMethod,
+         subquery_predicates: dict[Table, list[exp.Expression]] | None = None,
++        catalog_schemas: Mapping[str, str | None] | None = None,
+     ) -> bool:
+         """
+         Apply relevant RLS rules to the statement inplace.
+@@ -2964,6 +3056,10 @@ def apply_rls(
+         :param subquery_predicates: The rules for tables read inside a sub-query
+             (scalar, ``IN`` or ``EXISTS``), whose rows don't reach the statement's
+             output. Defaults to ``predicates``.
++        :param catalog_schemas: The schema a reference naming a catalog but no
++            schema (``catalog..table``) is read from, by lower-cased catalog, or
++            ``None`` when the catalog doesn't say. Without it such a reference
++            defaults to ``schema``, like any other table.
+         :returns: True if any rule was applied, False otherwise.
+         """
+         if not predicates and not subquery_predicates:
+@@ -2976,13 +3072,13 @@ def apply_rls(
+         if method not in transformers:
+             raise ValueError(f"Invalid RLS method: {method}")
+ 
+-        transformer = transformers[method](catalog, schema, predicates)
++        transformer = transformers[method](catalog, schema, predicates, catalog_schemas)
+         subquery_transformer = transformer
+         scopes = traverse_scope(self._parsed)
+         subquery_scopes: set[int] = set()
+         if subquery_predicates is not None:
+             subquery_transformer = transformers[method](
+-                catalog, schema, subquery_predicates
++                catalog, schema, subquery_predicates, catalog_schemas
+             )
+             subquery_scopes = _find_subquery_scopes(scopes)
+ 
+@@ -2995,13 +3091,13 @@ def apply_rls(
+             scope_transformer = (
+                 subquery_transformer if id(scope) in subquery_scopes else transformer
+             )
+-            for source in scope.sources.values():
++            for source in _find_scope_table_reads(
++                scope,
++                self._dialect,
++                self.engine in CTE_FORWARD_REFERENCE_ENGINES,
++            ):
+                 # dedupe by identity: a correlated LATERAL reaches one node twice
+-                if (
+-                    isinstance(source, exp.Table)
+-                    and not is_cte(source, scope)
+-                    and id(source) not in seen
+-                ):
++                if id(source) not in seen:
+                     seen.add(id(source))
+                     reads.append((source, scope_transformer))
+ 
+@@ -3317,13 +3413,15 @@ def get_disallowed_tables(
+         tables: set[str],
+         default_schema: str | None = None,
+         schema_indeterminate: bool = False,
++        catalog_schemas: Mapping[str, str | None] | None = None,
+     ) -> set[str]:
+         """
+         Return the subset of ``tables`` referenced by this statement.
+ 
+         :param tables: Set of table names to check for (case-insensitive)
+         :param default_schema: Unused; accepted for interface parity
+         :param schema_indeterminate: Unused; accepted for interface parity
++        :param catalog_schemas: Unused; accepted for interface parity
+         :return: The matched entries, in their original denylist form
+         """
+         logger.warning("Kusto KQL doesn't support checking for tables present.")
+@@ -3571,17 +3669,26 @@ def check_tables_present(
+             runtime (e.g. the session ``search_path`` / selected schema)
+         :return: True if any of the tables are present
+         """
++        # no ``catalog_schemas``: a ``catalog..table`` reference matches a qualified
++        # entry by name in any schema, which errs toward a match (nothing in
++        # production calls this; the denylist callers use ``get_disallowed_tables``)
+         return bool(self.get_disallowed_tables(tables, default_schema))
+ 
+     def get_disallowed_tables(
+-        self, tables: set[str], default_schema: str | None = None
++        self,
++        tables: set[str],
++        default_schema: str | None = None,
++        catalog_schemas: Mapping[str, str | None] | None = None,
+     ) -> set[str]:
+         """
+         Return the subset of ``tables`` referenced anywhere in the script.
+ 
+         :param tables: Set of table names to check for (case-insensitive)
+         :param default_schema: Schema unqualified references resolve to at
+             runtime (e.g. the session ``search_path`` / selected schema)
++        :param catalog_schemas: The schema a reference naming a catalog but no
++            schema is read from, by lower-cased catalog (see
++            :meth:`SQLStatement.get_disallowed_tables`)
+         :return: The matched entries, in their original denylist form
+         """
+         # A `SET search_path` only affects statements that run *after* it, so
+@@ -3595,7 +3702,7 @@ def get_disallowed_tables(
+         schema_indeterminate = False
+         for statement in self.statements:
+             found |= statement.get_disallowed_tables(
+-                tables, default_schema, schema_indeterminate
++                tables, default_schema, schema_indeterminate, catalog_schemas
+             )
+             if statement.changes_search_path():
+                 schema_indeterminate = True
+@@ -3673,6 +3780,7 @@ def _find_show_statement_tables(statement: exp.Show) -> set[Table]:
+ def _find_table_sources(
+     statement: exp.Expression,
+     dialect: Dialects | None,
++    cte_forward_references: bool = False,
+ ) -> list[exp.Table]:
+     """
+     Find every table reference (occurrence, not deduplicated) in a statement.
+@@ -3720,17 +3828,52 @@ def _find_table_sources(
+     return [
+         source
+         for scope in scopes
++        for source in _find_scope_table_reads(scope, dialect, cte_forward_references)
++    ]
++
++
++def _find_scope_table_reads(
++    scope: Scope,
++    dialect: DialectType,
++    cte_forward_references: bool = False,
++) -> list[exp.Table]:
++    """
++    Find the real tables a scope reads, leaving out its CTE references.
++
++    sqlglot lists a reference it matches to a CTE by the exact name as the CTE's
++    scope in ``Scope.sources``, not as the table. On a dialect that folds CTE names
++    such a reference can still read a table (``WITH "Sales" ... FROM Sales`` reads
++    ``sales`` on PostgreSQL), so those references are checked again there.
++
++    :param dialect: The statement's sqlglot dialect
++    :param cte_forward_references: See ``is_cte``
++    """
++    reads = [
++        source
+         for source in scope.sources.values()
+-        if isinstance(source, exp.Table) and not is_cte(source, scope)
++        if isinstance(source, exp.Table)
++        and not is_cte(source, scope, dialect, cte_forward_references)
+     ]
++    if _folds_cte_names(dialect):
++        reads.extend(
++            table
++            for table in scope.tables
++            if isinstance(scope.sources.get(table.alias_or_name), Scope)
++            and not is_cte(table, scope, dialect, cte_forward_references)
++        )
++    return reads
+ 
+ 
+ def extract_tables_from_statement(
+     statement: exp.Expression,
+     dialect: Dialects | None,
++    cte_forward_references: bool = False,
+ ) -> set[Table]:
+     """
+     Extract all distinct table references in a single statement.
++
++    :param cte_forward_references: The engine lets a ``WITH RECURSIVE`` CTE read
++        a CTE defined later in the same clause (see ``is_cte``)
+     """
+     if isinstance(statement, exp.Show):
+         return _find_show_statement_tables(statement)
+@@ -3741,7 +3884,7 @@ def extract_tables_from_statement(
+             source.db if source.db != "" else None,
+             source.catalog if source.catalog != "" else None,
+         )
+-        for source in _find_table_sources(statement, dialect)
++        for source in _find_table_sources(statement, dialect, cte_forward_references)
+     }
+ 
+ 
+@@ -3899,24 +4042,92 @@ def _is_correlated(scope: Scope) -> bool:
+     )
+ 
+ 
+-def is_cte(source: exp.Table, scope: Scope) -> bool:
++def is_cte(
++    source: exp.Table,
++    scope: Scope,
++    dialect: DialectType = None,
++    cte_forward_references: bool = False,
++) -> bool:
+     """
+     Does this reference resolve to a CTE rather than to a real table?
+ 
+     A CTE reference is also an ``exp.Table``, so it must be excluded from a statement's
+     read tables, or a rule on a table could be evaded by wrapping it in a same-named
+     CTE. Resolve the name through ``Scope.cte_sources`` (not ``Scope.sources``, keyed by
+     ``alias_or_name``, which would hide a real table sharing a CTE's alias); a qualified
+-    reference (schema or catalog) is always a table. Where sqlglot registers a name
+-    differently than SQL scopes it (letter-case, a ``WITH RECURSIVE`` self/forward
+-    reference), this errs toward reporting a table -- a spurious check, not a leak.
++    reference (schema or catalog) is always a table.
++
++    sqlglot registers a CTE under its name as written, so on a dialect in
++    ``CTE_NAME_FOLDING_DIALECTS`` ASCII letters in both names are folded the way
++    the engine folds them (``WITH Sales ... FROM sales`` reads the CTE on PostgreSQL,
++    while ``WITH "Sales" ... FROM Sales`` reads the table). Other dialects compare the
++    names exactly, which errs toward reporting a table -- a spurious check, not a
++    leak.
++
++    :param dialect: The statement's sqlglot dialect
++    :param cte_forward_references: The engine lets a ``WITH RECURSIVE`` CTE body
++        read any CTE of the same clause, including one defined after it, which
++        sqlglot doesn't register as visible there
+     """
+     if source.db or source.catalog:
+         # Qualified references are always physical tables, never CTEs.
+         return False
+ 
+-    resolved = scope.cte_sources.get(source.name)
+-    return isinstance(resolved, Scope) and resolved.scope_type == ScopeType.CTE
++    # the CTEs visible here, by the name sqlglot registers, with their identifier
++    ctes: dict[str, exp.Expression | None] = {
++        name: _find_cte_identifier(cte_scope)
++        for name, cte_scope in scope.cte_sources.items()
++        if isinstance(cte_scope, Scope) and cte_scope.scope_type == ScopeType.CTE
++    }
++    if cte_forward_references:
++        cte = source.find_ancestor(exp.CTE)
++        while cte is not None:
++            clause = cte.parent
++            if isinstance(clause, exp.With) and clause.args.get("recursive"):
++                for sibling in clause.expressions:
++                    ctes.setdefault(sibling.alias, sibling.args["alias"].this)
++            cte = cte.find_ancestor(exp.CTE)
++
++    if not _folds_cte_names(dialect) or not isinstance(source.this, exp.Identifier):
++        return source.name in ctes
++
++    name = _cte_name_key(source.this, dialect)
++    return any(
++        identifier is not None and _cte_name_key(identifier, dialect) == name
++        for identifier in ctes.values()
++    )
++
++
++def _cte_name_key(identifier: exp.Expression, dialect: DialectType) -> str:
++    """Fold only ASCII letters of an unquoted CTE identifier.
++
++    Python's Unicode uppercasing expands names such as ``straße`` to ``STRASSE``,
++    unlike Oracle's identifier rules. Non-ASCII mappings depend on the database
++    character set; leaving those characters intact may report an extra table,
++    but must not hide a real read behind a different CTE name.
++    """
++    if not isinstance(identifier, exp.Identifier) or identifier.quoted:
++        return identifier.name
++    translation = _CTE_ASCII_LOWER if dialect == Dialects.POSTGRES else _CTE_ASCII_UPPER
++    return identifier.name.translate(translation)
++
++
++def _folds_cte_names(dialect: DialectType) -> bool:
++    """
++    Does the dialect match a CTE reference to its CTE by the folded name?
++    """
++    return dialect in CTE_NAME_FOLDING_DIALECTS
++
++
++def _find_cte_identifier(cte_scope: Scope) -> exp.Expression | None:
++    """
++    The identifier naming a CTE, with its quoting.
++
++    A recursive CTE's scope can hold just its anchor query, so the CTE is the
++    nearest ``exp.CTE`` ancestor of the scope's expression rather than its parent.
++    """
++    cte = cte_scope.expression.find_ancestor(exp.CTE)
++    return cte and cte.args["alias"].this
+ 
+ 
+ T = TypeVar("T", str, None)
+==FILE== superset/sql_lab.py
+@@ -23,6 +23,7 @@
+ from collections.abc import Callable
+ from contextlib import closing, nullcontext
+ from datetime import datetime
++from functools import cache, partial
+ from sys import getsizeof
+ from typing import Any, cast, Optional, TYPE_CHECKING, TypeVar, Union
+ 
+@@ -82,7 +83,12 @@
+ from superset.utils.database import warm_and_release_connection
+ from superset.utils.dates import now_as_float
+ from superset.utils.decorators import stats_timing
+-from superset.utils.rls import apply_rls
++from superset.utils.rls import (
++    apply_rls,
++    get_disallowed_tables,
++    get_unqualified_table_schemas,
++    has_qualified_table_entry,
++)
+ 
+ if TYPE_CHECKING:
+     from superset.models.core import Database
+@@ -542,11 +548,30 @@ def execute_sql_statements(  # noqa: C901
+     if disallowed_tables or rls_enabled:
+         effective_schema = database.get_default_schema_for_query(query)
+ 
++    # A query without a schema still reads unqualified tables through the
++    # connection's search path, so RLS and schema-qualified denylist entries
++    # match each against the schema it's read from there. Looking that up connects
++    # to the database, so it runs at most once and only when a control needs it.
++    table_schemas = cache(
++        partial(
++            get_unqualified_table_schemas,
++            database,
++            query.catalog,
++            effective_schema,
++            parsed_script.statements,
++        )
++    )
++
+     if disallowed_tables:
+         # Report only the denylisted tables actually referenced in the query,
+         # honoring schema-qualified entries (e.g. ``information_schema.tables``).
+-        found_tables = parsed_script.get_disallowed_tables(
+-            disallowed_tables, effective_schema
++        found_tables = get_disallowed_tables(
++            database,
++            parsed_script,
++            disallowed_tables,
++            table_schemas()
++            if has_qualified_table_entry(disallowed_tables)
++            else effective_schema,
+         )
+         if found_tables:
+             raise SupersetDisallowedSQLTableException(found_tables)
+@@ -560,7 +585,7 @@ def execute_sql_statements(  # noqa: C901
+ 
+     if rls_enabled:
+         for statement in parsed_script.statements:
+-            apply_rls(query.database, query.catalog, effective_schema, statement)
++            apply_rls(query.database, query.catalog, table_schemas(), statement)
+ 
+     if query.select_as_cta:
+         # CTAS is valid when the last statement is a SELECT, while CVAS is valid when
+==FILE== superset/utils/rls.py
+@@ -17,13 +17,16 @@
+ 
+ from __future__ import annotations
+ 
+-from collections.abc import Callable
++import logging
++from collections.abc import Callable, Iterable, Mapping
+ from functools import partial
+ from typing import Any, TYPE_CHECKING
+ 
+-from sqlalchemy import and_, func, or_
++from flask import current_app
++from sqlalchemy import and_, func, or_, true
+ 
+ from superset import db, security_manager
++from superset.exceptions import OAuth2Error, OAuth2RedirectError
+ from superset.sql.parse import folds_unquoted_object_names, Table
+ from superset.utils import json
+ from superset.utils.core import get_user_id, remove_duplicates
+@@ -32,7 +35,9 @@
+ if TYPE_CHECKING:
+     from superset.connectors.sqla.models import SqlaTable
+     from superset.models.core import Database
+-    from superset.sql.parse import BaseSQLStatement
++    from superset.sql.parse import BaseSQLStatement, SQLScript
++
++logger = logging.getLogger(__name__)
+ 
+ 
+ def _get_cache_identity() -> str:
+@@ -55,32 +60,422 @@ def _get_cache_identity() -> str:
+     return str(get_user_id())
+ 
+ 
++class SearchPath:
++    """
++    The search path a connection reads a table referenced without a schema through
++    (the Postgres ``search_path``, for instance), resolving each such table to the
++    schema it's read from.
++
++    A connection searching several schemas reads the first table of the name it
++    finds, so which schema that is isn't known without asking it (see
++    ``Database.get_search_path``). Tables are looked up as they're needed, each at
++    most once, and a batch passed to ``resolve`` in one round trip. Asking
++    connects to the database, so a table no control could match in any schema
++    (see ``is_table_controlled``) isn't looked up at all.
++
++    A table is identified by its name and the catalog it names, if any. One naming
++    a catalog (but no schema) isn't read through the search path, which is that of
++    the catalog the query runs in: it's read from the schema its catalog gives it
++    (see ``get_catalog_reference_schema``), which needs no lookup.
++    """
++
++    def __init__(
++        self,
++        database: Database,
++        catalog: str | None,
++        schemas: Iterable[str] | None,
++    ) -> None:
++        """
++        :param schemas: The schemas on the path, in order, or ``None`` when the
++            connection couldn't be asked for them
++        """
++        self.database = database
++        self.catalog = catalog
++        self.schemas = None if schemas is None else tuple(schemas)
++        self._tables: dict[Table, tuple[str, ...] | None] = {}
++        self._discovered = True
++
++    @classmethod
++    def deferred(cls, database: Database, catalog: str | None) -> SearchPath:
++        """
++        A search path that's read from the connection when a table first needs it,
++        for a caller that doesn't know the tables it will be asked about.
++        """
++        search_path = cls(database, catalog, None)
++        search_path._discovered = False
++        return search_path
++
++    def resolve(self, tables: Iterable[Table]) -> None:
++        """
++        Look up the tables not looked up yet.
++
++        A failed lookup leaves which schema they're read from unknown, rather than
++        guessing one (see ``schemas_for``). A failure to authenticate isn't one: the
++        user has to sign in, so it's raised.
++        """
++        missing = sorted(set(tables) - self._tables.keys(), key=str)
++        for table in missing:
++            if table.catalog:
++                schema = get_catalog_reference_schema(self.database, table.catalog)
++                self._tables[table] = (schema,) if schema else None
++        missing = [table for table in missing if not table.catalog]
++        controlled = [
++            table
++            for table in missing
++            if is_table_controlled(self.database, self.catalog, table)
++        ]
++        for table in set(missing) - set(controlled):
++            # no control matches a table of this name, whichever schema holds it
++            self._tables[table] = None
++        if not controlled:
++            return
++        found: dict[str, list[str]] = {}
++        if not self._discovered or self.schemas is not None:
++            try:
++                schemas, found = self.database.get_search_path(
++                    self.catalog, sorted({table.table for table in controlled})
++                )
++                self.schemas = tuple(schemas)
++            except (OAuth2RedirectError, OAuth2Error):
++                raise
++            except Exception:  # pylint: disable=broad-except
++                logger.warning(
++                    "Unable to look up tables on the search path", exc_info=True
++                )
++                self.schemas = None
++            self._discovered = True
++        self.record(controlled, found)
++
++    def record(self, tables: Iterable[Table], found: dict[str, list[str]]) -> None:
++        """
++        Record the schemas holding the tables, as ``get_search_path`` found them
++        (by table name).
++        """
++        for table in tables:
++            self._tables[table] = (
++                None
++                if self.schemas is None
++                else tuple(found.get(table.table) or self.schemas) or None
++            )
++
++    def schemas_for(self, table: Table) -> tuple[str, ...] | None:
++        """
++        The schemas a table referenced without a schema may be read from.
++
++        :returns: The schema holding it, or the schemas when its name is ambiguous
++            (see ``get_search_path``); every schema on the path when none holds it
++            (a script can create it before reading it); the schema its catalog gives
++            it when it names one; or ``None`` when that's unknown, so a control has
++            to match the table in any schema
++        """
++        self.resolve([table])
++        return self._tables[table]
++
++
++def get_catalog_reference_schema(database: Database, catalog: str) -> str | None:
++    """
++    The schema a table naming ``catalog`` but no schema (``catalog..table``) is read
++    from, or ``None`` when that's unknown (see
++    ``BaseEngineSpec.get_catalog_reference_schema``).
++    """
++    return database.db_engine_spec.get_catalog_reference_schema(catalog)
++
++
++def is_table_controlled(database: Database, catalog: str | None, table: Table) -> bool:
++    """
++    Whether an RLS rule or a schema-qualified ``DISALLOWED_SQL_TABLES`` entry may
++    match a table of this name, in some schema.
++
++    Only then does the schema an unqualified table is read from matter, and finding
++    it out connects to the database. A bare denylist entry matches whatever the
++    schema, so it never needs the lookup. When this can't be told, a control is
++    assumed to match.
++
++    :param catalog: The catalog the query runs in, for a table naming none. A table
++        naming a catalog is looked up in that one, as ``Table.qualify`` keeps it.
++    """
++    name = table.table.lower()
++    catalog = table.catalog or catalog
++    denylist = current_app.config.get("DISALLOWED_SQL_TABLES", {}).get(
++        database.db_engine_spec.engine, set()
++    )
++    if any(
++        "." in entry and entry.lower().rpartition(".")[2] == name for entry in denylist
++    ):
++        return True
++    try:
++        return bool(
++            get_predicates_for_table(
++                Table(table.table, catalog=catalog),
++                database,
++                database.get_default_catalog() if catalog else None,
++                any_schema=True,
++            )
++        )
++    except Exception:  # pylint: disable=broad-except
++        # a caught DB error can leave db.session in "pending rollback" state
++        db.session.rollback()  # pylint: disable=consider-using-transaction
++        logger.warning("Unable to look up the rules of a table", exc_info=True)
++        return True
++
++
++# The schema unqualified tables resolve to, or the search path they're read through.
++RLSSchema = str | SearchPath
++
++
+ def get_rls_schema(
+     database: Database,
+     catalog: str | None,
+     schema: str | None,
+     sql: str,
+     template_params: dict[str, Any] | None = None,
+-) -> str:
++) -> RLSSchema:
+     """Qualify RLS tables with the execution schema, retaining unknown defaults.
+ 
+     Only dynamic-schema engines apply a query's schema to the connection. Other
+     engines discover it from connection parameters or the inspector. When discovery
+     returns no schema, keep the configured schema rather than losing its RLS rules.
+     """
+     if database.db_engine_spec.supports_dynamic_schema:
+-        return schema or database.get_default_schema(catalog) or ""
++        return get_unqualified_table_schemas(database, catalog, schema)
+     return (
+         database.resolve_query_default_schema(sql, schema, catalog, template_params)
+         or schema
+         or ""
+     )
+ 
+ 
++def get_unqualified_table_schemas(
++    database: Database,
++    catalog: str | None,
++    schema: str | None,
++    statements: Iterable[BaseSQLStatement[Any]] | None = None,
++) -> RLSSchema:
++    """
++    The schema an unqualified table resolves to, given the per-query schema, or
++    the search path it's read through.
++
++    An engine with dynamic-schema support takes the per-query schema from the
++    request, so a request without one has no per-query schema. The connection still
++    resolves an unqualified table, through its search path (the Postgres
++    ``search_path``, for instance), so the controls that match tables by schema --
++    RLS and schema-qualified ``DISALLOWED_SQL_TABLES`` entries -- must match it in
++    the schema the connection reads it from, or a table on the path escapes them.
++
++    :param schema: The per-query schema already resolved for execution, if any
++    :param statements: The statements being checked. When given, the search path
++        is only read if one of them reads an unqualified table that a control may
++        match (see ``is_table_controlled``), and those tables are looked up on it at
++        the same time, since that connects to the database. Without them, the
++        search path is read when a table first needs it (see ``SearchPath``). When
++        one of them changes the database (``DROP``, ``CREATE``, ``ALTER``...), a
++        table may not be read from the schema holding it before the script runs,
++        so it's taken to be in any schema on the path.
++    :returns: The schema, the search path when it has several, or an empty string
++        when there's no unqualified table to resolve
++    """
++    if schema:
++        return schema
++    if not database.db_engine_spec.supports_dynamic_schema:
++        return ""
++    if statements is None:
++        # the tables aren't known, so the search path is read when one needs it
++        return SearchPath.deferred(database, catalog)
++    statements = list(statements)
++    tables = [
++        table
++        for table in sorted(unqualified_tables(statements), key=str)
++        # one naming a catalog isn't read through the search path (see ``SearchPath``)
++        if not table.catalog and is_table_controlled(database, catalog, table)
++    ]
++    if not tables:
++        return ""
++    try:
++        schemas, found = database.get_search_path(
++            catalog, sorted({table.table for table in tables})
++        )
++    except (OAuth2RedirectError, OAuth2Error):
++        raise
++    except Exception:  # pylint: disable=broad-except
++        logger.warning("Unable to read the search path", exc_info=True)
++        return SearchPath(database, catalog, None)
++    if len(schemas) < 2:
++        # a single schema is where every unqualified table is read from
++        return schemas[0] if schemas else ""
++    if any(statement.is_mutating() for statement in statements):
++        # a statement can drop, create or move a table before another reads one of
++        # its name, so the schema holding it now needn't be the one read
++        found = {}
++    search_path = SearchPath(database, catalog, schemas)
++    search_path.record(tables, found)
++    return search_path
++
++
++def _rls_key_schema(schema: RLSSchema) -> str | None:
++    """
++    The schema ``apply_rls`` keys an unqualified table's rules under.
++
++    A table read through a search path with several schemas is keyed without a
++    schema, so it can't share a key, and the rules, with a table the query
++    qualifies with one. With a single schema every unqualified table is read from
++    it, which is the key a known schema gives. The schemas are known once a table
++    on the path has been resolved.
++    """
++    if isinstance(schema, str):
++        return schema
++    return schema.schemas[0] if schema.schemas and len(schema.schemas) == 1 else None
++
++
++def rls_key(
++    table: Table,
++    catalog: str | None,
++    schema: RLSSchema,
++    catalog_schemas: Mapping[str, str | None],
++) -> Table:
++    """
++    The key ``apply_rls`` files a table's rules under, which is the table
++    ``RLSTransformer.get_predicate`` looks up for the same reference.
++
++    A table naming a catalog but no schema is keyed under the schema its catalog
++    gives it, or none when that's unknown, and not under the query's schema: it's
++    another table than a ``table`` or ``catalog.schema.table`` the query's schema
++    would put under the same key.
++    """
++    if table.catalog and not table.schema:
++        return table.qualify(
++            catalog=catalog, schema=catalog_schemas.get(table.catalog.lower())
++        )
++    return table.qualify(catalog=catalog, schema=_rls_key_schema(schema))
++
++
++def qualify_table(
++    database: Database,
++    table: Table,
++    catalog: str | None,
++    schema: RLSSchema,
++) -> list[tuple[Table, bool]]:
++    """
++    The tables a reference may name, each qualified with a schema it may be read
++    from.
++
++    A reference naming its schema, or an unqualified one read from a known schema,
++    names the table there. One read through a search path names the table in the
++    schema it's read from (see ``SearchPath.schemas_for``), and when that's
++    unknown, a table of its name in any schema, so a control errs toward an extra
++    rule rather than a missing one. One naming a catalog but no schema is read from
++    the schema its catalog gives it, and not from the schema or search path of the
++    catalog the query runs in (see ``get_catalog_reference_schema``).
++
++    :param schema: The schema, or search path, unqualified tables resolve to (see
++        ``get_unqualified_table_schemas``)
++    :returns: Each table, and whether it stands for a table of its name in any
++        schema (see ``get_predicates_for_table``)
++    """
++    if table.schema:
++        return [(table.qualify(catalog=catalog), False)]
++    if table.catalog and isinstance(schema, str):
++        named_schema = get_catalog_reference_schema(database, table.catalog)
++        return [
++            (table.qualify(catalog=catalog, schema=named_schema), named_schema is None)
++        ]
++    if isinstance(schema, str):
++        return [(table.qualify(catalog=catalog, schema=schema), False)]
++    candidates = schema.schemas_for(Table(table.table, catalog=table.catalog))
++    if candidates is None:
++        return [(table.qualify(catalog=catalog), True)]
++    return [
++        (table.qualify(catalog=catalog, schema=candidate), False)
++        for candidate in candidates
++    ]
++
++
++def get_disallowed_tables(
++    database: Database,
++    script: SQLScript,
++    tables: set[str],
++    schema: RLSSchema | None,
++) -> set[str]:
++    """
++    The ``DISALLOWED_SQL_TABLES`` entries a script reads.
++
++    :param schema: The schema unqualified tables resolve to, or the search path
++        they're read through (see ``get_unqualified_table_schemas``). A
++        schema-qualified entry matches an unqualified table read from its schema,
++        and when that's unknown, one of its name whatever the schema. One naming a
++        catalog but no schema is read from the schema its catalog gives it (see
++        ``get_catalog_reference_schema``), whatever this is.
++    """
++    catalog_schemas = get_catalog_schemas(database, script.statements)
++    if not isinstance(schema, SearchPath):
++        return script.get_disallowed_tables(tables, schema, catalog_schemas)
++
++    found = script.get_disallowed_tables(tables, None, catalog_schemas)
++    qualified = {
++        entry: entry.lower().rpartition(".")[::2] for entry in tables if "." in entry
++    }
++    names = unqualified_tables(script.statements) if qualified else set()
++    schema.resolve(names)
++    for reference in names:
++        candidates = schema.schemas_for(reference)
++        searched = None if candidates is None else {c.lower() for c in candidates}
++        found.update(
++            entry
++            for entry, (entry_schema, entry_table) in qualified.items()
++            if entry_table == reference.table.lower()
++            and (searched is None or entry_schema in searched)
++        )
++    return found
++
++
++def unqualified_tables(statements: Iterable[BaseSQLStatement[Any]]) -> set[Table]:
++    """
++    The tables the statements read without naming their schema, each with the
++    catalog it names, if any.
++    """
++    return {
++        Table(table.table, catalog=table.catalog)
++        for statement in statements
++        for table in statement.tables
++        if not table.schema
++    }
++
++
++def get_catalog_schemas(
++    database: Database, statements: Iterable[BaseSQLStatement[Any]]
++) -> dict[str, str | None]:
++    """
++    The schema each catalog the statements name gives a table that names it but no
++    schema (``catalog..table``), by lower-cased catalog, or ``None`` when the engine
++    doesn't say (see ``get_catalog_reference_schema``).
++    """
++    return {
++        table.catalog.lower(): get_catalog_reference_schema(database, table.catalog)
++        for table in unqualified_tables(statements)
++        if table.catalog
++    }
++
++
++def reads_unqualified_table(statements: Iterable[BaseSQLStatement[Any]]) -> bool:
++    """
++    Whether any of the statements reads a table without naming its schema.
++    """
++    return bool(unqualified_tables(statements))
++
++
++def has_qualified_table_entry(tables: Iterable[str]) -> bool:
++    """
++    Whether a table denylist has a schema-qualified entry (e.g. ``public.secrets``).
++
++    Bare entries match a table whatever its schema, so only a qualified entry needs
++    the schema an unqualified table resolves to.
++    """
++    return any("." in table for table in tables)
++
++
+ def apply_rls(
+     database: Database,
+     catalog: str | None,
+-    schema: str,
++    schema: RLSSchema,
+     parsed_statement: BaseSQLStatement[Any],
+     exclude_dataset_id: int | None = None,
+     include_global_guest_rls: bool = True,
+@@ -131,17 +526,18 @@ def parse(rules: dict[Table, list[str]]) -> dict[Table, list[Any]]:
+ 
+     return parsed_statement.apply_rls(
+         catalog,
+-        schema,
++        _rls_key_schema(schema),
+         parse(predicates),
+         method,
+         None if subquery_predicates is None else parse(subquery_predicates),
++        get_catalog_schemas(database, [parsed_statement]),
+     )
+ 
+ 
+ def get_rls_predicates(
+     database: Database,
+     catalog: str | None,
+-    schema: str,
++    schema: RLSSchema,
+     parsed_statement: BaseSQLStatement[Any],
+     default_catalog: str | None,
+     exclude_dataset_id: int | None = None,
+@@ -159,21 +555,44 @@ def get_rls_predicates(
+         parameters.
+     """
+ 
++    catalog_schemas = get_catalog_schemas(database, [parsed_statement])
++
+     def collect_predicates(
+         include_global: bool, exclude_id: int | None
+     ) -> dict[Table, list[str]]:
+         predicates: dict[Table, list[str]] = {}
+-        for table in parsed_statement.tables:
+-            table = table.qualify(catalog=catalog, schema=schema)
+-            predicates[table] = get_predicates_for_table(
+-                table,
+-                database,
+-                default_catalog,
+-                exclude_dataset_id=exclude_id,
+-                include_global_guest_rls=include_global,
++        # In a fixed order, as ``tables`` is a set whose order varies with the
++        # process, so what a key ends up with doesn't.
++        for table in sorted(parsed_statement.tables, key=str):
++            key = rls_key(table, catalog, schema, catalog_schemas)
++            # Tables sharing a key (a search path of several schemas keys its
++            # tables without one, as does an unknown schema of a catalog) share
++            # the rules of each: an extra rule rather than a missing one.
++            predicates[key] = remove_duplicates(
++                [
++                    *predicates.get(key, []),
++                    *(
++                        predicate
++                        for candidate, any_schema in qualify_table(
++                            database, table, catalog, schema
++                        )
++                        for predicate in get_predicates_for_table(
++                            candidate,
++                            database,
++                            default_catalog,
++                            exclude_dataset_id=exclude_id,
++                            include_global_guest_rls=include_global,
++                            any_schema=any_schema,
++                        )
++                    ),
++                ]
+             )
+         return predicates
+ 
++    if isinstance(schema, SearchPath):
++        # one round trip for the statement's tables, rather than one per table
++        schema.resolve(unqualified_tables([parsed_statement]))
++
+     predicates = collect_predicates(include_global_guest_rls, exclude_dataset_id)
+     # The outer query only constrains the rows that reach it, so a table read
+     # inside an uncorrelated sub-query still gets the rules left to the outer
+@@ -229,6 +648,7 @@ def find_datasets(
+     default_catalog: str | None,
+     exclude_dataset_id: int | None,
+     fold: bool,
++    any_schema: bool = False,
+ ) -> list[SqlaTable]:
+     """
+     Find the datasets a table reference resolves to.
+@@ -246,6 +666,8 @@ def find_datasets(
+         match several that differ only in case. They all name the same physical
+         table, so all of them are returned and the caller applies every one's
+         predicates, rather than picking one and dropping the rest.
++    :param any_schema: Match a dataset of the table's name in any schema, for a
++        reference whose schema can't be determined
+     """
+     from superset.connectors.sqla.models import SqlaTable
+ 
+@@ -271,11 +693,14 @@ def find_datasets(
+ 
+     def match(schema_predicate: Any) -> list[SqlaTable]:
+         query = db.session.query(SqlaTable).filter(and_(*filters, schema_predicate))
+-        if fold:
++        if fold or any_schema:
+             return query.all()
+         dataset = query.one_or_none()
+         return [dataset] if dataset else []
+ 
++    if any_schema:
++        return match(true())
++
+     if datasets := match(eq(SqlaTable.schema, table.schema)):
+         return datasets
+ 
+@@ -295,6 +720,7 @@ def get_predicates_for_table(
+     default_catalog: str | None,
+     exclude_dataset_id: int | None = None,
+     include_global_guest_rls: bool = True,
++    any_schema: bool = False,
+ ) -> list[str]:
+     """
+     Get the RLS predicates for a table.
+@@ -305,6 +731,8 @@ def get_predicates_for_table(
+ 
+     :param include_global_guest_rls: Also return global (unscoped) guest RLS rules.
+         See ``apply_rls``.
++    :param any_schema: Get the predicates of the table in any schema (see
++        ``find_datasets``)
+     """
+     datasets = find_datasets(
+         table,
+@@ -322,6 +750,7 @@ def get_predicates_for_table(
+         # distinct table on those engines: that direction applies extra
+         # predicates rather than dropping one that should have applied.
+         fold=folds_unquoted_object_names(database.db_engine_spec.engine),
++        any_schema=any_schema,
+     )
+ 
+     if not datasets:
+@@ -355,7 +784,7 @@ def collect_rls_predicates_for_sql(
+     *,
+     include_global_guest_rls: bool = True,
+     resolve_catalog: Callable[[], str | None] | None = None,
+-    resolve_schema: Callable[[], str] | None = None,
++    resolve_schema: Callable[[], RLSSchema] | None = None,
+ ) -> list[str]:
+     """
+     Collect all RLS predicates that would be applied to tables in the given SQL.
+@@ -386,7 +815,7 @@ def collect_rls_predicates_for_sql(
+     try:
+         # Schema discovery can connect to the database, so failures must use
+         # the same viewer-scoped fallback as predicate collection failures.
+-        schema = (
++        rls_schema: RLSSchema = (
+             resolve_schema()
+             if resolve_schema is not None
+             else (
+@@ -402,7 +831,7 @@ def collect_rls_predicates_for_sql(
+             predicates, subquery_predicates = get_rls_predicates(
+                 database,
+                 catalog,
+-                schema,
++                rls_schema,
+                 statement,
+                 default_catalog,
+                 exclude_dataset_id=exclude_dataset_id,
+@@ -418,6 +847,9 @@ def collect_rls_predicates_for_sql(
+                     for rule in table_rules
+                 )
+         return sorted(keys)
++    except (OAuth2RedirectError, OAuth2Error):
++        # the user has to sign in to the database to look up the tables
++        raise
+     except Exception:
+         # The block above is not only SQL parsing: `get_predicates_for_table`
+         # queries `db.session` and `get_default_catalog()` builds an engine, so
+==FILE== tests/unit_tests/connectors/sqla/virtual_dataset_connections_test.py
+@@ -51,7 +51,7 @@
+     validate_stored_expression_at_query_time,
+ )
+ from superset.models.sql_lab import Query
+-from superset.sql.parse import SQLStatement
++from superset.sql.parse import SQLStatement, Table
+ from superset.superset_typing import AdhocColumn, AdhocMetric, QueryObjectDict
+ from superset.utils import json, rls
+ from superset.utils.core import QueryObjectFilterClause
+@@ -463,13 +463,19 @@ def test_virtual_dataset_preserves_default_schema_fallback(
+         database.db_engine_spec, "get_default_schema", return_value="main"
+     )
+     mocker.spy(rls, "collect_rls_predicates_for_sql")
++    mocker.patch("superset.utils.rls.is_table_controlled", return_value=True)
+     apply = mocker.patch("superset.models.helpers.apply_rls", return_value=False)
+ 
+     virtual.get_extra_cache_keys({})
+     assert default_schema.call_count == 1
+     virtual.get_from_clause()
+-    assert apply.call_args.args[2] == "main"
+-    assert default_schema.call_count == 2
++    if dynamic_schema:
++        # the cache key and the query share one lookup of the default schema
++        assert apply.call_args.args[2].schemas_for(Table("physical")) == ("main",)
++        assert default_schema.call_count == 1
++    else:
++        assert apply.call_args.args[2] == "main"
++        assert default_schema.call_count == 2
+ 
+ 
+ @pytest.mark.parametrize("datasource_class", [SqlaTable, Query])
+==FILE== tests/unit_tests/db_engine_specs/test_base.py
+@@ -2361,6 +2361,34 @@ def test_expand_nested_columns_default_returns_input() -> None:
+     assert BaseEngineSpec.expand_nested_columns(object(), columns) is columns
+ 
+ 
++def test_get_catalog_reference_schema() -> None:
++    """
++    An engine that doesn't say which schema a catalog gives a table named without
++    one (``catalog..table``) leaves it unknown.
++    """
++    assert BaseEngineSpec.get_catalog_reference_schema("cat") is None
++
++
++@pytest.mark.parametrize("default_schema, expected", [("main", ["main"]), (None, [])])
++def test_get_search_path(
++    mocker: MockerFixture, default_schema: str | None, expected: list[str]
++) -> None:
++    """
++    An engine without a search path looks an unqualified table up in its default
++    schema only, so it needn't look up which schema holds a table.
++    """
++    database = mocker.MagicMock()
++    get_default_schema = mocker.patch.object(
++        BaseEngineSpec, "get_default_schema", return_value=default_schema
++    )
++
++    assert BaseEngineSpec.get_search_path(database, "cat", ["sales"]) == (
++        expected,
++        {},
++    )
++    get_default_schema.assert_called_once_with(database, "cat")
++
++
+ def test_update_params_from_encrypted_extra_drops_the_embedded_credential(
+     mocker: MockerFixture,
+ ) -> None:
+==FILE== tests/unit_tests/db_engine_specs/test_postgres.py
+@@ -934,3 +934,176 @@ def test_extended_aggregation_func_compiles_expected_sql(
+         )
+     )
+     assert compiled == expected_sql
++
++
++def _search_path_database(
++    mocker: MockerFixture,
++    search_path: Any,
++    found: list[tuple[str, str]] | None = None,
++) -> MagicMock:
++    """
++    A database whose connection reports a search path and the schema each quoted
++    table name resolves to. A path given as the schemas alone is set as the
++    ``search_path`` too, for a user without a schema.
++    """
++    database = mocker.MagicMock()
++    cursor = database.get_raw_connection.return_value.__enter__.return_value.cursor
++    if isinstance(search_path, Exception):
++        cursor.return_value.execute.side_effect = search_path
++    else:
++        if (
++            isinstance(search_path, tuple)
++            and len(search_path) == 1
++            and isinstance(search_path[0], list)
++        ):
++            schemas = [s for s in search_path[0] if s != "pg_catalog"]
++            search_path = (search_path[0], ", ".join(schemas), "nobody")
++        cursor.return_value.fetchone.return_value = search_path
++        cursor.return_value.fetchall.return_value = found or []
++    return database
++
++
++SEARCH_PATH_QUERY = (
++    "SELECT pg_catalog.current_schemas(true)::text[], "
++    "pg_catalog.current_setting('search_path'), current_user::text"
++)
++
++
++def test_get_search_path(mocker: MockerFixture) -> None:
++    """
++    DB Eng Specs (postgres): ``get_search_path`` lists every schema searched for an
++    unqualified table, the implicit ``pg_catalog`` included, and resolves each
++    table to the schema holding it, both spellings of a name that may be quoted.
++    """
++    database = _search_path_database(
++        mocker,
++        (["pg_catalog", "analyst", "public"],),
++        [
++            ('"pg_class"', "pg_catalog"),
++            ('"Sales"', "public"),
++            ('"sales"', "analyst"),
++            ('"temp"', "pg_temp_3"),
++        ],
++    )
++
++    assert spec.get_search_path(
++        database, "analytics", ["Sales", "pg_class", "missing", "temp"]
++    ) == (
++        ["pg_catalog", "analyst", "public"],
++        {
++            "Sales": ["analyst", "public"],
++            "pg_class": ["pg_catalog"],
++            "temp": ["pg_temp_3"],
++        },
++    )
++    database.get_raw_connection.assert_called_once_with(catalog="analytics")
++    cursor = database.get_raw_connection.return_value.__enter__.return_value.cursor
++    (paths,), (lookup, params) = (
++        call.args for call in cursor.return_value.execute.call_args_list
++    )
++    assert paths == SEARCH_PATH_QUERY
++    assert "pg_catalog.to_regclass(spelling)" in lookup
++    assert params == (['"Sales"', '"sales"', '"pg_class"', '"missing"', '"temp"'],)
++
++
++def test_get_search_path_without_tables(mocker: MockerFixture) -> None:
++    """
++    DB Eng Specs (postgres): only the search path is read when no table is asked
++    about, and a name is quoted so it's looked up exactly as written.
++    """
++    database = _search_path_database(mocker, (["public"],))
++    cursor = database.get_raw_connection.return_value.__enter__.return_value.cursor
++
++    assert spec.get_search_path(database, None) == (["public"], {})
++    cursor.return_value.execute.assert_called_once_with(SEARCH_PATH_QUERY)
++
++    spec.get_search_path(database, None, ['a"b'])
++    assert cursor.return_value.execute.call_args.args[1] == (['"a""b"'],)
++
++
++@pytest.mark.parametrize(
++    "table, spellings",
++    [
++        # either spelling of an ASCII name, since it may have been quoted
++        ("Sales", ['"Sales"', '"sales"']),
++        ("sales", ['"sales"']),
++        # Postgres folds ASCII letters only: ``VENTÉ`` is read as ``ventÉ``, never
++        # the ``venté`` ``str.lower`` makes of it. The name is also passed unquoted
++        # for a database whose encoding folds other letters as well.
++        ("VENTÉ", ['"VENTÉ"', '"ventÉ"', "VENTÉ"]),
++        ("ventÉ", ['"ventÉ"', "ventÉ"]),
++        # a name ``to_regclass`` would read as several isn't passed unquoted
++        ("A.É", ['"A.É"', '"a.É"']),
++    ],
++)
++def test_get_search_path_folds_ascii_letters_only(
++    mocker: MockerFixture, table: str, spellings: list[str]
++) -> None:
++    """
++    DB Eng Specs (postgres): ``get_search_path`` looks a table up under the names
++    Postgres reads it as, folding ASCII letters only, so the schema it returns is
++    the one holding the table the query reads (a ``ventÉ`` in ``public`` isn't
++    shadowed by a ``venté`` in the user's schema).
++    """
++    database = _search_path_database(
++        mocker, (["pg_catalog", "analyst", "public"],), [('"ventÉ"', "public")]
++    )
++    cursor = database.get_raw_connection.return_value.__enter__.return_value.cursor
++
++    found = spec.get_search_path(database, None, [table])
++
++    assert cursor.return_value.execute.call_args.args[1] == (spellings,)
++    assert found[1] == ({table: ["public"]} if '"ventÉ"' in spellings else {})
++
++
++@pytest.mark.parametrize(
++    "setting, schemas",
++    [
++        ('"$user", public', ["pg_catalog", "public", "analyst"]),
++        ("analyst, public", ["pg_catalog", "public", "analyst"]),
++        (
++            'Staging, "My, ""S""", pg_temp, public',
++            ["pg_catalog", "public", "staging", 'My, "S"'],
++        ),
++        ("", ["pg_catalog", "public"]),
++    ],
++)
++def test_get_search_path_lists_schemas_not_created_yet(
++    mocker: MockerFixture, setting: str, schemas: list[str]
++) -> None:
++    """
++    DB Eng Specs (postgres): ``current_schemas`` leaves out a schema the path names
++    that doesn't exist, which a script can create before reading a table from it,
++    so ``get_search_path`` lists it after the schemas searched: ``$user`` as the
++    current user's schema, an unquoted name folded and a quoted one as written.
++    The session's own ``pg_temp`` isn't one.
++    """
++    database = _search_path_database(
++        mocker, (["pg_catalog", "public"], setting, "analyst")
++    )
++
++    assert spec.get_search_path(database, None) == (schemas, {})
++
++
++@pytest.mark.parametrize("search_path", [None, ("{analyst,public}",)])
++def test_get_search_path_unreadable(mocker: MockerFixture, search_path: Any) -> None:
++    """
++    DB Eng Specs (postgres): a search path the connection doesn't report as a list
++    raises, rather than reading as an empty one.
++    """
++    database = _search_path_database(mocker, search_path)
++
++    with pytest.raises(ValueError, match="Unexpected search path"):
++        spec.get_search_path(database, None, ["sales"])
++
++
++def test_get_search_path_failure_raises(mocker: MockerFixture) -> None:
++    """
++    DB Eng Specs (postgres): a connection that can't be asked raises, rather than
++    falling back to its default schema, which needn't be where a table is read.
++    """
++    database = _search_path_database(mocker, Exception("permission denied"))
++
++    with pytest.raises(Exception, match="permission denied"):
++        spec.get_search_path(database, None, ["sales"])
++    database.get_inspector.assert_not_called()
+==FILE== tests/unit_tests/db_engine_specs/test_snowflake.py
+@@ -330,6 +330,16 @@ def test_adjust_engine_params_catalog_only() -> None:
+     )
+ 
+ 
++def test_get_catalog_reference_schema() -> None:
++    """
++    A two-dot name (``db..table``) reads the ``PUBLIC`` schema of the database,
++    whatever the schema of the session.
++    """
++    from superset.db_engine_specs.snowflake import SnowflakeEngineSpec
++
++    assert SnowflakeEngineSpec.get_catalog_reference_schema("OTHERDB") == "PUBLIC"
++
++
+ def test_get_default_catalog() -> None:
+     """
+     Test the ``get_default_catalog`` method.
+==FILE== tests/unit_tests/sql/execution/test_executor.py
+@@ -567,6 +567,125 @@ def test_check_disallowed_tables_no_config(
+     assert result is None
+ 
+ 
++@pytest.mark.parametrize(
++    "entry, sql, search_path, blocked",
++    [
++        # a qualified entry matches an unqualified table in the default schema
++        ("public.secrets", "SELECT * FROM secrets", "public", True),
++        ("archive.secrets", "SELECT * FROM secrets", "public", False),
++        # or in the schema the search path reads it from
++        ("public.secrets", "SELECT * FROM secrets", {"secrets": ["public"]}, True),
++        ("analyst.secrets", "SELECT * FROM secrets", {"secrets": ["public"]}, False),
++        # without a known default schema only a bare entry can match
++        ("public.secrets", "SELECT * FROM secrets", "", False),
++        ("secrets", "SELECT * FROM secrets", "", True),
++        # a qualified table matches as before
++        ("public.secrets", "SELECT * FROM public.secrets", "", True),
++    ],
++)
++def test_check_disallowed_tables_without_schema(
++    mocker: MockerFixture,
++    app_context: None,
++    entry: str,
++    sql: str,
++    search_path: str | dict[str, list[str]],
++    blocked: bool,
++) -> None:
++    """
++    A query without a schema reads unqualified tables through the connection's
++    search path, the ``table_schemas`` ``_prepare_sql`` resolves, so a
++    schema-qualified entry is matched against the schema each is read from.
++    """
++    from superset.sql.execution.executor import SQLExecutor
++    from superset.utils.rls import SearchPath
++
++    database = Database(
++        id=1, database_name="pg", sqlalchemy_uri="postgresql://u:p@h/analytics"
++    )
++    mocker.patch.dict(
++        current_app.config, {"DISALLOWED_SQL_TABLES": {"postgresql": {entry}}}
++    )
++    table_schemas: str | SearchPath = search_path  # type: ignore[assignment]
++    if isinstance(search_path, dict):
++        mocker.patch.object(
++            database,
++            "get_search_path",
++            return_value=(["analyst", "public"], search_path),
++        )
++        table_schemas = SearchPath(database, None, ["analyst", "public"])
++
++    result = SQLExecutor(database)._check_disallowed_tables(
++        SQLScript(sql, "postgresql"), None, table_schemas
++    )
++
++    assert result == ({entry} if blocked else None)
++
++
++def test_prepare_sql_resolves_table_schemas_once(
++    mocker: MockerFixture, app_context: None
++) -> None:
++    """
++    ``_prepare_sql`` looks the unqualified tables of a query without a schema up on
++    the connection's search path once, and hands it to both RLS and the denylist
++    check.
++    """
++    from superset.sql.execution.executor import SQLExecutor
++    from superset.utils.rls import SearchPath
++
++    database = Database(
++        id=1, database_name="pg", sqlalchemy_uri="postgresql://u:p@h/analytics"
++    )
++    mocker.patch.dict(
++        current_app.config,
++        {"DISALLOWED_SQL_TABLES": {"postgresql": {"public.secrets"}}},
++    )
++    get_search_path = mocker.patch.object(
++        database, "get_search_path", return_value=(["analyst", "public"], {})
++    )
++    apply_rls = mocker.patch.object(SQLExecutor, "_apply_rls_to_script")
++
++    *_, schema, table_schemas = SQLExecutor(database)._prepare_sql(
++        "SELECT * FROM secrets", QueryOptions()
++    )
++
++    assert schema is None
++    assert isinstance(table_schemas, SearchPath)
++    get_search_path.assert_called_once_with("analytics", ["secrets"])
++    assert apply_rls.call_args.args[2] is table_schemas
++
++
++def test_prepare_sql_skips_search_path_when_no_control_could_match(
++    mocker: MockerFixture, app_context: None
++) -> None:
++    """
++    ``_prepare_sql`` doesn't connect for the search path of a query reading no table
++    an RLS rule or a schema-qualified denylist entry could be about, a dry run
++    included.
++    """
++    from superset.sql.execution.executor import SQLExecutor
++
++    database = Database(
++        id=1, database_name="pg", sqlalchemy_uri="postgresql://u:p@h/analytics"
++    )
++    mocker.patch.dict(
++        current_app.config,
++        {"DISALLOWED_SQL_TABLES": {"postgresql": {"public.secrets"}}},
++    )
++    mocker.patch("superset.utils.rls.get_predicates_for_table", return_value=[])
++    get_search_path = mocker.patch.object(database, "get_search_path")
++    get_inspector = mocker.patch.object(database, "get_inspector")
++    get_raw_connection = mocker.patch.object(database, "get_raw_connection")
++
++    *_, table_schemas = SQLExecutor(database)._prepare_sql(
++        "SELECT * FROM unrelated", QueryOptions(dry_run=True)
++    )
++
++    assert table_schemas == ""
++    get_search_path.assert_not_called()
++    get_inspector.assert_not_called()
++    get_raw_connection.assert_not_called()
++
++
+ # =============================================================================
+ # Row-Level Security Tests
+ # =============================================================================
+==FILE== tests/unit_tests/sql/parse_tests.py
+@@ -1095,20 +1095,164 @@ def test_extract_tables_aliased_cte_does_not_hide_table() -> None:
+     ) == {Table("other_table")}
+ 
+ 
+-def test_extract_tables_cte_reference_over_reported() -> None:
+-    """Test the two shapes that over-report a CTE reference as a table.
++@pytest.mark.parametrize(
++    "sql, engine, expected",
++    [
++        # PostgreSQL folds both unquoted names, so `sales` reads the CTE
++        ("WITH Sales AS (SELECT 1 AS n) SELECT * FROM sales", "postgresql", set()),
++        ("WITH sales AS (SELECT 1 AS n) SELECT * FROM SALES", "postgresql", set()),
++        ('WITH "sales" AS (SELECT 1 AS n) SELECT * FROM Sales', "postgresql", set()),
++        ("WITH Sales AS (SELECT 1 AS n) SELECT * FROM sales", "snowflake", set()),
++        ('WITH "SALES" AS (SELECT 1 AS n) SELECT * FROM sales', "snowflake", set()),
++        ("WITH Sales AS (SELECT 1 AS n) SELECT * FROM sales", "oracle", set()),
++        (
++            "WITH RECURSIVE T(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM t) "
++            "SELECT * FROM t",
++            "postgresql",
++            set(),
++        ),
++        (
++            "SELECT * FROM (WITH Sales AS (SELECT 1 AS n) SELECT * FROM sales) AS x",
++            "postgresql",
++            set(),
++        ),
++        # a quoted name keeps its case, so the folded reference reads the table
++        (
++            'WITH "Sales" AS (SELECT 1 AS n) SELECT * FROM sales',
++            "postgresql",
++            {Table("sales")},
++        ),
++        (
++            'WITH "Sales" AS (SELECT 1 AS n) SELECT * FROM Sales',
++            "postgresql",
++            {Table("Sales")},
++        ),
++        (
++            'WITH sales AS (SELECT 1 AS n) SELECT * FROM "Sales"',
++            "postgresql",
++            {Table("Sales")},
++        ),
++        (
++            'WITH "Sales" AS (SELECT 1 AS n) SELECT * FROM sales',
++            "snowflake",
++            {Table("sales")},
++        ),
++        # a CTE body reads the table its CTE shadows
++        (
++            "WITH sales AS (SELECT * FROM sales) SELECT * FROM sales",
++            "postgresql",
++            {Table("sales")},
++        ),
++        # dialects whose case rules aren't fixed keep the exact match
++        (
++            "WITH Sales AS (SELECT 1 AS n) SELECT * FROM sales",
++            "mysql",
++            {Table("sales")},
++        ),
++        (
++            "WITH Sales AS (SELECT 1 AS n) SELECT * FROM sales",
++            "mssql",
++            {Table("sales")},
++        ),
++        (
++            "WITH Sales AS (SELECT 1 AS n) SELECT * FROM sales",
++            "bigquery",
++            {Table("sales")},
++        ),
++        ("WITH Sales AS (SELECT 1 AS n) SELECT * FROM sales", "base", {Table("sales")}),
++    ],
++)
++def test_extract_tables_cte_name_folding(
++    sql: str, engine: str, expected: set[Table]
++) -> None:
++    """
++    Test that a CTE reference matches its CTE by the name the engine resolves.
+ 
+-    A spurious access check, not a missing one. Pinned so a change either way is meant.
++    On an engine that folds unquoted identifiers, a reference differing from its
++    CTE's name only in case reads the CTE, and one matching a quoted CTE name only
++    as written reads a table.
+     """
+-    # PostgreSQL resolves `foo` to the CTE; this reports the table.
+-    assert extract_tables_from_sql("WITH Foo AS (SELECT 1 AS d) SELECT * FROM foo") == {
+-        Table("foo")
+-    }
+-    # Legal under RECURSIVE: `q2` is the CTE declared below, not a table.
+-    assert extract_tables_from_sql(
++    assert extract_tables_from_sql(sql, engine) == expected
++    assert {
++        table
++        for statement in SQLScript(sql, engine).statements
++        for table in statement.tables
++    } == expected
++
++
++@pytest.mark.parametrize(
++    "sql, engine, expected",
++    [
++        # under RECURSIVE, `sales` is the CTE declared after `a`
++        (
++            "WITH RECURSIVE a AS (SELECT n FROM sales), sales AS (SELECT 1 AS n) "
++            "SELECT * FROM a",
++            "postgresql",
++            set(),
++        ),
++        (
++            "WITH RECURSIVE a AS (SELECT n FROM Sales), sales AS (SELECT 1 AS n) "
++            "SELECT * FROM a",
++            "postgresql",
++            set(),
++        ),
++        # also from a nested CTE body inside the recursive clause
++        (
++            "WITH RECURSIVE x AS (WITH y AS (SELECT * FROM sales) SELECT * FROM y), "
++            "sales AS (SELECT 1 AS n) SELECT * FROM x",
++            "postgresql",
++            set(),
++        ),
++        # without RECURSIVE a CTE only sees the ones before it
++        (
++            "WITH a AS (SELECT n FROM sales), sales AS (SELECT 1 AS n) SELECT * FROM a",
++            "postgresql",
++            {Table("sales")},
++        ),
++        # engines not known to resolve forward references keep reporting the table
++        (
++            "WITH RECURSIVE a AS (SELECT n FROM sales), sales AS (SELECT 1 AS n) "
++            "SELECT * FROM a",
++            "cockroachdb",
++            {Table("sales")},
++        ),
++        (
++            "WITH RECURSIVE a AS (SELECT n FROM sales), sales AS (SELECT 1 AS n) "
++            "SELECT * FROM a",
++            "mysql",
++            {Table("sales")},
++        ),
++    ],
++)
++def test_extract_tables_recursive_cte_forward_reference(
++    sql: str, engine: str, expected: set[Table]
++) -> None:
++    """
++    Test that a ``WITH RECURSIVE`` CTE body can read a CTE defined after it.
++    """
++    assert {
++        table
++        for statement in SQLScript(sql, engine).statements
++        for table in statement.tables
++    } == expected
++
++
++def test_extract_tables_forward_reference_needs_engine() -> None:
++    """
++    Test that the module-level extractor resolves forward references on request.
++    """
++    sql = (
+         "WITH RECURSIVE q1 AS (SELECT key FROM q2), q2 AS (SELECT 1 AS key) "
+         "SELECT * FROM q1"
+-    ) == {Table("q2")}
++    )
++    assert extract_tables_from_sql(sql) == {Table("q2")}
++    statement = SQLScript(sql, "postgresql").statements[0]
++    assert (
++        extract_tables_from_statement(
++            statement._parsed, Dialects.POSTGRES, cte_forward_references=True
++        )
++        == set()
++    )
+ 
+ 
+ def test_extract_tables_multistatement() -> None:
+@@ -4886,6 +5030,45 @@ def test_rls_subquery_filters_every_authorized_read(
+         assert output.count(f"rls_{table} = 1") == count
+ 
+ 
++@pytest.mark.parametrize(
++    "sql, filtered",
++    [
++        ("WITH Sales AS (SELECT 1 AS n) SELECT * FROM sales", False),
++        (
++            "WITH RECURSIVE a AS (SELECT n FROM sales), sales AS (SELECT 1 AS n) "
++            "SELECT * FROM a",
++            False,
++        ),
++        ('WITH "Sales" AS (SELECT 1 AS n) SELECT * FROM Sales', True),
++        ('WITH "Sales" AS (SELECT 1 AS n) SELECT * FROM sales', True),
++    ],
++)
++@pytest.mark.parametrize("method", [RLSMethod.AS_PREDICATE, RLSMethod.AS_SUBQUERY])
++def test_rls_cte_reference_folded_like_the_engine(
++    sql: str, filtered: bool, method: RLSMethod
++) -> None:
++    """
++    A rule on a table filters the references the engine resolves to it.
++
++    On PostgreSQL a reference matching a CTE's name after case folding, or a CTE
++    defined later in a ``WITH RECURSIVE`` clause, reads the CTE, so the table's rule
++    stays out of it; a reference matching a quoted CTE name only as written reads
++    the table.
++    """
++    statement = SQLStatement(sql, "postgresql")
++    applied = statement.apply_rls(
++        None,
++        "public",
++        {
++            Table(table, "public"): [parse_one("region = 'east'")]
++            for table in ("sales", "Sales")
++        },
++        method,
++    )
++    assert applied is filtered
++    assert ("region = 'east'" in statement.format()) is filtered
++
++
+ def test_rls_invalid_method(mocker: MockerFixture) -> None:
+     """
+     Test that an invalid RLS method raises an error.
+@@ -6223,6 +6406,53 @@ def test_get_disallowed_tables_default_schema(
+     )
+ 
+ 
++@pytest.mark.parametrize(
++    "denylist, default_schema, catalog_schemas, expected",
++    [
++        # read from the schema its catalog gives it, not the query's default schema
++        ({"PUBLIC.SALES"}, "ANALYTICS", {"otherdb": "PUBLIC"}, {"PUBLIC.SALES"}),
++        ({"ANALYTICS.SALES"}, "ANALYTICS", {"otherdb": "PUBLIC"}, set()),
++        ({"X.SALES"}, "ANALYTICS", {"otherdb": "PUBLIC"}, set()),
++        # with or without its catalog
++        (
++            {"OTHERDB.PUBLIC.SALES"},
++            "ANALYTICS",
++            {"otherdb": "PUBLIC"},
++            {"OTHERDB.PUBLIC.SALES"},
++        ),
++        ({"OTHERDB.ANALYTICS.SALES"}, "ANALYTICS", {"otherdb": "PUBLIC"}, set()),
++        # a bare entry matches whatever the schema
++        ({"SALES"}, "ANALYTICS", {"otherdb": "PUBLIC"}, {"SALES"}),
++        # an unknown schema: a qualified entry matches by table name
++        ({"PUBLIC.SALES"}, "ANALYTICS", {"otherdb": None}, {"PUBLIC.SALES"}),
++        ({"ANALYTICS.SALES"}, None, {"otherdb": None}, {"ANALYTICS.SALES"}),
++        ({"ANALYTICS.SALES"}, "ANALYTICS", None, {"ANALYTICS.SALES"}),
++        ({"ANALYTICS.SALES"}, "ANALYTICS", {}, {"ANALYTICS.SALES"}),
++        ({"ANALYTICS.OTHER"}, "ANALYTICS", None, set()),
++        # another catalog's schema doesn't say anything about this one's
++        ({"ANALYTICS.SALES"}, "ANALYTICS", {"thirddb": "PUBLIC"}, {"ANALYTICS.SALES"}),
++    ],
++)
++def test_get_disallowed_tables_reference_naming_a_catalog(
++    denylist: set[str],
++    default_schema: str | None,
++    catalog_schemas: dict[str, str | None] | None,
++    expected: set[str],
++) -> None:
++    """
++    A reference naming a catalog but no schema (`OTHERDB..SALES`) isn't read from
++    the default schema of the catalog the query runs in, so `get_disallowed_tables`
++    matches it against the schema its catalog gives it, or, when that isn't known,
++    against a qualified entry's table name whatever its schema.
++    """
++    script = SQLScript("SELECT * FROM OTHERDB..SALES", "snowflake")
++
++    assert (
++        script.get_disallowed_tables(denylist, default_schema, catalog_schemas)
++        == expected
++    )
++
++
+ @pytest.mark.parametrize(
+     "sql, default_schema, denylist, expected",
+     [
+@@ -8098,3 +8328,154 @@ def test_strip_comments_refuses_what_does_not_relex_the_same(
+     mocker.patch("superset.sql.parse.Dialect.get_or_raise", return_value=lexer)
+ 
+     assert strip_comments("lower(:value) -- c", "hive") is None
++
++
++@pytest.mark.parametrize("method", [RLSMethod.AS_PREDICATE, RLSMethod.AS_SUBQUERY])
++@pytest.mark.parametrize(
++    "catalog_schemas, filtered",
++    [
++        # the catalog gives the table its own schema: the rule on that schema applies
++        ({"otherdb": "PUBLIC"}, True),
++        # the catalog doesn't say: neither a rule under the statement's schema nor a
++        # table in a schema is the one it reads
++        ({"otherdb": None}, False),
++        ({"thirddb": "PUBLIC"}, False),
++        # without the mapping the reference defaults to the statement's schema, as
++        # any table does
++        (None, False),
++    ],
++)
++def test_rls_table_naming_a_catalog_but_no_schema(
++    method: RLSMethod,
++    catalog_schemas: dict[str, str | None] | None,
++    filtered: bool,
++) -> None:
++    """
++    A table naming a catalog but no schema is looked up under the schema its catalog
++    gives it, not the statement's own, so it can't take the rules of another table
++    of its name in the statement's schema.
++    """
++    statement = SQLStatement("SELECT * FROM OTHERDB..SALES", "snowflake")
++    applied = statement.apply_rls(
++        "MAIN",
++        "ANALYTICS",
++        {Table("SALES", "PUBLIC", "OTHERDB"): [parse_one("region = 'east'")]},
++        method,
++        catalog_schemas=catalog_schemas,
++    )
++
++    assert applied is filtered
++    assert ("region = 'east'" in statement.format()) is filtered
++
++
++def test_rls_table_naming_a_catalog_and_schema_ignores_the_catalog_schemas() -> None:
++    """
++    A table naming its schema is looked up under it, whatever its catalog gives a
++    table naming no schema.
++    """
++    statement = SQLStatement("SELECT * FROM OTHERDB.ANALYTICS.SALES", "snowflake")
++    applied = statement.apply_rls(
++        "MAIN",
++        "PUBLIC",
++        {Table("SALES", "ANALYTICS", "OTHERDB"): [parse_one("region = 'east'")]},
++        RLSMethod.AS_PREDICATE,
++        catalog_schemas={"otherdb": "PUBLIC"},
++    )
++
++    assert applied
++
++
++@pytest.mark.parametrize(
++    "cte, table",
++    [("straße", "strasse"), ("ﬁle", "file"), ("ﬆuff", "stuff")],
++)
++@pytest.mark.parametrize("reverse", [False, True])
++@pytest.mark.parametrize("quoted", [False, True])
++def test_extract_tables_cte_unicode_expansion(
++    cte: str, table: str, reverse: bool, quoted: bool
++) -> None:
++    """Unicode expansions must not hide an Oracle physical table behind a CTE."""
++    if reverse:
++        cte, table = table.upper(), cte
++    if quoted:
++        cte = f'"{cte}"'
++    sql = f"WITH {cte} AS (SELECT 1 FROM dual) SELECT * FROM {table}"  # noqa: S608
++    expected = {Table("dual"), Table(table)}
++    assert SQLStatement(sql, "oracle").tables == expected
++    assert extract_tables_from_sql(sql, "oracle") == expected
++
++
++@pytest.mark.parametrize("engine", ["oracle", "snowflake", "postgresql"])
++@pytest.mark.parametrize(
++    "cte, reference, physical",
++    [
++        ("Sales", "sales", False),
++        ('"Sales"', "sales", True),
++        ("sales", '"Sales"', True),
++        ('"sales"', '"sales"', False),
++    ],
++)
++def test_extract_tables_cte_ascii_unchanged(
++    engine: str, cte: str, reference: str, physical: bool
++) -> None:
++    """ASCII folding and quoted-name distinctions remain dialect-specific."""
++    sql = f"WITH {cte} AS (SELECT 1) SELECT * FROM {reference}"  # noqa: S608
++    expected = {Table(reference.strip('"'))} if physical else set()
++    assert SQLStatement(sql, engine).tables == expected
++    assert extract_tables_from_sql(sql, engine) == expected
++
++
++@pytest.mark.parametrize(
++    "cte, table",
++    [("straße", "strasse"), ("ﬁle", "file"), ("ﬆuff", "stuff")],
++)
++@pytest.mark.parametrize("method", [RLSMethod.AS_PREDICATE, RLSMethod.AS_SUBQUERY])
++def test_rls_cte_unicode_expansion(cte: str, table: str, method: RLSMethod) -> None:
++    """Both RLS rewrites filter a Unicode CTE's distinct physical table."""
++    statement = SQLStatement(
++        f"WITH {cte} AS (SELECT 1 FROM dual) SELECT * FROM {table}",  # noqa: S608
++        "oracle",
++    )
++    assert statement.apply_rls(
++        None,
++        "public",
++        {Table(table, "public"): [parse_one("region = 'east'")]},
++        method,
++    )
++    assert statement.format().count("region = 'east'") == 1
++
++
++@pytest.mark.parametrize(
++    "cte, table",
++    [("straße", "strasse"), ("ﬁle", "file"), ("ﬆuff", "stuff")],
++)
++def test_denylist_cte_unicode_expansion(cte: str, table: str) -> None:
++    """A distinct physical table remains visible to the denylist."""
++    statement = SQLStatement(
++        f"WITH {cte} AS (SELECT 1 FROM dual) SELECT * FROM {table}",  # noqa: S608
++        "oracle",
++    )
++    assert statement.get_disallowed_tables({table}) == {table}
++
++
++@pytest.mark.parametrize(
++    "cte, reference, physical",
++    [
++        ('"straße"', "straße", True),
++        ('"STRAßE"', "straße", False),
++        ("Straße", "straße", False),
++        ('"ﬁle"', "ﬁle", True),
++        ('"ﬁLE"', "ﬁle", False),
++        ("café", "CAFÉ", True),
++    ],
++)
++def test_extract_tables_cte_folds_only_ascii(
++    cte: str, reference: str, physical: bool
++) -> None:
++    """Preserve quoting and prefer an extra table check to guessing Unicode case."""
++    sql = f"WITH {cte} AS (SELECT 1 FROM dual) SELECT * FROM {reference}"  # noqa: S608
++    expected = {Table("dual")}
++    if physical:
++        expected.add(Table(reference))
++    assert SQLStatement(sql, "oracle").tables == expected
++    assert extract_tables_from_sql(sql, "oracle") == expected
+==FILE== tests/unit_tests/sql_lab_rls_default_schema_test.py
+[no patch: added]
+
+==FILE== tests/unit_tests/sql_lab_test.py
+@@ -2110,13 +2110,15 @@ def test_apply_rls(mocker: MockerFixture) -> None:
+                 "examples",
+                 exclude_dataset_id=None,
+                 include_global_guest_rls=True,
++                any_schema=False,
+             ),
+             mocker.call(
+                 Table("t2", "public", "examples"),
+                 database,
+                 "examples",
+                 exclude_dataset_id=None,
+                 include_global_guest_rls=True,
++                any_schema=False,
+             ),
+         ]
+     )

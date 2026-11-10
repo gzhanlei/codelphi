@@ -1,0 +1,137 @@
+{
+  "sha": "09c015eef5dd011e7ad9fdbd0e38294bf23717be",
+  "node_id": "C_kwDOAlosUtoAKDA5YzAxNWVlZjVkZDAxMWU3YWQ5ZmRiZDBlMzgyOTRiZjIzNzE3YmU",
+  "commit": {
+    "author": {
+      "name": "dependabot[bot]",
+      "email": "49699333+dependabot[bot]@users.noreply.github.com",
+      "date": "2026-11-06T18:23:04Z"
+    },
+    "committer": {
+      "name": "GitHub",
+      "email": "noreply@github.com",
+      "date": "2026-11-06T18:23:04Z"
+    },
+    "message": "chore(deps): bump ace-builds from 1.45.0 to 1.45.2 in /superset-frontend (#46052)\n\nSigned-off-by: dependabot[bot] <support@github.com>\nCo-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>",
+    "tree": {
+      "sha": "ab301445d9bdbec7a87f72c9d843242210352fd3",
+      "url": "https://api.github.com/repos/apache/superset/git/trees/ab301445d9bdbec7a87f72c9d843242210352fd3"
+    },
+    "url": "https://api.github.com/repos/apache/superset/git/commits/09c015eef5dd011e7ad9fdbd0e38294bf23717be",
+    "comment_count": 0,
+    "verification": {
+      "verified": true,
+      "reason": "valid",
+      "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJq7hsICRC1aQ7uu5UhlAAAGOAQAES7VTwG7nIfvmTyMIpn0YNZ\n+pn2LkK0bI/aSR0gu9pvgYuora/sV3JyBHjlqppGHJNPSbVE5qMXjsKk0P0g3OEk\nQAF/8RLlo49l9eFaOm6tWFfWpXDcBrvpX3Bwn8MrV7lDxnG3p+olqz0F3UnGe2Vu\n5yc4DckCfgB+yvBzuQ1E7dUqXjSSIgO3EA1lv4gtxkv5nBMvVuP3gY3+28gKpBb2\nSrxHZ+I3xCDxBE8ywUOQo0x9Q3Prl64rGbJAUvj8o2E2UTwwjy9Hxe0vfOBWN0zr\nn+KR9HPzojd/lExdHxNohvMjjZLAfgHPGv0LBlz1aUyK75FXSQLAfgx1kJAmLWDe\nSQU9udrd9j2YoE4LyRo+J+4GREsRBqvZulKPZitywsYyBxhyy94EHz9W+IwoVxW6\nr1F10sUjchpSwsKFgD76Gtgn27JF8jZ6WC1qqy+z4okBG+j+7DP43i4B99DtrkLO\nkBkkM/kDCSQbk0yA0m5RQ/ADl8zq1XvW9BKZu0arY9o6rYOF0DiHgiI75uB2sfHP\ncAu4Fomn7+ZkDlLhbGaZY9Jh+RUjCvE/Kp+0LYwrH+ZJ0wdsGvq3dyFn90xG3tNM\nF8socZpFtoWsY9sBNNcSdXtZyALQ1tLDhF8OATYWbrXAU1tO/MZV1pu0XPVgSm/K\njDNoO8U/GRLDbbiSWA8g\n=83fk\n-----END PGP SIGNATURE-----\n",
+      "payload": "tree ab301445d9bdbec7a87f72c9d843242210352fd3\nparent 51a71563e17ca032c3a20b30bef5036e5c606d87\nauthor dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> 1793989384 -0800\ncommitter GitHub <noreply@github.com> 1793989384 -0800\n\nchore(deps): bump ace-builds from 1.45.0 to 1.45.2 in /superset-frontend (#46052)\n\nSigned-off-by: dependabot[bot] <support@github.com>\nCo-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>",
+      "verified_at": "2026-11-06T18:23:05Z"
+    }
+  },
+  "url": "https://api.github.com/repos/apache/superset/commits/09c015eef5dd011e7ad9fdbd0e38294bf23717be",
+  "html_url": "https://github.com/apache/superset/commit/09c015eef5dd011e7ad9fdbd0e38294bf23717be",
+  "comments_url": "https://api.github.com/repos/apache/superset/commits/09c015eef5dd011e7ad9fdbd0e38294bf23717be/comments",
+  "author": {
+    "login": "dependabot[bot]",
+    "id": 49699333,
+    "node_id": "MDM6Qm90NDk2OTkzMzM=",
+    "avatar_url": "https://avatars.githubusercontent.com/in/29110?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/dependabot%5Bbot%5D",
+    "html_url": "https://github.com/apps/dependabot",
+    "followers_url": "https://api.github.com/users/dependabot%5Bbot%5D/followers",
+    "following_url": "https://api.github.com/users/dependabot%5Bbot%5D/following{/other_user}",
+    "gists_url": "https://api.github.com/users/dependabot%5Bbot%5D/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/dependabot%5Bbot%5D/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/dependabot%5Bbot%5D/subscriptions",
+    "organizations_url": "https://api.github.com/users/dependabot%5Bbot%5D/orgs",
+    "repos_url": "https://api.github.com/users/dependabot%5Bbot%5D/repos",
+    "events_url": "https://api.github.com/users/dependabot%5Bbot%5D/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/dependabot%5Bbot%5D/received_events",
+    "type": "Bot",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "committer": {
+    "login": "web-flow",
+    "id": 19864447,
+    "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+    "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/web-flow",
+    "html_url": "https://github.com/web-flow",
+    "followers_url": "https://api.github.com/users/web-flow/followers",
+    "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+    "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+    "organizations_url": "https://api.github.com/users/web-flow/orgs",
+    "repos_url": "https://api.github.com/users/web-flow/repos",
+    "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/web-flow/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "parents": [
+    {
+      "sha": "51a71563e17ca032c3a20b30bef5036e5c606d87",
+      "url": "https://api.github.com/repos/apache/superset/commits/51a71563e17ca032c3a20b30bef5036e5c606d87",
+      "html_url": "https://github.com/apache/superset/commit/51a71563e17ca032c3a20b30bef5036e5c606d87"
+    }
+  ],
+  "stats": {
+    "total": 18,
+    "additions": 9,
+    "deletions": 9
+  },
+  "files": [
+    {
+      "sha": "e484499772ba2104166a7bd518ca878c63304830",
+      "filename": "superset-frontend/package-lock.json",
+      "status": "modified",
+      "additions": 6,
+      "deletions": 6,
+      "changes": 12,
+      "blob_url": "https://github.com/apache/superset/blob/09c015eef5dd011e7ad9fdbd0e38294bf23717be/superset-frontend%2Fpackage-lock.json",
+      "raw_url": "https://github.com/apache/superset/raw/09c015eef5dd011e7ad9fdbd0e38294bf23717be/superset-frontend%2Fpackage-lock.json",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/superset-frontend%2Fpackage-lock.json?ref=09c015eef5dd011e7ad9fdbd0e38294bf23717be",
+      "patch": "@@ -15416,9 +15416,9 @@\n       }\n     },\n     \"node_modules/ace-builds\": {\n-      \"version\": \"1.45.0\",\n-      \"resolved\": \"https://registry.npmjs.org/ace-builds/-/ace-builds-1.45.0.tgz\",\n-      \"integrity\": \"sha512-tAAorvbQRlsdDeuf4RnBLgaRk4HVT9td2D4QKEqXyuQkZmFoqHxl9JuV2o1XkuDT+zOreooGPiG1tU/Y+pNFkg==\",\n+      \"version\": \"1.45.2\",\n+      \"resolved\": \"https://registry.npmjs.org/ace-builds/-/ace-builds-1.45.2.tgz\",\n+      \"integrity\": \"sha512-a0IADaETGBnBW5CIkniUJn7F+NyTuHWKqlv1A8FXaMmFflJsMGnU3TzkiyslInqIZ3odfcVKOdXBGIKBefzFDA==\",\n       \"license\": \"BSD-3-Clause\"\n     },\n     \"node_modules/acorn\": {\n@@ -41752,7 +41752,7 @@\n         \"@testing-library/jest-dom\": \"*\",\n         \"@testing-library/react\": \"*\",\n         \"@testing-library/user-event\": \"*\",\n-        \"ace-builds\": \"^1.45.0\",\n+        \"ace-builds\": \"^1.45.2\",\n         \"brace\": \"^0.11.1\",\n         \"memoize-one\": \"^6.0.0\",\n         \"react\": \"^18.3.0\",\n@@ -41772,7 +41772,7 @@\n         \"@types/d3-format\": \"^3.0.4\",\n         \"@types/json-bigint\": \"^1.0.4\",\n         \"@visx/responsive\": \"^4.0.0\",\n-        \"ace-builds\": \"^1.45.0\",\n+        \"ace-builds\": \"^1.45.2\",\n         \"ag-grid-community\": \"36.2.0\",\n         \"ag-grid-react\": \"36.2.0\",\n         \"brace\": \"^0.11.1\",\n@@ -42131,7 +42131,7 @@\n         \"@apache-superset/core\": \"*\",\n         \"@superset-ui/chart-controls\": \"*\",\n         \"@superset-ui/core\": \"*\",\n-        \"ace-builds\": \"^1.45.0\",\n+        \"ace-builds\": \"^1.45.2\",\n         \"dayjs\": \"^1.11.21\",\n         \"handlebars\": \"^4.7.10\",\n         \"lodash\": \"^4.18.1\","
+    },
+    {
+      "sha": "e19683b4581e98f7b68b109b0f7ab1da86d8b040",
+      "filename": "superset-frontend/packages/superset-ui-chart-controls/package.json",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "changes": 2,
+      "blob_url": "https://github.com/apache/superset/blob/09c015eef5dd011e7ad9fdbd0e38294bf23717be/superset-frontend%2Fpackages%2Fsuperset-ui-chart-controls%2Fpackage.json",
+      "raw_url": "https://github.com/apache/superset/raw/09c015eef5dd011e7ad9fdbd0e38294bf23717be/superset-frontend%2Fpackages%2Fsuperset-ui-chart-controls%2Fpackage.json",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/superset-frontend%2Fpackages%2Fsuperset-ui-chart-controls%2Fpackage.json?ref=09c015eef5dd011e7ad9fdbd0e38294bf23717be",
+      "patch": "@@ -41,7 +41,7 @@\n     \"@testing-library/jest-dom\": \"*\",\n     \"@testing-library/react\": \"*\",\n     \"@testing-library/user-event\": \"*\",\n-    \"ace-builds\": \"^1.45.0\",\n+    \"ace-builds\": \"^1.45.2\",\n     \"brace\": \"^0.11.1\",\n     \"memoize-one\": \"^6.0.0\",\n     \"react\": \"^18.3.0\","
+    },
+    {
+      "sha": "86a099a0f426e56cc5d26c1598d6c0361c0fa478",
+      "filename": "superset-frontend/packages/superset-ui-core/package.json",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "changes": 2,
+      "blob_url": "https://github.com/apache/superset/blob/09c015eef5dd011e7ad9fdbd0e38294bf23717be/superset-frontend%2Fpackages%2Fsuperset-ui-core%2Fpackage.json",
+      "raw_url": "https://github.com/apache/superset/raw/09c015eef5dd011e7ad9fdbd0e38294bf23717be/superset-frontend%2Fpackages%2Fsuperset-ui-core%2Fpackage.json",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/superset-frontend%2Fpackages%2Fsuperset-ui-core%2Fpackage.json?ref=09c015eef5dd011e7ad9fdbd0e38294bf23717be",
+      "patch": "@@ -56,7 +56,7 @@\n     \"@types/d3-format\": \"^3.0.4\",\n     \"@types/json-bigint\": \"^1.0.4\",\n     \"@visx/responsive\": \"^4.0.0\",\n-    \"ace-builds\": \"^1.45.0\",\n+    \"ace-builds\": \"^1.45.2\",\n     \"ag-grid-community\": \"36.2.0\",\n     \"ag-grid-react\": \"36.2.0\",\n     \"brace\": \"^0.11.1\","
+    },
+    {
+      "sha": "d65d92d3f6eed62f493b7c96c60802db55919525",
+      "filename": "superset-frontend/plugins/plugin-chart-handlebars/package.json",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "changes": 2,
+      "blob_url": "https://github.com/apache/superset/blob/09c015eef5dd011e7ad9fdbd0e38294bf23717be/superset-frontend%2Fplugins%2Fplugin-chart-handlebars%2Fpackage.json",
+      "raw_url": "https://github.com/apache/superset/raw/09c015eef5dd011e7ad9fdbd0e38294bf23717be/superset-frontend%2Fplugins%2Fplugin-chart-handlebars%2Fpackage.json",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/superset-frontend%2Fplugins%2Fplugin-chart-handlebars%2Fpackage.json?ref=09c015eef5dd011e7ad9fdbd0e38294bf23717be",
+      "patch": "@@ -41,7 +41,7 @@\n     \"@apache-superset/core\": \"*\",\n     \"@superset-ui/chart-controls\": \"*\",\n     \"@superset-ui/core\": \"*\",\n-    \"ace-builds\": \"^1.45.0\",\n+    \"ace-builds\": \"^1.45.2\",\n     \"dayjs\": \"^1.11.21\",\n     \"handlebars\": \"^4.7.10\",\n     \"lodash\": \"^4.18.1\","
+    }
+  ]
+}

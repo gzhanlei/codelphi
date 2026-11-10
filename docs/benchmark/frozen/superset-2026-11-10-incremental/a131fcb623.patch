@@ -1,0 +1,3394 @@
+==FILE== docs/admin_docs/configuration/mcp-server.mdx
+@@ -2427,6 +2427,55 @@ supported time grains; missing or empty lists use the dataset's supported grains
+ Pass `[]` to clear an optional time-grain filter; required filters cannot be
+ cleared.
+ 
++## Reselecting fields on an existing semantic chart
++
++`update_chart` can certify complete field reselection for table and interactive
++table charts whose semantic selection marker is missing or outdated. Supply all
++columns using the target view's member IDs and explicitly supply `filters`
++(`[]` clears them). Supply sorting explicitly if the chart retains sorting.
++Certification applies only when the final merged query contains no unverified
++retained selections; sending `config` alone is not enough.
++
++Table display settings and dashboard associations may be retained. Empty
++conditional-formatting and annotation settings are supported, but unclassified
++non-empty plugin state still requires Explore recovery. An explicitly selected
++`temporal_column` is checked against the target view's temporal metadata and the
++generated query filter; a saved internal time-binding marker alone is not proof
++of a fresh selection.
++
++Explore's boolean temporal-column lookup describes datasource metadata, not
++selected fields, so old names in that lookup may be retained. Target temporal
++metadata must be available. A recognized duration grain is omitted only with a
++well-formed saved lookup, no reselected temporal member and no time axis set.
++Active grains, malformed lookup metadata, and unknown grain formats still
++require Explore recovery. An unpublished explicit `temporal_column` is refused
++rather than silently ignored.
++
++Only an explicit `filters: []` authorizes clearing saved WHERE/HAVING predicate
++aliases, including legacy and adhoc filters. A non-empty filter replacement that
++would discard those unclassified predicates is refused; reselect in Explore, or
++explicitly clear filters if removing the saved constraints is intended.
++The canonical SIMPLE/WHERE `TEMPORAL_RANGE` entry with comparator `No filter`
++is an inactive placeholder, not a saved predicate. Real ranges, SQL expressions
++and unclassified filter entries still require explicit clearing.
++
++If native controls, temporal bindings, external filters, secondary queries or
++unsupported plugin state cannot be verified, the update refuses without changing
++the saved chart. The error names the incomplete category and directs you to
++reselect it in Explore and save there. Omitted state is not silently reset.
++For example: “Cannot verify temporal selections; reselect them in Explore and
++save the chart.”
++
++Renaming a chart or using `add_columns` does not upgrade its selection marker.
++Ordinary partial updates on the same source with a current marker keep their
++existing behavior. Changing the source requires fresh target selections even if
++the two sources use the same marker string. On versioned providers, a source-only
++rebind without a complete table config is refused as “no reselection supplied”;
++retry with complete selections or reselect in Explore. A preview is a snapshot, not a lease:
++a concurrent saved-chart change can cause a direct update to refuse and require
++a reload. Providers without a selection-version contract and physical datasets
++do not receive an invented marker.
++
+ ## Missing chart columns
+ 
+ `generate_chart`, `update_chart`, `update_chart_preview` and
+==FILE== superset/commands/chart/update.py
+@@ -15,13 +15,17 @@
+ # specific language governing permissions and limitations
+ # under the License.
+ import logging
++from dataclasses import asdict, dataclass
+ from datetime import datetime
+ from functools import partial
+-from typing import Any, Optional, TYPE_CHECKING
++from typing import Any, cast, Optional, TYPE_CHECKING
+ 
+ from flask import g
+ from flask_appbuilder.models.sqla import Model
+ from marshmallow import ValidationError
++from sqlalchemy import Table
++from sqlalchemy.engine import CursorResult
++from sqlalchemy.orm import lazyload
+ 
+ from superset import security_manager
+ from superset.commands.base import BaseCommand, UpdateMixin
+@@ -72,20 +76,47 @@ def is_query_context_update(properties: dict[str, Any]) -> bool:
+     )
+ 
+ 
++@dataclass(frozen=True)
++class ChartUpdateBasis:
++    """Capture the saved inputs used to prepare a certified chart update."""
++
++    params: str | None
++    datasource_id: int | None
++    datasource_type: str | None
++    viz_type: str | None
++    slice_name: str | None
++
++    @classmethod
++    def from_chart(cls, chart: Slice) -> "ChartUpdateBasis":
++        """Snapshot values rather than retaining a mutable ORM reference."""
++        return cls(
++            chart.params,
++            chart.datasource_id,
++            chart.datasource_type,
++            chart.viz_type,
++            chart.slice_name,
++        )
++
++
+ class UpdateChartCommand(UpdateMixin, BaseCommand):
+     def __init__(
+         self,
+         model_id: int,
+         data: dict[str, Any],
+         normalization_changes: object = None,
++        *,
++        expected_basis: ChartUpdateBasis | None = None,
+     ) -> None:
+         self._model_id: int = model_id
+         self._properties: dict[str, Any] = data.copy()
+         self._model: Optional[Slice] = None
+         self._normalization_changes: object = normalization_changes
++        self._expected_basis: ChartUpdateBasis | None = expected_basis
+ 
+     @transaction(on_error=partial(on_error, reraise=ChartUpdateFailedError))
+     def run(self) -> Model:
++        if self._expected_basis is not None:
++            self._fence_expected_basis()
+         self.validate()
+         assert self._model
+ 
+@@ -126,6 +157,51 @@ def run(self) -> Model:
+ 
+         return ChartDAO.update(self._model, self._properties)
+ 
++    def _fence_expected_basis(self) -> None:
++        """Reject stale preparation and hold its write fence through commit."""
++        assert self._expected_basis is not None
++        table: Table = Slice.__table__
++        # Core UPDATE avoids ORM history for the guard. Pin onupdate columns to
++        # themselves so acquiring the fence does not change audit timestamps.
++        values: dict[Any, Any] = {
++            column: column for column in table.c if column.onupdate is not None
++        }
++        values[table.c.id] = table.c.id
++        with db.session.no_autoflush:
++            result: CursorResult = cast(
++                CursorResult,
++                db.session.execute(
++                    table.update()
++                    .where(
++                        table.c.id == self._model_id,
++                        *(
++                            table.c[key].is_not_distinct_from(value)
++                            for key, value in asdict(self._expected_basis).items()
++                        ),
++                    )
++                    .values(values)
++                ),
++            )
++            if result.rowcount != 1:
++                raise ChartUpdateFailedError("Chart changed; reload before retrying.")
++            # The locking read also escapes MySQL REPEATABLE READ snapshots.
++            # Keep a strong reference until the command's normal ORM mutation.
++            self._model = (
++                db.session.query(Slice)
++                # Lock only the chart: subquery eager loads can propagate FOR
++                # UPDATE into DISTINCT queries that PostgreSQL rejects.
++                .options(lazyload("*"))
++                .populate_existing()
++                .filter(Slice.id == self._model_id)
++                .with_for_update()
++                .one_or_none()
++            )
++        if (
++            self._model is None
++            or ChartUpdateBasis.from_chart(self._model) != self._expected_basis
++        ):
++            raise ChartUpdateFailedError("Chart changed; reload before retrying.")
++
+     def _validate_new_dashboard_access(
+         self, requested_dashboards: list[Dashboard], exceptions: list[ValidationError]
+     ) -> None:
+==FILE== superset/mcp_service/chart/chart_helpers.py
+@@ -34,6 +34,10 @@
+ 
+ from superset.common.utils.time_grain_utils import apply_time_grain_to_base_axis
+ from superset.constants import EXTRA_FORM_DATA_OVERRIDE_REGULAR_MAPPINGS
++from superset.mcp_service.dashboard_scope import (
++    merge_semantic_selection_sources,
++    SEMANTIC_SELECTION_MEMBER_KEYS,
++)
+ from superset.utils.core import ExtraFiltersReasonType
+ 
+ if TYPE_CHECKING:
+@@ -320,6 +324,7 @@ def merge_extra_form_data(
+     merge, which iterates them, never receives ``None``.
+     """
+     merged: dict[str, Any] = dict(existing) if isinstance(existing, dict) else {}
++    sources: list[Any] = merge_semantic_selection_sources(merged, incoming)
+     for key in ("adhoc_filters", "filters"):
+         if key in merged and merged[key] is None:
+             del merged[key]
+@@ -333,6 +338,8 @@ def merge_extra_form_data(
+             merged[key] = {**current, **value}
+         else:
+             merged[key] = value
++    if sources:
++        merged["semantic_selection_sources"] = sources
+     return merged
+ 
+ 
+@@ -427,6 +434,19 @@ def merge_extra_form_data_filters_into_query(
+     datasource_type: str,
+ ) -> None:
+     """Merge request extra_form_data predicates into an existing query payload."""
++    selection_version: str | None = (
++        _query_semantic_selection_version(
++            {
++                "datasource": f"{datasource_id}__{datasource_type}",
++                "semantic_selection_version": (query.get("extras") or {}).get(
++                    "semantic_selection_version"
++                ),
++            },
++            extra_form_data,
++        )
++        if datasource_type == "semantic_view"
++        else None
++    )
+     extra_query_form_data: dict[str, Any] = {"adhoc_filters": []}
+     prepare_form_data_for_query(
+         extra_query_form_data,
+@@ -435,6 +455,8 @@ def merge_extra_form_data_filters_into_query(
+         extra_form_data,
+     )
+     merge_form_data_filters_into_query(query, extra_query_form_data)
++    if selection_version is not None:
++        query.setdefault("extras", {})["semantic_selection_version"] = selection_version
+     if extra_form_data.get("time_range"):
+         from superset.charts.data.dashboard_filter_context import (
+             mark_dashboard_time_range_filters,
+@@ -1165,6 +1187,36 @@ def coerce_enum_values(value: Any) -> Any:
+     return value
+ 
+ 
++def _query_semantic_selection_version(
++    form_data: dict[str, Any], extra_form_data: dict[str, Any] | None
++) -> str | None:
++    """Mirror Explore's version transport without certifying external selections."""
++    version: object = form_data.get("semantic_selection_version")
++    if not isinstance(version, str):
++        return None
++    unverified: str = "unverified-external-selections"
++    sources: list[Any] = list(form_data.get("semantic_selection_sources") or [])
++    extra: dict[str, Any]
++    for extra in (form_data.get("extra_form_data") or {}, extra_form_data or {}):
++        if extra.get("semantic_selection_sources"):
++            sources.extend(extra["semantic_selection_sources"])
++        elif any(extra.get(key) for key in SEMANTIC_SELECTION_MEMBER_KEYS):
++            return unverified
++    if any(
++        not isinstance(source, dict)
++        or source.get("datasource") != form_data.get("datasource")
++        or source.get("version") != version
++        for source in sources
++    ):
++        return unverified
++    if any(
++        filter_.get("col") not in {"__time_range", "__time_grain", "__time_compare"}
++        for filter_ in form_data.get("extra_filters") or []
++    ):
++        return unverified
++    return version
++
++
+ def build_query_dicts_from_form_data(
+     form_data: dict[str, Any],
+     datasource_id: Any,
+@@ -1193,6 +1245,11 @@ def build_query_dicts_from_form_data(
+     form_data = coerce_enum_values(deepcopy(form_data))
+     if extra_form_data is not None:
+         extra_form_data = coerce_enum_values(deepcopy(extra_form_data))
++    selection_version: str | None = (
++        _query_semantic_selection_version(form_data, extra_form_data)
++        if datasource_type == "semantic_view"
++        else None
++    )
+     viz_type: str = (
+         form_data.get("viz_type")
+         or (getattr(chart, "viz_type", "") if chart else "")
+@@ -1222,33 +1279,39 @@ def build_query_dicts_from_form_data(
+ 
+     # Plugins see (and may validate) the complete reconstructed state, including
+     # legacy clauses and request-level extra_form_data merged above.
++    queries: list[dict[str, Any]] | None = None
+     if plugin is not None:
+-        plugin_queries = plugin.build_query_dicts(
++        queries = plugin.build_query_dicts(
+             form_data,
+             viz_type=viz_type,
+             engine=engine,
+             row_limit=row_limit,
+             order_desc=order_desc,
+         )
+-        if plugin_queries is not None:
+-            return plugin_queries
+ 
+     # Deck.gl charts use spatial column configs rather than the standard
+     # metrics / groupby fields. Extract columns from the spatial controls.
+-    if viz_type.startswith("deck_"):
+-        return [
++    if queries is None and viz_type.startswith("deck_"):
++        queries = [
+             build_deck_gl_query_dict(
+                 form_data, viz_type, row_limit=row_limit, order_desc=order_desc
+             )
+         ]
+-    return build_query_objects_from_form_data(
+-        form_data,
+-        viz_type=viz_type,
+-        row_limit=row_limit,
+-        order_desc=order_desc,
+-        filters_prepared=True,
+-        secondary_form_data=secondary_form_data,
+-    )
++    if queries is None:
++        queries = build_query_objects_from_form_data(
++            form_data,
++            viz_type=viz_type,
++            row_limit=row_limit,
++            order_desc=order_desc,
++            filters_prepared=True,
++            secondary_form_data=secondary_form_data,
++        )
++    if selection_version is not None:
++        for query in queries:
++            query.setdefault("extras", {})["semantic_selection_version"] = (
++                selection_version
++            )
++    return queries
+ 
+ 
+ def build_deck_gl_query_dict(
+==FILE== superset/mcp_service/chart/chart_utils.py
+@@ -1766,7 +1766,10 @@ def _add_xy_limits(form_data: Dict[str, Any], config: XYChartConfig) -> None:
+ 
+ 
+ def map_xy_config(  # noqa: C901
+-    config: XYChartConfig, dataset_id: int | str | None = None
++    config: XYChartConfig,
++    dataset_id: int | str | None = None,
++    *,
++    temporal_columns: set[str] | None = None,
+ ) -> Dict[str, Any]:
+     """Map XY chart config to form_data with defensive validation."""
+     # Early validation to prevent empty charts
+@@ -1783,7 +1786,10 @@ def map_xy_config(  # noqa: C901
+     # Check if x-axis column is truly temporal (based on actual SQL type).
+     # Reuse the dataset fetched above (if any) to avoid a second DAO lookup.
+     x_is_temporal = is_column_truly_temporal(
+-        config.x.name, dataset_id, dataset=resolved_dataset
++        config.x.name,
++        dataset_id,
++        dataset=resolved_dataset,
++        temporal_columns=temporal_columns,
+     )
+ 
+     # Map chart kind to viz_type - always use the same viz types
+==FILE== superset/mcp_service/chart/datasource_resolver.py
+@@ -88,6 +88,15 @@ def resolve_semantic_view(view_id: int | str | UUID) -> ChartDatasource | None:
+     )
+ 
+ 
++def stamp_new_semantic_selections(
++    form_data: dict[str, Any], target: ChartDatasource
++) -> None:
++    """Stamp freshly selected members, never retained selections from a saved chart."""
++    version: str | None = target.explorable.implementation.selection_identity_version
++    if isinstance(version, str):
++        form_data["semantic_selection_version"] = version
++
++
+ def build_context_from_explorable(target: ChartDatasource) -> DatasetContext:
+     """Adapt authorized host metadata without assuming table columns."""
+     view: SemanticView = target.explorable
+==FILE== superset/mcp_service/chart/plugins/xy.py
+@@ -24,12 +24,9 @@
+ from typing import Any, ClassVar
+ 
+ from superset.mcp_service.chart.chart_utils import (
+-    _add_adhoc_filters,
+     _xy_chart_context,
+     _xy_chart_what,
+-    configure_temporal_handling,
+     create_metric_object,
+-    is_column_truly_temporal,
+     map_xy_config,
+ )
+ from superset.mcp_service.chart.plugin import BaseChartPlugin
+@@ -299,19 +296,9 @@ def apply_temporal_columns(
+         form_data: dict[str, Any],
+         temporal_columns: set[str],
+     ) -> None:
+-        """Undo dataset-less time defaults for a categorical semantic x-axis."""
+-        if (
+-            config.x is None
+-            or config.x.name is None
+-            or is_column_truly_temporal(
+-                config.x.name, None, temporal_columns=temporal_columns
+-            )
+-        ):
+-            return
+-        configure_temporal_handling(form_data, False, config.time_grain)
+-        form_data.pop("adhoc_filters", None)
+-        _add_adhoc_filters(form_data, config.filters)
+-        form_data.pop("x_axis_time_format", None)
++        """Rebuild with authoritative types before deciding sorting and warnings."""
++        form_data.clear()
++        form_data.update(map_xy_config(config, temporal_columns=temporal_columns))
+ 
+     def normalize_column_refs(self, config: Any, dataset_context: Any) -> Any:
+         config_dict = config.model_dump(exclude_unset=True)
+==FILE== superset/mcp_service/chart/schemas.py
+@@ -6502,7 +6502,10 @@ class UpdateChartRequest(
+     ] = Field(
+         None,
+         description=(
+-            f"{CHART_CONFIG_DESCRIPTION} Optional; omit to only update chart_name."
++            f"{CHART_CONFIG_DESCRIPTION} Optional; omit to only update chart_name. "
++            "Outdated semantic tables require all columns reselected and explicit "
++            "filters ([] to clear). Unverified retained selections refuse with "
++            "Explore recovery guidance."
+         ),
+     )
+     add_columns: List[ColumnRef] | None = Field(
+==FILE== superset/mcp_service/chart/semantic_reselection.py
+@@ -0,0 +1,456 @@
++# Licensed to the Apache Software Foundation (ASF) under one
++# or more contributor license agreements.  See the NOTICE file
++# distributed with this work for additional information
++# regarding copyright ownership.  The ASF licenses this file
++# to you under the Apache License, Version 2.0 (the
++# "License"); you may not use this file except in compliance
++# with the License.  You may obtain a copy of the License at
++#
++#   http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing,
++# software distributed under the License is distributed on an
++# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
++# KIND, either express or implied.  See the License for the
++# specific language governing permissions and limitations
++# under the License.
++"""Prove bounded table reselections without certifying inherited query state."""
++
++from typing import Any
++
++from superset.constants import TimeGrain
++from superset.mcp_service.chart.chart_utils import map_config_to_form_data
++from superset.mcp_service.chart.schemas import (
++    ChartConfig,
++    TableChartConfig,
++    TableColumnConfig,
++)
++
++# These keys carry neither member identity nor executable query expressions.
++_PRESENTATION_KEYS: frozenset[str] = frozenset(
++    {
++        "datasource",
++        "slice_id",
++        "slice_name",
++        "viz_type",
++        "semantic_selection_version",
++        "row_limit",
++        "color_scheme",
++        "number_format",
++        "date_format",
++        "show_cell_bars",
++        "show_totals",
++        "page_length",
++        "table_timestamp_format",
++        "dashboards",
++        "server_page_length",
++        "allow_render_html",
++        "color_pn",
++    }
++)
++_QUERY_KEYS: frozenset[str] = frozenset(
++    {
++        "all_columns",
++        "columns",
++        "groupby",
++        "metrics",
++        "query_mode",
++        "include_time",
++        "order_desc",
++        "adhoc_filters",
++        "order_by_cols",
++    }
++)
++_FILTER_KEYS: frozenset[str] = frozenset(
++    {
++        "adhoc_filters",
++        "filters",
++        "extra_filters",
++        "where",
++        "having",
++    }
++)
++_EMPTY_LIST_KEYS: frozenset[str] = frozenset(
++    {
++        "conditional_formatting",
++        "header_groups",
++        "annotation_layers",
++        "percent_metrics",
++        "time_compare",
++        "time_offsets",
++        "extra_filters",
++        "filters",
++    }
++)
++_EMPTY_STRING_KEYS: frozenset[str] = frozenset(
++    {
++        "where",
++        "having",
++        "granularity",
++        "granularity_sqla",
++        "time_grain_sqla",
++        "since",
++        "until",
++    }
++)
++_EMPTY_DICT_KEYS: frozenset[str] = frozenset(
++    {
++        "extra_form_data",
++        "url_params",
++        "semantic_selection_sources",
++    }
++)
++_DURATION_GRAINS: frozenset[str] = frozenset(
++    grain for grain in TimeGrain if grain.startswith("P") and "/" not in grain
++)
++# Explore serializes hidden controls too. Accept only these inert values,
++# not arbitrary values for query-affecting controls or a matrixify prefix.
++_INERT_DEFAULTS: dict[str, Any] = {
++    "server_pagination": False,
++    "comparison_color_enabled": False,
++    "comparison_color_scheme": "Green",
++    "comparison_type": "values",
++    "timeseries_limit_metric": None,
++    "percent_metric_calculation": "row_limit",
++    "totals_aggregate": "ORIGINAL",
++    "matrixify_enable": False,
++    "matrixify_mode_columns": "disabled",
++    "matrixify_mode_rows": "disabled",
++    "matrixify_dimension_selection_mode_columns": "members",
++    "matrixify_dimension_selection_mode_rows": "members",
++    "matrixify_dimension_columns": {"dimension": "", "values": []},
++    "matrixify_dimension_rows": {"dimension": "", "values": []},
++    "matrixify_topn_value_columns": 10,
++    "matrixify_topn_value_rows": 10,
++    "matrixify_all_sort_by_columns": "a_to_z",
++    "matrixify_all_sort_by_rows": "a_to_z",
++    "matrixify_topn_order_columns": True,
++    "matrixify_topn_order_rows": True,
++    "matrixify_show_column_headers": True,
++    "matrixify_show_row_labels": True,
++    "matrixify_fit_columns_dynamically": True,
++    "matrixify_row_height": 300,
++    "matrixify_charts_per_row": 3,
++    "matrixify_cell_title_template": "",
++}
++
++
++def _verified_temporal_lookup(value: Any, temporal_columns: set[str] | None) -> bool:
++    """Validate metadata shape; old lookup names are not selected query roles."""
++    return (
++        temporal_columns is not None
++        and isinstance(value, dict)
++        and all(
++            isinstance(key, str) and isinstance(temporal, bool)
++            for key, temporal in value.items()
++        )
++    )
++
++
++def has_dormant_table_grain(
++    state: dict[str, Any], temporal_columns: set[str] | None
++) -> bool:
++    """Recognize duration metadata with no selected temporal query axis."""
++    grain: Any = state.get("time_grain_sqla")
++    if not isinstance(grain, str) or grain not in _DURATION_GRAINS:
++        return False
++    if not _verified_temporal_lookup(
++        state.get("temporal_columns_lookup"), temporal_columns
++    ):
++        return False
++    if (
++        state.get("granularity")
++        or state.get("granularity_sqla")
++        or state.get("include_time")
++    ):
++        return False
++    # Use authorized metadata as well as the saved lookup: a missing/false
++    # lookup entry must not disguise a selected temporal column as dormant.
++    for key in ("columns", "all_columns", "groupby"):
++        columns: Any = state.get(key, [])
++        if not isinstance(columns, list) or any(
++            not isinstance(column, str) or column in (temporal_columns or set())
++            for column in columns
++        ):
++            return False
++    return True
++
++
++def _neutral_control(
++    key: str, value: Any, *, temporal_columns: set[str] | None, dormant_grain: bool
++) -> bool:
++    """Recognize individually classified empty, metadata, or dormant controls."""
++    if key == "temporal_columns_lookup":
++        return _verified_temporal_lookup(value, temporal_columns)
++    if key == "time_grain_sqla" and dormant_grain:
++        return True
++    if key in {
++        "include_search",
++        "allow_rearrange_columns",
++        "align_pn",
++        "json_in_cell",
++        "show_numbered_column",
++        "zebra_striping",
++    }:
++        return type(value) is bool
++    if key in _INERT_DEFAULTS:
++        default: Any = _INERT_DEFAULTS[key]
++        return type(value) is type(default) and value == default
++    if key in _EMPTY_LIST_KEYS:
++        return value is None or value == []
++    if key in _EMPTY_STRING_KEYS:
++        return value is None or value == ""
++    if key in _EMPTY_DICT_KEYS:
++        return value is None or value == {}
++    if key == "time_range":
++        return value is None or value in ("", "No filter")
++    return False
++
++
++def _formatting_only(value: Any) -> bool:
++    """Reject unmodeled nested formatting instead of assuming it is cosmetic."""
++    if value is None:
++        return True
++    if not isinstance(value, dict):
++        return False
++    allowed: set[str] = {
++        field.alias or name for name, field in TableColumnConfig.model_fields.items()
++    } | {
++        "horizontalAlign",
++        "currencyFormat",
++        "showCellBars",
++        "truncateLongCells",
++        "visible",
++        "customColumnName",
++        "alignPositiveNegative",
++        "colorPositiveNegative",
++        "d3SmallNumberFormat",
++        "displayTypeIcon",
++    }
++    return all(
++        isinstance(settings, dict) and set(settings) <= allowed
++        for settings in value.values()
++    )
++
++
++def _category(key: str) -> str:
++    """Name a recovery category without exposing saved values."""
++    if key in _FILTER_KEYS:
++        return "filters"
++    if key in {"order_by_cols", "order_desc"}:
++        return "sorting"
++    if key in _EMPTY_STRING_KEYS or key in {
++        "time_range",
++        "time_compare",
++        "time_offsets",
++        "temporal_columns_lookup",
++    }:
++        return "temporal selections"
++    if key in _EMPTY_DICT_KEYS:
++        return "external selections"
++    return "native/plugin or secondary-query selections"
++
++
++def _query_mismatch(fresh: dict[str, Any], candidate: dict[str, Any]) -> str | None:
++    """Require every effective query role to match freshly mapped input."""
++    for key in _QUERY_KEYS:
++        expected: Any = fresh.get(key)
++        actual: Any = candidate.get(key)
++        if key in {
++            "order_by_cols",
++            "adhoc_filters",
++            "metrics",
++            "groupby",
++            "columns",
++            "all_columns",
++        }:
++            expected = [] if expected is None else expected
++            actual = [] if actual is None else actual
++        if key == "include_time":
++            expected = False if expected is None else expected
++            actual = False if actual is None else actual
++        if actual != expected:
++            return _category(key)
++    return None
++
++
++def _unverified_control(
++    state: dict[str, Any],
++    *,
++    replacing_filters: bool = False,
++    temporal_subject: str | None = None,
++    temporal_columns: set[str] | None = None,
++    dormant_grain: bool = False,
++) -> str | None:
++    """Classify retained controls without discarding unknown state."""
++    for key, value in state.items():
++        if key == "_mcp_dashboard_time_filter_subject":
++            if temporal_subject is not None and value == temporal_subject:
++                continue
++            return "temporal selections"
++        if key == "include_time" and value is not None and value is not False:
++            return "temporal selections"
++        if key in _PRESENTATION_KEYS or key in _QUERY_KEYS:
++            continue
++        if replacing_filters and key in _FILTER_KEYS:
++            continue
++        if key == "column_config" and _formatting_only(value):
++            continue
++        if _neutral_control(
++            key, value, temporal_columns=temporal_columns, dormant_grain=dormant_grain
++        ):
++            continue
++        return _category(key)
++    return None
++
++
++def _has_saved_predicates(state: dict[str, Any]) -> bool:
++    """Recognize predicate aliases without treating replacement as a clear."""
++    for key in _FILTER_KEYS:
++        value: Any = state.get(key)
++        if key == "adhoc_filters" and isinstance(value, list):
++            value = [entry for entry in value if not _neutral_time_filter(entry)]
++        empty: str | list[Any] = "" if key in {"where", "having"} else []
++        if value is not None and value != empty:
++            return True
++    return False
++
++
++def _neutral_time_filter(value: Any) -> bool:
++    """Recognize only Explore's inactive time-range placeholder."""
++    if not isinstance(value, dict):
++        return False
++    metadata: dict[str, type] = {
++        "filterOptionName": str,
++        "isExtra": bool,
++        "isNew": bool,
++        "datasourceWarning": bool,
++    }
++    if any(
++        key in value and not isinstance(value[key], kind)
++        for key, kind in metadata.items()
++    ):
++        return False
++    return (
++        isinstance(value.get("subject"), str)
++        and bool(value["subject"])
++        and {
++            key: item
++            for key, item in value.items()
++            if key not in metadata and not (key == "sqlExpression" and item is None)
++        }
++        == {
++            "clause": "WHERE",
++            "expressionType": "SIMPLE",
++            "operator": "TEMPORAL_RANGE",
++            "comparator": "No filter",
++            "subject": value["subject"],
++        }
++    )
++
++
++def prove_table_reselection(
++    original: ChartConfig | None,
++    resolved: ChartConfig | None,
++    existing: dict[str, Any],
++    candidate: dict[str, Any],
++    *,
++    temporal_columns: set[str] | None = None,
++) -> str | None:
++    """Return an incomplete category, or None for a fully repicked table."""
++    if original is None:
++        return "no reselection supplied"
++    if not isinstance(original, TableChartConfig) or not isinstance(
++        resolved, TableChartConfig
++    ):
++        return "unsupported chart type"
++    if existing.get("viz_type") not in {"table", "ag-grid-table"}:
++        return "unsupported saved chart type"
++    if "columns" not in original.model_fields_set:
++        return "columns"
++    if "filters" not in original.model_fields_set or original.filters is None:
++        return "filters"
++    if original.filters != [] and _has_saved_predicates(existing):
++        return "saved WHERE/HAVING predicates"
++    fresh: dict[str, Any] = map_config_to_form_data(
++        resolved, include_disabled=True, temporal_columns=temporal_columns
++    )
++    # Original presence, not equality or post-normalization fields_set, is proof.
++    if "sort_by" not in original.model_fields_set or original.sort_by is None:
++        if existing.get("order_by_cols") not in (None, []):
++            return "sorting"
++    return _unrequested_control_change(
++        original, existing, candidate
++    ) or _mapped_reselection_mismatch(
++        original, existing, candidate, fresh, temporal_columns
++    )
++
++
++def _mapped_reselection_mismatch(
++    original: TableChartConfig,
++    existing: dict[str, Any],
++    candidate: dict[str, Any],
++    fresh: dict[str, Any],
++    temporal_columns: set[str] | None,
++) -> str | None:
++    """Compare effective mapped controls while preserving classified saved scalars."""
++    # Aggregate mapping omits this scalar; retain the saved direction without
++    # allowing it to carry a member identity or changing it during a rebind.
++    if "order_desc" not in fresh and "order_desc" in existing:
++        if not isinstance(existing["order_desc"], bool):
++            return "sorting"
++        fresh["order_desc"] = existing["order_desc"]
++    temporal_subject: str | None = (
++        fresh.get("_mcp_dashboard_time_filter_subject")
++        if "temporal_column" in original.model_fields_set
++        else None
++    )
++    if original.temporal_column and temporal_subject is None:
++        return "temporal selections"
++    if candidate.get("_mcp_dashboard_time_filter_subject") != temporal_subject:
++        return "temporal selections"
++    # Judge the retained grain against the reselected axes, not the old axes.
++    grain_state: dict[str, Any] = {
++        **candidate,
++        "time_grain_sqla": existing.get("time_grain_sqla"),
++        "temporal_columns_lookup": existing.get("temporal_columns_lookup"),
++    }
++    dormant_grain: bool = has_dormant_table_grain(grain_state, temporal_columns)
++    # Inspect saved state too: a rebind/cross-viz merge can discard controls.
++    # Disappearance is not an explicit clear and must not manufacture proof.
++    return (
++        _query_mismatch(fresh, candidate)
++        or _unverified_control(
++            existing,
++            replacing_filters=True,
++            temporal_subject=temporal_subject,
++            temporal_columns=temporal_columns,
++            dormant_grain=dormant_grain,
++        )
++        or _unverified_control(
++            candidate,
++            temporal_subject=temporal_subject,
++            temporal_columns=temporal_columns,
++            dormant_grain=has_dormant_table_grain(candidate, temporal_columns),
++        )
++    )
++
++
++def _unrequested_control_change(
++    original: TableChartConfig,
++    existing: dict[str, Any],
++    candidate: dict[str, Any],
++) -> str | None:
++    """Do not treat a rebind's dropped limits or sort direction as intent."""
++    controls: tuple[tuple[str, str, str], ...] = (
++        ("row_limit", "row_limit", "row limits"),
++        ("order_desc", "sort_by", "sorting"),
++    )
++    for key, request_field, category in controls:
++        if (
++            key in existing
++            and request_field not in original.model_fields_set
++            and candidate.get(key) != existing[key]
++        ):
++            return category
++    return None
+==FILE== superset/mcp_service/chart/tool/generate_chart.py
+@@ -52,6 +52,7 @@
+ from superset.mcp_service.chart.datasource_resolver import (
+     ChartDatasource,
+     resolve_semantic_view,
++    stamp_new_semantic_selections,
+     validate_semantic_view_config,
+     validate_semantic_view_form_data,
+     view_not_found_error,
+@@ -324,6 +325,7 @@ async def generate_chart(  # noqa: C901
+             datasource_type=datasource_type,
+         )
+         if target is not None:
++            stamp_new_semantic_selections(form_data, target)
+             semantic_error = validate_semantic_view_form_data(form_data, target)
+             if semantic_error is not None:
+                 return GenerateChartResponse(success=False, error=semantic_error)
+==FILE== superset/mcp_service/chart/tool/update_chart.py
+@@ -29,6 +29,7 @@
+ from superset_core.mcp.decorators import tool, ToolAnnotations
+ 
+ from superset import security_manager
++from superset.commands.chart.update import ChartUpdateBasis
+ from superset.commands.exceptions import CommandException
+ from superset.common.form_data_query_context import is_raw_query_mode
+ from superset.exceptions import (
+@@ -83,6 +84,10 @@
+     TableChartConfig,
+     UpdateChartRequest,
+ )
++from superset.mcp_service.chart.semantic_reselection import (
++    has_dormant_table_grain,
++    prove_table_reselection,
++)
+ from superset.mcp_service.chart.validation.dataset_validator import (
+     GanttSemanticNormalizationError,
+ )
+@@ -716,6 +721,79 @@ def _validate_update_against_dataset(  # noqa: C901
+     )
+ 
+ 
++def _prepare_semantic_reselection(
++    request: UpdateChartRequest,
++    chart: Slice,
++    parsed_config: ChartConfig | None,
++    target: ChartDatasource | None,
++    temporal_columns: set[str] | None,
++    is_rebind: bool,
++) -> dict[str, Any] | GenerateChartResponse | None:
++    """Build one proven candidate when a semantic update needs certification."""
++    if target is None or (request.config is None and not is_rebind):
++        return None
++    version: str | None = target.explorable.implementation.selection_identity_version
++    if not isinstance(version, str):
++        return None
++    try:
++        saved_state: Any = json.loads(chart.params) if chart.params else {}
++        if not isinstance(saved_state, dict):
++            raise ValueError("Saved chart state is not an object")
++    except (ValueError, TypeError):
++        return _validation_error_response(
++            "Cannot verify saved selections",
++            "Open the chart in Explore and reselect its fields before retrying.",
++        )
++    existing: dict[str, Any] = _get_existing_form_data(chart)
++    if not is_rebind and existing.get("semantic_selection_version") == version:
++        return None
++    payload: dict[str, Any] | GenerateChartResponse = _build_update_payload(
++        request, chart, parsed_config, temporal_columns=temporal_columns
++    )
++    if isinstance(payload, GenerateChartResponse):
++        return payload
++    candidate: dict[str, Any] = json.loads(payload.get("params", chart.params))
++    # Omit only proven dormant duration metadata before certification. The
++    # semantic query mapper otherwise requires a time axis for this extra.
++    if has_dormant_table_grain(candidate, temporal_columns):
++        candidate.pop("time_grain_sqla")
++    category: str | None = prove_table_reselection(
++        request.config,
++        parsed_config,
++        existing,
++        candidate,
++        temporal_columns=temporal_columns,
++    )
++    if category is not None:
++        return _validation_error_response(
++            "Complete semantic reselection is required",
++            f"Cannot verify {category}; reselect them in Explore and save the chart. "
++            "The chart was not updated.",
++        )
++    candidate["semantic_selection_version"] = version
++    payload["params"] = json.dumps(candidate)
++    return payload
++
++
++def _check_reselection_target(
++    target: ChartDatasource, certified: dict[str, Any], candidate: dict[str, Any]
++) -> GenerateChartResponse | None:
++    """Refuse publication if the authorized target contract changed."""
++    refreshed: ChartDatasource | None = resolve_semantic_view(target.id)
++    if (
++        candidate != certified
++        or refreshed is None
++        or refreshed.form_data_datasource != target.form_data_datasource
++        or refreshed.explorable.implementation.selection_identity_version
++        != certified["semantic_selection_version"]
++    ):
++        return _validation_error_response(
++            "Semantic target changed",
++            "Reload the chart and reselect its fields in Explore before retrying.",
++        )
++    return None
++
++
+ def _validate_update_against_semantic_view(
+     parsed_config: ChartConfig | None,
+     view_id: int,
+@@ -1179,11 +1257,38 @@ async def update_chart(  # noqa: C901
+                     "Column normalization failed for chart %s: %s", chart.id, e
+                 )
+ 
++        prepared_payload: dict[str, Any] | GenerateChartResponse | None = (
++            _prepare_semantic_reselection(
++                request,
++                chart,
++                parsed_config,
++                semantic_target,
++                temporal_columns,
++                is_rebind,
++            )
++        )
++        if isinstance(prepared_payload, GenerateChartResponse):
++            return _finalize_response(prepared_payload)
++        certified_form_data: dict[str, Any] | None = (
++            json.loads(prepared_payload["params"])
++            if prepared_payload is not None
++            else None
++        )
++        expected_basis: ChartUpdateBasis | None = (
++            ChartUpdateBasis.from_chart(chart)
++            if prepared_payload is not None and not request.generate_preview
++            else None
++        )
++
+         if not request.generate_preview:
+             from superset.commands.chart.update import UpdateChartCommand
+ 
+-            payload_or_error = _build_update_payload(
+-                request, chart, parsed_config, temporal_columns=temporal_columns
++            payload_or_error: dict[str, Any] | GenerateChartResponse = (
++                prepared_payload
++                if prepared_payload is not None
++                else _build_update_payload(
++                    request, chart, parsed_config, temporal_columns=temporal_columns
++                )
+             )
+             if isinstance(payload_or_error, GenerateChartResponse):
+                 return _finalize_response(payload_or_error)
+@@ -1245,15 +1350,34 @@ async def update_chart(  # noqa: C901
+                 payload_or_error["params"] = json.dumps(new_form_data)
+ 
+             with event_logger.log_context(action="mcp.update_chart.db_write"):
+-                command = UpdateChartCommand(chart.id, payload_or_error)
++                if certified_form_data is not None and semantic_target is not None:
++                    assert new_form_data is not None
++                    target_error: GenerateChartResponse | None = (
++                        _check_reselection_target(
++                            semantic_target, certified_form_data, new_form_data
++                        )
++                    )
++                    if target_error is not None:
++                        return _finalize_response(target_error)
++                command: UpdateChartCommand = (
++                    UpdateChartCommand(
++                        chart.id, payload_or_error, expected_basis=expected_basis
++                    )
++                    if expected_basis is not None
++                    else UpdateChartCommand(chart.id, payload_or_error)
++                )
+                 updated_chart = command.run()
+             saved = True
+             explore_url = (
+                 f"{get_superset_base_url()}/explore/?slice_id={updated_chart.id}"
+             )
+         else:
+-            preview_or_error = _build_preview_form_data(
+-                request, chart, parsed_config, temporal_columns=temporal_columns
++            preview_or_error: dict[str, Any] | GenerateChartResponse = (
++                json.loads(prepared_payload["params"])
++                if prepared_payload is not None
++                else _build_preview_form_data(
++                    request, chart, parsed_config, temporal_columns=temporal_columns
++                )
+             )
+             if isinstance(preview_or_error, GenerateChartResponse):
+                 return _finalize_response(preview_or_error)
+@@ -1295,6 +1419,15 @@ async def update_chart(  # noqa: C901
+                 new_form_data = preview_or_error
+ 
+             with event_logger.log_context(action="mcp.update_chart.preview_link"):
++                if certified_form_data is not None and semantic_target is not None:
++                    target_error = _check_reselection_target(
++                        semantic_target, certified_form_data, preview_or_error
++                    )
++                    if target_error is not None:
++                        return _finalize_response(target_error)
++                # Save payloads keep the name outside params; previews cache it inside.
++                if prepared_payload is not None and "slice_name" in prepared_payload:
++                    preview_or_error["slice_name"] = prepared_payload["slice_name"]
+                 explore_url, form_data_key, warnings = _create_preview_url(
+                     chart,
+                     preview_or_error,
+==FILE== superset/mcp_service/dashboard_scope.py
+@@ -428,6 +428,43 @@ def _check_model_temporal_filters(
+             )
+ 
+ 
++SEMANTIC_SELECTION_MEMBER_KEYS: tuple[str, ...] = (
++    "filters",
++    "adhoc_filters",
++    "interactive_drilldown",
++    "interactive_groupby",
++    "interactive_highlight",
++    "granularity_sqla",
++    "granularity",
++    "time_column",
++    "custom_form_data",
++)
++
++
++def merge_semantic_selection_sources(
++    *payloads: Mapping[str, Any],
++) -> list[Any]:
++    """Preserve each input's provenance before its members lose their origin.
++
++    Without any source records, leave the payload unversioned for the query
++    guard. Once sources are present, every member-bearing input needs a record.
++    """
++    if not any(payload.get("semantic_selection_sources") for payload in payloads):
++        return []
++    sources: list[Any] = []
++    payload: Mapping[str, Any]
++    for payload in payloads:
++        provenance: Any = payload.get("semantic_selection_sources")
++        if isinstance(provenance, list) and provenance:
++            sources.extend(provenance)
++        elif provenance or any(
++            payload.get(key) for key in SEMANTIC_SELECTION_MEMBER_KEYS
++        ):
++            # A later versioned input must not certify these unproven members.
++            sources.append({"datasource": "", "version": None})
++    return sources
++
++
+ def compose_extra_form_data(
+     scope_efd: Mapping[str, Any] | None,
+     model_efd: Mapping[str, Any] | None,
+@@ -450,7 +487,12 @@ def compose_extra_form_data(
+ 
+     composed = dict(scope_efd)
+     for key, value in model_efd.items():
++        if key == "semantic_selection_sources":
++            continue
+         _merge_model_value(composed, scope_efd, key, value)
++    sources: list[Any] = merge_semantic_selection_sources(scope_efd, model_efd)
++    if sources:
++        composed["semantic_selection_sources"] = sources
+     return composed
+ 
+ 
+==FILE== superset/mcp_service/explore/tool/generate_explore_link.py
+@@ -41,6 +41,7 @@
+ from superset.mcp_service.chart.datasource_resolver import (
+     ChartDatasource,
+     resolve_semantic_view,
++    stamp_new_semantic_selections,
+     validate_semantic_view_config,
+     validate_semantic_view_form_data,
+     view_not_found_error,
+@@ -482,6 +483,7 @@ async def _generate_for_semantic_view(
+     )
+     form_data.pop("_mcp_warnings", None)
+     form_data["datasource"] = target.form_data_datasource
++    stamp_new_semantic_selections(form_data, target)
+     error = validate_semantic_view_form_data(form_data, target)
+     if error is not None:
+         return GenerateExploreLinkResponse(
+==FILE== tests/unit_tests/commands/chart/test_update_basis.py
+@@ -0,0 +1,267 @@
++# Licensed to the Apache Software Foundation (ASF) under one
++# or more contributor license agreements.  See the NOTICE file
++# distributed with this work for additional information
++# regarding copyright ownership.  The ASF licenses this file
++# to you under the Apache License, Version 2.0 (the
++# "License"); you may not use this file except in compliance
++# with the License.  You may obtain a copy of the License at
++#
++#   http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing,
++# software distributed under the License is distributed on an
++# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
++# KIND, either express or implied.  See the License for the
++# specific language governing permissions and limitations
++# under the License.
++"""Real-session checks for the optional certified-update precondition."""
++
++from pathlib import Path
++from typing import Any
++from unittest.mock import MagicMock, Mock
++
++import pytest
++import sqlalchemy as sa
++from flask import g
++from pytest_mock import MockerFixture
++from sqlalchemy.orm import Session
++
++from superset.commands.chart.exceptions import ChartUpdateFailedError
++from superset.commands.chart.update import ChartUpdateBasis, UpdateChartCommand
++from superset.models.slice import Slice
++
++
++def test_basis_fence_rechecks_exact_values_after_database_match(
++    mocker: MockerFixture,
++) -> None:
++    """A case-insensitive database match cannot certify a case-only rename."""
++    chart: Slice = Slice(slice_name="Original", viz_type="table")
++    basis: ChartUpdateBasis = ChartUpdateBasis.from_chart(chart)
++    chart.slice_name = "original"
++    session: MagicMock = MagicMock()
++    session.execute.return_value.rowcount = 1
++    query: MagicMock = session.query.return_value
++    query.options.return_value = query
++    query.populate_existing.return_value = query
++    query.filter.return_value = query
++    query.with_for_update.return_value = query
++    query.one_or_none.return_value = chart
++    mocker.patch("superset.commands.chart.update.db", Mock(session=session))
++    command: UpdateChartCommand = UpdateChartCommand(123, {}, expected_basis=basis)
++    with pytest.raises(ChartUpdateFailedError, match="reload"):
++        command._fence_expected_basis()
++
++
++@pytest.mark.parametrize(
++    "changed_field", ["params", "slice_name", "viz_type", "datasource_id", "deleted"]
++)
++def test_stale_certified_update_does_not_overwrite(
++    app: Any, tmp_path: Path, mocker: MockerFixture, changed_field: str
++) -> None:
++    """Another writer's committed basis change must survive a stale update."""
++    engine: sa.engine.Engine = sa.create_engine(f"sqlite:///{tmp_path / 'charts.db'}")
++    Slice.metadata.create_all(engine)
++    first: Session = Session(engine)
++    second: Session = Session(engine)
++    try:
++        first.execute(
++            Slice.__table__.insert().values(
++                id=123,
++                slice_name="Original",
++                params='{"all_columns":["old"]}',
++                datasource_id=1,
++                datasource_type="semantic_view",
++                viz_type="table",
++            )
++        )
++        first.commit()
++        chart: Slice = first.query(Slice).filter_by(id=123).one()
++        basis: ChartUpdateBasis = ChartUpdateBasis.from_chart(chart)
++        changed_value: Any = 2 if changed_field == "datasource_id" else "changed"
++        if changed_field == "deleted":
++            second.execute(sa.delete(Slice.__table__).where(Slice.id == 123))
++        else:
++            second.execute(
++                sa.update(Slice.__table__)
++                .where(Slice.id == 123)
++                .values({changed_field: changed_value})
++            )
++        second.commit()
++        # Preserve the stale identity-map instance, as a real in-flight request does.
++        mocker.patch("superset.commands.chart.update.db", Mock(session=first))
++        mocker.patch("superset.db", Mock(session=first))
++        command: UpdateChartCommand = UpdateChartCommand(
++            123,
++            {"params": '{"all_columns":["new"]}', "slice_name": "Replacement"},
++            expected_basis=basis,
++        )
++        mocker.patch.object(
++            command, "validate", side_effect=lambda: setattr(command, "_model", chart)
++        )
++        with app.app_context():
++            g.user = None
++            with pytest.raises(ChartUpdateFailedError):
++                command.run()
++        second.expire_all()
++        if changed_field == "deleted":
++            assert second.query(Slice).filter_by(id=123).one_or_none() is None
++        else:
++            assert (
++                getattr(second.query(Slice).filter_by(id=123).one(), changed_field)
++                == changed_value
++            )
++    finally:
++        first.close()
++        second.close()
++        engine.dispose()
++
++
++def test_wal_stale_snapshot_refuses(
++    app: Any, tmp_path: Path, mocker: MockerFixture
++) -> None:
++    """A real SQLite read snapshot cannot be promoted past a competing write."""
++    engine: sa.engine.Engine = sa.create_engine(
++        f"sqlite:///{tmp_path / 'snapshot.db'}", connect_args={"timeout": 0.05}
++    )
++    with engine.connect() as connection:
++        connection.exec_driver_sql("PRAGMA journal_mode=WAL")
++    Slice.metadata.create_all(engine)
++    with Session(engine) as first, Session(engine) as second:
++        first.execute(
++            Slice.__table__.insert().values(
++                id=123,
++                slice_name="Original",
++                params=None,
++                datasource_type="table",
++                viz_type="table",
++            )
++        )
++        first.commit()
++        first.connection().exec_driver_sql("BEGIN")
++        chart: Slice = first.get(Slice, 123)
++        basis: ChartUpdateBasis = ChartUpdateBasis.from_chart(chart)
++        second.execute(
++            sa.update(Slice.__table__).where(Slice.id == 123).values(slice_name="Other")
++        )
++        second.commit()
++        mocker.patch("superset.commands.chart.update.db", Mock(session=first))
++        mocker.patch("superset.db", Mock(session=first))
++        with app.app_context(), pytest.raises(ChartUpdateFailedError):
++            UpdateChartCommand(123, {"slice_name": "Stale"}, expected_basis=basis).run()
++        assert not first.in_transaction()
++        assert first.get(Slice, 123).slice_name == "Other"
++    engine.dispose()
++
++
++@pytest.mark.parametrize("params", [None, '{"all_columns":["old"]}'])
++def test_basis_fence_is_a_noop(
++    app: Any, tmp_path: Path, mocker: MockerFixture, params: str | None
++) -> None:
++    """Acquiring the fence changes neither chart values nor version history."""
++    engine: sa.engine.Engine = sa.create_engine(f"sqlite:///{tmp_path / 'noop.db'}")
++    Slice.metadata.create_all(engine)
++    session: Session = Session(engine)
++    try:
++        session.execute(
++            Slice.__table__.insert().values(
++                id=123,
++                slice_name="Original",
++                params=params,
++                datasource_id=1,
++                datasource_type="semantic_view",
++                viz_type="table",
++            )
++        )
++        session.commit()
++        before: Any = session.execute(sa.select(Slice.__table__)).one()
++        chart: Slice = session.query(Slice).filter_by(id=123).one()
++        basis: ChartUpdateBasis = ChartUpdateBasis.from_chart(chart)
++        mocker.patch("superset.commands.chart.update.db", Mock(session=session))
++        command: UpdateChartCommand = UpdateChartCommand(123, {}, expected_basis=basis)
++        versions: sa.Table = Slice.metadata.tables["slices_version"]
++        before_versions: int = session.execute(
++            sa.select(sa.func.count()).select_from(versions)
++        ).scalar_one()
++        with app.app_context():
++            statements: list[str] = []
++
++            def record_statement(
++                connection: Any,
++                cursor: Any,
++                statement: str,
++                parameters: Any,
++                context: Any,
++                executemany: bool,
++            ) -> None:
++                """Observe the fence's statements without setup or assertion queries."""
++                statements.append(statement)
++
++            sa.event.listen(engine, "before_cursor_execute", record_statement)
++            command._fence_expected_basis()
++            sa.event.remove(engine, "before_cursor_execute", record_statement)
++            assert len(statements) == 2
++            assert not any("DISTINCT" in statement.upper() for statement in statements)
++            session.commit()
++        after: Any = session.execute(sa.select(Slice.__table__)).one()
++        assert tuple(after) == tuple(before)
++        assert (
++            session.execute(
++                sa.select(sa.func.count()).select_from(versions)
++            ).scalar_one()
++            == before_versions
++        )
++    finally:
++        session.close()
++        engine.dispose()
++
++
++@pytest.mark.parametrize("wal", [False, True])
++def test_basis_fence_holds_until_transaction_end(
++    app: Any, tmp_path: Path, mocker: MockerFixture, wal: bool
++) -> None:
++    """A second writer cannot alter a candidate's basis while it is fenced."""
++    engine: sa.engine.Engine = sa.create_engine(
++        f"sqlite:///{tmp_path / 'locked.db'}", connect_args={"timeout": 0.05}
++    )
++    if wal:
++        with engine.connect() as connection:
++            connection.exec_driver_sql("PRAGMA journal_mode=WAL")
++    Slice.metadata.create_all(engine)
++    first: Session = Session(engine)
++    second: Session = Session(engine)
++    try:
++        first.execute(
++            Slice.__table__.insert().values(
++                id=123,
++                slice_name="Original",
++                params=None,
++                datasource_id=1,
++                datasource_type="semantic_view",
++                viz_type="table",
++            )
++        )
++        first.commit()
++        chart: Slice = first.query(Slice).filter_by(id=123).one()
++        mocker.patch("superset.commands.chart.update.db", Mock(session=first))
++        command: UpdateChartCommand = UpdateChartCommand(
++            123, {}, expected_basis=ChartUpdateBasis.from_chart(chart)
++        )
++        with app.app_context():
++            command._fence_expected_basis()
++        with pytest.raises(sa.exc.OperationalError, match="locked"):
++            second.execute(
++                sa.update(Slice.__table__)
++                .where(Slice.id == 123)
++                .values(slice_name="Other")
++            )
++        second.rollback()
++        first.rollback()
++        second.execute(
++            sa.update(Slice.__table__).where(Slice.id == 123).values(slice_name="Other")
++        )
++        second.commit()
++        assert second.query(Slice).filter_by(id=123).one().slice_name == "Other"
++    finally:
++        first.close()
++        second.close()
++        engine.dispose()
+==FILE== tests/unit_tests/commands/chart/test_update_basis_lifecycle.py
+@@ -0,0 +1,265 @@
++# Licensed to the Apache Software Foundation (ASF) under one
++# or more contributor license agreements.  See the NOTICE file
++# distributed with this work for additional information
++# regarding copyright ownership.  The ASF licenses this file
++# to you under the Apache License, Version 2.0 (the
++# "License"); you may not use this file except in compliance
++# with the License.  You may obtain a copy of the License at
++#
++#   http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing,
++# software distributed under the License is distributed on an
++# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
++# KIND, either express or implied.  See the License for the
++# specific language governing permissions and limitations
++# under the License.
++"""Run the normal command and capture listeners on disposable metadata databases."""
++
++import os
++from collections.abc import Iterator
++from typing import Any
++from unittest.mock import Mock
++
++import pytest
++import sqlalchemy as sa
++from flask import g
++from flask_appbuilder import Model
++from pytest_mock import MockerFixture
++from sqlalchemy.orm import Session
++
++from superset.app import SupersetApp
++from superset.commands.chart.exceptions import (
++    ChartForbiddenError,
++    ChartUpdateFailedError,
++)
++from superset.commands.chart.update import ChartUpdateBasis, UpdateChartCommand
++from superset.exceptions import SupersetSecurityException
++from superset.extensions import db
++from superset.models.slice import Slice
++
++
++def _disposable_uri() -> str:
++    """Refuse non-local/non-dedicated databases before app initialization."""
++    uri: str = os.environ.get("SC130336_TEST_URI", "sqlite://")
++    url: sa.engine.URL = sa.engine.make_url(uri)
++    if uri != "sqlite://" and not (
++        url.host == "127.0.0.1"
++        and url.database == "sc130336"
++        and (url.get_backend_name(), url.port)
++        in {("postgresql", 55436), ("mysql", 53336)}
++    ):
++        raise ValueError("Only disposable sc130336 databases are allowed")
++    return uri
++
++
++pytestmark: pytest.MarkDecorator = pytest.mark.parametrize(
++    "app",
++    [
++        {
++            "SQLALCHEMY_DATABASE_URI": _disposable_uri(),
++            "FAB_CREATE_DB": False,
++            "FAB_UPDATE_PERMS": False,
++        }
++    ],
++    indirect=True,
++)
++
++
++@pytest.fixture
++def capture_session(app: SupersetApp, mocker: MockerFixture) -> Iterator[Session]:
++    """Retain production session, validation, mutation and capture wiring."""
++    # This unrelated model has unbounded TEXT unique keys unsupported by MySQL.
++    # It is not referenced by charts or version capture; leave it outside the fixture.
++    tables: list[sa.Table] = [
++        table
++        for table in Model.metadata.sorted_tables
++        if table.name != "dynamic_plugin"
++    ]
++    Model.metadata.create_all(db.engine, tables=tables)
++    mocker.patch(
++        "superset.commands.chart.update.security_manager.is_admin", return_value=True
++    )
++    mocker.patch(
++        "superset.commands.chart.update.security_manager.can_access_all_datasources",
++        return_value=True,
++    )
++    mocker.patch("superset.commands.chart.update.security_manager.raise_for_editorship")
++    g.user = None
++    try:
++        yield db.session()
++    finally:
++        db.session.remove()
++        Model.metadata.drop_all(db.engine, tables=tables)
++
++
++def _history(session: Session) -> dict[str, int]:
++    """Count all audit tables so an extra guard record cannot hide."""
++    return {
++        table.name: session.execute(
++            sa.select(sa.func.count()).select_from(table)
++        ).scalar_one()
++        for table in Model.metadata.tables.values()
++        if table.name.endswith("_version")
++        or table.name in {"version_transaction", "version_changes"}
++    }
++
++
++def test_fenced_command_has_ordinary_save_audit(capture_session: Session) -> None:
++    """A fenced save produces the same audit delta as an ordinary save."""
++    ordinary: Slice = Slice(
++        slice_name="Original", viz_type="table", params="{}", datasource_type="table"
++    )
++    fenced: Slice = Slice(
++        slice_name="Original", viz_type="table", params="{}", datasource_type="table"
++    )
++    capture_session.add_all([ordinary, fenced])
++    capture_session.commit()
++    before: dict[str, int] = _history(capture_session)
++    UpdateChartCommand(ordinary.id, {"slice_name": "Replacement"}).run()
++    middle: dict[str, int] = _history(capture_session)
++    UpdateChartCommand(
++        fenced.id,
++        {"slice_name": "Replacement"},
++        expected_basis=ChartUpdateBasis.from_chart(fenced),
++    ).run()
++    after: dict[str, int] = _history(capture_session)
++    assert {key: middle[key] - value for key, value in before.items()} == {
++        key: after[key] - value for key, value in middle.items()
++    }
++    assert after["slices_version"] - middle["slices_version"] == 1
++    assert after["version_transaction"] - middle["version_transaction"] == 1
++    assert after["version_changes"] > middle["version_changes"]
++    capture_session.expire_all()
++    assert capture_session.get(Slice, fenced.id).slice_name == "Replacement"
++
++
++def test_fenced_command_denial_rolls_back(
++    capture_session: Session, mocker: MockerFixture
++) -> None:
++    """Permission denial after fencing leaves both live data and history intact."""
++    chart: Slice = Slice(
++        slice_name="Original", viz_type="table", params="{}", datasource_type="table"
++    )
++    capture_session.add(chart)
++    capture_session.commit()
++    before: dict[str, int] = _history(capture_session)
++    mocker.patch(
++        "superset.commands.chart.update.security_manager.raise_for_editorship",
++        side_effect=SupersetSecurityException(Mock()),
++    )
++    with pytest.raises(ChartForbiddenError):
++        UpdateChartCommand(
++            chart.id,
++            {"slice_name": "Denied"},
++            expected_basis=ChartUpdateBasis.from_chart(chart),
++        ).run()
++    assert _history(capture_session) == before
++    capture_session.expire_all()
++    assert chart.slice_name == "Original"
++    # A separate writer succeeding also proves the denied command released its fence.
++    with Session(db.engine) as other:
++        other.execute(
++            sa.update(Slice.__table__)
++            .where(Slice.id == chart.id)
++            .values(slice_name="Other")
++        )
++        other.commit()
++
++
++@pytest.mark.parametrize(
++    "field",
++    ["params", "datasource_id", "slice_name", "viz_type", "deleted", "case_only_name"],
++)
++def test_fenced_command_rejects_committed_competitor(
++    capture_session: Session, field: str
++) -> None:
++    """A stale identity map and snapshot cannot overwrite a competing commit."""
++    chart: Slice = Slice(
++        slice_name="Original", viz_type="table", params=None, datasource_type="table"
++    )
++    capture_session.add(chart)
++    capture_session.commit()
++    basis: ChartUpdateBasis = ChartUpdateBasis.from_chart(chart)
++    chart_id: int = chart.id
++    value: Any = 99 if field == "datasource_id" else "Other"
++    if field == "case_only_name":
++        field = "slice_name"
++        value = "original"
++    with Session(db.engine) as other:
++        if field == "deleted":
++            other.execute(sa.delete(Slice.__table__).where(Slice.id == chart_id))
++        else:
++            other.execute(
++                sa.update(Slice.__table__)
++                .where(Slice.id == chart_id)
++                .values({field: value})
++            )
++        other.commit()
++    with pytest.raises(ChartUpdateFailedError):
++        UpdateChartCommand(
++            chart_id, {"slice_name": "Stale"}, expected_basis=basis
++        ).run()
++    with Session(db.engine) as reader:
++        row: Slice | None = reader.get(Slice, chart_id)
++        if field == "deleted":
++            assert row is None
++        else:
++            assert row is not None
++            assert getattr(row, field) == value
++
++
++def test_unchanged_null_basis_matches(capture_session: Session) -> None:
++    """A no-op UPDATE must report a matched row even when it changes no values."""
++    chart: Slice = Slice(
++        slice_name="Original", viz_type="table", params=None, datasource_type="table"
++    )
++    capture_session.add(chart)
++    capture_session.commit()
++    before: dict[str, int] = _history(capture_session)
++    before_row: Any = capture_session.execute(sa.select(Slice.__table__)).one()
++    UpdateChartCommand(
++        chart.id, {}, expected_basis=ChartUpdateBasis.from_chart(chart)
++    )._fence_expected_basis()
++    capture_session.commit()
++    assert _history(capture_session) == before
++    assert tuple(capture_session.execute(sa.select(Slice.__table__)).one()) == tuple(
++        before_row
++    )
++
++
++@pytest.mark.skipif(
++    _disposable_uri() == "sqlite://",
++    reason="SQLite contention uses file-backed test_update_basis fixtures",
++)
++def test_database_fence_blocks_second_writer(capture_session: Session) -> None:
++    """The fence lasts through the command transaction, not just its SELECT."""
++    chart: Slice = Slice(
++        slice_name="Original", viz_type="table", params=None, datasource_type="table"
++    )
++    capture_session.add(chart)
++    capture_session.commit()
++    chart_id: int = chart.id
++    UpdateChartCommand(
++        chart_id, {}, expected_basis=ChartUpdateBasis.from_chart(chart)
++    )._fence_expected_basis()
++    with Session(db.engine) as other:
++        if db.engine.dialect.name == "postgresql":
++            other.execute(sa.text("SET LOCAL lock_timeout = '100ms'"))
++        else:
++            other.execute(sa.text("SET SESSION innodb_lock_wait_timeout = 1"))
++        with pytest.raises(sa.exc.OperationalError, match="[Ll]ock"):
++            other.execute(
++                sa.update(Slice.__table__)
++                .where(Slice.id == chart_id)
++                .values(slice_name="Other")
++            )
++        other.rollback()
++        capture_session.rollback()
++        other.execute(
++            sa.update(Slice.__table__)
++            .where(Slice.id == chart_id)
++            .values(slice_name="Other")
++        )
++        other.commit()
++        assert other.get(Slice, chart_id).slice_name == "Other"
+==FILE== tests/unit_tests/mcp_service/chart/fixtures/explore_table_defaults.yaml
+@@ -0,0 +1,98 @@
++# Licensed to the Apache Software Foundation (ASF) under one
++# or more contributor license agreements. See the NOTICE file
++# distributed with this work for additional information
++# regarding copyright ownership. The ASF licenses this file
++# to you under the Apache License, Version 2.0 (the
++# "License"); you may not use this file except in compliance
++# with the License. You may obtain a copy of the License at
++#
++#   http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing,
++# software distributed under the License is distributed on an
++# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
++# KIND, either express or implied. See the License for the
++# specific language governing permissions and limitations
++# under the License.
++# Captured at 5690a1a01d through Table controlPanel registration,
++# getControlsState (with initialized controls), and getFormDataFromControls.
++# Input: shipped featured_charts/charts/Table.yaml params, semantic datasource
++# with order_date (temporal) and product_line columns; null sort metric,
++# empty column_config and conditional_formatting. No output keys removed.
++# Grain corrected to P1D, matching the shipped chart and initialized grain choices;
++# the original capture omitted datasource grain choices and produced null.
++{
++  "datasource": "7__semantic_view",
++  "viz_type": "table",
++  "matrixify_enable": false,
++  "matrixify_mode_columns": "disabled",
++  "matrixify_dimension_selection_mode_columns": "members",
++  "matrixify_dimension_columns": {
++    "dimension": "",
++    "values": []
++  },
++  "matrixify_topn_value_columns": 10,
++  "matrixify_all_sort_by_columns": "a_to_z",
++  "matrixify_topn_order_columns": true,
++  "matrixify_show_column_headers": true,
++  "matrixify_fit_columns_dynamically": true,
++  "matrixify_mode_rows": "disabled",
++  "matrixify_dimension_selection_mode_rows": "members",
++  "matrixify_dimension_rows": {
++    "dimension": "",
++    "values": []
++  },
++  "matrixify_topn_value_rows": 10,
++  "matrixify_all_sort_by_rows": "a_to_z",
++  "matrixify_topn_order_rows": true,
++  "matrixify_show_row_labels": true,
++  "matrixify_row_height": 300,
++  "matrixify_charts_per_row": 3,
++  "matrixify_cell_title_template": "",
++  "query_mode": "raw",
++  "groupby": [],
++  "time_grain_sqla": "P1D",
++  "temporal_columns_lookup": {
++    "order_date": true,
++    "product_line": false
++  },
++  "all_columns": [
++    "order_date",
++    "product_line",
++    "status",
++    "price_each",
++    "sales"
++  ],
++  "percent_metrics": [],
++  "adhoc_filters": [
++    {
++      "clause": "WHERE",
++      "comparator": "No filter",
++      "expressionType": "SIMPLE",
++      "operator": "TEMPORAL_RANGE",
++      "subject": "order_date"
++    }
++  ],
++  "timeseries_limit_metric": null,
++  "order_by_cols": [],
++  "order_desc": true,
++  "server_pagination": false,
++  "server_page_length": 10,
++  "row_limit": 1000,
++  "percent_metric_calculation": "row_limit",
++  "show_totals": false,
++  "totals_aggregate": "ORIGINAL",
++  "table_timestamp_format": "smart_date",
++  "include_search": false,
++  "allow_rearrange_columns": false,
++  "allow_render_html": true,
++  "header_groups": [],
++  "column_config": {},
++  "show_cell_bars": true,
++  "align_pn": false,
++  "color_pn": true,
++  "comparison_color_enabled": false,
++  "comparison_color_scheme": "Green",
++  "conditional_formatting": [],
++  "comparison_type": "values"
++}
+==FILE== tests/unit_tests/mcp_service/chart/test_chart_helpers.py
+@@ -15,6 +15,7 @@
+ # specific language governing permissions and limitations
+ # under the License.
+ 
++from copy import deepcopy
+ from typing import Any
+ from unittest.mock import MagicMock, patch
+ 
+@@ -34,6 +35,7 @@
+     extract_form_data_key_from_url,
+     find_chart_by_identifier,
+     get_cached_form_data,
++    merge_extra_form_data,
+     merge_extra_form_data_filters_into_query,
+     merge_form_data_filters_into_query,
+     prepare_form_data_for_query,
+@@ -42,11 +44,145 @@
+     resolve_metrics,
+     resolve_metrics_and_groupby,
+ )
++from superset.mcp_service.dashboard_scope import compose_extra_form_data
+ from superset.semantic_layers.mapper import validate_filter_columns
+ from superset.utils import json
+ from superset.utils.core import QueryObjectFilterClause
+ 
+ 
++@pytest.mark.parametrize("merge_site", ["dashboard", "helper"])
++@pytest.mark.parametrize("reverse", [False, True])
++@pytest.mark.parametrize("request_version", [None, "current", "old"])
++def test_external_merge_does_not_inherit_other_members_provenance(
++    merge_site: str,
++    reverse: bool,
++    request_version: str | None,
++) -> None:
++    """An unversioned request filter cannot borrow the dashboard's version."""
++    scope: dict[str, Any] = {
++        "filters": [{"col": "region", "op": "IN", "val": ["West"]}],
++        "semantic_selection_sources": [
++            {"datasource": "1__semantic_view", "version": "current"}
++        ],
++    }
++    request: dict[str, Any] = {
++        "filters": [{"col": "legacy_member", "op": "IN", "val": ["x"]}]
++    }
++    if request_version is not None:
++        request["semantic_selection_sources"] = [
++            {"datasource": "1__semantic_view", "version": request_version}
++        ]
++    if reverse:
++        scope, request = request, scope
++    merged: dict[str, Any] = (
++        compose_extra_form_data(scope, request)
++        if merge_site == "dashboard"
++        else merge_extra_form_data(scope, request)
++    )
++    queries: list[dict[str, Any]] = build_query_dicts_from_form_data(
++        {
++            "viz_type": "pie",
++            "datasource": "1__semantic_view",
++            "groupby": ["region"],
++            "metric": "revenue",
++            "semantic_selection_version": "current",
++        },
++        1,
++        "semantic_view",
++        extra_form_data=merged,
++    )
++    assert queries
++    query: dict[str, Any]
++    for query in queries:
++        assert {filter_["col"] for filter_ in query["filters"]} == {
++            "region",
++            "legacy_member",
++        }
++        assert query["extras"]["semantic_selection_version"] == (
++            "current"
++            if request_version == "current"
++            else "unverified-external-selections"
++        )
++
++
++@pytest.mark.parametrize("merge_site", ["dashboard", "helper"])
++@pytest.mark.parametrize(
++    "unversioned",
++    [
++        {"filters": [{"col": "unproven", "op": "IN", "val": [1]}]},
++        {"adhoc_filters": [{"subject": "unproven", "operator": "==", "comparator": 1}]},
++        {"interactive_groupby": ["unproven"]},
++        {"custom_form_data": {"unproven": 1}},
++    ],
++)
++def test_repeated_merge_preserves_missing_provenance(
++    merge_site: str,
++    unversioned: dict[str, Any],
++) -> None:
++    """Versioned inputs cannot wash out a previously unproven contributor."""
++    trusted: dict[str, Any] = {
++        "semantic_selection_sources": [
++            {"datasource": "1__semantic_view", "version": "v"}
++        ],
++    }
++    before: dict[str, Any] = deepcopy(unversioned)
++    first: dict[str, Any] = (
++        compose_extra_form_data(trusted, unversioned)
++        if merge_site == "dashboard"
++        else merge_extra_form_data(trusted, unversioned)
++    )
++    final: dict[str, Any] = (
++        compose_extra_form_data(first, trusted)
++        if merge_site == "dashboard"
++        else merge_extra_form_data(first, trusted)
++    )
++    assert {"datasource": "", "version": None} in final["semantic_selection_sources"]
++    assert unversioned == before
++    assert trusted["semantic_selection_sources"] == [
++        {"datasource": "1__semantic_view", "version": "v"}
++    ]
++
++
++@pytest.mark.parametrize("merge_site", ["dashboard", "helper"])
++def test_memberless_extra_does_not_invalidate_provenance(merge_site: str) -> None:
++    """A time range supplies no semantic member needing source provenance."""
++    trusted: dict[str, Any] = {
++        "semantic_selection_sources": [
++            {"datasource": "1__semantic_view", "version": "v"}
++        ],
++    }
++    extra: dict[str, Any] = {"time_range": "Last week", "filters": []}
++    merged: dict[str, Any] = (
++        compose_extra_form_data(trusted, extra)
++        if merge_site == "dashboard"
++        else merge_extra_form_data(trusted, extra)
++    )
++    assert merged["semantic_selection_sources"] == trusted["semantic_selection_sources"]
++
++
++@pytest.mark.parametrize("source_version", [None, "current", "old"])
++def test_saved_query_merge_checks_external_provenance(
++    source_version: str | None,
++) -> None:
++    """Cached query contexts must not certify newly appended unproven filters."""
++    query: dict[str, Any] = {
++        "filters": [],
++        "extras": {"semantic_selection_version": "current"},
++    }
++    extra: dict[str, Any] = {
++        "filters": [{"col": "region", "op": "IN", "val": ["West"]}],
++    }
++    if source_version is not None:
++        extra["semantic_selection_sources"] = [
++            {"datasource": "1__semantic_view", "version": source_version}
++        ]
++    merge_extra_form_data_filters_into_query(query, extra, 1, "semantic_view")
++    assert query["filters"][0]["col"] == "region"
++    assert query["extras"]["semantic_selection_version"] == (
++        "current" if source_version == "current" else "unverified-external-selections"
++    )
++
++
+ def test_extract_form_data_key_from_url_with_key():
+     url = "http://localhost:8088/explore/?form_data_key=abc123&slice_id=1"
+     assert extract_form_data_key_from_url(url) == "abc123"
+==FILE== tests/unit_tests/mcp_service/chart/test_dashboard_time_binding.py
+@@ -375,13 +375,15 @@ def test_unbound_charts_get_dashboard_temporal_filter(
+     expected_subject: str,
+ ) -> None:
+     mock_find_dataset.return_value = SimpleNamespace(main_dttm_col="order_date")
+-    mock_is_temporal.side_effect = lambda column, dataset_id, dataset=None: (
+-        column
+-        in {
+-            "created_at",
+-            "event_time",
+-            "order_date",
+-        }
++    mock_is_temporal.side_effect = (
++        lambda column, dataset_id, dataset=None, temporal_columns=None: (
++            column
++            in {
++                "created_at",
++                "event_time",
++                "order_date",
++            }
++        )
+     )
+ 
+     form_data = map_config_to_form_data(config, dataset_id=42)
+==FILE== tests/unit_tests/mcp_service/chart/test_semantic_reselection.py
+@@ -0,0 +1,769 @@
++# Licensed to the Apache Software Foundation (ASF) under one
++# or more contributor license agreements.  See the NOTICE file
++# distributed with this work for additional information
++# regarding copyright ownership.  The ASF licenses this file
++# to you under the Apache License, Version 2.0 (the
++# "License"); you may not use this file except in compliance
++# with the License.  You may obtain a copy of the License at
++#
++#   http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing,
++# software distributed under the License is distributed on an
++# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
++# KIND, either express or implied.  See the License for the
++# specific language governing permissions and limitations
++# under the License.
++"""Proof counterexamples for semantic table reselection."""
++
++from pathlib import Path
++from typing import Any
++from unittest.mock import Mock
++
++import pytest
++import yaml
++
++from superset.common.form_data_query_context import build_query_objects_from_form_data
++from superset.mcp_service.chart.datasource_resolver import ChartDatasource
++from superset.mcp_service.chart.schemas import (
++    ColumnRef,
++    TableChartConfig,
++    UpdateChartRequest,
++)
++from superset.mcp_service.chart.semantic_reselection import prove_table_reselection
++from superset.mcp_service.chart.tool.update_chart import (
++    _build_update_payload,
++    _prepare_semantic_reselection,
++)
++from superset.utils import json
++from superset.utils.core import DatasourceType
++
++
++def _exported_table_state(case: str) -> dict[str, Any]:
++    """Load export-derived state and apply the case's saved-control shape."""
++    path: Path = (
++        Path(__file__).resolve().parents[4]
++        / "superset/examples/featured_charts/charts/Table.yaml"
++    )
++    saved: dict[str, Any] = yaml.safe_load(path.read_text())["params"]
++    if case in {"full_defaults", "full_defaults_rebind"}:
++        saved = yaml.safe_load(
++            (Path(__file__).parent / "fixtures/explore_table_defaults.yaml").read_text()
++        )
++    saved["datasource"] = "7__semantic_view"
++    if case == "neutral_time_filter_ui":
++        saved["adhoc_filters"][0].update(
++            {
++                "sqlExpression": None,
++                "isExtra": False,
++                "isNew": False,
++                "datasourceWarning": False,
++                "filterOptionName": "filter_saved",
++            }
++        )
++    if case in {"stale_lookup", "stale_lookup_rebind"}:
++        saved["temporal_columns_lookup"] = {"old_date": True}
++    if case not in {
++        "explore_controls",
++        "unmodified",
++        "full_defaults",
++        "rebind",
++        "full_defaults_rebind",
++        "neutral_time_filter",
++        "neutral_time_filter_ui",
++        "stale_lookup",
++        "stale_lookup_rebind",
++    }:
++        for key in (
++            "dashboards",
++            "server_page_length",
++            "allow_render_html",
++            "color_pn",
++            "annotation_layers",
++        ):
++            saved.pop(key)
++    elif case == "explore_controls":
++        saved["conditional_formatting"] = []
++    return saved
++
++
++@pytest.mark.parametrize(
++    "case",
++    [
++        "aggregate_sort",
++        "explore_controls",
++        "temporal",
++        "unmodified",
++        "full_defaults",
++        "rebind",
++        "full_defaults_rebind",
++        "neutral_time_filter",
++        "neutral_time_filter_ui",
++        "stale_lookup",
++        "stale_lookup_rebind",
++    ],
++)
++def test_reselection_of_exported_explore_table(case: str) -> None:
++    """Keep all shipped temporal controls when reselecting non-temporal columns."""
++    saved: dict[str, Any] = _exported_table_state(case)
++    config: TableChartConfig = TableChartConfig.model_validate(
++        {
++            "columns": [{"name": "sales", "aggregate": "SUM"}]
++            if case == "aggregate_sort"
++            else [{"name": "product_line"}],
++            "filters": [{"column": "product_line", "op": "=", "value": "Cars"}]
++            if case in {"neutral_time_filter", "neutral_time_filter_ui"}
++            else [],
++            "sort_by": [],
++            "row_limit": 1000,
++            **(
++                {"temporal_column": "order_date"}
++                if case in {"temporal", "neutral_time_filter", "neutral_time_filter_ui"}
++                else {}
++            ),
++        }
++    )
++    chart: Mock = Mock(
++        id=12,
++        datasource_id=7,
++        datasource_type="semantic_view",
++        viz_type="table",
++        slice_name="Table",
++        params=json.dumps(saved),
++    )
++    is_rebind: bool = case in {"rebind", "full_defaults_rebind", "stale_lookup_rebind"}
++    request: UpdateChartRequest = UpdateChartRequest(
++        identifier=12, config=config, **({"view_id": 8} if is_rebind else {})
++    )
++    payload: Any = _build_update_payload(
++        request,
++        chart,
++        config,
++        temporal_columns={"order_date"},
++    )
++    assert isinstance(payload, dict)
++    candidate: dict[str, Any] = json.loads(payload["params"])
++    assert (
++        prove_table_reselection(
++            config, config, saved, candidate, temporal_columns={"order_date"}
++        )
++        is None
++    )
++    assert candidate["order_desc"] is True
++    if case == "temporal":
++        assert candidate["_mcp_dashboard_time_filter_subject"] == "order_date"
++        assert candidate["adhoc_filters"][0]["subject"] == "order_date"
++    target: ChartDatasource = ChartDatasource(
++        Mock(implementation=Mock(selection_identity_version="v1")),
++        DatasourceType.SEMANTIC_VIEW,
++        8 if is_rebind else 7,
++        "Table",
++    )
++    prepared: Any = _prepare_semantic_reselection(
++        request,
++        chart,
++        config,
++        target,
++        {"order_date"},
++        is_rebind,
++    )
++    assert isinstance(prepared, dict)
++    assert json.loads(prepared["params"])["semantic_selection_version"] == "v1"
++    assert "time_grain_sqla" not in json.loads(prepared["params"])
++    if is_rebind:
++        assert json.loads(prepared["params"])["datasource"] == "8__semantic_view"
++    queries: list[dict[str, Any]] = build_query_objects_from_form_data(
++        json.loads(prepared["params"])
++    )
++    assert queries
++    assert all("time_grain_sqla" not in query.get("extras", {}) for query in queries)
++    if case in {"neutral_time_filter", "neutral_time_filter_ui"}:
++        assert queries[0]["filters"] == [
++            {"col": "product_line", "op": "==", "val": "Cars"},
++            {"col": "order_date", "op": "TEMPORAL_RANGE", "val": "No filter"},
++        ]
++    if case in {"full_defaults", "rebind", "full_defaults_rebind"}:
++        assert len(queries) == 1
++        assert queries[0]["columns"] == ["product_line"]
++        assert not queries[0].get("metrics")
++        assert not queries[0].get("filters")
++
++
++def test_unpublished_explicit_temporal_column_refuses_without_binding() -> None:
++    """The candidate and proof must not silently drop the same requested member."""
++    config: TableChartConfig = TableChartConfig(
++        columns=[ColumnRef(name="member_id")], filters=[], temporal_column="missing"
++    )
++    existing: dict[str, Any]
++    candidate: dict[str, Any]
++    existing, candidate = _candidate({}, config, temporal_columns=set())
++    assert "_mcp_dashboard_time_filter_subject" not in candidate
++    assert (
++        prove_table_reselection(
++            config, config, existing, candidate, temporal_columns=set()
++        )
++        == "temporal selections"
++    )
++
++
++def test_order_direction_mismatch_reports_sorting() -> None:
++    """Direct callers get the actionable category even with explicit sorting."""
++    config: TableChartConfig = TableChartConfig(
++        columns=[ColumnRef(name="member_id")], filters=[], sort_by=[]
++    )
++    existing: dict[str, Any]
++    candidate: dict[str, Any]
++    existing, candidate = _candidate({}, config)
++    candidate["order_desc"] = not candidate["order_desc"]
++    assert prove_table_reselection(config, config, existing, candidate) == "sorting"
++
++
++@pytest.mark.parametrize(
++    "lookup,grain,column,temporal_columns",
++    [
++        ({"order_date": True}, "P1D", "order_date", {"order_date"}),
++        ({"order_date": False}, "P1D", "order_date", {"order_date"}),
++        ({}, "P1D", "order_date", {"order_date"}),
++        ({"order_date": 1}, "P1D", "member_id", {"order_date"}),
++        ({"order_date": "true"}, "P1D", "member_id", {"order_date"}),
++        ({1: False}, "P1D", "member_id", {"order_date"}),
++        ([], "P1D", "member_id", {"order_date"}),
++        (None, "P1D", "member_id", {"order_date"}),
++        ({"order_date": True}, "P1D", "member_id", None),
++        ({"order_date": True}, "P999D", "member_id", {"order_date"}),
++        ({"order_date": True}, "P1W/1970-01-04T00:00:00Z", "member_id", {"order_date"}),
++        ({"order_date": True}, "%Y-%m", "member_id", {"order_date"}),
++        ({"order_date": True}, ["P1D"], "member_id", {"order_date"}),
++    ],
++)
++def test_temporal_metadata_does_not_certify_active_or_unknown_grain(
++    lookup: Any, grain: Any, column: str, temporal_columns: set[str] | None
++) -> None:
++    """Only authorized boolean lookup metadata with dormant durations is safe."""
++    config: TableChartConfig = TableChartConfig(
++        columns=[ColumnRef(name=column)], filters=[], sort_by=[]
++    )
++    existing: dict[str, Any]
++    candidate: dict[str, Any]
++    existing, candidate = _candidate(
++        {"temporal_columns_lookup": lookup, "time_grain_sqla": grain}, config
++    )
++    assert (
++        prove_table_reselection(
++            config, config, existing, candidate, temporal_columns=temporal_columns
++        )
++        == "temporal selections"
++    )
++
++
++def test_authorized_temporal_lookup_without_grain_is_metadata() -> None:
++    """Selecting an ungrained time column does not inherit a time transform."""
++    config: TableChartConfig = TableChartConfig(
++        columns=[ColumnRef(name="order_date")], filters=[]
++    )
++    existing: dict[str, Any]
++    candidate: dict[str, Any]
++    existing, candidate = _candidate(
++        {"temporal_columns_lookup": {"order_date": True}}, config
++    )
++    assert (
++        prove_table_reselection(
++            config, config, existing, candidate, temporal_columns={"order_date"}
++        )
++        is None
++    )
++
++
++@pytest.mark.parametrize(
++    "retained",
++    [
++        {"conditional_formatting": [{"column": "old_member"}]},
++        {"annotation_layers": [{"name": "old_layer"}]},
++        {"server_pagination": True},
++        {"server_pagination": 0},
++        {"server_pagination": None},
++        {"include_search": "false"},
++        {"header_groups": [{"name": "old_member"}]},
++        {"timeseries_limit_metric": "old_metric"},
++        {"comparison_type": "difference"},
++        {"percent_metric_calculation": "all_records"},
++        {"totals_aggregate": "SUM"},
++        {"matrixify_enable": True},
++        {"matrixify_mode_rows": "dimensions"},
++        {"matrixify_mode_columns": "metrics"},
++        {"matrixify_dimension_rows": {"dimension": "old_member", "values": []}},
++        {"matrixify_dimension_columns": {"dimension": "", "values": ["old"]}},
++        {"matrixify_cell_title_template": "{old_member}"},
++        {"matrixify_topn_value_rows": True},
++        {"matrixify_unknown": False},
++        {"unknown_plugin_state": []},
++        {"_mcp_dashboard_time_filter_subject": "old_member"},
++    ],
++)
++def test_explore_classification_still_refuses_query_state(
++    retained: dict[str, Any],
++) -> None:
++    """Safe display keys must not broaden permission to keep query identities."""
++    config: TableChartConfig = TableChartConfig(
++        columns=[ColumnRef(name="member_id")], filters=[]
++    )
++    existing: dict[str, Any]
++    candidate: dict[str, Any]
++    existing, candidate = _candidate(retained, config)
++    assert prove_table_reselection(config, config, existing, candidate) is not None
++
++
++@pytest.mark.parametrize(
++    "overrides,column,target_temporal",
++    [
++        (
++            {"temporal_columns_lookup": {"order_date": 1}},
++            "product_line",
++            {"order_date"},
++        ),
++        ({"temporal_columns_lookup": None}, "product_line", {"order_date"}),
++        ({}, "order_date", {"order_date"}),
++        ({"temporal_columns_lookup": {}}, "order_date", {"order_date"}),
++        ({}, "product_line", None),
++        ({"time_grain_sqla": "P999D"}, "product_line", {"order_date"}),
++        ({"header_groups": [{"name": "old_member"}]}, "product_line", {"order_date"}),
++        ({"server_pagination": True}, "product_line", {"order_date"}),
++    ],
++)
++def test_rebind_does_not_certify_scrubbed_active_or_unknown_controls(
++    overrides: dict[str, Any], column: str, target_temporal: set[str] | None
++) -> None:
++    """Scrubbing cannot turn active/unknown saved state into a proven rebind."""
++    saved: dict[str, Any] = {
++        "viz_type": "table",
++        "datasource": "7__semantic_view",
++        "time_grain_sqla": "P1D",
++        "temporal_columns_lookup": {"order_date": True},
++        **overrides,
++    }
++    config: TableChartConfig = TableChartConfig(
++        columns=[ColumnRef(name=column)], filters=[], sort_by=[]
++    )
++    chart: Mock = Mock(
++        id=12,
++        datasource_id=7,
++        datasource_type="semantic_view",
++        viz_type="table",
++        slice_name="Table",
++        params=json.dumps(saved),
++    )
++    target: ChartDatasource = ChartDatasource(
++        Mock(implementation=Mock(selection_identity_version="v1")),
++        DatasourceType.SEMANTIC_VIEW,
++        8,
++        "Table",
++    )
++    prepared: Any = _prepare_semantic_reselection(
++        UpdateChartRequest(identifier=12, config=config, view_id=8),
++        chart,
++        config,
++        target,
++        target_temporal,
++        True,
++    )
++    assert not isinstance(prepared, dict)
++    assert prepared.success is False
++    assert json.loads(chart.params) == saved
++
++
++@pytest.mark.parametrize("tamper", ["subject", "filter", "unpublished"])
++def test_explicit_temporal_binding_must_match_authorized_fresh_mapping(
++    tamper: str,
++) -> None:
++    """A copied marker alone cannot certify a different or unpublished member."""
++    config: TableChartConfig = TableChartConfig(
++        columns=[ColumnRef(name="member_id")], filters=[], temporal_column="order_date"
++    )
++    chart: Mock = Mock(
++        id=12,
++        datasource_id=7,
++        datasource_type="semantic_view",
++        viz_type="table",
++        slice_name="Table",
++        params='{"viz_type":"table"}',
++    )
++    payload: Any = _build_update_payload(
++        UpdateChartRequest(identifier=12, config=config),
++        chart,
++        config,
++        temporal_columns={"order_date"},
++    )
++    candidate: dict[str, Any] = json.loads(payload["params"])
++    if tamper == "subject":
++        candidate["_mcp_dashboard_time_filter_subject"] = "other_date"
++    elif tamper == "filter":
++        candidate["adhoc_filters"][0]["subject"] = "other_date"
++    assert (
++        prove_table_reselection(
++            config,
++            config,
++            {"viz_type": "table"},
++            candidate,
++            temporal_columns=set() if tamper == "unpublished" else {"order_date"},
++        )
++        is not None
++    )
++
++
++def _candidate(
++    saved: dict[str, Any],
++    config: TableChartConfig,
++    *,
++    temporal_columns: set[str] | None = None,
++) -> tuple[dict[str, Any], dict[str, Any]]:
++    """Exercise the real merge rather than mirror it in expected fixtures."""
++    existing: dict[str, Any] = {
++        "viz_type": "table",
++        "datasource": "7__semantic_view",
++        "all_columns": ["old_member"],
++        "query_mode": "raw",
++        **saved,
++    }
++    chart: Mock = Mock(
++        id=12,
++        datasource_id=7,
++        datasource_type="semantic_view",
++        viz_type="table",
++        slice_name="Revenue",
++        params=json.dumps(existing),
++    )
++    payload: Any = _build_update_payload(
++        UpdateChartRequest(identifier=12, config=config),
++        chart,
++        config,
++        temporal_columns=temporal_columns,
++    )
++    assert isinstance(payload, dict)
++    return existing, json.loads(payload["params"])
++
++
++@pytest.mark.parametrize("viz_type", ["table", "ag-grid-table"])
++@pytest.mark.parametrize(
++    "control",
++    [
++        "include_search",
++        "allow_rearrange_columns",
++        "align_pn",
++        "json_in_cell",
++        "show_numbered_column",
++        "zebra_striping",
++    ],
++)
++@pytest.mark.parametrize("value", [True, False, 0, 1, None, "false"])
++def test_display_toggle_requires_actual_boolean(
++    viz_type: str, control: str, value: Any
++) -> None:
++    """Display toggles never select members, but malformed values stay refused."""
++    config: TableChartConfig = TableChartConfig.model_validate(
++        {"viz_type": viz_type, "columns": [{"name": "member_id"}], "filters": []}
++    )
++    saved: dict[str, Any]
++    candidate: dict[str, Any]
++    saved, candidate = _candidate({"viz_type": viz_type, control: value}, config)
++    assert (prove_table_reselection(config, config, saved, candidate) is None) == (
++        type(value) is bool
++    )
++    assert type(candidate[control]) is type(value)
++    assert candidate[control] == value
++    queries: list[dict[str, Any]] = build_query_objects_from_form_data(candidate)
++    assert queries[0]["columns"] == ["member_id"]
++    assert not queries[0].get("metrics")
++
++
++@pytest.mark.parametrize("include_time", [False, None, True, 0, "false"])
++def test_raw_table_reselection_to_aggregate(include_time: Any) -> None:
++    """Missing aggregate include_time agrees only with inactive saved state."""
++    config: TableChartConfig = TableChartConfig(
++        columns=[ColumnRef(name="sales", aggregate="SUM")], filters=[]
++    )
++    saved: dict[str, Any]
++    candidate: dict[str, Any]
++    saved, candidate = _candidate({"include_time": include_time}, config)
++    assert candidate["query_mode"] == "aggregate"
++    assert (prove_table_reselection(config, config, saved, candidate) is None) == (
++        include_time is None or include_time is False
++    )
++    queries: list[dict[str, Any]] = build_query_objects_from_form_data(candidate)
++    assert len(queries) == 1
++    assert not queries[0].get("columns")
++    assert queries[0]["metrics"][0]["aggregate"] == "SUM"
++    assert queries[0]["metrics"][0]["column"]["column_name"] == "sales"
++
++
++@pytest.mark.parametrize(
++    "settings",
++    [
++        {"horizontalAlign": "right"},
++        {"currencyFormat": {"symbol": "USD", "symbolPosition": "prefix"}},
++        {"showCellBars": True},
++        {"truncateLongCells": True},
++        {"visible": False},
++        {"customColumnName": "Display name"},
++        {"alignPositiveNegative": True},
++        {"colorPositiveNegative": False},
++        {"d3SmallNumberFormat": ".2f"},
++        {"d3SmallNumberFormat": None},
++        {"displayTypeIcon": True},
++    ],
++)
++def test_saved_column_display_settings_preserve_query(settings: dict[str, Any]) -> None:
++    """Known display keys survive without contributing query selections."""
++    config: TableChartConfig = TableChartConfig(
++        columns=[ColumnRef(name="member_id")], filters=[]
++    )
++    saved: dict[str, Any]
++    candidate: dict[str, Any]
++    saved, candidate = _candidate({"column_config": {"member_id": settings}}, config)
++    assert prove_table_reselection(config, config, saved, candidate) is None
++    assert candidate["column_config"]["member_id"] == settings
++    queries: list[dict[str, Any]] = build_query_objects_from_form_data(candidate)
++    assert len(queries) == 1
++    assert queries[0]["columns"] == ["member_id"]
++    assert not queries[0].get("metrics")
++
++
++@pytest.mark.parametrize("grain", [None, "P1D"])
++@pytest.mark.parametrize("selected", ["member_id", "order_date"])
++def test_stale_lookup_names_are_not_selected_members(
++    grain: str | None, selected: str
++) -> None:
++    """Old metadata cannot block fresh selections or hide an active time grain."""
++    config: TableChartConfig = TableChartConfig(
++        columns=[ColumnRef(name=selected)], filters=[]
++    )
++    saved: dict[str, Any]
++    candidate: dict[str, Any]
++    saved, candidate = _candidate(
++        {"temporal_columns_lookup": {"old_date": True}, "time_grain_sqla": grain},
++        config,
++        temporal_columns={"order_date"},
++    )
++    assert (
++        prove_table_reselection(
++            config, config, saved, candidate, temporal_columns={"order_date"}
++        )
++        is None
++    ) == (grain is None or selected != "order_date")
++
++
++@pytest.mark.parametrize(
++    "override",
++    [
++        {"comparator": "Last year"},
++        {"comparator": False},
++        {"comparator": None},
++        {"operator": "=="},
++        {"clause": "HAVING"},
++        {"expressionType": "SQL"},
++        {"subject": 0},
++        {"subject": ""},
++        {"sqlExpression": "old_member > 1"},
++        {"unknown": "old_member"},
++        {"isExtra": 0},
++        {"isNew": "false"},
++        {"datasourceWarning": None},
++        {"filterOptionName": ["old_member"]},
++        {"timeGrain": "P1D"},
++    ],
++)
++def test_neutral_time_placeholder_does_not_hide_predicates(
++    override: dict[str, Any],
++) -> None:
++    """Only the exact inactive shape can accompany a nonempty replacement."""
++    config: TableChartConfig = TableChartConfig.model_validate(
++        {
++            "columns": [{"name": "member_id"}],
++            "filters": [{"column": "member_id", "op": "=", "value": "selected"}],
++        }
++    )
++    saved: dict[str, Any]
++    candidate: dict[str, Any]
++    saved, candidate = _candidate({}, config)
++    saved["adhoc_filters"] = [
++        {
++            "clause": "WHERE",
++            "expressionType": "SIMPLE",
++            "operator": "TEMPORAL_RANGE",
++            "comparator": "No filter",
++            "subject": "old_date",
++            **override,
++        }
++    ]
++    assert prove_table_reselection(config, config, saved, candidate) == (
++        "saved WHERE/HAVING predicates"
++    )
++
++
++@pytest.mark.parametrize(
++    "retained",
++    [
++        {"granularity_sqla": "member_id"},
++        {"include_time": True},
++        {"extra_form_data": {"time_compare": ["1 year ago"]}},
++        {"metrics_b": ["member_id"]},
++        {"unknown_control": False},
++        {"unknown_control": 0},
++        {"unknown_control": []},
++        {"column_config": {"member_id": {"unknown_field": "old_member"}}},
++        {"order_by_cols": ['["member_id", false]']},
++    ],
++)
++def test_retained_state_cannot_be_certified(retained: dict[str, Any]) -> None:
++    """Even a retained name equal to a valid ID is not a fresh selection."""
++    config: TableChartConfig = TableChartConfig(
++        columns=[ColumnRef(name="member_id")], filters=[]
++    )
++    existing: dict[str, Any]
++    candidate: dict[str, Any]
++    existing, candidate = _candidate(retained, config)
++    assert prove_table_reselection(config, config, existing, candidate) is not None
++
++
++@pytest.mark.parametrize("filters", [{}, {"filters": None}])
++def test_default_filters_are_not_an_explicit_clear(filters: dict[str, Any]) -> None:
++    """Absence and null must not become intent through mapper defaults."""
++    config: TableChartConfig = TableChartConfig.model_validate(
++        {
++            "columns": [{"name": "member_id"}],
++            **filters,
++        }
++    )
++    existing: dict[str, Any]
++    candidate: dict[str, Any]
++    existing, candidate = _candidate({}, config)
++    assert prove_table_reselection(config, config, existing, candidate) == "filters"
++
++
++def test_aliases_and_explicit_empty_clears_are_fresh() -> None:
++    """Schema aliases and explicit clears are verified against final output."""
++    config: TableChartConfig = TableChartConfig.model_validate(
++        {
++            "all_columns": [{"name": "member_id"}],
++            "filters": [],
++            "order_by": [],
++        }
++    )
++    existing: dict[str, Any]
++    candidate: dict[str, Any]
++    existing, candidate = _candidate(
++        {
++            "where": "old_member > 1",
++            "having": "old_member > 5",
++            "filters": [{"col": "old_member", "op": "==", "val": "x"}],
++            "order_by_cols": ['["old_member", false]'],
++        },
++        config,
++    )
++    assert prove_table_reselection(config, config, existing, candidate) is None
++    assert not candidate.get("where")
++    assert not candidate.get("having")
++    assert not candidate.get("filters")
++    assert not candidate.get("order_by_cols")
++
++
++def test_plugin_restored_percent_metric_refuses() -> None:
++    """Table finalization can restore a role that the config cannot reselect."""
++    config: TableChartConfig = TableChartConfig(
++        columns=[ColumnRef(name="member_id", saved_metric=True)], filters=[]
++    )
++    existing: dict[str, Any]
++    candidate: dict[str, Any]
++    existing, candidate = _candidate(
++        {
++            "query_mode": "aggregate",
++            "percent_metrics": ["member_id"],
++        },
++        config,
++    )
++    assert candidate["percent_metrics"] == ["member_id"]
++    assert prove_table_reselection(config, config, existing, candidate) is not None
++
++
++@pytest.mark.parametrize(
++    "key", ["where", "having", "filters", "extra_filters", "adhoc_filters"]
++)
++@pytest.mark.parametrize(
++    "saved_value", ["legacy predicate", False, 0, {"unknown": True}]
++)
++def test_nonempty_replacement_does_not_clear_saved_predicates(
++    key: str, saved_value: Any
++) -> None:
++    """Even malformed aliases cannot disappear under a fresh non-empty filter list."""
++    config: TableChartConfig = TableChartConfig.model_validate(
++        {
++            "columns": [{"name": "member_id"}],
++            "filters": [{"column": "member_id", "op": "=", "value": "selected"}],
++        }
++    )
++    existing: dict[str, Any]
++    candidate: dict[str, Any]
++    existing, candidate = _candidate({}, config)
++    existing[key] = saved_value
++    assert prove_table_reselection(config, config, existing, candidate) == (
++        "saved WHERE/HAVING predicates"
++    )
++
++
++@pytest.mark.parametrize(
++    "saved",
++    [
++        {},
++        {
++            "where": "",
++            "having": "",
++            "adhoc_filters": [],
++            "filters": [],
++            "extra_filters": [],
++        },
++        {
++            "where": None,
++            "having": None,
++            "adhoc_filters": None,
++            "filters": None,
++            "extra_filters": None,
++        },
++    ],
++)
++def test_nonempty_filters_without_saved_predicates_can_be_certified(
++    saved: dict[str, Any],
++) -> None:
++    """Known neutral aliases do not prevent genuine fresh filter selection."""
++    config: TableChartConfig = TableChartConfig.model_validate(
++        {
++            "columns": [{"name": "member_id"}],
++            "filters": [{"column": "member_id", "op": "=", "value": "selected"}],
++        }
++    )
++    existing: dict[str, Any]
++    candidate: dict[str, Any]
++    existing, candidate = _candidate(saved, config)
++    assert prove_table_reselection(config, config, existing, candidate) is None
++
++
++def test_disappearing_rebind_control_is_not_a_clear() -> None:
++    """A source rebind's scrub cannot manufacture explicit reset intent."""
++    config: TableChartConfig = TableChartConfig(
++        columns=[ColumnRef(name="member_id")], filters=[]
++    )
++    existing: dict[str, Any]
++    candidate: dict[str, Any]
++    existing, candidate = _candidate({"granularity_sqla": "old_time"}, config)
++    candidate.pop("granularity_sqla", None)
++    assert prove_table_reselection(config, config, existing, candidate) is not None
++
++
++def test_rebind_cannot_silently_change_an_omitted_limit() -> None:
++    """A mapper default is not permission to broaden a saved row limit."""
++    config: TableChartConfig = TableChartConfig(
++        columns=[ColumnRef(name="member_id")], filters=[]
++    )
++    existing: dict[str, Any]
++    candidate: dict[str, Any]
++    existing, candidate = _candidate({"row_limit": 20}, config)
++    candidate["row_limit"] = 1000
++    assert prove_table_reselection(config, config, existing, candidate) == "row limits"
+==FILE== tests/unit_tests/mcp_service/chart/tool/test_generate_chart_semantic_view.py
+@@ -47,6 +47,116 @@
+ from superset.utils import json
+ 
+ 
++@pytest.mark.parametrize("version", [None, "snowflake-table-qualified-v1"])
++def test_stamp_new_semantic_selections(version: str | None) -> None:
++    """Unversioned providers do not acquire an invented identity marker."""
++    from superset.mcp_service.chart.datasource_resolver import (
++        ChartDatasource,
++        stamp_new_semantic_selections,
++    )
++    from superset.utils.core import DatasourceType
++
++    view: Mock = Mock()
++    view.implementation.selection_identity_version = version
++    target: ChartDatasource = ChartDatasource(
++        view, DatasourceType.SEMANTIC_VIEW, 1, "View"
++    )
++    form_data: dict[str, Any] = {"metrics": ["revenue"]}
++    stamp_new_semantic_selections(form_data, target)
++    assert form_data.get("semantic_selection_version") == version
++    assert ("semantic_selection_version" in form_data) == (version is not None)
++
++
++@pytest.mark.parametrize(
++    "viz_type", ["echarts_timeseries_bar", "mixed_timeseries", "pie"]
++)
++@pytest.mark.parametrize("source", ["same", "other-view", "old-version"])
++def test_semantic_version_on_every_query(viz_type: str, source: str) -> None:
++    """Every query preserves valid provenance and refuses mismatched filters."""
++    from superset.mcp_service.chart.chart_helpers import (
++        build_query_dicts_from_form_data,
++    )
++
++    form_data: dict[str, Any] = {
++        "viz_type": viz_type,
++        "datasource": "1__semantic_view",
++        "x_axis": "region",
++        "groupby": ["region"],
++        "metrics": ["revenue"],
++        "metrics_b": ["profit"],
++        "semantic_selection_version": "current",
++    }
++    queries: list[dict[str, Any]] = build_query_dicts_from_form_data(
++        form_data,
++        1,
++        "semantic_view",
++        extra_form_data={
++            "filters": [{"col": "region", "op": "IN", "val": ["West"]}],
++            "semantic_selection_sources": [
++                {
++                    "datasource": "2__semantic_view"
++                    if source == "other-view"
++                    else "1__semantic_view",
++                    "version": "old" if source == "old-version" else "current",
++                }
++            ],
++        },
++    )
++    assert queries
++    assert len(queries) == (2 if viz_type == "mixed_timeseries" else 1)
++    for query in queries:
++        assert query["extras"]["semantic_selection_version"] == (
++            "current" if source == "same" else "unverified-external-selections"
++        )
++    assert "extras" not in form_data
++
++
++@pytest.mark.parametrize("external_filters", [False, True])
++def test_versioned_semantic_query_extras(external_filters: bool) -> None:
++    """A form-data version must reach the query validation boundary."""
++    from superset.mcp_service.chart.chart_helpers import (
++        build_query_dicts_from_form_data,
++    )
++
++    queries: list[dict[str, Any]] = build_query_dicts_from_form_data(
++        {
++            "viz_type": "echarts_timeseries_bar",
++            "datasource": "1__semantic_view",
++            "x_axis": "region",
++            "metrics": ["revenue"],
++            "semantic_selection_version": "snowflake-table-qualified-v1",
++        },
++        1,
++        "semantic_view",
++        extra_form_data={"filters": [{"col": "region", "op": "IN", "val": ["West"]}]}
++        if external_filters
++        else None,
++    )
++    assert queries[0].get("extras", {}).get("semantic_selection_version") == (
++        "unverified-external-selections"
++        if external_filters
++        else "snowflake-table-qualified-v1"
++    )
++
++
++def test_semantic_string_sort_uses_authorized_metadata() -> None:
++    """String axes retain requested metric sorting after semantic correction."""
++    from superset.mcp_service.chart.chart_utils import map_config_to_form_data
++
++    config: XYChartConfig = XYChartConfig(
++        chart_type="xy",
++        kind="bar",
++        x=ColumnRef(name="region"),
++        y=[ColumnRef(name="revenue", saved_metric=True)],
++        sort_by="revenue",
++    )
++    form_data: dict[str, Any] = map_config_to_form_data(
++        config, dataset_id=None, temporal_columns=set()
++    )
++    assert not form_data.get("_mcp_warnings")
++    assert form_data["x_axis_sort"] == "revenue"
++
++
+ @pytest.mark.parametrize("temporal_column", ["metric_time", None])
+ def test_semantic_temporal_metadata_survives_mapping(
+     mocker: MockerFixture, temporal_column: str | None
+@@ -83,6 +193,7 @@ async def test_categorical_semantic_axis_compiles_without_temporal_filter(
+ ) -> None:
+     """An authorized string dimension must not become a time-range subject."""
+     view: Mock = Mock(id=1)
++    view.implementation.selection_identity_version = "snowflake-table-qualified-v1"
+     view.name = "Semantic revenue"
+     view.datasource_name = "Semantic revenue"
+     view.table_name = "Semantic revenue"
+@@ -99,7 +210,9 @@ async def test_categorical_semantic_axis_compiles_without_temporal_filter(
+         return_value=Mock(id=1, username="admin", roles=[], groups=[]),
+     )
+     mocker.patch("superset.utils.log.DBEventLogger.log")
+-    mocker.patch("superset.common.query_context_factory.QueryContextFactory")
++    factory: MagicMock = mocker.patch(
++        "superset.common.query_context_factory.QueryContextFactory"
++    )
+     command: MagicMock = mocker.patch(
+         "superset.commands.chart.data.get_data_command.ChartDataCommand"
+     )
+@@ -148,6 +261,13 @@ async def test_categorical_semantic_axis_compiles_without_temporal_filter(
+     command.return_value.validate.assert_called_once()
+     command.return_value.run.assert_called_once()
+     form_data: dict[str, Any] = json.loads(create.call_args.args[0]["params"])
++    assert form_data.get("semantic_selection_version") == (
++        "snowflake-table-qualified-v1"
++    )
++    for query in factory.return_value.create.call_args.kwargs["queries"]:
++        assert query["extras"]["semantic_selection_version"] == (
++            "snowflake-table-qualified-v1"
++        )
+     assert form_data["granularity_sqla"] is None
+     assert form_data["x_axis_sort_series_type"] == "name"
+     assert not any(
+==FILE== tests/unit_tests/mcp_service/chart/tool/test_update_chart.py
+@@ -21,15 +21,25 @@
+ 
+ import importlib
+ from typing import Any
+-from unittest.mock import Mock, patch
++from unittest.mock import AsyncMock, MagicMock, Mock, patch
+ 
+ import pytest
+ from fastmcp import Client
+ from pydantic import ValidationError
++from pytest_mock import MockerFixture
+ 
++from superset.exceptions import SupersetSecurityException
+ from superset.mcp_service.app import mcp
+-from superset.mcp_service.chart.chart_helpers import find_chart_by_identifier
++from superset.mcp_service.chart.chart_helpers import (
++    build_query_dicts_from_form_data,
++    find_chart_by_identifier,
++)
+ from superset.mcp_service.chart.chart_utils import DatasetValidationResult
++from superset.mcp_service.chart.compile import CompileResult
++from superset.mcp_service.chart.datasource_resolver import (
++    ChartDatasource,
++    resolve_semantic_view,
++)
+ from superset.mcp_service.chart.schemas import (
+     AxisConfig,
+     ColumnRef,
+@@ -47,6 +57,7 @@
+     _build_update_payload,
+ )
+ from superset.utils import json
++from superset.utils.core import DatasourceType
+ 
+ # The __init__.py re-exports the update_chart *function*, so a plain
+ # `from ... import update_chart` gives the function, not the module.
+@@ -56,6 +67,420 @@
+ )
+ 
+ 
++@pytest.mark.asyncio
++@pytest.mark.parametrize("preview_mode", [False, True])
++@pytest.mark.parametrize("viz_type", ["table", "ag-grid-table"])
++@pytest.mark.parametrize("row_filter", [False, True])
++@pytest.mark.parametrize("saved_predicate", [None, "where", "having", "adhoc_filters"])
++@pytest.mark.parametrize("explicit_source", [False, True])
++@pytest.mark.parametrize(
++    "saved_version,source_rebind",
++    [(None, False), ("older-format", False), ("target-v1", True), (None, True)],
++)
++async def test_semantic_table_reselection_filter_intent(
++    mocker: MockerFixture,
++    preview_mode: bool,
++    viz_type: str,
++    saved_version: str | None,
++    source_rebind: bool,
++    row_filter: bool,
++    explicit_source: bool,
++    saved_predicate: str | None,
++) -> None:
++    """Certify complete selections only when saved predicate removal is explicit."""
++    existing: dict[str, Any] = {
++        "viz_type": viz_type,
++        "datasource": "7__semantic_view",
++        "all_columns": ["legacy_label"],
++        "query_mode": "raw",
++        "semantic_selection_version": saved_version,
++    }
++    if saved_predicate is not None:
++        existing[saved_predicate] = (
++            [
++                {
++                    "clause": "HAVING",
++                    "expressionType": "SQL",
++                    "sqlExpression": "legacy_label > 10",
++                }
++            ]
++            if saved_predicate == "adhoc_filters"
++            else "legacy_label > 10"
++        )
++    chart: Mock = Mock(
++        id=12,
++        uuid=None,
++        slice_name="Revenue",
++        viz_type=viz_type,
++        datasource_id=7,
++        datasource_type="semantic_view",
++        params=json.dumps(existing),
++    )
++    target: ChartDatasource = ChartDatasource(
++        Mock(
++            columns=[Mock(column_name="member_id", type="STRING", is_dttm=False)],
++            metrics=[],
++            implementation=Mock(selection_identity_version="target-v1"),
++        ),
++        DatasourceType.SEMANTIC_VIEW,
++        9 if source_rebind else 7,
++        "Revenue",
++    )
++    mocker.patch.object(
++        update_chart_module, "find_chart_by_identifier", return_value=chart
++    )
++    mocker.patch.object(
++        update_chart_module, "resolve_semantic_view", return_value=target
++    )
++    mocker.patch("superset.utils.log.DBEventLogger.log")
++    preview: MagicMock = mocker.patch.object(
++        update_chart_module,
++        "_create_preview_url",
++        return_value=("http://localhost/explore/?form_data_key=key", "key", []),
++    )
++    write: MagicMock = mocker.patch("superset.commands.chart.update.UpdateChartCommand")
++    write.return_value.run.return_value = chart
++
++    def compile_candidate(
++        form_data: dict[str, Any], *args: Any, **kwargs: Any
++    ) -> CompileResult:
++        assert form_data.get("semantic_selection_version") == "target-v1"
++        assert form_data["all_columns"] == ["member_id"]
++        queries: list[dict[str, Any]] = build_query_dicts_from_form_data(
++            form_data, target.id, "semantic_view"
++        )
++        assert queries
++        for query in queries:
++            assert query["extras"]["semantic_selection_version"] == "target-v1"
++            assert query["columns"] == ["member_id"]
++            assert query["filters"] == (
++                [{"col": "member_id", "op": "==", "val": "selected"}]
++                if row_filter
++                else []
++            )
++            assert not query["extras"].get("having")
++            assert not query["extras"].get("where")
++        return CompileResult(success=True)
++
++    mocker.patch.object(
++        update_chart_module, "_compile_chart", side_effect=compile_candidate
++    )
++    response: GenerateChartResponse = await update_chart_module.update_chart(
++        UpdateChartRequest(
++            identifier=12,
++            view_id=9 if source_rebind else (7 if explicit_source else None),
++            chart_name="Renamed",
++            config=TableChartConfig.model_validate(
++                {
++                    "columns": [{"name": "member_id"}],
++                    "filters": (
++                        [{"column": "member_id", "op": "=", "value": "selected"}]
++                        if row_filter
++                        else []
++                    ),
++                }
++            ),
++            generate_preview=preview_mode,
++            preview_formats=[],
++        ),
++        ctx=MagicMock(
++            info=AsyncMock(),
++            debug=AsyncMock(),
++            error=AsyncMock(),
++            report_progress=AsyncMock(),
++        ),
++    )
++    if row_filter and saved_predicate is not None:
++        assert not response.success
++        assert response.error is not None
++        assert "saved WHERE/HAVING predicates" in response.error.details
++        write.assert_not_called()
++        preview.assert_not_called()
++        assert json.loads(chart.params) == existing
++        return
++    assert response.success, response.error
++    candidate: dict[str, Any] = (
++        preview.call_args.args[1]
++        if preview_mode
++        else json.loads(write.call_args.args[1]["params"])
++    )
++    assert candidate["semantic_selection_version"] == "target-v1"
++    assert candidate["all_columns"] == ["member_id"]
++    assert candidate["datasource"] == target.form_data_datasource
++    assert candidate["viz_type"] == viz_type
++    if preview_mode:
++        assert candidate["slice_name"] == "Renamed"
++    else:
++        assert write.call_args.args[1]["slice_name"] == "Renamed"
++        assert write.call_args.kwargs["expected_basis"] is not None
++        assert write.call_args.kwargs["expected_basis"].params == chart.params
++        assert write.call_args.kwargs["expected_basis"].datasource_id == 7
++    assert json.loads(chart.params) == existing
++
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize("preview_mode", [False, True])
++@pytest.mark.parametrize(
++    "case",
++    [
++        "filter_omission",
++        "retained_time",
++        "retained_external",
++        "secondary",
++        "source_only",
++        "target_changed",
++        "candidate_changed",
++        "invalid_saved_json",
++        "target_missing",
++        "metadata_failure",
++        "target_denied",
++    ],
++)
++async def test_semantic_reselection_refuses_before_publication(
++    mocker: MockerFixture, preview_mode: bool, case: str
++) -> None:
++    """Incomplete intent and changed target contracts cannot publish success."""
++    existing: dict[str, Any] = {
++        "viz_type": "table",
++        "datasource": "7__semantic_view",
++        "all_columns": ["member_id"],
++        "query_mode": "raw",
++        "semantic_selection_version": "target-v1" if case == "source_only" else None,
++    }
++    retained: dict[str, dict[str, Any]] = {
++        "retained_time": {"granularity_sqla": "member_id"},
++        "retained_external": {
++            "extra_form_data": {
++                "filters": [{"col": "member_id", "op": "==", "val": "x"}]
++            }
++        },
++        "secondary": {"metrics_b": ["member_id"]},
++    }
++    existing.update(retained.get(case, {}))
++    chart: Mock = Mock(
++        id=12,
++        uuid=None,
++        slice_name="Revenue",
++        viz_type="table",
++        datasource_id=7,
++        datasource_type="semantic_view",
++        params="[" if case == "invalid_saved_json" else json.dumps(existing),
++    )
++    implementation: Mock = Mock(selection_identity_version="target-v1")
++    target: ChartDatasource = ChartDatasource(
++        Mock(
++            columns=[Mock(column_name="member_id", type="STRING", is_dttm=False)],
++            metrics=[],
++            implementation=implementation,
++        ),
++        DatasourceType.SEMANTIC_VIEW,
++        9 if case == "source_only" else 7,
++        "Revenue",
++    )
++    mocker.patch.object(
++        update_chart_module, "find_chart_by_identifier", return_value=chart
++    )
++    resolve: MagicMock = mocker.patch.object(
++        update_chart_module, "resolve_semantic_view", return_value=target
++    )
++    mocker.patch("superset.utils.log.DBEventLogger.log")
++    preview: MagicMock = mocker.patch.object(update_chart_module, "_create_preview_url")
++    write: MagicMock = mocker.patch("superset.commands.chart.update.UpdateChartCommand")
++
++    def compile_candidate(*args: Any, **kwargs: Any) -> CompileResult:
++        if case == "target_changed":
++            implementation.selection_identity_version = "target-v2"
++        if case == "candidate_changed":
++            args[0]["all_columns"] = ["legacy_label"]
++        if case == "target_missing":
++            resolve.return_value = None
++        if case == "metadata_failure":
++            resolve.side_effect = ValueError("Target metadata unavailable")
++        if case == "target_denied":
++            mocker.patch(
++                "superset.mcp_service.chart.datasource_resolver.DatasourceDAO.get_datasource",
++                return_value=target.explorable,
++            )
++            mocker.patch.object(
++                target.explorable,
++                "raise_for_access",
++                side_effect=SupersetSecurityException(Mock()),
++            )
++            resolve.side_effect = resolve_semantic_view
++        return CompileResult(success=True)
++
++    compile_query: MagicMock = mocker.patch.object(
++        update_chart_module, "_compile_chart", side_effect=compile_candidate
++    )
++    config: TableChartConfig | None = (
++        None
++        if case == "source_only"
++        else TableChartConfig.model_validate(
++            {
++                "columns": [{"name": "member_id"}],
++                **({} if case == "filter_omission" else {"filters": []}),
++            }
++        )
++    )
++    response: GenerateChartResponse = await update_chart_module.update_chart(
++        UpdateChartRequest(
++            identifier=12,
++            config=config,
++            view_id=9 if case == "source_only" else None,
++            generate_preview=preview_mode,
++            preview_formats=[],
++        ),
++        ctx=MagicMock(
++            info=AsyncMock(),
++            debug=AsyncMock(),
++            error=AsyncMock(),
++            report_progress=AsyncMock(),
++        ),
++    )
++    preview.assert_not_called()
++    write.assert_not_called()
++    assert not response.success
++    assert response.error is not None
++    if case != "metadata_failure":
++        assert "Explore" in response.error.details
++    if case == "source_only":
++        assert "no reselection supplied" in response.error.details
++    assert compile_query.called is (
++        case
++        in {
++            "target_changed",
++            "candidate_changed",
++            "target_missing",
++            "metadata_failure",
++            "target_denied",
++        }
++    )
++    assert chart.params == (
++        "[" if case == "invalid_saved_json" else json.dumps(existing)
++    )
++
++
++@pytest.mark.parametrize("operation", ["rename", "add_columns", "config"])
++@pytest.mark.parametrize("saved_version", [None, "older-format"])
++def test_existing_semantic_updates_do_not_stamp_selection_version(
++    operation: str,
++    saved_version: str | None,
++) -> None:
++    """Partial updates cannot bless retained selections with a current version."""
++    existing: dict[str, Any] = {
++        "viz_type": "ag-grid-table",
++        "datasource": "1__semantic_view",
++        "query_mode": "raw",
++        "all_columns": ["region"],
++    }
++    if saved_version is not None:
++        existing["semantic_selection_version"] = saved_version
++    chart: Mock = Mock(
++        id=7,
++        datasource_id=1,
++        datasource_type="semantic_view",
++        viz_type="ag-grid-table",
++        slice_name="Existing",
++        params=json.dumps(existing),
++    )
++    config: TableChartConfig | None = (
++        TableChartConfig(chart_type="table", columns=[ColumnRef(name="region")])
++        if operation == "config"
++        else None
++    )
++    request: UpdateChartRequest = UpdateChartRequest(
++        identifier=7,
++        chart_name="Renamed" if operation == "rename" else None,
++        add_columns=[ColumnRef(name="country")] if operation == "add_columns" else None,
++        config=config,
++    )
++    payload: dict[str, Any] | GenerateChartResponse = _build_update_payload(
++        request, chart, parsed_config=config, temporal_columns=set()
++    )
++    preview: dict[str, Any] | GenerateChartResponse = _build_preview_form_data(
++        request, chart, parsed_config=config, temporal_columns=set()
++    )
++    assert isinstance(payload, dict)
++    assert isinstance(preview, dict)
++    persisted: dict[str, Any] = json.loads(payload.get("params", chart.params))
++    for form_data in (persisted, preview):
++        # The existing config merge may drop the old marker; neither retaining
++        # nor dropping it certifies these selections as current.
++        assert form_data.get("semantic_selection_version") in (None, saved_version)
++        assert (
++            form_data.get("semantic_selection_version")
++            != "snowflake-table-qualified-v1"
++        )
++
++
++@pytest.mark.parametrize("preview", [False, True])
++@pytest.mark.parametrize("operation", ["rename", "add_columns", "config"])
++@pytest.mark.parametrize("saved_version", [None, "older-format", "target-v1"])
++def test_partial_semantic_certification_dispatch(
++    preview: bool, operation: str, saved_version: str | None
++) -> None:
++    """Only an outdated config update requires fresh certification."""
++    chart: Mock = Mock(
++        id=7,
++        datasource_id=1,
++        datasource_type="semantic_view",
++        viz_type="table",
++        slice_name="Existing",
++        params=json.dumps(
++            {
++                "viz_type": "table",
++                "datasource": "1__semantic_view",
++                "all_columns": ["region"],
++                "semantic_selection_version": saved_version,
++            }
++        ),
++    )
++    before: str = chart.params
++    config: TableChartConfig | None = (
++        TableChartConfig(columns=[ColumnRef(name="region")])
++        if operation == "config"
++        else None
++    )
++    request: UpdateChartRequest = UpdateChartRequest(
++        identifier=7,
++        chart_name="Renamed" if operation == "rename" else None,
++        add_columns=[ColumnRef(name="country")] if operation == "add_columns" else None,
++        config=config,
++        generate_preview=preview,
++    )
++    target: ChartDatasource = ChartDatasource(
++        Mock(implementation=Mock(selection_identity_version="target-v1")),
++        DatasourceType.SEMANTIC_VIEW,
++        1,
++        "View",
++    )
++    result: dict[str, Any] | GenerateChartResponse | None = (
++        update_chart_module._prepare_semantic_reselection(
++            request, chart, config, target, set(), False
++        )
++    )
++    if operation == "config" and saved_version != "target-v1":
++        assert isinstance(result, GenerateChartResponse)
++        assert not result.success
++    else:
++        assert result is None
++    assert chart.params == before
++    # Neither an unversioned target nor a physical dataset acquires a marker.
++    target.explorable.implementation.selection_identity_version = None
++    assert (
++        update_chart_module._prepare_semantic_reselection(
++            request, chart, config, target, set(), False
++        )
++        is None
++    )
++    assert (
++        update_chart_module._prepare_semantic_reselection(
++            request, chart, config, None, set(), False
++        )
++        is None
++    )
++
++
+ class TestUpdateChart:
+     """Tests for update_chart MCP tool."""
+ 
+==FILE== tests/unit_tests/mcp_service/explore/tool/test_generate_explore_link_semantic_view.py
+@@ -66,6 +66,7 @@ def _mock_view(view_id: int = 1) -> Mock:
+     view: Mock = Mock()
+     view.id = view_id
+     view.name = "Jaffle Shop"
++    view.implementation.selection_identity_version = "snowflake-table-qualified-v1"
+     time_col: Mock = Mock()
+     time_col.column_name = "metric_time"
+     time_col.type = "TIMESTAMP"
+@@ -116,6 +117,7 @@ async def test_view_id_builds_a_semantic_view_explore_link() -> None:
+     assert form_data["datasource"] == "1__semantic_view"
+     assert form_data["viz_type"] == "echarts_timeseries_line"
+     assert form_data["metrics"] == ["revenue"]
++    assert form_data["semantic_selection_version"] == "snowflake-table-qualified-v1"
+     get_datasource.assert_called_once()
+     # The view id must never be looked up as a table dataset.
+     find_dataset.assert_not_called()

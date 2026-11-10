@@ -1,0 +1,125 @@
+{
+  "sha": "d91d9836eaa344d5cbb9ce5e3624ca0cc4980c02",
+  "node_id": "C_kwDOAlosUtoAKGQ5MWQ5ODM2ZWFhMzQ0ZDVjYmI5Y2U1ZTM2MjRjYTBjYzQ5ODBjMDI",
+  "commit": {
+    "author": {
+      "name": "Mike Bridge",
+      "email": "michael.bridge@preset.io",
+      "date": "2026-11-06T18:33:29Z"
+    },
+    "committer": {
+      "name": "GitHub",
+      "email": "noreply@github.com",
+      "date": "2026-11-06T18:33:29Z"
+    },
+    "message": "fix(semantic-layer): keep provider responses complete on older urllib3 (#46012)",
+    "tree": {
+      "sha": "fc371a3d5896644092209bf62491cb5d9e2641f0",
+      "url": "https://api.github.com/repos/apache/superset/git/trees/fc371a3d5896644092209bf62491cb5d9e2641f0"
+    },
+    "url": "https://api.github.com/repos/apache/superset/git/commits/d91d9836eaa344d5cbb9ce5e3624ca0cc4980c02",
+    "comment_count": 0,
+    "verification": {
+      "verified": true,
+      "reason": "valid",
+      "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJq7h15CRC1aQ7uu5UhlAAABNgQAFLbO49oFU+yNuzxdUR13UHf\nxImkxJQwJ++WG8HI0uq/el8Pn4EBKTdpQng0SDoCEf44LdCTd/VsvSasorJwrKxE\nq9UMsKVHJtQ90OBEzc6W6zxap6m3+C+/zePZCIXsHuow7VsPJGSqmSvR8lCWvLvK\nfYrtq1lZuoJvqfUERcCjh55v4nr+dM+TFlKyZKdjhHSSaCcKAuzbQJ7l76/khrhh\ng5OnwxYicypLRooA9Uxhd0hla5T0TFT/5B4tr6/v8NJpX71kdqQg2yw/uztNo9tj\nWK91Ns7Rlf8VsxWtomLwlJnE3+Q45iz0EtjEktdH2Y0WCOWU1mJdPkODzCoYZ2B1\nXJQKCU1DWg/av82F8ilVvz7w7Ci2lsvMROg7JEzmfYKrATdQew2Kej8V2a1usCYG\nu0q99PqxB2wO1rpWtHI41UbmojZ+lRod8mHFL+ZAtzQXrWMx/tRhx7/7sJiHAQBG\nMgGbrBaEsTiAwTgFpsyZXScNSr6N3co+M7dKtnXFGXmq2HH2tr9EN6gOnc/XAlD6\nt4wXF1VJouoIwGtXWtEZ7MphI+8DJk47QeNPbrYPugo9x+6Gss//2DuALZ3PDH11\n931dqIYLmIlfnqeCqQ2Bl1nH6R+8wyeVwILacS+IBVB/WNdGyUGSymXFFKxqAQb4\nS8HiFCl2l1wnjLxN+fmQ\n=aTwz\n-----END PGP SIGNATURE-----\n",
+      "payload": "tree fc371a3d5896644092209bf62491cb5d9e2641f0\nparent 5abdb20986d52a3a63cd5d34cbb6555a4bf7a415\nauthor Mike Bridge <michael.bridge@preset.io> 1793990009 -0600\ncommitter GitHub <noreply@github.com> 1793990009 -0300\n\nfix(semantic-layer): keep provider responses complete on older urllib3 (#46012)",
+      "verified_at": "2026-11-06T18:33:30Z"
+    }
+  },
+  "url": "https://api.github.com/repos/apache/superset/commits/d91d9836eaa344d5cbb9ce5e3624ca0cc4980c02",
+  "html_url": "https://github.com/apache/superset/commit/d91d9836eaa344d5cbb9ce5e3624ca0cc4980c02",
+  "comments_url": "https://api.github.com/repos/apache/superset/commits/d91d9836eaa344d5cbb9ce5e3624ca0cc4980c02/comments",
+  "author": {
+    "login": "mikebridge",
+    "id": 213273,
+    "node_id": "MDQ6VXNlcjIxMzI3Mw==",
+    "avatar_url": "https://avatars.githubusercontent.com/u/213273?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/mikebridge",
+    "html_url": "https://github.com/mikebridge",
+    "followers_url": "https://api.github.com/users/mikebridge/followers",
+    "following_url": "https://api.github.com/users/mikebridge/following{/other_user}",
+    "gists_url": "https://api.github.com/users/mikebridge/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/mikebridge/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/mikebridge/subscriptions",
+    "organizations_url": "https://api.github.com/users/mikebridge/orgs",
+    "repos_url": "https://api.github.com/users/mikebridge/repos",
+    "events_url": "https://api.github.com/users/mikebridge/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/mikebridge/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "committer": {
+    "login": "web-flow",
+    "id": 19864447,
+    "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+    "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/web-flow",
+    "html_url": "https://github.com/web-flow",
+    "followers_url": "https://api.github.com/users/web-flow/followers",
+    "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+    "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+    "organizations_url": "https://api.github.com/users/web-flow/orgs",
+    "repos_url": "https://api.github.com/users/web-flow/repos",
+    "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/web-flow/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "parents": [
+    {
+      "sha": "5abdb20986d52a3a63cd5d34cbb6555a4bf7a415",
+      "url": "https://api.github.com/repos/apache/superset/commits/5abdb20986d52a3a63cd5d34cbb6555a4bf7a415",
+      "html_url": "https://github.com/apache/superset/commit/5abdb20986d52a3a63cd5d34cbb6555a4bf7a415"
+    }
+  ],
+  "stats": {
+    "total": 156,
+    "additions": 155,
+    "deletions": 1
+  },
+  "files": [
+    {
+      "sha": "ce3062259b440ba1ee18f528bafe17ec8e2c9e1a",
+      "filename": "docs/sidebarTutorials.js",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 0,
+      "changes": 1,
+      "blob_url": "https://github.com/apache/superset/blob/d91d9836eaa344d5cbb9ce5e3624ca0cc4980c02/docs%2FsidebarTutorials.js",
+      "raw_url": "https://github.com/apache/superset/raw/d91d9836eaa344d5cbb9ce5e3624ca0cc4980c02/docs%2FsidebarTutorials.js",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/docs%2FsidebarTutorials.js?ref=d91d9836eaa344d5cbb9ce5e3624ca0cc4980c02",
+      "patch": "@@ -87,6 +87,7 @@ const sidebars = {\n             'extensions/extension-points/semantic-layers',\n           ],\n         },\n+        'extensions/semantic-provider-transport',\n         'extensions/development',\n         'extensions/deployment',\n         'extensions/mcp',"
+    },
+    {
+      "sha": "67b99535bd5c6a5e714802e94fe605cbeea80c56",
+      "filename": "superset/semantic_layers/transport.py",
+      "status": "modified",
+      "additions": 22,
+      "deletions": 1,
+      "changes": 23,
+      "blob_url": "https://github.com/apache/superset/blob/d91d9836eaa344d5cbb9ce5e3624ca0cc4980c02/superset%2Fsemantic_layers%2Ftransport.py",
+      "raw_url": "https://github.com/apache/superset/raw/d91d9836eaa344d5cbb9ce5e3624ca0cc4980c02/superset%2Fsemantic_layers%2Ftransport.py",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/superset%2Fsemantic_layers%2Ftransport.py?ref=d91d9836eaa344d5cbb9ce5e3624ca0cc4980c02",
+      "patch": "@@ -220,11 +220,32 @@ def _read_body(\n         consume: Callable[[int], None] | None,\n     ) -> bytes:\n         body: BytesIO = BytesIO()\n+        content_length: str | None = response.headers.get(\"Content-Length\")\n+        read_chunk: Callable[..., bytes] = getattr(\n+            response.raw, \"read1\", response.raw.read\n+        )\n         while True:\n             bound.remaining()\n-            chunk: bytes = response.raw.read1(_CHUNK_BYTES, decode_content=False)\n+            chunk: bytes = read_chunk(_CHUNK_BYTES, decode_content=False)\n             bound.remaining()  # Shutdown can look like EOF; refuse partial bytes.\n             if not chunk:\n+                if isinstance(content_length, str) and (\n+                    response.request is None or response.request.method != \"HEAD\"\n+                ):\n+                    lengths: set[str] = {\n+                        part.strip(\" \\t\") for part in content_length.split(\",\")\n+                    }\n+                    if len(lengths) != 1:\n+                        raise ProviderRequestError(Failure.UNREACHABLE)\n+                    content_length = lengths.pop()\n+                    if not (content_length.isascii() and content_length.isdecimal()):\n+                        raise ProviderRequestError(Failure.UNREACHABLE)\n+                    try:\n+                        expected_length: int = int(content_length)\n+                    except ValueError:\n+                        raise ProviderRequestError(Failure.UNREACHABLE) from None\n+                    if body.tell() != expected_length:\n+                        raise ProviderRequestError(Failure.UNREACHABLE)\n                 return body.getvalue()\n             if consume is not None:\n                 consume(len(chunk))"
+    },
+    {
+      "sha": "9c16a07b392e03b307c8a67080827025709fb488",
+      "filename": "tests/unit_tests/semantic_layers/transport_test.py",
+      "status": "modified",
+      "additions": 132,
+      "deletions": 0,
+      "changes": 132,
+      "blob_url": "https://github.com/apache/superset/blob/d91d9836eaa344d5cbb9ce5e3624ca0cc4980c02/tests%2Funit_tests%2Fsemantic_layers%2Ftransport_test.py",
+      "raw_url": "https://github.com/apache/superset/raw/d91d9836eaa344d5cbb9ce5e3624ca0cc4980c02/tests%2Funit_tests%2Fsemantic_layers%2Ftransport_test.py",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/tests%2Funit_tests%2Fsemantic_layers%2Ftransport_test.py?ref=d91d9836eaa344d5cbb9ce5e3624ca0cc4980c02",
+      "patch": "@@ -772,6 +772,138 @@ def test_bounded_body_is_read_through_the_checked_connection(\n     assert seen == [f\"POST /q public.example.test:{port}\"]\n \n \n+def test_bounded_body_supports_urllib3_without_read1() -> None:\n+    class RawWithoutRead1:\n+        def __init__(self, body: bytes) -> None:\n+            self.stream: BytesIO = BytesIO(body)\n+            self.read_sizes: list[int] = []\n+\n+        def read(self, amt: int, decode_content: bool = False) -> bytes:\n+            assert decode_content is False\n+            self.read_sizes.append(amt)\n+            return self.stream.read(amt)\n+\n+    raw: RawWithoutRead1 = RawWithoutRead1(b\"response body\")\n+    response: Mock = Mock(raw=raw)\n+    bound: semantic_layer_http._Deadline = semantic_layer_http._Deadline(\n+        time.monotonic() + 2\n+    )\n+\n+    assert (\n+        semantic_layer_http.HostProviderTransport._read_body(response, bound, 32, None)\n+        == b\"response body\"\n+    )\n+    assert raw.read_sizes == [semantic_layer_http._CHUNK_BYTES] * 2\n+\n+    oversized: RawWithoutRead1 = RawWithoutRead1(b\"too many bytes\")\n+    with pytest.raises(ProviderRequestError, match=\"byte budget\"):\n+        semantic_layer_http.HostProviderTransport._read_body(\n+            Mock(raw=oversized), bound, 4, None\n+        )\n+    assert oversized.read_sizes == [semantic_layer_http._CHUNK_BYTES]\n+\n+\n+def test_bounded_body_rejects_short_urllib3_1_response() -> None:\n+    raw: Mock = Mock(spec=[\"read\"])\n+    raw.read.side_effect = [b\"eleven bytes\", b\"\"]\n+    response: Mock = Mock(\n+        raw=raw, headers={\"Content-Length\": \"100\"}, request=Mock(method=\"GET\")\n+    )\n+    bound: semantic_layer_http._Deadline = semantic_layer_http._Deadline(\n+        time.monotonic() + 2\n+    )\n+\n+    raised: pytest.ExceptionInfo[ProviderRequestError]\n+    with pytest.raises(ProviderRequestError) as raised:\n+        semantic_layer_http.HostProviderTransport._read_body(response, bound, 100, None)\n+\n+    assert raised.value.failure == ProviderRequestFailure.UNREACHABLE\n+\n+\n+@pytest.mark.parametrize(\n+    \"content_length\", [\"5, 5\", \"5 \", \"5,\\t5\"], ids=[\"repeated\", \"ows\", \"repeated-ows\"]\n+)\n+def test_bounded_body_accepts_equivalent_content_lengths(content_length: str) -> None:\n+    raw: Mock = Mock(spec=[\"read\"])\n+    raw.read.side_effect = [b\"hello\", b\"\"]\n+    response: Mock = Mock(\n+        raw=raw,\n+        headers={\"Content-Length\": content_length},\n+        request=Mock(method=\"GET\"),\n+    )\n+    bound: semantic_layer_http._Deadline = semantic_layer_http._Deadline(\n+        time.monotonic() + 2\n+    )\n+\n+    assert (\n+        semantic_layer_http.HostProviderTransport._read_body(response, bound, 100, None)\n+        == b\"hello\"\n+    )\n+\n+\n+@pytest.mark.parametrize(\n+    \"content_length\", [\"+5\", \"5, 6\", \"５\"], ids=[\"signed\", \"conflicting\", \"non-ascii\"]\n+)\n+def test_bounded_body_rejects_invalid_complete_content_length(\n+    content_length: str,\n+) -> None:\n+    raw: Mock = Mock(spec=[\"read\"])\n+    raw.read.side_effect = [b\"hello\", b\"\"]\n+    response: Mock = Mock(\n+        raw=raw,\n+        headers={\"Content-Length\": content_length},\n+        request=Mock(method=\"GET\"),\n+    )\n+    bound: semantic_layer_http._Deadline = semantic_layer_http._Deadline(\n+        time.monotonic() + 2\n+    )\n+\n+    raised: pytest.ExceptionInfo[ProviderRequestError]\n+    with pytest.raises(ProviderRequestError) as raised:\n+        semantic_layer_http.HostProviderTransport._read_body(response, bound, 100, None)\n+    assert raised.value.failure == ProviderRequestFailure.UNREACHABLE\n+\n+\n+def test_bounded_body_head_exempts_content_length_from_body_check() -> None:\n+    raw: Mock = Mock(spec=[\"read\"])\n+    raw.read.return_value = b\"\"\n+    response: Mock = Mock(\n+        raw=raw,\n+        headers={\"Content-Length\": \"5\"},\n+        request=Mock(method=\"HEAD\"),\n+    )\n+    bound: semantic_layer_http._Deadline = semantic_layer_http._Deadline(\n+        time.monotonic() + 2\n+    )\n+\n+    assert (\n+        semantic_layer_http.HostProviderTransport._read_body(response, bound, 100, None)\n+        == b\"\"\n+    )\n+\n+\n+@pytest.mark.parametrize(\n+    \"content_length\", [\"invalid\", \"9\" * 5000], ids=[\"nonnumeric\", \"oversized-digits\"]\n+)\n+def test_bounded_body_rejects_malformed_content_length(content_length: str) -> None:\n+    raw: Mock = Mock(spec=[\"read\"])\n+    raw.read.return_value = b\"\"\n+    response: Mock = Mock(\n+        raw=raw,\n+        headers={\"Content-Length\": content_length},\n+        request=Mock(method=\"GET\"),\n+    )\n+    bound: semantic_layer_http._Deadline = semantic_layer_http._Deadline(\n+        time.monotonic() + 2\n+    )\n+\n+    raised: pytest.ExceptionInfo[ProviderRequestError]\n+    with pytest.raises(ProviderRequestError) as raised:\n+        semantic_layer_http.HostProviderTransport._read_body(response, bound, 100, None)\n+\n+    assert raised.value.failure == ProviderRequestFailure.UNREACHABLE\n+\n+\n def test_bounded_body_is_refused_past_its_byte_cap(\n     public_tls: tuple[ssl.SSLContext, list[str]],\n ) -> None:"
+    }
+  ]
+}

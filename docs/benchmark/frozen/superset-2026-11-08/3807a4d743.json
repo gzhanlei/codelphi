@@ -1,0 +1,101 @@
+{
+  "sha": "3807a4d7433eb824c758b4a5e801e58351e0b0e2",
+  "node_id": "C_kwDOAlosUtoAKDM4MDdhNGQ3NDMzZWI4MjRjNzU4YjRhNWU4MDFlNTgzNTFlMGIwZTI",
+  "commit": {
+    "author": {
+      "name": "Joe Li",
+      "email": "joe@preset.io",
+      "date": "2026-11-07T03:05:09Z"
+    },
+    "committer": {
+      "name": "GitHub",
+      "email": "noreply@github.com",
+      "date": "2026-11-07T03:05:09Z"
+    },
+    "message": "style(frontend): format FilterScopeSelector with oxfmt 0.75 (#46033)\n\nCo-authored-by: Claude Opus 5.5 <noreply@anthropic.com>",
+    "tree": {
+      "sha": "82d78c26d425751f99aca1120c09d314972738ed",
+      "url": "https://api.github.com/repos/apache/superset/git/trees/82d78c26d425751f99aca1120c09d314972738ed"
+    },
+    "url": "https://api.github.com/repos/apache/superset/git/commits/3807a4d7433eb824c758b4a5e801e58351e0b0e2",
+    "comment_count": 0,
+    "verification": {
+      "verified": true,
+      "reason": "valid",
+      "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJq7pVlCRC1aQ7uu5UhlAAAgxsQADjSsBX4QlivDDNGqtTdQXm0\neM3mmAhYdGShLs4tDzTCKNDRkKXv0EHTElqDbcI0iuGLKJeXihdwZxmKw2V3SpxF\nJCw/73j8Z/OH/LSvaaLPyms2GTMQ9tTSUY3TrDKHTq2Qz2SPAM1/SWWwEGgIx5a3\n45Ik3ex2KCqqaS0om8jzAqk2y56AM8xcOpjMaH2QCccrazSu+AuU/G3yzMlJWYKs\nQ9u6/MW79w5nGB6RK9fMADwVO2Y007LFO9EjKqp/gkw6W3Lgn85GoehH72IOjv4G\nGzSdOTyX1FHjdcwwJeO+NzmMMl+gxiXlqz3kfdFOPr52sj9iy3oB9xIPF5i+jNh1\n4jDq9caqAmlmuDbeqFEKfSmb3WBo17R9Bde3se2oTawnWRWIsiKZRJsbCIUfF0LL\nbozU4O01StUyBXitlqZYoG8KBQ3tpNJoZX3Bt58RD5shhqunSxo2R0SwzZPuljtc\n3GgdPLF0hZljGhC1f6FqcZzqoO5IrEaBsdPqS4xELiQt4Z0r1Hewt0ZHxWI6DoR2\n3Ed7QrkMYilOffgusyNiiZCB9Ij0w+SIPSNJPexmNPNBdQGc3UvqN3SOVSHUkVvC\nkjn7IaTdxHXlfJmkgzHmlJa+5xbhz8WO49z55x+kbXEq3BA09UO3bTeUSPlkthk6\namqSoWgtvO4t4IOpUrfX\n=ML6p\n-----END PGP SIGNATURE-----\n",
+      "payload": "tree 82d78c26d425751f99aca1120c09d314972738ed\nparent 1a30d454b5c1aa36a6f5528e6b2d3a53a4d36fa5\nauthor Joe Li <joe@preset.io> 1794020709 -0800\ncommitter GitHub <noreply@github.com> 1794020709 +0700\n\nstyle(frontend): format FilterScopeSelector with oxfmt 0.75 (#46033)\n\nCo-authored-by: Claude Opus 5.5 <noreply@anthropic.com>",
+      "verified_at": "2026-11-07T03:05:10Z"
+    }
+  },
+  "url": "https://api.github.com/repos/apache/superset/commits/3807a4d7433eb824c758b4a5e801e58351e0b0e2",
+  "html_url": "https://github.com/apache/superset/commit/3807a4d7433eb824c758b4a5e801e58351e0b0e2",
+  "comments_url": "https://api.github.com/repos/apache/superset/commits/3807a4d7433eb824c758b4a5e801e58351e0b0e2/comments",
+  "author": {
+    "login": "sadpandajoe",
+    "id": 47334392,
+    "node_id": "MDQ6VXNlcjQ3MzM0Mzky",
+    "avatar_url": "https://avatars.githubusercontent.com/u/47334392?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/sadpandajoe",
+    "html_url": "https://github.com/sadpandajoe",
+    "followers_url": "https://api.github.com/users/sadpandajoe/followers",
+    "following_url": "https://api.github.com/users/sadpandajoe/following{/other_user}",
+    "gists_url": "https://api.github.com/users/sadpandajoe/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/sadpandajoe/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/sadpandajoe/subscriptions",
+    "organizations_url": "https://api.github.com/users/sadpandajoe/orgs",
+    "repos_url": "https://api.github.com/users/sadpandajoe/repos",
+    "events_url": "https://api.github.com/users/sadpandajoe/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/sadpandajoe/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "committer": {
+    "login": "web-flow",
+    "id": 19864447,
+    "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+    "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/web-flow",
+    "html_url": "https://github.com/web-flow",
+    "followers_url": "https://api.github.com/users/web-flow/followers",
+    "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+    "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+    "organizations_url": "https://api.github.com/users/web-flow/orgs",
+    "repos_url": "https://api.github.com/users/web-flow/repos",
+    "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/web-flow/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "parents": [
+    {
+      "sha": "1a30d454b5c1aa36a6f5528e6b2d3a53a4d36fa5",
+      "url": "https://api.github.com/repos/apache/superset/commits/1a30d454b5c1aa36a6f5528e6b2d3a53a4d36fa5",
+      "html_url": "https://github.com/apache/superset/commit/1a30d454b5c1aa36a6f5528e6b2d3a53a4d36fa5"
+    }
+  ],
+  "stats": {
+    "total": 9,
+    "additions": 4,
+    "deletions": 5
+  },
+  "files": [
+    {
+      "sha": "ea6cf9159c5fb856e91f1a49b80cd80f78a663bb",
+      "filename": "superset-frontend/src/dashboard/components/filterscope/FilterScopeSelector.tsx",
+      "status": "modified",
+      "additions": 4,
+      "deletions": 5,
+      "changes": 9,
+      "blob_url": "https://github.com/apache/superset/blob/3807a4d7433eb824c758b4a5e801e58351e0b0e2/superset-frontend%2Fsrc%2Fdashboard%2Fcomponents%2Ffilterscope%2FFilterScopeSelector.tsx",
+      "raw_url": "https://github.com/apache/superset/raw/3807a4d7433eb824c758b4a5e801e58351e0b0e2/superset-frontend%2Fsrc%2Fdashboard%2Fcomponents%2Ffilterscope%2FFilterScopeSelector.tsx",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/superset-frontend%2Fsrc%2Fdashboard%2Fcomponents%2Ffilterscope%2FFilterScopeSelector.tsx?ref=3807a4d7433eb824c758b4a5e801e58351e0b0e2",
+      "patch": "@@ -503,11 +503,10 @@ export default function FilterScopeSelector({\n   const [filterFieldNodes] = useState<FilterFieldNode[]>(() =>\n     initialized.showSelector ? initialized.initialState.filterFieldNodes : [],\n   );\n-  const [checkedFilterFields, setCheckedFilterFields] = useState<string[]>(\n-    () =>\n-      initialized.showSelector\n-        ? initialized.initialState.checkedFilterFields\n-        : [],\n+  const [checkedFilterFields, setCheckedFilterFields] = useState<string[]>(() =>\n+    initialized.showSelector\n+      ? initialized.initialState.checkedFilterFields\n+      : [],\n   );\n   const [expandedFilterIds, setExpandedFilterIds] = useState<\n     (string | number)[]"
+    }
+  ]
+}

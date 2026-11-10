@@ -1,0 +1,1046 @@
+==FILE== docs/src/data/databases.json
+@@ -310,7 +310,7 @@
+             }
+           }
+         ],
+-        "notes": "URL-encode special characters in s3_staging_dir (e.g., s3:// becomes s3%3A//).",
++        "notes": "URL-encode special characters in s3_staging_dir (e.g., s3:// becomes s3%3A//). Either s3_staging_dir or work_group is required; s3_staging_dir can be omitted when the work group defines a query result location or uses managed query results.",
+         "category": "Cloud - AWS",
+         "custom_errors": [
+           {
+==FILE== superset-frontend/src/features/databases/DatabaseModal/DatabaseConnectionForm/AwsSecretAccessKeyField.test.tsx
+@@ -0,0 +1,57 @@
++/**
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ *
++ *   http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing,
++ * software distributed under the License is distributed on an
++ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
++ * KIND, either express or implied.  See the License for the
++ * specific language governing permissions and limitations
++ * under the License.
++ */
++import { render, screen } from 'spec/helpers/testing-library';
++import { ConfigurationMethod, FieldPropTypes } from '../../types';
++import { awsSecretAccessKeyField } from './CommonParameters';
++
++const renderSecretField = (isEditMode: boolean, secret?: string) => {
++  const props = {
++    required: false,
++    field: 'aws_secret_access_key',
++    changeMethods: { onParametersChange: jest.fn() },
++    getValidation: jest.fn(),
++    validationErrors: null,
++    db: {
++      configuration_method: ConfigurationMethod.DynamicForm,
++      database_name: 'athena',
++      driver: 'rest',
++      engine: 'awsathena',
++      parameters: { aws_secret_access_key: secret },
++    },
++    isValidating: false,
++    isEditMode,
++  } as unknown as FieldPropTypes;
++  return render(awsSecretAccessKeyField(props));
++};
++
++test.each([
++  ['add', false],
++  ['edit', true],
++])(
++  'masks the AWS secret access key in %s mode',
++  (_mode: string, isEditMode: boolean) => {
++    renderSecretField(isEditMode, 'wJalrXUtnFEMI/K7MDENG');
++
++    expect(screen.getByText('AWS Secret Access Key')).toBeInTheDocument();
++    const input = screen.getByRole('textbox');
++    expect(input).toHaveAttribute('type', 'password');
++    expect(input).toHaveAttribute('name', 'aws_secret_access_key');
++    expect(screen.getByTestId('icon-eye')).toBeInTheDocument();
++  },
++);
+==FILE== superset-frontend/src/features/databases/DatabaseModal/DatabaseConnectionForm/CommonParameters.tsx
+@@ -238,6 +238,33 @@ export const passwordField = ({
+     onChange={changeMethods.onParametersChange}
+   />
+ );
++// The AWS secret is rendered as a password input in both add and edit mode.
++// `LabeledErrorBoundInput` only masks when `visibilityToggle` is set (or the
++// field is literally named `password`), so it is always passed here; turning
++// it off in edit mode would fall back to a plaintext input and expose a
++// newly-typed secret.
++export const awsSecretAccessKeyField = ({
++  required,
++  changeMethods,
++  getValidation,
++  validationErrors,
++  db,
++  isValidating,
++}: FieldPropTypes) => (
++  <ValidatedInput
++    id="aws_secret_access_key"
++    name="aws_secret_access_key"
++    required={required}
++    isValidating={isValidating}
++    visibilityToggle
++    value={db?.parameters?.aws_secret_access_key}
++    validationMethods={{ onBlur: getValidation }}
++    errorMessage={validationErrors?.aws_secret_access_key}
++    placeholder={t('e.g. ********')}
++    label={t('AWS Secret Access Key')}
++    onChange={changeMethods.onParametersChange}
++  />
++);
+ export const accessTokenField = ({
+   required,
+   changeMethods,
+==FILE== superset-frontend/src/features/databases/DatabaseModal/DatabaseConnectionForm/ValidatedInputField.test.tsx
+@@ -0,0 +1,55 @@
++/**
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ *
++ *   http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing,
++ * software distributed under the License is distributed on an
++ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
++ * KIND, either express or implied.  See the License for the
++ * specific language governing permissions and limitations
++ * under the License.
++ */
++import { render, screen } from 'spec/helpers/testing-library';
++import { ConfigurationMethod, FieldPropTypes } from '../../types';
++import { validatedInputField } from './ValidatedInputField';
++
++const renderField = (field: string, required: boolean) => {
++  const props = {
++    required,
++    field,
++    changeMethods: { onParametersChange: jest.fn() },
++    getValidation: jest.fn(),
++    validationErrors: null,
++    db: {
++      configuration_method: ConfigurationMethod.DynamicForm,
++      database_name: 'athena',
++      driver: 'rest',
++      engine: 'awsathena',
++      parameters: {},
++    },
++    isValidating: false,
++    isEditMode: false,
++  } as unknown as FieldPropTypes;
++  return render(validatedInputField(props));
++};
++
++test('labels the Athena S3 field as the query results location', () => {
++  renderField('s3_staging_dir', false);
++
++  expect(screen.getByText('S3 query results location')).toBeInTheDocument();
++  expect(screen.queryByText('S3 Staging Directory')).not.toBeInTheDocument();
++  expect(
++    screen.getByPlaceholderText('e.g. s3://my-bucket/athena-results/'),
++  ).toBeInTheDocument();
++  expect(
++    screen.getByText('Optional if your workgroup sets a result location.'),
++  ).toBeInTheDocument();
++  expect(screen.getByRole('textbox')).not.toBeRequired();
++});
+==FILE== superset-frontend/src/features/databases/DatabaseModal/DatabaseConnectionForm/ValidatedInputField.tsx
+@@ -38,6 +38,30 @@ const FIELD_TEXT_MAP = {
+     placeholder: t('e.g. AccountAdmin'),
+     className: 'form-group-w-50',
+   },
++  aws_access_key_id: {
++    label: t('AWS Access Key ID'),
++    placeholder: t('e.g. AKIAIOSFODNN7EXAMPLE'),
++  },
++  region_name: {
++    label: t('Region'),
++    placeholder: t('e.g. us-east-1'),
++    className: 'form-group-w-50',
++  },
++  s3_staging_dir: {
++    label: t('S3 query results location'),
++    placeholder: t('e.g. s3://my-bucket/athena-results/'),
++    helpText: t('Optional if your workgroup sets a result location.'),
++  },
++  schema_name: {
++    label: t('Schema'),
++    placeholder: t('e.g. default'),
++    className: 'form-group-w-50',
++  },
++  work_group: {
++    label: t('Work Group'),
++    placeholder: t('e.g. primary'),
++    className: 'form-group-w-50',
++  },
+ };
+ 
+ type FieldTextMapKey = keyof typeof FIELD_TEXT_MAP;
+==FILE== superset-frontend/src/features/databases/DatabaseModal/DatabaseConnectionForm/constants.ts
+@@ -19,6 +19,7 @@
+ import { getExtensionsRegistry } from '@superset-ui/core';
+ import {
+   accessTokenField,
++  awsSecretAccessKeyField,
+   databaseField,
+   defaultCatalogField,
+   defaultSchemaField,
+@@ -61,6 +62,12 @@ export const FormFieldOrder = [
+   'account',
+   'warehouse',
+   'role',
++  'aws_access_key_id',
++  'aws_secret_access_key',
++  'region_name',
++  's3_staging_dir',
++  'schema_name',
++  'work_group',
+   'ssh',
+   'oauth2_client_info',
+   'embedded_credentials',
+@@ -93,6 +100,12 @@ export const FORM_FIELD_MAP = {
+   warehouse: validatedInputField,
+   role: validatedInputField,
+   account: validatedInputField,
++  aws_access_key_id: validatedInputField,
++  aws_secret_access_key: awsSecretAccessKeyField,
++  region_name: validatedInputField,
++  s3_staging_dir: validatedInputField,
++  schema_name: validatedInputField,
++  work_group: validatedInputField,
+   ssh: SSHTunnelSwitchComponent,
+   project_id: projectIdfield,
+ };
+==FILE== superset-frontend/src/features/databases/types.ts
+@@ -60,6 +60,12 @@ export type DatabaseParameters = {
+   warehouse?: string;
+   role?: string;
+   account?: string;
++  aws_access_key_id?: string;
++  aws_secret_access_key?: string;
++  region_name?: string;
++  s3_staging_dir?: string;
++  schema_name?: string;
++  work_group?: string;
+   ssh?: boolean;
+   project_id?: string;
+   oauth2_client_info?: Record<string, string>;
+==FILE== superset/db_engine_specs/athena.py
+@@ -17,20 +17,97 @@
+ import re
+ from datetime import datetime
+ from re import Pattern
+-from typing import Any, Optional
++from typing import Any, Optional, TypedDict
+ 
+-from flask_babel import gettext as __
++from apispec import APISpec
++from apispec.ext.marshmallow import MarshmallowPlugin
++from flask_babel import gettext as __, lazy_gettext as _
++from marshmallow import fields, Schema
+ from sqlalchemy import types
+ from sqlalchemy.engine.url import URL
+ 
+ from superset.constants import TimeGrain
+-from superset.db_engine_specs.base import BaseEngineSpec, DatabaseCategory
+-from superset.errors import SupersetErrorType
++from superset.databases.utils import make_url_safe
++from superset.db_engine_specs.base import (
++    BaseEngineSpec,
++    BasicPropertiesType,
++    DatabaseCategory,
++)
++from superset.errors import ErrorLevel, SupersetError, SupersetErrorType
+ 
+ SYNTAX_ERROR_REGEX = re.compile(
+     ": mismatched input '(?P<syntax_error>.*?)'. Expecting: "
+ )
+ 
++# Standard regional host of the PyAthena SQLAlchemy URI, e.g.
++# ``athena.us-east-1.amazonaws.com`` or ``athena.cn-north-1.amazonaws.com.cn``.
++# Mirrors the pattern PyAthena itself uses to derive ``region_name`` from the
++# host; any other host (e.g. a VPC/PrivateLink endpoint) is passed to PyAthena
++# verbatim.
++ATHENA_HOST_REGEX = re.compile(
++    r"^athena\.(?P<region_name>[a-z0-9-]+)\.amazonaws\.com(?P<china>\.cn)?$"
++)
++
++# URI query parameters exposed as their own form fields; every other query
++# parameter (``catalog_name``, ``role_arn``, ``endpoint_url``, ...) round-trips
++# through the ``query`` parameter so editing a connection never drops it.
++ATHENA_FORM_QUERY_PARAMS = ("s3_staging_dir", "work_group")
++
++
++class AthenaParametersSchema(Schema):
++    aws_access_key_id = fields.Str(
++        required=False,
++        allow_none=True,
++        metadata={"description": _("AWS access key ID")},
++    )
++    aws_secret_access_key = fields.Str(
++        required=False,
++        allow_none=True,
++        metadata={"description": _("AWS secret access key")},
++    )
++    region_name = fields.Str(
++        required=True,
++        metadata={"description": _("AWS region, e.g. us-east-1")},
++    )
++    s3_staging_dir = fields.Str(
++        required=False,
++        allow_none=True,
++        metadata={
++            "description": _(
++                "S3 location where Athena query results are stored, "
++                "e.g. s3://my-bucket/athena-results/. Can be left empty when "
++                "the work group defines a query result location or uses "
++                "managed query results."
++            )
++        },
++    )
++    schema_name = fields.Str(
++        required=False,
++        allow_none=True,
++        metadata={"description": _("Default schema (database) to connect to")},
++    )
++    work_group = fields.Str(
++        required=False,
++        allow_none=True,
++        metadata={"description": _("Athena work group to run queries against")},
++    )
++    query = fields.Dict(
++        keys=fields.Str(),
++        values=fields.Raw(),
++        required=False,
++        metadata={"description": _("Additional parameters")},
++    )
++
++
++class AthenaParametersType(TypedDict, total=False):
++    aws_access_key_id: Optional[str]
++    aws_secret_access_key: Optional[str]
++    region_name: str
++    s3_staging_dir: Optional[str]
++    schema_name: Optional[str]
++    work_group: Optional[str]
++    query: dict[str, Any]
++
+ 
+ class AthenaEngineSpec(BaseEngineSpec):
+     engine = "awsathena"
+@@ -41,6 +118,17 @@ class AthenaEngineSpec(BaseEngineSpec):
+     use_equality_for_boolean_filters = True
+     supports_dynamic_schema = True
+ 
++    # Render the dynamic connection form (individual parameters) instead of the
++    # raw SQLAlchemy URI box. Athena's URI is not a simple host/port/user/pass/db,
++    # so a custom schema is used rather than ``BasicParametersMixin``.
++    parameters_schema = AthenaParametersSchema()
++    default_driver = "rest"
++    sqlalchemy_uri_placeholder = (
++        "awsathena+rest://{aws_access_key_id}:{aws_secret_access_key}@"
++        "athena.{region_name}.amazonaws.com/{schema_name}"
++        "?s3_staging_dir={s3_staging_dir}"
++    )
++
+     metadata = {
+         "description": (
+             "Amazon Athena is an interactive query service for "
+@@ -95,7 +183,10 @@ class AthenaEngineSpec(BaseEngineSpec):
+         ],
+         "notes": (
+             "URL-encode special characters in s3_staging_dir "
+-            "(e.g., s3:// becomes s3%3A//)."
++            "(e.g., s3:// becomes s3%3A//). Either s3_staging_dir or "
++            "work_group is required; s3_staging_dir can be omitted when the "
++            "work group defines a query result location or uses managed "
++            "query results."
+         ),
+     }
+ 
+@@ -190,3 +281,151 @@ def get_schema_from_engine_params(
+             awsathena+rest://athena.{region_name}.amazonaws.com:443/{schema_name}?catalog_name={catalog_name}&s3_staging_dir={s3_staging_dir}
+         """
+         return sqlalchemy_uri.database
++
++    @classmethod
++    def build_sqlalchemy_uri(
++        cls,
++        parameters: AthenaParametersType,
++        encrypted_extra: Optional[  # pylint: disable=unused-argument
++            dict[str, Any]
++        ] = None,
++    ) -> str:
++        # PyAthena needs an S3 result location or a work group (which may define
++        # its own result location or use managed query results); empty values
++        # are left out of the URI.
++        # Carry through any other URI query parameters (catalog_name, role_arn,
++        # endpoint_url, ...) so they are not lost when the form is re-saved.
++        query: dict[str, str] = {
++            key: str(value)
++            for key, value in (parameters.get("query") or {}).items()
++            if key not in ATHENA_FORM_QUERY_PARAMS and value is not None
++        }
++        if s3_staging_dir := parameters.get("s3_staging_dir"):
++            query["s3_staging_dir"] = s3_staging_dir
++        if work_group := parameters.get("work_group"):
++            query["work_group"] = work_group
++
++        # SQLAlchemy 2.0 made URL.__str__() hide the password by default
++        # (it rendered in full under 1.4); render_as_string(hide_password=
++        # False) is required here since this URI is stored/used to actually
++        # connect, not just displayed.
++        host, port = cls._build_host(parameters["region_name"])
++        return URL.create(
++            f"{cls.engine}+{cls.default_driver}",
++            username=parameters.get("aws_access_key_id"),
++            password=parameters.get("aws_secret_access_key"),
++            host=host,
++            port=port,
++            database=parameters.get("schema_name"),
++            query=query,
++        ).render_as_string(hide_password=False)
++
++    @staticmethod
++    def _build_host(region_name: str) -> tuple[str, Optional[int]]:
++        """
++        Return the URI host (and port) for the ``region_name`` parameter.
++
++        ``region_name`` is normally an AWS region code (``us-east-1``), from
++        which the standard regional Athena host is built (``.amazonaws.com.cn``
++        for China regions). Region codes never contain a dot or a colon, so a
++        value that does is a full host — e.g. a VPC/PrivateLink endpoint kept
++        verbatim by ``get_parameters_from_uri`` — and is used as-is, including
++        any ``:port`` suffix.
++        """
++        if "." not in region_name and ":" not in region_name:
++            suffix = ".cn" if region_name.startswith("cn-") else ""
++            return f"athena.{region_name}.amazonaws.com{suffix}", None
++
++        host, sep, port = region_name.rpartition(":")
++        if sep and port.isdigit():
++            return host, int(port)
++        return region_name, None
++
++    @classmethod
++    def get_parameters_from_uri(
++        cls,
++        uri: str,
++        encrypted_extra: Optional[  # pylint: disable=unused-argument
++            dict[str, Any]
++        ] = None,
++    ) -> AthenaParametersType:
++        url = make_url_safe(uri)
++        query = dict(url.query.items())
++
++        host = url.host or ""
++        if match := ATHENA_HOST_REGEX.match(host):
++            # PyAthena ignores the port, so a standard regional host reduces
++            # to just its region code.
++            region_name = match["region_name"]
++        else:
++            # Non-standard host (e.g. VPC/PrivateLink endpoint): keep it, and
++            # its port, verbatim so ``build_sqlalchemy_uri`` reproduces it.
++            region_name = f"{host}:{url.port}" if url.port else host
++
++        parameters: AthenaParametersType = {
++            "aws_access_key_id": url.username,
++            "aws_secret_access_key": url.password,
++            "region_name": region_name,
++            "schema_name": url.database,
++        }
++        if "s3_staging_dir" in query:
++            parameters["s3_staging_dir"] = query["s3_staging_dir"]
++        if "work_group" in query:
++            parameters["work_group"] = query["work_group"]
++        if extra_query := {
++            key: value
++            for key, value in query.items()
++            if key not in ATHENA_FORM_QUERY_PARAMS
++        }:
++            parameters["query"] = extra_query
++        return parameters
++
++    @classmethod
++    def validate_parameters(
++        cls,
++        properties: BasicPropertiesType,
++    ) -> list[SupersetError]:
++        errors: list[SupersetError] = []
++        parameters = properties.get("parameters", {})
++        present = {key for key in parameters if parameters.get(key, ())}
++
++        missing: list[str] = []
++        if "region_name" not in present:
++            missing.append("region_name")
++        # Athena needs somewhere to write query results: either an explicit S3
++        # location or a work group (which may define its own result location
++        # or use managed query results). Both fields are flagged when neither
++        # is set.
++        if not present & {"s3_staging_dir", "work_group"}:
++            missing.extend(["s3_staging_dir", "work_group"])
++
++        if missing:
++            errors.append(
++                SupersetError(
++                    message=(
++                        f"One or more parameters are missing: {', '.join(missing)}"
++                    ),
++                    error_type=SupersetErrorType.CONNECTION_MISSING_PARAMETERS_ERROR,
++                    level=ErrorLevel.WARNING,
++                    extra={"missing": missing},
++                ),
++            )
++        return errors
++
++    @classmethod
++    def parameters_json_schema(cls) -> Any:
++        """
++        Return configuration parameters as OpenAPI.
++        """
++        if not cls.parameters_schema:
++            return None
++
++        spec = APISpec(
++            title="Database Parameters",
++            version="1.0.0",
++            openapi_version="3.0.0",
++            plugins=[MarshmallowPlugin()],
++        )
++
++        spec.components.schema(cls.__name__, schema=cls.parameters_schema)
++        return spec.to_dict()["components"]["schemas"][cls.__name__]
+==FILE== superset/translations/messages.pot
+@@ -1188,6 +1188,21 @@ msgstr ""
+ msgid "AUG"
+ msgstr ""
+ 
++msgid "AWS Access Key ID"
++msgstr ""
++
++msgid "AWS Secret Access Key"
++msgstr ""
++
++msgid "AWS access key ID"
++msgstr ""
++
++msgid "AWS region, e.g. us-east-1"
++msgstr ""
++
++msgid "AWS secret access key"
++msgstr ""
++
+ msgid "Aborted"
+ msgstr ""
+ 
+@@ -2476,6 +2491,9 @@ msgstr ""
+ msgid "Asynchronous query execution"
+ msgstr ""
+ 
++msgid "Athena work group to run queries against"
++msgstr ""
++
+ msgid "Attribution"
+ msgstr ""
+ 
+@@ -5147,6 +5165,9 @@ msgstr ""
+ msgid "Default minimal column width in pixels, actual width may still be larger than this if other columns don't need much space"
+ msgstr ""
+ 
++msgid "Default schema (database) to connect to"
++msgstr ""
++
+ msgid "Default value must be set when \"Filter has default value\" is checked"
+ msgstr ""
+ 
+@@ -10370,6 +10391,9 @@ msgstr ""
+ msgid "Optional dimension used to split the chart into multiple candlestick series."
+ msgstr ""
+ 
++msgid "Optional if your workgroup sets a result location."
++msgstr ""
++
+ msgid "Optional metric used to scale the size of each dot. Dot areas are scaled linearly between the minimum and maximum dot size."
+ msgstr ""
+ 
+@@ -11375,6 +11399,9 @@ msgstr ""
+ msgid "Region value format"
+ msgstr ""
+ 
++msgid "Region"
++msgstr ""
++
+ msgid "Register"
+ msgstr ""
+ 
+@@ -12047,6 +12074,12 @@ msgstr ""
+ msgid "Running block %(block_num)s out of %(block_count)s"
+ msgstr ""
+ 
++msgid "S3 location where Athena query results are stored, e.g. s3://my-bucket/athena-results/. Can be left empty when the work group defines a query result location or uses managed query results."
++msgstr ""
++
++msgid "S3 query results location"
++msgstr ""
++
+ msgid "SAT"
+ msgstr ""
+ 
+@@ -17502,6 +17535,9 @@ msgstr ""
+ msgid "Word Rotation"
+ msgstr ""
+ 
++msgid "Work Group"
++msgstr ""
++
+ msgid "Working"
+ msgstr ""
+ 
+@@ -18388,6 +18424,9 @@ msgstr ""
+ msgid "e.g. 5432"
+ msgstr ""
+ 
++msgid "e.g. AKIAIOSFODNN7EXAMPLE"
++msgstr ""
++
+ msgid "e.g. AccountAdmin"
+ msgstr ""
+ 
+@@ -18409,9 +18448,18 @@ msgstr ""
+ msgid "e.g. param1=value1&param2=value2"
+ msgstr ""
+ 
++msgid "e.g. primary"
++msgstr ""
++
++msgid "e.g. s3://my-bucket/athena-results/"
++msgstr ""
++
+ msgid "e.g. sql/protocolv1/o/12345"
+ msgstr ""
+ 
++msgid "e.g. us-east-1"
++msgstr ""
++
+ msgid "e.g. world_population"
+ msgstr ""
+ 
+==FILE== tests/unit_tests/db_engine_specs/test_athena.py
+@@ -17,7 +17,7 @@
+ # pylint: disable=unused-argument, import-outside-toplevel, protected-access
+ import re
+ from datetime import datetime
+-from typing import Optional
++from typing import Any, Optional
+ 
+ import pytest
+ from sqlalchemy.engine.url import make_url
+@@ -190,3 +190,393 @@ def test_get_schema_from_engine_params() -> None:
+         )
+         is None
+     )
++
++
++def test_build_sqlalchemy_uri_full() -> None:
++    """
++    Test ``build_sqlalchemy_uri`` with every parameter supplied.
++    """
++    from superset.db_engine_specs.athena import AthenaEngineSpec
++
++    uri = AthenaEngineSpec.build_sqlalchemy_uri(
++        {
++            "aws_access_key_id": "AKIAIOSFODNN7EXAMPLE",
++            "aws_secret_access_key": "secret/with+special=chars",
++            "region_name": "us-east-1",
++            "s3_staging_dir": "s3://my-bucket/staging/",
++            "schema_name": "default",
++            "work_group": "primary",
++        }
++    )
++    assert uri == (
++        "awsathena+rest://AKIAIOSFODNN7EXAMPLE:secret%2Fwith+special%3Dchars@"
++        "athena.us-east-1.amazonaws.com/default"
++        "?s3_staging_dir=s3%3A%2F%2Fmy-bucket%2Fstaging%2F&work_group=primary"
++    )
++
++
++def test_build_sqlalchemy_uri_minimal() -> None:
++    """
++    Test ``build_sqlalchemy_uri`` with only the required parameters.
++
++    Without explicit credentials (e.g. IAM role based auth) the URI has no
++    user/password, no schema, and no work group.
++    """
++    from superset.db_engine_specs.athena import AthenaEngineSpec
++
++    uri = AthenaEngineSpec.build_sqlalchemy_uri(
++        {
++            "region_name": "eu-west-1",
++            "s3_staging_dir": "s3://another-bucket/",
++        }
++    )
++    assert uri == (
++        "awsathena+rest://athena.eu-west-1.amazonaws.com"
++        "?s3_staging_dir=s3%3A%2F%2Fanother-bucket%2F"
++    )
++
++
++def test_get_parameters_from_uri() -> None:
++    """
++    Test ``get_parameters_from_uri`` extracts each parameter back out.
++    """
++    from superset.db_engine_specs.athena import AthenaEngineSpec
++
++    parameters = AthenaEngineSpec.get_parameters_from_uri(
++        "awsathena+rest://AKIAIOSFODNN7EXAMPLE:secret%2Fkey@"
++        "athena.us-east-1.amazonaws.com/default"
++        "?s3_staging_dir=s3%3A%2F%2Fmy-bucket%2Fstaging%2F&work_group=primary"
++    )
++    assert parameters == {
++        "aws_access_key_id": "AKIAIOSFODNN7EXAMPLE",
++        "aws_secret_access_key": "secret/key",
++        "region_name": "us-east-1",
++        "s3_staging_dir": "s3://my-bucket/staging/",
++        "schema_name": "default",
++        "work_group": "primary",
++    }
++
++
++def test_parameters_round_trip() -> None:
++    """
++    Building a URI and parsing it back should yield the original parameters.
++    """
++    from superset.db_engine_specs.athena import (
++        AthenaEngineSpec,
++        AthenaParametersType,
++    )
++
++    parameters: AthenaParametersType = {
++        "aws_access_key_id": "AKIAIOSFODNN7EXAMPLE",
++        "aws_secret_access_key": "secret/with+special=chars",
++        "region_name": "us-east-1",
++        "s3_staging_dir": "s3://my-bucket/staging/",
++        "schema_name": "default",
++        "work_group": "primary",
++    }
++    uri = AthenaEngineSpec.build_sqlalchemy_uri(parameters)
++    assert AthenaEngineSpec.get_parameters_from_uri(uri) == parameters
++
++
++@pytest.mark.parametrize(
++    "s3_staging_dir",
++    ["", None, "absent"],
++)
++def test_build_sqlalchemy_uri_work_group_only(s3_staging_dir: str | None) -> None:
++    """
++    An empty or missing S3 location is left out of the URI.
++    """
++    from superset.db_engine_specs.athena import (
++        AthenaEngineSpec,
++        AthenaParametersType,
++    )
++
++    parameters: AthenaParametersType = {
++        "region_name": "us-east-1",
++        "work_group": "wg",
++    }
++    if s3_staging_dir != "absent":
++        parameters["s3_staging_dir"] = s3_staging_dir
++
++    uri = AthenaEngineSpec.build_sqlalchemy_uri(parameters)
++    assert uri == "awsathena+rest://athena.us-east-1.amazonaws.com?work_group=wg"
++
++
++def test_parameters_round_trip_work_group_only() -> None:
++    """
++    A work-group-only connection round-trips without an S3 location.
++    """
++    from superset.db_engine_specs.athena import (
++        AthenaEngineSpec,
++        AthenaParametersType,
++    )
++
++    uri = "awsathena+rest://athena.us-east-1.amazonaws.com/default?work_group=wg"
++    parameters = AthenaEngineSpec.get_parameters_from_uri(uri)
++    expected: AthenaParametersType = {
++        "aws_access_key_id": None,
++        "aws_secret_access_key": None,
++        "region_name": "us-east-1",
++        "schema_name": "default",
++        "work_group": "wg",
++    }
++    assert parameters == expected
++    assert "s3_staging_dir" not in parameters
++    assert AthenaEngineSpec.build_sqlalchemy_uri(parameters) == uri
++    assert (
++        AthenaEngineSpec.validate_parameters(
++            {"parameters": parameters}  # type: ignore
++        )
++        == []
++    )
++
++
++def test_get_parameters_from_uri_non_standard_host() -> None:
++    """
++    A host that doesn't match the ``athena.<region>.amazonaws.com`` shape is
++    returned verbatim as ``region_name``.
++    """
++    from superset.db_engine_specs.athena import AthenaEngineSpec
++
++    parameters = AthenaEngineSpec.get_parameters_from_uri(
++        "awsathena+rest://vpce-1234.athena.us-east-1.vpce.amazonaws.com/default"
++        "?s3_staging_dir=s3%3A%2F%2Fbucket%2F"
++    )
++    assert parameters["region_name"] == "vpce-1234.athena.us-east-1.vpce.amazonaws.com"
++    assert parameters["s3_staging_dir"] == "s3://bucket/"
++
++
++def test_parameters_json_schema() -> None:
++    """
++    Test that the OpenAPI schema exposes the expected fields.
++    """
++    from superset.db_engine_specs.athena import AthenaEngineSpec
++
++    schema = AthenaEngineSpec.parameters_json_schema()
++    assert set(schema["properties"]) == {
++        "aws_access_key_id",
++        "aws_secret_access_key",
++        "region_name",
++        "s3_staging_dir",
++        "schema_name",
++        "work_group",
++        "query",
++    }
++    assert schema["required"] == ["region_name"]
++
++
++def test_parameters_schema_load_without_s3_staging_dir() -> None:
++    """
++    The S3 location is optional, so a work-group-only payload loads cleanly.
++    """
++    from superset.db_engine_specs.athena import AthenaEngineSpec
++
++    assert AthenaEngineSpec.parameters_schema is not None
++    loaded = AthenaEngineSpec.parameters_schema.load(
++        {"region_name": "us-east-1", "work_group": "primary"}
++    )
++    assert loaded == {"region_name": "us-east-1", "work_group": "primary"}
++
++
++def test_validate_parameters_missing_required() -> None:
++    """
++    Test that ``validate_parameters`` flags a missing region.
++    """
++    from superset.db_engine_specs.athena import AthenaEngineSpec
++
++    errors = AthenaEngineSpec.validate_parameters(
++        {"parameters": {"work_group": "primary"}}  # type: ignore
++    )
++    assert len(errors) == 1
++    assert errors[0].error_type == (
++        SupersetErrorType.CONNECTION_MISSING_PARAMETERS_ERROR
++    )
++    assert errors[0].extra is not None
++    assert errors[0].extra["missing"] == ["region_name"]
++
++
++@pytest.mark.parametrize(
++    "parameters",
++    [
++        {"region_name": "us-east-1"},
++        {"region_name": "us-east-1", "s3_staging_dir": "", "work_group": ""},
++        {"region_name": "us-east-1", "s3_staging_dir": None, "work_group": None},
++    ],
++)
++def test_validate_parameters_missing_s3_and_work_group(
++    parameters: dict[str, Any],
++) -> None:
++    """
++    Without an S3 location or a work group, both fields are flagged.
++    """
++    from superset.db_engine_specs.athena import AthenaEngineSpec
++
++    errors = AthenaEngineSpec.validate_parameters(
++        {"parameters": parameters}  # type: ignore
++    )
++    assert len(errors) == 1
++    assert errors[0].error_type == (
++        SupersetErrorType.CONNECTION_MISSING_PARAMETERS_ERROR
++    )
++    assert errors[0].extra is not None
++    assert errors[0].extra["missing"] == ["s3_staging_dir", "work_group"]
++
++
++def test_validate_parameters_missing_everything() -> None:
++    """
++    An empty payload flags the region plus both result-location fields.
++    """
++    from superset.db_engine_specs.athena import AthenaEngineSpec
++
++    errors = AthenaEngineSpec.validate_parameters({"parameters": {}})
++    assert len(errors) == 1
++    assert errors[0].extra is not None
++    assert errors[0].extra["missing"] == [
++        "region_name",
++        "s3_staging_dir",
++        "work_group",
++    ]
++
++
++def test_validate_parameters_work_group_only() -> None:
++    """
++    A work group alone is enough; it can supply the result location.
++    """
++    from superset.db_engine_specs.athena import AthenaEngineSpec
++
++    errors = AthenaEngineSpec.validate_parameters(
++        {
++            "parameters": {  # type: ignore
++                "region_name": "us-east-1",
++                "s3_staging_dir": "",
++                "work_group": "primary",
++            }
++        }
++    )
++    assert errors == []
++
++
++def test_validate_parameters_valid() -> None:
++    """
++    Test that ``validate_parameters`` passes when required parameters exist.
++    """
++    from superset.db_engine_specs.athena import AthenaEngineSpec
++
++    errors = AthenaEngineSpec.validate_parameters(
++        {
++            "parameters": {  # type: ignore
++                "region_name": "us-east-1",
++                "s3_staging_dir": "s3://my-bucket/staging/",
++            }
++        }
++    )
++    assert errors == []
++
++
++def test_parameters_round_trip_preserves_extra_query_params() -> None:
++    """
++    Re-saving a dynamic-form connection keeps every URI query parameter that is
++    not a dedicated form field (catalog, IAM role, custom endpoint).
++    """
++    from superset.db_engine_specs.athena import AthenaEngineSpec
++
++    uri = (
++        "awsathena+rest://AKIAIOSFODNN7EXAMPLE:secret@"
++        "athena.us-east-1.amazonaws.com/default"
++        "?s3_staging_dir=s3%3A%2F%2Fbucket%2F"
++        "&work_group=primary"
++        "&catalog_name=my_catalog"
++        "&role_arn=arn%3Aaws%3Aiam%3A%3A123456789012%3Arole%2Fathena"
++        "&endpoint_url=https%3A%2F%2Fathena.us-east-1.amazonaws.com"
++    )
++    parameters = AthenaEngineSpec.get_parameters_from_uri(uri)
++    assert parameters["query"] == {
++        "catalog_name": "my_catalog",
++        "role_arn": "arn:aws:iam::123456789012:role/athena",
++        "endpoint_url": "https://athena.us-east-1.amazonaws.com",
++    }
++    assert parameters["s3_staging_dir"] == "s3://bucket/"
++    assert parameters["work_group"] == "primary"
++
++    rebuilt = make_url(AthenaEngineSpec.build_sqlalchemy_uri(parameters))
++    assert dict(rebuilt.query) == dict(make_url(uri).query)
++    assert rebuilt.host == "athena.us-east-1.amazonaws.com"
++
++
++def test_parameters_round_trip_form_fields_win_over_query() -> None:
++    """
++    The dedicated S3/work group fields take precedence over a duplicate key in
++    the additional parameters, and empty values are left out of the URI.
++    """
++    from superset.db_engine_specs.athena import AthenaEngineSpec
++
++    uri = AthenaEngineSpec.build_sqlalchemy_uri(
++        {
++            "region_name": "us-east-1",
++            "s3_staging_dir": "s3://form-bucket/",
++            "query": {
++                "s3_staging_dir": "s3://query-bucket/",
++                "catalog_name": "my_catalog",
++                "role_arn": None,
++            },
++        }
++    )
++    assert dict(make_url(uri).query) == {
++        "s3_staging_dir": "s3://form-bucket/",
++        "catalog_name": "my_catalog",
++    }
++
++
++@pytest.mark.parametrize(
++    "uri",
++    [
++        # VPC / PrivateLink endpoint, with and without an explicit port
++        "awsathena+rest://AKIA:secret@vpce-0123-abcd.athena.us-east-1"
++        ".vpce.amazonaws.com:443/default?s3_staging_dir=s3%3A%2F%2Fbucket%2F",
++        "awsathena+rest://AKIA:secret@vpce-0123-abcd.athena.us-east-1"
++        ".vpce.amazonaws.com/default?work_group=primary",
++        # China partition regional host
++        "awsathena+rest://AKIA:secret@athena.cn-north-1.amazonaws.com.cn/default"
++        "?work_group=primary",
++    ],
++)
++def test_parameters_round_trip_preserves_host(uri: str) -> None:
++    """
++    Non-standard hosts (and their port) survive a round trip instead of being
++    re-prefixed into a malformed ``athena.<host>.amazonaws.com`` endpoint.
++    """
++    from superset.db_engine_specs.athena import AthenaEngineSpec
++
++    parameters = AthenaEngineSpec.get_parameters_from_uri(uri)
++    rebuilt = make_url(AthenaEngineSpec.build_sqlalchemy_uri(parameters))
++    original = make_url(uri)
++    assert rebuilt.host == original.host
++    assert rebuilt.port == original.port
++    assert rebuilt.database == original.database
++    assert dict(rebuilt.query) == dict(original.query)
++
++
++def test_get_parameters_from_uri_china_region() -> None:
++    """
++    A China-partition regional host reduces to its region code.
++    """
++    from superset.db_engine_specs.athena import AthenaEngineSpec
++
++    parameters = AthenaEngineSpec.get_parameters_from_uri(
++        "awsathena+rest://athena.cn-north-1.amazonaws.com.cn/default?work_group=primary"
++    )
++    assert parameters["region_name"] == "cn-north-1"
++
++
++def test_get_parameters_from_uri_standard_host_port_dropped() -> None:
++    """
++    PyAthena ignores the port of a standard regional host, so it reduces to
++    just the region code (the rebuilt URI connects identically).
++    """
++    from superset.db_engine_specs.athena import AthenaEngineSpec
++
++    parameters = AthenaEngineSpec.get_parameters_from_uri(
++        "awsathena+rest://athena.us-east-1.amazonaws.com:443/default?work_group=primary"
++    )
++    assert parameters["region_name"] == "us-east-1"
++    assert "query" not in parameters

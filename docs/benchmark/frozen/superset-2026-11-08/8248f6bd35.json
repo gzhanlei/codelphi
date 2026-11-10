@@ -1,0 +1,113 @@
+{
+  "sha": "8248f6bd3512caa267465bc06bd2c3a8d9bda028",
+  "node_id": "C_kwDOAlosUtoAKDgyNDhmNmJkMzUxMmNhYTI2NzQ2NWJjMDZiZDJjM2E4ZDliZGEwMjg",
+  "commit": {
+    "author": {
+      "name": "Mike Bridge",
+      "email": "michael.bridge@preset.io",
+      "date": "2026-11-06T07:01:42Z"
+    },
+    "committer": {
+      "name": "GitHub",
+      "email": "noreply@github.com",
+      "date": "2026-11-06T07:01:42Z"
+    },
+    "message": "fix(build): prepare shared declarations before parallel plugins (#46024)",
+    "tree": {
+      "sha": "743631db1239f4d651c2d3b840f97bcc70a58da7",
+      "url": "https://api.github.com/repos/apache/superset/git/trees/743631db1239f4d651c2d3b840f97bcc70a58da7"
+    },
+    "url": "https://api.github.com/repos/apache/superset/git/commits/8248f6bd3512caa267465bc06bd2c3a8d9bda028",
+    "comment_count": 0,
+    "verification": {
+      "verified": true,
+      "reason": "valid",
+      "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJq7XtWCRC1aQ7uu5UhlAAA8jsQAAUwKLhjp4zePcq85RgERe98\ntHrJvD1fCiowly0ynai4Pndy22nZapMKCP4vaCcEZ7p14mGFl26WNAB2QWLNDI1N\nXlz82OGLWZKJSwxoWC7tzsrZu/w2Af42/thh45PQI2MDN+FF7O1XGK3oDVX9Rr4X\nqT0lzZapI0EfFZl3g4vRoWy29dbIgg4wXueeBGYAf7nMyp3oQM5779Xekg4VWBBe\nalIEOYm9VWp0jQF5wD7UML1pRzGeGN61wweQhDmh5QsQqv3kY7BrgzlLutPZwFz4\nsW4K0TXdfV3hj2aBxDK5++Lo3lp7TbCIsDcD0nNNqygtWhqqgBTo3EK78n4HbeSS\nwa++SxGehbJ62b9Nck8pDsP9e/gri7xEFRknCXDkIVD6+PhYwzLu+cq0pORD8tZU\nHUv2EJUuE4dM9qf4QLojp6oxfy6A7UXROdrVdtngk/+BDaStuObKDOSydG7tzK7I\nXawb0JX5QLH+/MY3g1+95pvqHLAFbAfq9YSwjbc0WG2WaIUTpk26izAPrb+tn0zw\nhbm9HYeh6DTSQMTYkvHoH2al+VAWcsHgglMFdyJUyPPv87MakkJtqEMZKsKq1JAp\nMihyoYArz0mVg9sXr43iYrTqeRqIrQArhUEgCxhiIKm61i8/SLPXYCbJ5hro+C8g\nHDXpdwXENQmzqvFc3+kL\n=gvSJ\n-----END PGP SIGNATURE-----\n",
+      "payload": "tree 743631db1239f4d651c2d3b840f97bcc70a58da7\nparent d3e73df527140c3b1e93dde45b45d0c3d39b9a00\nauthor Mike Bridge <michael.bridge@preset.io> 1793948502 -0600\ncommitter GitHub <noreply@github.com> 1793948502 +0000\n\nfix(build): prepare shared declarations before parallel plugins (#46024)",
+      "verified_at": "2026-11-06T07:01:42Z"
+    }
+  },
+  "url": "https://api.github.com/repos/apache/superset/commits/8248f6bd3512caa267465bc06bd2c3a8d9bda028",
+  "html_url": "https://github.com/apache/superset/commit/8248f6bd3512caa267465bc06bd2c3a8d9bda028",
+  "comments_url": "https://api.github.com/repos/apache/superset/commits/8248f6bd3512caa267465bc06bd2c3a8d9bda028/comments",
+  "author": {
+    "login": "mikebridge",
+    "id": 213273,
+    "node_id": "MDQ6VXNlcjIxMzI3Mw==",
+    "avatar_url": "https://avatars.githubusercontent.com/u/213273?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/mikebridge",
+    "html_url": "https://github.com/mikebridge",
+    "followers_url": "https://api.github.com/users/mikebridge/followers",
+    "following_url": "https://api.github.com/users/mikebridge/following{/other_user}",
+    "gists_url": "https://api.github.com/users/mikebridge/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/mikebridge/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/mikebridge/subscriptions",
+    "organizations_url": "https://api.github.com/users/mikebridge/orgs",
+    "repos_url": "https://api.github.com/users/mikebridge/repos",
+    "events_url": "https://api.github.com/users/mikebridge/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/mikebridge/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "committer": {
+    "login": "web-flow",
+    "id": 19864447,
+    "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+    "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/web-flow",
+    "html_url": "https://github.com/web-flow",
+    "followers_url": "https://api.github.com/users/web-flow/followers",
+    "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+    "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+    "organizations_url": "https://api.github.com/users/web-flow/orgs",
+    "repos_url": "https://api.github.com/users/web-flow/repos",
+    "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/web-flow/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "parents": [
+    {
+      "sha": "d3e73df527140c3b1e93dde45b45d0c3d39b9a00",
+      "url": "https://api.github.com/repos/apache/superset/commits/d3e73df527140c3b1e93dde45b45d0c3d39b9a00",
+      "html_url": "https://github.com/apache/superset/commit/d3e73df527140c3b1e93dde45b45d0c3d39b9a00"
+    }
+  ],
+  "stats": {
+    "total": 102,
+    "additions": 102,
+    "deletions": 0
+  },
+  "files": [
+    {
+      "sha": "cac274eeb7d19a89a6fe4d03ed0bcbf616ddd13f",
+      "filename": "superset-frontend/scripts/build.js",
+      "status": "modified",
+      "additions": 5,
+      "deletions": 0,
+      "changes": 5,
+      "blob_url": "https://github.com/apache/superset/blob/8248f6bd3512caa267465bc06bd2c3a8d9bda028/superset-frontend%2Fscripts%2Fbuild.js",
+      "raw_url": "https://github.com/apache/superset/raw/8248f6bd3512caa267465bc06bd2c3a8d9bda028/superset-frontend%2Fscripts%2Fbuild.js",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/superset-frontend%2Fscripts%2Fbuild.js?ref=8248f6bd3512caa267465bc06bd2c3a8d9bda028",
+      "patch": "@@ -137,6 +137,11 @@ run(`${babelCommand} --out-dir esm`, {\n });\n \n console.log('--- Run tsc ---');\n+// Build shared references once so parallel plugins only read their declarations.\n+// Otherwise each plugin's build can write the same outputs concurrently.\n+run(\n+  'tsc --build packages/superset-core packages/superset-ui-core packages/superset-ui-chart-controls',\n+);\n // only run tsc for packages with ts files\n scope = getPackages(glob, true);\n run("
+    },
+    {
+      "sha": "2db30c034996fb6f650440bb73008ca92e6f278c",
+      "filename": "superset-frontend/spec/scripts/build.test.ts",
+      "status": "added",
+      "additions": 97,
+      "deletions": 0,
+      "changes": 97,
+      "blob_url": "https://github.com/apache/superset/blob/8248f6bd3512caa267465bc06bd2c3a8d9bda028/superset-frontend%2Fspec%2Fscripts%2Fbuild.test.ts",
+      "raw_url": "https://github.com/apache/superset/raw/8248f6bd3512caa267465bc06bd2c3a8d9bda028/superset-frontend%2Fspec%2Fscripts%2Fbuild.test.ts",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/superset-frontend%2Fspec%2Fscripts%2Fbuild.test.ts?ref=8248f6bd3512caa267465bc06bd2c3a8d9bda028",
+      "patch": "@@ -0,0 +1,97 @@\n+/**\n+ * Licensed to the Apache Software Foundation (ASF) under one\n+ * or more contributor license agreements.  See the NOTICE file\n+ * distributed with this work for additional information\n+ * regarding copyright ownership.  The ASF licenses this file\n+ * to you under the Apache License, Version 2.0 (the\n+ * \"License\"); you may not use this file except in compliance\n+ * with the License.  You may obtain a copy of the License at\n+ *\n+ *   http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing,\n+ * software distributed under the License is distributed on an\n+ * \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+ * KIND, either express or implied.  See the License for the\n+ * specific language governing permissions and limitations\n+ * under the License.\n+ */\n+import { spawnSync } from 'node:child_process';\n+import {\n+  existsSync,\n+  mkdirSync,\n+  mkdtempSync,\n+  rmSync,\n+  writeFileSync,\n+} from 'node:fs';\n+import { tmpdir } from 'node:os';\n+import path from 'node:path';\n+\n+function runBuild(args: string[], sharedBuildFails = false) {\n+  const directory = mkdtempSync(path.join(tmpdir(), 'plugin-build-'));\n+  try {\n+    const bin = path.join(directory, 'node_modules/.bin');\n+    const source = path.join(\n+      directory,\n+      'node_modules/@superset-ui/plugin-example/src',\n+    );\n+    mkdirSync(bin, { recursive: true });\n+    mkdirSync(source, { recursive: true });\n+    writeFileSync(path.join(source, 'index.ts'), 'export {};');\n+    // Simulate a shared compiler that publishes declarations only on success.\n+    writeFileSync(\n+      path.join(bin, 'tsc'),\n+      sharedBuildFails\n+        ? '#!/bin/sh\\nexit 23\\n'\n+        : '#!/bin/sh\\ntouch shared-ready\\n',\n+      { mode: 0o755 },\n+    );\n+    // A plugin must not start a reference build while shared outputs are absent.\n+    writeFileSync(\n+      path.join(bin, 'lerna'),\n+      `#!/bin/sh\n+case \"$*\" in\n+  *tsc.sh*)\n+    touch plugin-started\n+    test -f shared-ready || exit 42\n+    ;;\n+esac\n+`,\n+      { mode: 0o755 },\n+    );\n+    const result = spawnSync(\n+      process.execPath,\n+      [path.resolve(__dirname, '../../scripts/build.js'), ...args],\n+      { cwd: directory, encoding: 'utf8' },\n+    );\n+    return {\n+      status: result.status,\n+      output: result.stdout + result.stderr,\n+      pluginStarted: existsSync(path.join(directory, 'plugin-started')),\n+    };\n+  } finally {\n+    rmSync(directory, { recursive: true, force: true });\n+  }\n+}\n+\n+test.each([\n+  { args: [] },\n+  { args: ['--skip-lib'] },\n+  { args: ['--globs', 'plugin-example', '--globs', 'chart-unused'] },\n+])(\n+  'finishes shared declarations before parallel plugins with args $args',\n+  ({ args }) => {\n+    const result = runBuild(args);\n+    expect(result).toEqual({\n+      status: 0,\n+      output: expect.any(String),\n+      pluginStarted: true,\n+    });\n+  },\n+);\n+\n+test('stops before parallel plugins if shared compilation fails', () => {\n+  const result = runBuild(['--skip-lib'], true);\n+  expect(result.status).toBe(23);\n+  expect(result.pluginStarted).toBe(false);\n+});"
+    }
+  ]
+}

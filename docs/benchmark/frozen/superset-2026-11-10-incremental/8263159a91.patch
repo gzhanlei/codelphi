@@ -1,0 +1,1142 @@
+==FILE== docs/docs/using-superset/recently-archived.mdx
+@@ -44,7 +44,9 @@ govern the normal lists apply here.
+ 
+ Archive confirmations say the item will move to Recently Archived. Successful
+ single-item and bulk archive messages include a direct link to the relevant
+-object type. Without an
++object type. Link-bearing notifications stay open until dismissed, including while
++hovered or reached by keyboard. Recovery links respect the deployment URL prefix.
++Without an
+ explicit type in the URL, the page opens the last type archived successfully in
+ this browser, when you have permission to read that type. Otherwise it opens the
+ first type you can read. Bookmarks can select a type with `/archived/?type=chart`,
+@@ -53,7 +55,13 @@ available to you, the page selects the first type you can read.
+ 
+ Archiving an unused dataset does not show a dependency warning. When a dataset
+ has dependent charts, the confirmation lists the affected objects and explains
+-that those charts become unavailable until the dataset is recovered.
++that those charts become unavailable until the dataset is recovered. Chart and
++dashboard totals are separate: some affected charts may not belong to a dashboard.
++
++Back and Forward restore the selected type and its page, sort, and search from
++the URL. On chart and dashboard cards in the Charts and Dashboards lists,
++Tab to the **More Options** button to read why Edit or Archive is unavailable
++without opening the menu. The actions themselves remain disabled.
+ 
+ Each row shows:
+ 
+==FILE== superset-frontend/packages/superset-ui-core/src/components/TableCollection/TableCollection.test.tsx
+@@ -250,6 +250,16 @@ test('should call setSortBy when clicking sortable column header', () => {
+   ]);
+ });
+ 
++test('controlled sort clears the header when restored to an empty sort', () => {
++  const { rerender } = render(
++    <TableCollection {...defaultProps} sortBy={[{ id: 'col1', desc: true }]} />,
++  );
++  const header = screen.getByRole('columnheader', { name: /Column 1/ });
++  expect(header).toHaveAttribute('aria-sort', 'descending');
++  rerender(<TableCollection {...defaultProps} sortBy={[]} />);
++  expect(header).not.toHaveAttribute('aria-sort');
++});
++
+ test('should not apply highlight class when highlightRowId is undefined', () => {
+   const propsWithoutHighlight = {
+     ...defaultProps,
+==FILE== superset-frontend/packages/superset-ui-core/src/components/TableCollection/index.tsx
+@@ -51,6 +51,7 @@ export interface TableCollectionProps<T extends object> {
+   isRowHighlighted?: (record: Record<string, unknown>) => boolean;
+   columnsForWrapText?: string[];
+   setSortBy?: (updater: SortingRule<T>[]) => void;
++  sortBy?: SortingRule<T>[];
+   bulkSelectEnabled?: boolean;
+   selectedFlatRows?: Row<T>[];
+   toggleRowSelected?: (rowId: string, value: boolean) => void;
+@@ -168,6 +169,7 @@ function TableCollection<T extends object>({
+   highlightRowId,
+   isRowHighlighted,
+   setSortBy,
++  sortBy,
+   headerGroups,
+   columnsForWrapText,
+   bulkSelectEnabled = false,
+@@ -186,8 +188,8 @@ function TableCollection<T extends object>({
+   expandable,
+ }: TableCollectionProps<T>) {
+   const mappedColumns = useMemo(
+-    () => mapColumns<T>(columns, headerGroups, columnsForWrapText),
+-    [columns, headerGroups, columnsForWrapText],
++    () => mapColumns<T>(columns, headerGroups, columnsForWrapText, sortBy),
++    [columns, headerGroups, columnsForWrapText, sortBy],
+   );
+ 
+   const mappedRows = useMemo(
+==FILE== superset-frontend/packages/superset-ui-core/src/components/TableCollection/utils.tsx
+@@ -23,7 +23,13 @@
+  */
+ 
+ import { ComponentType, ReactNode } from 'react';
+-import { Accessor, CellValue, HeaderGroup, Row } from 'react-table';
++import {
++  Accessor,
++  CellValue,
++  HeaderGroup,
++  Row,
++  SortingRule,
++} from 'react-table';
+ 
+ import { SortOrder } from '../Table';
+ 
+@@ -94,6 +100,7 @@ export function mapColumns<T extends object>(
+   columns: ListViewColumn<T>[],
+   headerGroups: HeaderGroup<T>[],
+   columnsForWrapText?: string[],
++  sortBy?: SortingRule<T>[],
+ ) {
+   return columns.map(column => {
+     // react-table backfills `id` from a string `accessor` for its own
+@@ -108,6 +115,7 @@ export function mapColumns<T extends object>(
+       (typeof column.accessor === 'string' ? column.accessor : undefined) ??
+       '';
+     const { isSorted, isSortedDesc } = getSortingInfo(headerGroups, id);
++    const sort = sortBy?.find(rule => rule.id === id);
+     return {
+       title: column.Header as ReactNode,
+       dataIndex: id.includes('.') ? id.split('.') : id,
+@@ -122,6 +130,13 @@ export function mapColumns<T extends object>(
+           ? 'descend'
+           : 'ascend'
+         : undefined) as SortOrder | undefined,
++      ...(sortBy && {
++        sortOrder: (sort
++          ? sort.desc
++            ? 'descend'
++            : 'ascend'
++          : null) as SortOrder,
++      }),
+       sorter: !column.disableSortBy,
+       render: (val: CellValue<T>, record: RowWithId<T>): ReactNode => {
+         const { Cell } = column;
+==FILE== superset-frontend/src/components/KebabMenuButton/KebabMenuButton.test.tsx
+@@ -21,6 +21,7 @@ import {
+   screen,
+   userEvent,
+   waitFor,
++  fireEvent,
+ } from 'spec/helpers/testing-library';
+ import type { MenuItem } from '@superset-ui/core/components/Menu';
+ import { KebabMenuButton } from '.';
+@@ -36,15 +37,79 @@ const menuItems: MenuItem[] = [
+   },
+ ];
+ 
++test.each([undefined, 'Some actions require edit access'])(
++  'Tab returns focus from the menu to More Options (hint=%s)',
++  async tooltipTitle => {
++    render(
++      <KebabMenuButton menuItems={menuItems} tooltipTitle={tooltipTitle} />,
++    );
++    const trigger = screen.getByRole('button', { name: 'More Options' });
++    await userEvent.click(trigger);
++    const item = await screen.findByRole('menuitem', { name: 'Edit' });
++    // Wait for the real Dropdown autoFocus rather than assigning focus in the test.
++    await waitFor(() => expect(item).toHaveFocus());
++    fireEvent.keyDown(item, { key: 'Tab', code: 'Tab', keyCode: 9, which: 9 });
++    await waitFor(() =>
++      expect(screen.queryByRole('menu')).not.toBeInTheDocument(),
++    );
++    expect(trigger).toHaveFocus();
++  },
++);
++
++test('focus exposes the hint as the trigger accessible description', async () => {
++  render(
++    <KebabMenuButton
++      menuItems={menuItems}
++      tooltipTitle="Edit requires ownership"
++    />,
++  );
++  await userEvent.tab();
++  const trigger = screen.getByRole('button', { name: 'More Options' });
++  expect(trigger).toHaveFocus();
++  const tooltip = await screen.findByRole('tooltip');
++  expect(trigger).toHaveAttribute('aria-describedby', tooltip.id);
++  expect(trigger).toHaveAccessibleDescription('Edit requires ownership');
++  expect(screen.queryByRole('menu')).not.toBeInTheDocument();
++});
++
+ test('opens the menu on click', async () => {
+-  render(<KebabMenuButton menuItems={menuItems} />);
++  render(
++    <KebabMenuButton
++      menuItems={menuItems}
++      tooltipTitle="Some actions require edit access"
++    />,
++  );
+ 
+   await userEvent.click(screen.getByRole('button', { name: 'More Options' }));
+ 
+   expect(await screen.findByText('Edit')).toBeInTheDocument();
+   expect(screen.getByText('Delete')).toBeInTheDocument();
+ });
+ 
++test('hint ids are distinct and the description is removed when the hint disappears', () => {
++  const { rerender } = render(
++    <>
++      <KebabMenuButton menuItems={menuItems} tooltipTitle="First hint" />
++      <KebabMenuButton menuItems={menuItems} tooltipTitle="Second hint" />
++    </>,
++  );
++  const [first, second] = screen.getAllByRole('button', {
++    name: 'More Options',
++  });
++  const firstId = first.getAttribute('aria-describedby');
++  expect(firstId).toBeTruthy();
++  expect(second.getAttribute('aria-describedby')).toBeTruthy();
++  expect(firstId).not.toBe(second.getAttribute('aria-describedby'));
++  rerender(
++    <>
++      <KebabMenuButton menuItems={menuItems} tooltipTitle="Updated hint" />
++      <KebabMenuButton menuItems={menuItems} />
++    </>,
++  );
++  expect(first).toHaveAttribute('aria-describedby', firstId);
++  expect(second).not.toHaveAttribute('aria-describedby');
++});
++
+ test('does not open the menu on hover', async () => {
+   render(<KebabMenuButton menuItems={menuItems} />);
+ 
+==FILE== superset-frontend/src/components/KebabMenuButton/index.tsx
+@@ -16,11 +16,12 @@
+  * specific language governing permissions and limitations
+  * under the License.
+  */
+-import { ReactNode } from 'react';
++import { ReactNode, useId } from 'react';
+ import {
+   Button,
+   Dropdown,
+   Icons,
++  Tooltip,
+   type ButtonProps,
+   type DropdownProps,
+ } from '@superset-ui/core/components';
+@@ -37,6 +38,7 @@ export interface KebabMenuButtonProps {
+   buttonStyle?: ButtonProps['buttonStyle'];
+   placement?: DropdownProps['placement'];
+   overlayStyle?: DropdownProps['overlayStyle'];
++  tooltipTitle?: ReactNode;
+ }
+ 
+ export function KebabMenuButton({
+@@ -50,7 +52,9 @@ export function KebabMenuButton({
+   buttonStyle = 'link',
+   placement,
+   overlayStyle,
++  tooltipTitle,
+ }: KebabMenuButtonProps) {
++  const tooltipId = useId();
+   const defaultIcon =
+     iconOrientation === 'vertical' ? (
+       <Icons.EllipsisOutlined
+@@ -62,22 +66,25 @@ export function KebabMenuButton({
+     );
+ 
+   return (
+-    <Dropdown
+-      menu={{ items: menuItems }}
+-      trigger={['click']}
+-      placement={placement}
+-      overlayStyle={overlayStyle}
+-    >
+-      <Button
+-        id={buttonId}
+-        buttonSize={buttonSize}
+-        buttonStyle={buttonStyle}
+-        aria-label={ariaLabel}
+-        aria-haspopup="true"
+-        data-test={dataTest}
++    <Tooltip id={tooltipId} title={tooltipTitle} trigger={['hover', 'focus']}>
++      <Dropdown
++        menu={{ items: menuItems }}
++        trigger={['click']}
++        placement={placement}
++        overlayStyle={overlayStyle}
+       >
+-        {icon || defaultIcon}
+-      </Button>
+-    </Dropdown>
++        <Button
++          id={buttonId}
++          buttonSize={buttonSize}
++          buttonStyle={buttonStyle}
++          aria-label={ariaLabel}
++          aria-describedby={tooltipTitle ? tooltipId : undefined}
++          aria-haspopup="true"
++          data-test={dataTest}
++        >
++          {icon || defaultIcon}
++        </Button>
++      </Dropdown>
++    </Tooltip>
+   );
+ }
+==FILE== superset-frontend/src/components/ListView/ListView.test.tsx
+@@ -16,7 +16,13 @@
+  * specific language governing permissions and limitations
+  * under the License.
+  */
+-import { render, screen, within, waitFor } from 'spec/helpers/testing-library';
++import {
++  render,
++  screen,
++  within,
++  waitFor,
++  fireEvent,
++} from 'spec/helpers/testing-library';
+ import userEvent from '@testing-library/user-event';
+ import { QueryParamProvider } from 'use-query-params';
+ import { ReactRouter5Adapter } from 'use-query-params/adapters/react-router-5';
+@@ -603,6 +609,151 @@ test('forceViewMode table shows table view', () => {
+   expect(screen.getByRole('table')).toBeInTheDocument();
+ });
+ 
++test.each([false, true])(
++  'Back and Forward restore card sort selection (drawer=%s)',
++  async drawer => {
++    const fetchData = jest.fn();
++    function SortHistoryList() {
++      const history = useHistory();
++      return (
++        <>
++          <button type="button" onClick={() => history.goBack()}>
++            Back
++          </button>
++          <button type="button" onClick={() => history.goForward()}>
++            Forward
++          </button>
++          <ListView
++            {...mockedPropsSimple}
++            fetchData={fetchData}
++            filters={mockedPropsComprehensive.filters}
++            forceViewMode="card"
++            renderCard={() => <div>Card</div>}
++            initialSort={[{ id: 'name', desc: false }]}
++            mobileFiltersOpen={drawer}
++            setMobileFiltersOpen={drawer ? jest.fn() : undefined}
++            cardSortSelectOptions={[
++              { id: 'name', desc: false, label: 'Alphabetical', value: 'name' },
++              { id: 'age', desc: true, label: 'Oldest first', value: 'age' },
++            ]}
++          />
++        </>
++      );
++    }
++    render(
++      <MemoryRouter
++        initialEntries={[
++          '/?sortColumn=name&sortOrder=asc',
++          '/?sortColumn=age&sortOrder=desc',
++        ]}
++        initialIndex={1}
++      >
++        <QueryParamProvider adapter={ReactRouter5Adapter}>
++          <SortHistoryList />
++        </QueryParamProvider>
++      </MemoryRouter>,
++    );
++    const openSort = async () =>
++      userEvent.click(
++        within(screen.getByTestId('card-sort-select')).getByRole('button'),
++      );
++    await openSort();
++    expect(
++      await screen.findByRole('option', { name: /Oldest first/ }),
++    ).toHaveAttribute('aria-selected', 'true');
++    await openSort();
++    await waitFor(() =>
++      expect(fetchData).toHaveBeenLastCalledWith(
++        expect.objectContaining({ sortBy: [{ id: 'age', desc: true }] }),
++      ),
++    );
++    // The drawer can cover the history controls; these buttons emulate browser navigation.
++    fireEvent.click(screen.getByText('Back'));
++    await waitFor(() =>
++      expect(fetchData).toHaveBeenLastCalledWith(
++        expect.objectContaining({ sortBy: [{ id: 'name', desc: false }] }),
++      ),
++    );
++    await openSort();
++    expect(
++      await screen.findByRole('option', { name: /Alphabetical/ }),
++    ).toHaveAttribute('aria-selected', 'true');
++    await openSort();
++    fireEvent.click(screen.getByText('Forward'));
++    await waitFor(() =>
++      expect(fetchData).toHaveBeenLastCalledWith(
++        expect.objectContaining({ sortBy: [{ id: 'age', desc: true }] }),
++      ),
++    );
++    await openSort();
++    expect(
++      await screen.findByRole('option', { name: /Oldest first/ }),
++    ).toHaveAttribute('aria-selected', 'true');
++  },
++);
++
++test('Back and Forward restore table sort headers with the fetched sort', async () => {
++  const fetchData = jest.fn();
++  function SortHistoryTable() {
++    const history = useHistory();
++    return (
++      <>
++        <button type="button" onClick={() => history.goBack()}>
++          Back
++        </button>
++        <button type="button" onClick={() => history.goForward()}>
++          Forward
++        </button>
++        <ListView
++          {...mockedPropsSimple}
++          fetchData={fetchData}
++          forceViewMode="table"
++          initialSort={[{ id: 'name', desc: false }]}
++        />
++      </>
++    );
++  }
++  render(
++    <MemoryRouter
++      initialEntries={[
++        '/?sortColumn=name&sortOrder=asc',
++        '/?sortColumn=age&sortOrder=desc',
++      ]}
++      initialIndex={1}
++    >
++      <QueryParamProvider adapter={ReactRouter5Adapter}>
++        <SortHistoryTable />
++      </QueryParamProvider>
++    </MemoryRouter>,
++  );
++  const ageHeader = screen.getByRole('columnheader', { name: /Age/ });
++  const nameHeader = screen.getByRole('columnheader', { name: /Name/ });
++  expect(ageHeader).toHaveAttribute('aria-sort', 'descending');
++  await userEvent.click(screen.getByRole('button', { name: 'Back' }));
++  await waitFor(() =>
++    expect(fetchData).toHaveBeenLastCalledWith(
++      expect.objectContaining({ sortBy: [{ id: 'name', desc: false }] }),
++    ),
++  );
++  expect(nameHeader).toHaveAttribute('aria-sort', 'ascending');
++  expect(ageHeader).not.toHaveAttribute('aria-sort');
++  await userEvent.click(screen.getByRole('button', { name: 'Forward' }));
++  await waitFor(() =>
++    expect(fetchData).toHaveBeenLastCalledWith(
++      expect.objectContaining({ sortBy: [{ id: 'age', desc: true }] }),
++    ),
++  );
++  expect(ageHeader).toHaveAttribute('aria-sort', 'descending');
++  expect(nameHeader).not.toHaveAttribute('aria-sort');
++  await userEvent.click(ageHeader);
++  await waitFor(() =>
++    expect(fetchData).toHaveBeenLastCalledWith(
++      expect.objectContaining({ sortBy: [{ id: 'age', desc: false }] }),
++    ),
++  );
++  expect(ageHeader).toHaveAttribute('aria-sort', 'ascending');
++});
++
+ test('Back restores the search input and page results without a stale blur submission', async () => {
+   const fetchData = jest.fn<void, [ListViewFetchDataConfig]>();
+   function SearchHistoryList() {
+==FILE== superset-frontend/src/components/ListView/ListView.tsx
+@@ -525,6 +525,7 @@ export function ListView<T extends object = any>({
+               cardSortSelectOptions &&
+               !setMobileFiltersOpen && (
+                 <CardSortSelect
++                  key={JSON.stringify(sortBy)}
+                   initialSort={sortBy}
+                   onChange={(value: SortColumn[]) => setSortBy(value)}
+                   options={cardSortSelectOptions}
+@@ -660,6 +661,7 @@ export function ListView<T extends object = any>({
+                   prepareRow={prepareRow}
+                   headerGroups={headerGroups}
+                   setSortBy={setSortBy}
++                  sortBy={sortBy}
+                   rows={rows}
+                   columns={columns}
+                   loading={loading && rows.length > 0}
+@@ -729,6 +731,7 @@ export function ListView<T extends object = any>({
+             />
+             {viewMode === 'card' && cardSortSelectOptions && (
+               <CardSortSelect
++                key={JSON.stringify(sortBy)}
+                 initialSort={sortBy}
+                 onChange={(value: SortColumn[]) => setSortBy(value)}
+                 options={cardSortSelectOptions}
+==FILE== superset-frontend/src/components/ListView/utils.test.tsx
+@@ -198,3 +198,37 @@ test('same-page history restores aliased and range filters in controls and reque
+     );
+   });
+ });
++
++test('history restores sort, page and search as one URL state', async () => {
++  const oldFilters = rison.encode({ name: 'old' });
++  const newFilters = rison.encode({ name: 'new' });
++  const { result, fetchData } = renderListState([
++    `/?pageIndex=2&sortColumn=name&sortOrder=asc&filters=${oldFilters}`,
++    `/?pageIndex=1&sortColumn=age&sortOrder=desc&filters=${newFilters}`,
++  ]);
++  await waitFor(() => expect(result.current.state.pageIndex).toBe(1));
++  act(() => result.current.history.goBack());
++  await waitFor(() => {
++    expect(result.current.state.pageIndex).toBe(2);
++    expect(result.current.state.sortBy).toEqual([{ id: 'name', desc: false }]);
++    expect(fetchData).toHaveBeenLastCalledWith(
++      expect.objectContaining({
++        pageIndex: 2,
++        sortBy: [{ id: 'name', desc: false }],
++        filters: [expect.objectContaining({ value: 'old' })],
++      }),
++    );
++  });
++  act(() => result.current.history.goForward());
++  await waitFor(() => {
++    expect(result.current.state.pageIndex).toBe(1);
++    expect(result.current.state.sortBy).toEqual([{ id: 'age', desc: true }]);
++    expect(fetchData).toHaveBeenLastCalledWith(
++      expect.objectContaining({
++        pageIndex: 1,
++        sortBy: [{ id: 'age', desc: true }],
++        filters: [expect.objectContaining({ value: 'new' })],
++      }),
++    );
++  });
++});
+==FILE== superset-frontend/src/components/ListView/utils.ts
+@@ -363,6 +363,9 @@ export function useListViewState<D extends object = any>({
+ 
+   useEffect(() => {
+     previousQuery.current = query;
++    if (!isEqual(initialSortBy, sortBy)) {
++      setSortBy(initialSortBy);
++    }
+     if (!isEqual(initialState.pageIndex, pageIndex)) {
+       gotoPage(initialState.pageIndex);
+     }
+==FILE== superset-frontend/src/components/MessageToasts/Toast.test.tsx
+@@ -159,3 +159,19 @@ test('an actionable toast remains until it is explicitly dismissed', () => {
+   expect(onCloseToast).not.toHaveBeenCalled();
+   jest.useRealTimers();
+ });
++
++test('an HTML link toast remains available until dismissed', () => {
++  jest.useFakeTimers();
++  const onCloseToast = jest.fn();
++  setup({
++    toast: {
++      ...htmlToast('<a href="/archived/">View archived</a>'),
++      duration: 100,
++    },
++    onCloseToast,
++  });
++  act(() => jest.advanceTimersByTime(1000));
++  act(() => jest.advanceTimersByTime(200));
++  expect(onCloseToast).not.toHaveBeenCalled();
++  jest.useRealTimers();
++});
+==FILE== superset-frontend/src/components/MessageToasts/Toast.tsx
+@@ -100,15 +100,22 @@ export default function Toast({ toast, onCloseToast }: ToastPresenterProps) {
+     setTimeout(showToast);
+     // Interactive notifications remain available until the user activates or
+     // dismisses them, so keyboard and assistive-technology users are not raced.
+-    if (!toast.action && toast.duration > 0) {
++    const hasLink = toast.allowHtml && /<a\s/i.test(toast.text);
++    if (!toast.action && !hasLink && toast.duration > 0) {
+       hideTimer.current = setTimeout(handleClosePress, toast.duration);
+     }
+     return () => {
+       if (hideTimer.current) {
+         clearTimeout(hideTimer.current);
+       }
+     };
+-  }, [handleClosePress, toast.duration]);
++  }, [
++    handleClosePress,
++    toast.duration,
++    toast.action,
++    toast.allowHtml,
++    toast.text,
++  ]);
+ 
+   const theme = useTheme();
+   let className = 'toast--success';
+==FILE== superset-frontend/src/features/charts/ChartCard.test.tsx
+@@ -109,6 +109,40 @@ test('renders the chart title', () => {
+   expect(screen.getByText('Sample Chart')).toBeInTheDocument();
+ });
+ 
++test.each([true, false])(
++  'keyboard reaches permission hints before opening the menu (soft delete=%s)',
++  async enabled => {
++    (isFeatureEnabled as jest.Mock).mockImplementation(
++      flag => enabled && flag === FeatureFlag.SoftDelete,
++    );
++    renderCard(createMemoryHistory(), { user: nonEditorUser });
++    const menuButton = screen.getByTestId('chart-card-menu');
++    // Native Tab keyCode matters: rc-dropdown consumes keyCode 9 while open.
++    for (let i = 0; i < 20 && document.activeElement !== menuButton; i += 1) {
++      fireEvent.keyDown(document.activeElement!, {
++        key: 'Tab',
++        code: 'Tab',
++        keyCode: 9,
++        which: 9,
++      });
++      await userEvent.tab();
++      fireEvent.keyUp(document.activeElement!, {
++        key: 'Tab',
++        code: 'Tab',
++        keyCode: 9,
++        which: 9,
++      });
++    }
++    expect(menuButton).toHaveFocus();
++    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
++    const tooltip = await screen.findByRole('tooltip');
++    expect(tooltip).toHaveTextContent('in order to edit.');
++    expect(tooltip).toHaveTextContent(
++      `in order to ${enabled ? 'archive' : 'delete'}.`,
++    );
++  },
++);
++
+ test.each([
+   [true, 'archive'],
+   [false, 'delete'],
+@@ -127,6 +161,9 @@ test.each([
+     expect(archiveButton).toBeDisabled();
+     const editButton = screen.getByTestId('chart-list-edit-option');
+     expect(editButton).toBeDisabled();
++    expect(editButton.parentElement).not.toHaveAttribute('tabindex');
++    expect(archiveButton.parentElement).not.toHaveAttribute('tabindex');
++
+     expect(editButton).toHaveStyleRule('cursor', 'not-allowed', {
+       target: ':disabled',
+     });
+==FILE== superset-frontend/src/features/charts/ChartCard.tsx
+@@ -105,42 +105,54 @@ export default function ChartCard({
+   const canEdit = hasPerm('can_write');
+   const canDelete = hasPerm('can_write');
+   const canExport = hasPerm('can_export');
++  const softDelete = isFeatureEnabled(FeatureFlag.SoftDelete);
+   const allowEdit = isUserEditorOrAdmin(
+     user,
+     chart.editors,
+     chart.extra_editors,
+   );
+   const menuItems: MenuItem[] = [];
++  const editPermissionHint = allowEdit
++    ? null
++    : t(
++        'You must be a chart editor in order to edit. Please reach out to a chart editor to request modifications or edit access.',
++      );
++  const deletePermissionHint = allowEdit
++    ? null
++    : softDelete
++      ? t(
++          'You must be a chart editor in order to archive. Please reach out to a chart editor to request modifications or edit access.',
++        )
++      : t(
++          'You must be a chart editor in order to delete. Please reach out to a chart editor to request modifications or edit access.',
++        );
+ 
+   if (canEdit) {
+     menuItems.push({
+       key: 'edit',
+       label: (
+         <Tooltip
+           placement="right"
+-          title={
+-            allowEdit
+-              ? null
+-              : t(
+-                  'You must be a chart editor in order to edit. Please reach out to a chart editor to request modifications or edit access.',
+-                )
+-          }
++          trigger={['hover', 'focus']}
++          title={editPermissionHint}
+         >
+-          <MenuItemButton
+-            type="button"
+-            data-test="chart-list-edit-option"
+-            disabled={!allowEdit}
+-            aria-disabled={!allowEdit}
+-            onClick={allowEdit ? () => openChartEditModal(chart) : undefined}
+-          >
+-            <Icons.EditOutlined
+-              iconSize="l"
+-              css={css`
+-                vertical-align: text-top;
+-              `}
+-            />{' '}
+-            {t('Edit')}
+-          </MenuItemButton>
++          <span>
++            <MenuItemButton
++              type="button"
++              data-test="chart-list-edit-option"
++              disabled={!allowEdit}
++              aria-disabled={!allowEdit}
++              onClick={allowEdit ? () => openChartEditModal(chart) : undefined}
++            >
++              <Icons.EditOutlined
++                iconSize="l"
++                css={css`
++                  vertical-align: text-top;
++                `}
++              />{' '}
++              {t('Edit')}
++            </MenuItemButton>
++          </span>
+         </Tooltip>
+       ),
+       disabled: !allowEdit,
+@@ -172,7 +184,6 @@ export default function ChartCard({
+     // With soft delete on, deleting archives the chart (recoverable), so the
+     // confirmation drops the type-DELETE friction and uses the shared archive
+     // copy -- matching the list view's dialog for the same action.
+-    const softDelete = isFeatureEnabled(FeatureFlag.SoftDelete);
+     menuItems.push({
+       key: 'delete',
+       label: (
+@@ -206,17 +217,8 @@ export default function ChartCard({
+           {confirmDelete => (
+             <Tooltip
+               placement="right"
+-              title={
+-                allowEdit
+-                  ? null
+-                  : softDelete
+-                    ? t(
+-                        'You must be a chart editor in order to archive. Please reach out to a chart editor to request modifications or edit access.',
+-                      )
+-                    : t(
+-                        'You must be a chart editor in order to delete. Please reach out to a chart editor to request modifications or edit access.',
+-                      )
+-              }
++              trigger={['hover', 'focus']}
++              title={deletePermissionHint}
+             >
+               <span>
+                 <MenuItemButton
+@@ -289,7 +291,18 @@ export default function ChartCard({
+                 isStarred={favoriteStatus}
+               />
+             )}
+-            <KebabMenuButton menuItems={menuItems} dataTest="chart-card-menu" />
++            <KebabMenuButton
++              menuItems={menuItems}
++              dataTest="chart-card-menu"
++              tooltipTitle={
++                !allowEdit && (canEdit || canDelete) ? (
++                  <>
++                    {canEdit && <div>{editPermissionHint}</div>}
++                    {canDelete && <div>{deletePermissionHint}</div>}
++                  </>
++                ) : undefined
++              }
++            />
+           </ListViewCard.Actions>
+         }
+       />
+==FILE== superset-frontend/src/features/dashboards/DashboardCard.test.tsx
+@@ -109,6 +109,53 @@ test('Renders the dashboard title', () => {
+   expect(titleElement).toBeInTheDocument();
+ });
+ 
++test.each([true, false])(
++  'keyboard reaches permission hints before opening the menu (soft delete=%s)',
++  async enabled => {
++    mockedIsFeatureEnabled.mockReturnValue(enabled);
++    const { container } = render(
++      <MemoryRouter>
++        <DashboardCard
++          dashboard={mockDashboard}
++          hasPerm={mockHasPerm}
++          bulkSelectEnabled={false}
++          loading={false}
++          favoriteStatus={false}
++          saveFavoriteStatus={mockSaveFavoriteStatus}
++          handleBulkDashboardExport={mockHandleBulkDashboardExport}
++          onDelete={mockOnDelete}
++          openDashboardEditModal={mockOpenDashboardEditModal}
++          user={nonEditorUser}
++        />
++      </MemoryRouter>,
++    );
++    const menuButton = within(container).getByTestId('dashboard-card-menu');
++    // Native Tab keyCode matters: rc-dropdown consumes keyCode 9 while open.
++    for (let i = 0; i < 20 && document.activeElement !== menuButton; i += 1) {
++      fireEvent.keyDown(document.activeElement!, {
++        key: 'Tab',
++        code: 'Tab',
++        keyCode: 9,
++        which: 9,
++      });
++      await userEvent.tab();
++      fireEvent.keyUp(document.activeElement!, {
++        key: 'Tab',
++        code: 'Tab',
++        keyCode: 9,
++        which: 9,
++      });
++    }
++    expect(menuButton).toHaveFocus();
++    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
++    const tooltip = await screen.findByRole('tooltip');
++    expect(tooltip).toHaveTextContent('in order to edit.');
++    expect(tooltip).toHaveTextContent(
++      `in order to ${enabled ? 'archive' : 'delete'}.`,
++    );
++  },
++);
++
+ test.each([
+   [true, 'archive'],
+   [false, 'delete'],
+@@ -142,6 +189,9 @@ test.each([
+     expect(archiveButton).toBeDisabled();
+     const editButton = screen.getByTestId('dashboard-card-option-edit-button');
+     expect(editButton).toBeDisabled();
++    expect(editButton.parentElement).not.toHaveAttribute('tabindex');
++    expect(archiveButton.parentElement).not.toHaveAttribute('tabindex');
++
+     expect(editButton).toHaveStyleRule('cursor', 'not-allowed', {
+       target: ':disabled',
+     });
+==FILE== superset-frontend/src/features/dashboards/DashboardCard.tsx
+@@ -101,33 +101,45 @@ function DashboardCard({
+       : '';
+ 
+   const menuItems: MenuItem[] = [];
++  const editPermissionHint = allowEdit
++    ? null
++    : t(
++        'You must be a dashboard editor in order to edit. Please reach out to a dashboard editor to request modifications or edit access.',
++      );
++  const deletePermissionHint = allowEdit
++    ? null
++    : softDelete
++      ? t(
++          'You must be a dashboard editor in order to archive. Please reach out to a dashboard editor to request modifications or edit access.',
++        )
++      : t(
++          'You must be a dashboard editor in order to delete. Please reach out to a dashboard editor to request modifications or edit access.',
++        );
+ 
+   if (canEdit && openDashboardEditModal) {
+     menuItems.push({
+       key: 'edit',
+       label: (
+         <Tooltip
+           placement="right"
+-          title={
+-            allowEdit
+-              ? null
+-              : t(
+-                  'You must be a dashboard editor in order to edit. Please reach out to a dashboard editor to request modifications or edit access.',
+-                )
+-          }
++          trigger={['hover', 'focus']}
++          title={editPermissionHint}
+         >
+-          <MenuItemButton
+-            type="button"
+-            className="action-button"
+-            onClick={
+-              allowEdit ? () => openDashboardEditModal(dashboard) : undefined
+-            }
+-            data-test="dashboard-card-option-edit-button"
+-            disabled={!allowEdit}
+-            aria-disabled={!allowEdit}
+-          >
+-            <Icons.EditOutlined iconSize="l" data-test="edit-alt" /> {t('Edit')}
+-          </MenuItemButton>
++          <span>
++            <MenuItemButton
++              type="button"
++              className="action-button"
++              onClick={
++                allowEdit ? () => openDashboardEditModal(dashboard) : undefined
++              }
++              data-test="dashboard-card-option-edit-button"
++              disabled={!allowEdit}
++              aria-disabled={!allowEdit}
++            >
++              <Icons.EditOutlined iconSize="l" data-test="edit-alt" />{' '}
++              {t('Edit')}
++            </MenuItemButton>
++          </span>
+         </Tooltip>
+       ),
+       disabled: !allowEdit,
+@@ -156,17 +168,8 @@ function DashboardCard({
+       label: (
+         <Tooltip
+           placement="right"
+-          title={
+-            allowEdit
+-              ? null
+-              : softDelete
+-                ? t(
+-                    'You must be a dashboard editor in order to archive. Please reach out to a dashboard editor to request modifications or edit access.',
+-                  )
+-                : t(
+-                    'You must be a dashboard editor in order to delete. Please reach out to a dashboard editor to request modifications or edit access.',
+-                  )
+-          }
++          trigger={['hover', 'focus']}
++          title={deletePermissionHint}
+         >
+           <span>
+             <MenuItemButton
+@@ -231,6 +234,17 @@ function DashboardCard({
+               <KebabMenuButton
+                 menuItems={menuItems}
+                 dataTest="dashboard-card-menu"
++                tooltipTitle={
++                  !allowEdit &&
++                  ((canEdit && openDashboardEditModal) || canDelete) ? (
++                    <>
++                      {canEdit && openDashboardEditModal && (
++                        <div>{editPermissionHint}</div>
++                      )}
++                      {canDelete && <div>{deletePermissionHint}</div>}
++                    </>
++                  ) : undefined
++                }
+               />
+             )}
+           </ListViewCard.Actions>
+==FILE== superset-frontend/src/pages/ArchivedList/ArchivedList.test.tsx
+@@ -30,7 +30,7 @@ import {
+ } from 'spec/helpers/testing-library';
+ import { FeatureFlag, isFeatureEnabled } from '@superset-ui/core';
+ import { rememberArchivedType } from 'src/utils/softDeleteCopy';
+-import { MemoryRouter, useLocation } from 'react-router-dom';
++import { MemoryRouter, useLocation, useHistory } from 'react-router-dom';
+ import { QueryParamProvider } from 'use-query-params';
+ import { ReactRouter5Adapter } from 'use-query-params/adapters/react-router-5';
+ import ArchivedList from 'src/pages/ArchivedList';
+@@ -196,12 +196,27 @@ const LocationProbe = () => (
+   <output data-test="archive-location">{useLocation().search}</output>
+ );
+ 
++function HistoryButtons() {
++  const history = useHistory();
++  return (
++    <>
++      <button type="button" onClick={() => history.goBack()}>
++        History Back
++      </button>
++      <button type="button" onClick={() => history.goForward()}>
++        History Forward
++      </button>
++    </>
++  );
++}
++
+ const renderArchivedList = (withStore = store, entry = '/archived/') =>
+   render(
+     <MemoryRouter initialEntries={[entry]}>
+       <QueryParamProvider adapter={ReactRouter5Adapter}>
+         <ArchivedList />
+         <LocationProbe />
++        <HistoryButtons />
+       </QueryParamProvider>
+     </MemoryRouter>,
+     { useRedux: true, store: withStore },
+@@ -1061,3 +1076,20 @@ test('explicit archive links override the remembered collection', async () => {
+   renderArchivedList(store, '/archived/?type=dashboard');
+   expect(await screen.findByText('Deleted Dashboard One')).toBeInTheDocument();
+ });
++
++test('Back and Forward restore the selected archived type', async () => {
++  mockRoutes();
++  renderArchivedList(store, '/archived/?type=chart');
++  await screen.findByTestId('archived-list-view');
++  await selectOption('Dashboard', 'Type');
++  await waitFor(() =>
++    expect(
++      fetchMock.callHistory.calls(/dashboard\/\?q/).length,
++    ).toBeGreaterThan(0),
++  );
++  fireEvent.click(screen.getByText('History Back'));
++  await screen.findByText('Deleted Chart One');
++  fireEvent.click(screen.getByText('History Forward'));
++  expect(await screen.findByText('Deleted Dashboard One')).toBeInTheDocument();
++  expect(screen.queryByText('Deleted Chart One')).not.toBeInTheDocument();
++});
+==FILE== superset-frontend/src/pages/ArchivedList/index.tsx
+@@ -696,7 +696,7 @@ function ArchivedList({ addDangerToast, addSuccessToast }: ToastProps) {
+       params.delete('sortColumn');
+       params.delete('sortOrder');
+       params.delete('pageIndex');
+-      history.replace({ search: params.toString() });
++      history.push({ search: params.toString() });
+     },
+     [history],
+   );
+==FILE== superset-frontend/src/pages/DatasetList/DatasetList.integration.test.tsx
+@@ -329,7 +329,7 @@ test('bulk delete confirm names the charts and dashboards that will break', asyn
+   expect(within(modal).getByText('Chart A')).toBeInTheDocument();
+   expect(within(modal).getByText('Chart B')).toBeInTheDocument();
+   expect(within(modal).getByText('Executive Dashboard')).toBeInTheDocument();
+-  expect(modal).toHaveTextContent(/linked to 2 charts on 1 dashboard\./i);
++  expect(modal).toHaveTextContent(/linked to 2 charts and 1 dashboard\./i);
+ 
+   // The whole selection goes out in one lookup.
+   const [lookup] = fetchMock.callHistory.calls(
+@@ -354,7 +354,7 @@ test('bulk delete confirm counts dependents the user cannot see', async () => {
+   const modal = await openBulkDeleteConfirm([mockDatasets[0], mockDatasets[1]]);
+ 
+   expect(await within(modal).findByText('Chart A')).toBeInTheDocument();
+-  expect(modal).toHaveTextContent(/linked to 2 charts on 1 dashboard\./i);
++  expect(modal).toHaveTextContent(/linked to 2 charts and 1 dashboard\./i);
+   expect(modal).toHaveTextContent(/1 additional restricted chart/i);
+   expect(modal).toHaveTextContent(/1 additional restricted dashboard/i);
+   expect(modal).not.toHaveTextContent(/no charts or dashboards depend on/i);
+@@ -569,7 +569,7 @@ test.each([0, 2])(
+       const modal = await screen.findByRole('dialog');
+       expect(modal).not.toHaveTextContent('Deleting');
+       if (count) {
+-        expect(modal).toHaveTextContent('2 charts on 1 dashboard');
++        expect(modal).toHaveTextContent('2 charts and 1 dashboard');
+         expect(modal).toHaveTextContent(
+           'Archiving it will make dependent charts unavailable until it is recovered.',
+         );
+==FILE== superset-frontend/src/pages/DatasetList/DatasetList.listview.test.tsx
+@@ -429,6 +429,7 @@ test('delete button opens modal with dataset details', async () => {
+   // Verify delete modal appears
+   const modal = await screen.findByRole('dialog');
+   expect(modal).toBeInTheDocument();
++  expect(modal).toHaveTextContent('is linked to 3 charts and 2 dashboards.');
+ });
+ 
+ test('delete action successfully deletes dataset and refreshes list', async () => {
+==FILE== superset-frontend/src/pages/DatasetList/index.tsx
+@@ -1735,7 +1735,7 @@ const DatasetList: FunctionComponent<DatasetListProps> = ({
+                   {t('The %s', datasetLabelLower())}
+                   <b> {datasetCurrentlyDeleting.table_name} </b>
+                   {t(
+-                    'is linked to %s charts that appear on %s dashboards. Are you sure you want to continue? Deleting the dataset will break those objects.',
++                    'is linked to %s charts and %s dashboards. Are you sure you want to continue? Deleting the dataset will break those objects.',
+                     datasetCurrentlyDeleting.charts.count,
+                     datasetCurrentlyDeleting.dashboards.count,
+                   )}
+@@ -1962,7 +1962,7 @@ const DatasetList: FunctionComponent<DatasetListProps> = ({
+                           true,
+                         )
+                       : t(
+-                          'The selected %s are linked to %s on %s. Deleting them will break those objects.',
++                          'The selected %s are linked to %s and %s. Deleting them will break those objects.',
+                           datasetsLabelLower(),
+                           tn(
+                             '%s chart',
+==FILE== superset-frontend/src/utils/softDeleteCopy.test.ts
+@@ -205,7 +205,7 @@ test.each([1, 2])(
+ test('dataset impact omits empty dependencies and retains nonzero dashboard counts', () => {
+   expect(datasetArchiveImpact('dataset', 0, 0)).toBeNull();
+   expect(datasetArchiveImpact('dataset', 2, 1)).toContain(
+-    'linked to 2 charts on 1 dashboard',
++    'linked to 2 charts and 1 dashboard',
+   );
+ });
+ 
+@@ -235,3 +235,19 @@ test('remembering an archive is explicit and ignores permanent deletes', () => {
+   rememberArchivedType('chart');
+   expect(getItem(LocalStorageKeys.LastArchivedType, null)).toBe('dashboard');
+ });
++
++test('bulk impact does not imply every affected chart belongs to a dashboard', () => {
++  expect(datasetArchiveImpact('datasets', 4, 1, true)).toContain(
++    'linked to 4 charts and 1 dashboard',
++  );
++});
++
++test.each(['/superset/dashboard/7/', '/analytics/superset/dashboard/7/'])(
++  'recovery link respects the application prefix for %s',
++  url => {
++    (applicationRoot as jest.Mock).mockReturnValue('/analytics');
++    expect(recoveredToast('Saved', 'Dashboard', url).text).toContain(
++      'href="/analytics/superset/dashboard/7/"',
++    );
++  },
++);
+==FILE== superset-frontend/src/utils/softDeleteCopy.ts
+@@ -163,7 +163,7 @@ export function recoveredToast(
+   }
+   const linkText = t('View %(type)s', { type: typeLabel });
+   return {
+-    text: `${escape(message)} <a href="${escape(url)}">${escape(linkText)} →</a>`,
++    text: `${escape(message)} <a href="${escape(ensureAppRoot(url))}">${escape(linkText)} →</a>`,
+     options: { allowHtml: true },
+   };
+ }
+@@ -264,11 +264,11 @@ export function datasetArchiveImpact(
+   }
+   return plural
+     ? t(
+-        'The selected %(type)s are linked to %(charts)s on %(dashboards)s. Archiving them will make dependent charts unavailable until they are recovered.',
++        'The selected %(type)s are linked to %(charts)s and %(dashboards)s. Archiving them will make dependent charts unavailable until they are recovered.',
+         values,
+       )
+     : t(
+-        'This %(type)s is linked to %(charts)s on %(dashboards)s. Archiving it will make dependent charts unavailable until it is recovered.',
++        'This %(type)s is linked to %(charts)s and %(dashboards)s. Archiving it will make dependent charts unavailable until it is recovered.',
+         values,
+       );
+ }
+==FILE== superset/translations/messages.pot
+@@ -14952,15 +14952,15 @@ msgid "The screenshot is being generated. Please, do not leave the page."
+ msgstr ""
+ 
+ #, python-format
+-msgid "The selected %(type)s are linked to %(charts)s on %(dashboards)s. Archiving them will make dependent charts unavailable until they are recovered."
++msgid "The selected %(type)s are linked to %(charts)s and %(dashboards)s. Archiving them will make dependent charts unavailable until they are recovered."
+ msgstr ""
+ 
+ #, python-format
+ msgid "The selected %(type)s are used by %(charts)s. Archiving them will make dependent charts unavailable until they are recovered."
+ msgstr ""
+ 
+ #, python-format
+-msgid "The selected %s are linked to %s on %s. Deleting them will break those objects."
++msgid "The selected %s are linked to %s and %s. Deleting them will break those objects."
+ msgstr ""
+ 
+ msgid "The semantic layer could not verify that this query result is complete. Retry the query; if it continues, ask an administrator to check the semantic-layer connection."
+@@ -15475,7 +15475,7 @@ msgid "This %(schedule)s executes as another user. Only admins can change its co
+ msgstr ""
+ 
+ #, python-format
+-msgid "This %(type)s is linked to %(charts)s on %(dashboards)s. Archiving it will make dependent charts unavailable until it is recovered."
++msgid "This %(type)s is linked to %(charts)s and %(dashboards)s. Archiving it will make dependent charts unavailable until it is recovered."
+ msgstr ""
+ 
+ #, python-format
+@@ -18603,11 +18603,11 @@ msgid "is false"
+ msgstr ""
+ 
+ #, python-format
+-msgid "is linked to %s charts that appear on %s dashboards and users have %s SQL Lab tabs using this database open. Are you sure you want to continue? Deleting the database will break those objects."
++msgid "is linked to %s charts and %s dashboards. Are you sure you want to continue? Deleting the dataset will break those objects."
+ msgstr ""
+ 
+ #, python-format
+-msgid "is linked to %s charts that appear on %s dashboards. Are you sure you want to continue? Deleting the dataset will break those objects."
++msgid "is linked to %s charts that appear on %s dashboards and users have %s SQL Lab tabs using this database open. Are you sure you want to continue? Deleting the database will break those objects."
+ msgstr ""
+ 
+ msgid "is not"

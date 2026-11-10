@@ -1,0 +1,113 @@
+{
+  "sha": "9e7fad6a9d3690422af41f607658e9a049b6df51",
+  "node_id": "C_kwDOAlosUtoAKDllN2ZhZDZhOWQzNjkwNDIyYWY0MWY2MDc2NThlOWEwNDliNmRmNTE",
+  "commit": {
+    "author": {
+      "name": "dependabot[bot]",
+      "email": "49699333+dependabot[bot]@users.noreply.github.com",
+      "date": "2026-11-07T03:30:27Z"
+    },
+    "committer": {
+      "name": "GitHub",
+      "email": "noreply@github.com",
+      "date": "2026-11-07T03:30:27Z"
+    },
+    "message": "chore(deps): bump query-string from 9.5.1 to 10.0.0 in /superset-frontend (#45971)\n\nSigned-off-by: dependabot[bot] <support@github.com>\nCo-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>",
+    "tree": {
+      "sha": "8dc895b0efefb0f2d7360a677a3a532dfc1cee29",
+      "url": "https://api.github.com/repos/apache/superset/git/trees/8dc895b0efefb0f2d7360a677a3a532dfc1cee29"
+    },
+    "url": "https://api.github.com/repos/apache/superset/git/commits/9e7fad6a9d3690422af41f607658e9a049b6df51",
+    "comment_count": 0,
+    "verification": {
+      "verified": true,
+      "reason": "valid",
+      "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJq7ptTCRC1aQ7uu5UhlAAA3bAQAGuRYlVFIrjc00VJl7LgsbW4\niPHxF1icxWHqL89RJAz8jJRH5cgB+tP7CPt5ra1fgxQmx84gGhn20Ym1ZQKqMRNJ\npKdgf/4f3CixImwWJpYEEY+5T/LsQjQC9WyhUjvLTBCXACTZdKRv0xmxXBnWNDvq\ncae7F01GrEV+8/9Ti4SjB2Obh/zL6QC5rkRX5sTtzGoelssqJFL1nfsbhwE7o4Oy\nctDlLMdka+qvFf7W9Kr2chJ66AU5C7FnepU2WDMu8lfxuxb5gDzt3WIIIDkXEqN4\nQ5qeu+Debt0kJ5SnFoCw9gGmYXS1xCxlCsYHDw8h3XdpmohMzy1THeaXseRpPS4o\nInoFZ/E911sF70UZK6SOyKi5U8kNrxfE3bPn7Hqx+NzV/Oq+wiw2uL9KwIAJSWJv\nvA0syb8lnQjta0LRgHMKagabBCrU13WimlbsFQIUbdUUfOl0owurf3Tb8Wszs+I4\nBVc2byQEZZcIGmAmAhDuArTpMbzw0pJYSWCAR/Got1rf58ZKTvxSuyIQbK3cKPnJ\ncwcYFEySjejp3mp4iy5rmilk/pj+uGpNNss1nGb4BX3PY6PwmfjIKg0Ri573wO3S\nEFlc88W8qAcUjje340BSdbUok+E/8W7eWg3zi48JBlpfHNJpHwen9sxhdJyIvttq\ntyF25aNjgI22xMG16bbP\n=9rKH\n-----END PGP SIGNATURE-----\n",
+      "payload": "tree 8dc895b0efefb0f2d7360a677a3a532dfc1cee29\nparent 4c8ec9e65c987683e79fcb08ea1552bb7c10afc4\nauthor dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> 1794022227 +0700\ncommitter GitHub <noreply@github.com> 1794022227 +0700\n\nchore(deps): bump query-string from 9.5.1 to 10.0.0 in /superset-frontend (#45971)\n\nSigned-off-by: dependabot[bot] <support@github.com>\nCo-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>",
+      "verified_at": "2026-11-07T03:30:28Z"
+    }
+  },
+  "url": "https://api.github.com/repos/apache/superset/commits/9e7fad6a9d3690422af41f607658e9a049b6df51",
+  "html_url": "https://github.com/apache/superset/commit/9e7fad6a9d3690422af41f607658e9a049b6df51",
+  "comments_url": "https://api.github.com/repos/apache/superset/commits/9e7fad6a9d3690422af41f607658e9a049b6df51/comments",
+  "author": {
+    "login": "dependabot[bot]",
+    "id": 49699333,
+    "node_id": "MDM6Qm90NDk2OTkzMzM=",
+    "avatar_url": "https://avatars.githubusercontent.com/in/29110?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/dependabot%5Bbot%5D",
+    "html_url": "https://github.com/apps/dependabot",
+    "followers_url": "https://api.github.com/users/dependabot%5Bbot%5D/followers",
+    "following_url": "https://api.github.com/users/dependabot%5Bbot%5D/following{/other_user}",
+    "gists_url": "https://api.github.com/users/dependabot%5Bbot%5D/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/dependabot%5Bbot%5D/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/dependabot%5Bbot%5D/subscriptions",
+    "organizations_url": "https://api.github.com/users/dependabot%5Bbot%5D/orgs",
+    "repos_url": "https://api.github.com/users/dependabot%5Bbot%5D/repos",
+    "events_url": "https://api.github.com/users/dependabot%5Bbot%5D/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/dependabot%5Bbot%5D/received_events",
+    "type": "Bot",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "committer": {
+    "login": "web-flow",
+    "id": 19864447,
+    "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+    "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/web-flow",
+    "html_url": "https://github.com/web-flow",
+    "followers_url": "https://api.github.com/users/web-flow/followers",
+    "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+    "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+    "organizations_url": "https://api.github.com/users/web-flow/orgs",
+    "repos_url": "https://api.github.com/users/web-flow/repos",
+    "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/web-flow/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "parents": [
+    {
+      "sha": "4c8ec9e65c987683e79fcb08ea1552bb7c10afc4",
+      "url": "https://api.github.com/repos/apache/superset/commits/4c8ec9e65c987683e79fcb08ea1552bb7c10afc4",
+      "html_url": "https://github.com/apache/superset/commit/4c8ec9e65c987683e79fcb08ea1552bb7c10afc4"
+    }
+  ],
+  "stats": {
+    "total": 42,
+    "additions": 16,
+    "deletions": 26
+  },
+  "files": [
+    {
+      "sha": "c276e15d75dd9c233aefeb42c9b21dfaf3fa0eef",
+      "filename": "superset-frontend/package-lock.json",
+      "status": "modified",
+      "additions": 15,
+      "deletions": 25,
+      "changes": 40,
+      "blob_url": "https://github.com/apache/superset/blob/9e7fad6a9d3690422af41f607658e9a049b6df51/superset-frontend%2Fpackage-lock.json",
+      "raw_url": "https://github.com/apache/superset/raw/9e7fad6a9d3690422af41f607658e9a049b6df51/superset-frontend%2Fpackage-lock.json",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/superset-frontend%2Fpackage-lock.json?ref=9e7fad6a9d3690422af41f607658e9a049b6df51",
+      "patch": "@@ -115,7 +115,7 @@\n         \"nanoid\": \"^6.0.2\",\n         \"ol\": \"^10.11.0\",\n         \"postcss\": \"^8.5.31\",\n-        \"query-string\": \"9.5.1\",\n+        \"query-string\": \"10.0.0\",\n         \"re-resizable\": \"^6.11.2\",\n         \"react\": \"^18.3.0\",\n         \"react-arborist\": \"^3.16.0\",\n@@ -18942,15 +18942,6 @@\n         \"url\": \"https://github.com/sponsors/wooorm\"\n       }\n     },\n-    \"node_modules/decode-uri-component\": {\n-      \"version\": \"0.5.1\",\n-      \"resolved\": \"https://registry.npmjs.org/decode-uri-component/-/decode-uri-component-0.5.1.tgz\",\n-      \"integrity\": \"sha512-vWHQkXgg2cE3BB4rR0c+PYw9BCQzLoNIRMI7AunIkZst74tw/vpPp7VLoYtsR/cy1f55g3XDWUslfeCZjiZJyA==\",\n-      \"license\": \"MIT\",\n-      \"engines\": {\n-        \"node\": \">=14.16\"\n-      }\n-    },\n     \"node_modules/dedent\": {\n       \"version\": \"0.7.0\",\n       \"resolved\": \"https://registry.npmjs.org/dedent/-/dedent-0.7.0.tgz\",\n@@ -20628,12 +20619,12 @@\n       }\n     },\n     \"node_modules/filter-obj\": {\n-      \"version\": \"5.1.0\",\n-      \"resolved\": \"https://registry.npmjs.org/filter-obj/-/filter-obj-5.1.0.tgz\",\n-      \"integrity\": \"sha512-qWeTREPoT7I0bifpPUXtxkZJ1XJzxWtfoWWkdVGqa+eCr3SHW/Ocp89o8vLvbUuQnadybJpjOKu4V+RwO6sGng==\",\n+      \"version\": \"6.1.0\",\n+      \"resolved\": \"https://registry.npmjs.org/filter-obj/-/filter-obj-6.1.0.tgz\",\n+      \"integrity\": \"sha512-xdMtCAODmPloU9qtmPcdBV9Kd27NtMse+4ayThxqIHUES5Z2S6bGpap5PpdmNM56ub7y3i1eyr+vJJIIgWGKmA==\",\n       \"license\": \"MIT\",\n       \"engines\": {\n-        \"node\": \">=14.16\"\n+        \"node\": \">=18\"\n       },\n       \"funding\": {\n         \"url\": \"https://github.com/sponsors/sindresorhus\"\n@@ -32772,17 +32763,16 @@\n       }\n     },\n     \"node_modules/query-string\": {\n-      \"version\": \"9.5.1\",\n-      \"resolved\": \"https://registry.npmjs.org/query-string/-/query-string-9.5.1.tgz\",\n-      \"integrity\": \"sha512-/zO3RwuRCMTIcEgq6YMv4OrtEE1XzBG7w5N6zc6ydYnkWYOWsnLI/5894hYEzfESfMOT4cHCsRTIdxsSl1KjGg==\",\n+      \"version\": \"10.0.0\",\n+      \"resolved\": \"https://registry.npmjs.org/query-string/-/query-string-10.0.0.tgz\",\n+      \"integrity\": \"sha512-QYodx/Ywk8lCcOmsyupXVN91yWPAdjq0xVqE2FE2BHFYnma71C8txR8JCBptjzoUpkfAK7Qjua9VjYRTru4LYg==\",\n       \"license\": \"MIT\",\n       \"dependencies\": {\n-        \"decode-uri-component\": \"^0.5.0\",\n-        \"filter-obj\": \"^5.1.0\",\n-        \"split-on-first\": \"^3.0.0\"\n+        \"filter-obj\": \"^6.1.0\",\n+        \"split-on-first\": \"^4.0.0\"\n       },\n       \"engines\": {\n-        \"node\": \">=18\"\n+        \"node\": \">=22\"\n       },\n       \"funding\": {\n         \"url\": \"https://github.com/sponsors/sindresorhus\"\n@@ -36482,12 +36472,12 @@\n       }\n     },\n     \"node_modules/split-on-first\": {\n-      \"version\": \"3.0.0\",\n-      \"resolved\": \"https://registry.npmjs.org/split-on-first/-/split-on-first-3.0.0.tgz\",\n-      \"integrity\": \"sha512-qxQJTx2ryR0Dw0ITYyekNQWpz6f8dGd7vffGNflQQ3Iqj9NJ6qiZ7ELpZsJ/QBhIVAiDfXdag3+Gp8RvWa62AA==\",\n+      \"version\": \"4.0.0\",\n+      \"resolved\": \"https://registry.npmjs.org/split-on-first/-/split-on-first-4.0.0.tgz\",\n+      \"integrity\": \"sha512-pyrgNqiEBHA9KlEtg9quYGagtrlTyukL3ryQ+RmjRn9SYmcNQmfa+sWIsI+hlcL4WrmFdrt7IfM6o8ktBAooDQ==\",\n       \"license\": \"MIT\",\n       \"engines\": {\n-        \"node\": \">=12\"\n+        \"node\": \">=20\"\n       },\n       \"funding\": {\n         \"url\": \"https://github.com/sponsors/sindresorhus\""
+    },
+    {
+      "sha": "06aadf2c723f8f6bd76518b6c36c0c54bf0963d1",
+      "filename": "superset-frontend/package.json",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "changes": 2,
+      "blob_url": "https://github.com/apache/superset/blob/9e7fad6a9d3690422af41f607658e9a049b6df51/superset-frontend%2Fpackage.json",
+      "raw_url": "https://github.com/apache/superset/raw/9e7fad6a9d3690422af41f607658e9a049b6df51/superset-frontend%2Fpackage.json",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/superset-frontend%2Fpackage.json?ref=9e7fad6a9d3690422af41f607658e9a049b6df51",
+      "patch": "@@ -191,7 +191,7 @@\n     \"nanoid\": \"^6.0.2\",\n     \"ol\": \"^10.11.0\",\n     \"postcss\": \"^8.5.31\",\n-    \"query-string\": \"9.5.1\",\n+    \"query-string\": \"10.0.0\",\n     \"re-resizable\": \"^6.11.2\",\n     \"react\": \"^18.3.0\",\n     \"react-arborist\": \"^3.16.0\","
+    }
+  ]
+}

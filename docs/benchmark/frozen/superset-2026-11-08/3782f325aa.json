@@ -1,0 +1,137 @@
+{
+  "sha": "3782f325aa9e2a36e367d82a846f0ed89909c947",
+  "node_id": "C_kwDOAlosUtoAKDM3ODJmMzI1YWE5ZTJhMzZlMzY3ZDgyYTg0NmYwZWQ4OTkwOWM5NDc",
+  "commit": {
+    "author": {
+      "name": "Mikołaj Balcerek",
+      "email": "mpbalcerek+github@gmail.com",
+      "date": "2026-11-06T15:28:54Z"
+    },
+    "committer": {
+      "name": "GitHub",
+      "email": "noreply@github.com",
+      "date": "2026-11-06T15:28:54Z"
+    },
+    "message": "fix(security): bump pyarrow floor to disallow package with CVE-2026-111497 (#46018)\n\nCo-authored-by: Claude Opus 5.5 <noreply@anthropic.com>",
+    "tree": {
+      "sha": "d19c5ee63664482ae64ad681115ef17ca47e640a",
+      "url": "https://api.github.com/repos/apache/superset/git/trees/d19c5ee63664482ae64ad681115ef17ca47e640a"
+    },
+    "url": "https://api.github.com/repos/apache/superset/git/commits/3782f325aa9e2a36e367d82a846f0ed89909c947",
+    "comment_count": 0,
+    "verification": {
+      "verified": true,
+      "reason": "valid",
+      "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJq7fI2CRC1aQ7uu5UhlAAAcDYQABs/yaF/OxkLHOSZiVPyiU4q\nast946efDISU/m1vDW1aKX+Yqwyp5nfMiYQjilXjVGJ7fISX8Thw9FZ8dfPbrYrv\n7QtT+Ur9CS+zspNJBcdkKi7vO+FW7EJW3iIRk71Bdoe77lnaGXp0mouMc8V9hQG6\nbb+dBkxPbsRZsztc2RFupV+yLkCccCcVJtKJRyplShVW2jqoAY9SxSZL6K6+JbSf\ny3mLHwV7WZnMR8gIpZbkDLRlBoxH5EN0giZ6peqIFK/1mDJZhGOEO2VGNtMOI5Fr\n+2jNetTToYdq9mmay2QF+Muz/MUyXcs2Z6z7NlhbUtKG4XMmtdpuFktRQggYwEQv\n3D32c+AKHr3Wl8LyUgXJNlrOXBwzkYdJwtxoZ4A2isyGGwpzCeHUlOGttyBsL2Zl\nyOHZRUKsfJzFss4FHX6W7HvH0Q1B8MdhdqYsI6ucrRuzNOPagtMYo3VWqAaSD/9U\nqLojEdzfmWlHP5IR0TnEVxllGKWw1H+xnL8qat94FmJw2LUlRLJJfT3osPcXui8c\nwj8sX7kcAGoWgJpGwAmG8CSswJwTdOalEppvBtu0g/+0DtUT2yxJf9tzzpgNueym\nN9qS4wSSTQfU2DehQWS8hLR9ylBq2+oCUwEynkbIEffO3KW3yIScq03Wlu+9F7h9\nu4RaD02Y/AryQYVpYT73\n=Im7i\n-----END PGP SIGNATURE-----\n",
+      "payload": "tree d19c5ee63664482ae64ad681115ef17ca47e640a\nparent 9ee13f85fa5cd3e00a14d152c06da78d43d137e1\nauthor Mikołaj Balcerek <mpbalcerek+github@gmail.com> 1793978934 +0100\ncommitter GitHub <noreply@github.com> 1793978934 +0000\n\nfix(security): bump pyarrow floor to disallow package with CVE-2026-111497 (#46018)\n\nCo-authored-by: Claude Opus 5.5 <noreply@anthropic.com>",
+      "verified_at": "2026-11-06T15:28:54Z"
+    }
+  },
+  "url": "https://api.github.com/repos/apache/superset/commits/3782f325aa9e2a36e367d82a846f0ed89909c947",
+  "html_url": "https://github.com/apache/superset/commit/3782f325aa9e2a36e367d82a846f0ed89909c947",
+  "comments_url": "https://api.github.com/repos/apache/superset/commits/3782f325aa9e2a36e367d82a846f0ed89909c947/comments",
+  "author": {
+    "login": "MikolajBalcerek",
+    "id": 22835787,
+    "node_id": "MDQ6VXNlcjIyODM1Nzg3",
+    "avatar_url": "https://avatars.githubusercontent.com/u/22835787?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/MikolajBalcerek",
+    "html_url": "https://github.com/MikolajBalcerek",
+    "followers_url": "https://api.github.com/users/MikolajBalcerek/followers",
+    "following_url": "https://api.github.com/users/MikolajBalcerek/following{/other_user}",
+    "gists_url": "https://api.github.com/users/MikolajBalcerek/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/MikolajBalcerek/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/MikolajBalcerek/subscriptions",
+    "organizations_url": "https://api.github.com/users/MikolajBalcerek/orgs",
+    "repos_url": "https://api.github.com/users/MikolajBalcerek/repos",
+    "events_url": "https://api.github.com/users/MikolajBalcerek/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/MikolajBalcerek/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "committer": {
+    "login": "web-flow",
+    "id": 19864447,
+    "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+    "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/web-flow",
+    "html_url": "https://github.com/web-flow",
+    "followers_url": "https://api.github.com/users/web-flow/followers",
+    "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+    "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+    "organizations_url": "https://api.github.com/users/web-flow/orgs",
+    "repos_url": "https://api.github.com/users/web-flow/repos",
+    "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/web-flow/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "parents": [
+    {
+      "sha": "9ee13f85fa5cd3e00a14d152c06da78d43d137e1",
+      "url": "https://api.github.com/repos/apache/superset/commits/9ee13f85fa5cd3e00a14d152c06da78d43d137e1",
+      "html_url": "https://github.com/apache/superset/commit/9ee13f85fa5cd3e00a14d152c06da78d43d137e1"
+    }
+  ],
+  "stats": {
+    "total": 10,
+    "additions": 5,
+    "deletions": 5
+  },
+  "files": [
+    {
+      "sha": "6d7d8161f64f9c5ffaeda0741b563c52b1eb23c2",
+      "filename": "pyproject.toml",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "changes": 2,
+      "blob_url": "https://github.com/apache/superset/blob/3782f325aa9e2a36e367d82a846f0ed89909c947/pyproject.toml",
+      "raw_url": "https://github.com/apache/superset/raw/3782f325aa9e2a36e367d82a846f0ed89909c947/pyproject.toml",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/pyproject.toml?ref=3782f325aa9e2a36e367d82a846f0ed89909c947",
+      "patch": "@@ -99,7 +99,7 @@ dependencies = [\n     \"python-dateutil\",\n     \"python-dotenv\", # optional dependencies for Flask but required for Superset, see https://flask.palletsprojects.com/en/stable/installation/#optional-dependencies\n     \"pygeohash\",\n-    \"pyarrow>=26.0.0, <27\", # before upgrading pyarrow, check that all db dependencies support this, see e.g. https://github.com/apache/superset/pull/34693\n+    \"pyarrow>=26.0.1, <27\", # before upgrading pyarrow, check that all db dependencies support this, see e.g. https://github.com/apache/superset/pull/34693\n     \"pyyaml>=6.0.3, <7.0.0\",\n     \"PyJWT>=2.15.1, <3.0\", # raise floor to match resolved pin; closes SCA false-positive on 2.4.x-range CVEs already fixed in 2.13.0\n     \"redis>=5.0.0, <9.0\","
+    },
+    {
+      "sha": "2a2382c82af78016fdbbe0eee5d78a97eb2193d2",
+      "filename": "requirements/base.in",
+      "status": "modified",
+      "additions": 2,
+      "deletions": 2,
+      "changes": 4,
+      "blob_url": "https://github.com/apache/superset/blob/3782f325aa9e2a36e367d82a846f0ed89909c947/requirements%2Fbase.in",
+      "raw_url": "https://github.com/apache/superset/raw/3782f325aa9e2a36e367d82a846f0ed89909c947/requirements%2Fbase.in",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/requirements%2Fbase.in?ref=3782f325aa9e2a36e367d82a846f0ed89909c947",
+      "patch": "@@ -31,8 +31,8 @@ numexpr>=2.9.0\n cryptography>=50.0.2,<51.0.0\n # Security: Snyk - XSS vulnerability in Mako templates\n mako>=1.4.3,<2.0.0\n-# Security: CVE-2024-52338 (CRITICAL) - Deserialization of untrusted data in IPC/Parquet readers\n-pyarrow>=26.0.0,<27.0.0\n+# Security: Above 26.0.1 for brotli CVE-2026-111497\n+pyarrow>=26.0.1,<27.0.0\n # Security: CVE-2026-27459 - pyopenssl certificate validation\n pyopenssl>=26.0.0,<27.0.0\n # Security: CVE-2026-25645 (MEDIUM) - Insecure Temporary File"
+    },
+    {
+      "sha": "83c0785dfb8ce9c5927413d40d763f8b26249b05",
+      "filename": "requirements/base.txt",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "changes": 2,
+      "blob_url": "https://github.com/apache/superset/blob/3782f325aa9e2a36e367d82a846f0ed89909c947/requirements%2Fbase.txt",
+      "raw_url": "https://github.com/apache/superset/raw/3782f325aa9e2a36e367d82a846f0ed89909c947/requirements%2Fbase.txt",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/requirements%2Fbase.txt?ref=3782f325aa9e2a36e367d82a846f0ed89909c947",
+      "patch": "@@ -283,7 +283,7 @@ prison==0.2.1\n     # via flask-appbuilder\n prompt-toolkit==3.0.51\n     # via click-repl\n-pyarrow==26.0.0\n+pyarrow==26.0.1\n     # via\n     #   -r requirements/base.in\n     #   apache-superset (pyproject.toml)"
+    },
+    {
+      "sha": "df1617c7a6174e5eb8ce13786ca969923a66ac9f",
+      "filename": "requirements/development.txt",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "changes": 2,
+      "blob_url": "https://github.com/apache/superset/blob/3782f325aa9e2a36e367d82a846f0ed89909c947/requirements%2Fdevelopment.txt",
+      "raw_url": "https://github.com/apache/superset/raw/3782f325aa9e2a36e367d82a846f0ed89909c947/requirements%2Fdevelopment.txt",
+      "contents_url": "https://api.github.com/repos/apache/superset/contents/requirements%2Fdevelopment.txt?ref=3782f325aa9e2a36e367d82a846f0ed89909c947",
+      "patch": "@@ -798,7 +798,7 @@ psycopg2-binary==2.9.13\n     # via apache-superset\n py-key-value-aio==0.4.4\n     # via fastmcp-slim\n-pyarrow==26.0.0\n+pyarrow==26.0.1\n     # via\n     #   -c requirements/base-constraint.txt\n     #   apache-superset"
+    }
+  ]
+}
