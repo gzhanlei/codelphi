@@ -77,6 +77,8 @@ export const MCP_TOOLS: McpToolDef[] = [
   { name: "search_scenarios", description: "按关键词检索规格原文（命中条目 = 已过证据校验的原文，未覆盖时明确返回空）", inputSchema: { type: "object", properties: { slug: { type: "string" }, query: { type: "string" } }, required: ["slug", "query"] } },
   { name: "list_releases", description: "列产品的发布（时间倒序，默认 10 条）", inputSchema: { type: "object", properties: { slug: { type: "string" }, limit: { type: "number" } }, required: ["slug"] } },
   { name: "get_release", description: "单条发布的行为变化清单（含前后差异摘要与证据链接）", inputSchema: { type: "object", properties: { slug: { type: "string" }, releaseId: { type: "number" } }, required: ["slug", "releaseId"] } },
+  { name: "get_release_notes", description: "单条发布的人工发布稿（块级、含 override 后文案与证据路径；未生成返回空）", inputSchema: { type: "object", properties: { slug: { type: "string" }, releaseId: { type: "number" } }, required: ["slug", "releaseId"] } },
+  { name: "get_digest", description: "最近一期周期行为摘要（滚动 7 天分桶：support/sales/marketing；无则返回空）", inputSchema: { type: "object", properties: { slug: { type: "string" } }, required: ["slug"] } },
   { name: "send_feedback", description: "向产品方发送使用反馈（只写反馈表，无其他写权限）", inputSchema: { type: "object", properties: { slug: { type: "string" }, kind: { type: "string", enum: ["bug", "question", "suggestion"] }, message: { type: "string" } }, required: ["slug", "kind", "message"] } },
 ];
 
@@ -252,6 +254,64 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
     };
   }
 
+  if (name === "get_release_notes") {
+    const releaseId = Number(args.releaseId ?? 0);
+    const notes = await queryRows<{ id: number; status: string; emphasis: string; shareToken: string | null; publishedAt: Date | null }>(
+      execute("SELECT id, status, emphasis, share_token AS shareToken, published_at AS publishedAt FROM release_notes WHERE release_id = ? AND product_id = ?", [releaseId, product.id]),
+    );
+    const note = notes[0];
+    if (!note) return {};
+    const blocks = await queryRows<{ position: number; kind: string; featureName: string; scenarioReference: string; summary: string; summaryOverride: string | null; highlightType: string | null; beforeJson: unknown; afterJson: unknown }>(
+      execute(
+        `SELECT b.position, c.kind, c.feature_name AS featureName, c.scenario_reference AS scenarioReference,
+              c.summary, b.summary_override AS summaryOverride, c.highlight_type AS highlightType,
+              c.before_json AS beforeJson, c.after_json AS afterJson
+       FROM release_note_blocks b JOIN spec_changes c ON c.id = b.spec_change_id
+       WHERE b.release_note_id = ? ORDER BY b.position`,
+        [note.id],
+      ),
+    );
+    return {
+      status: note.status,
+      emphasis: note.emphasis,
+      publishedAt: note.publishedAt,
+      publicUrl: note.status === "published" && note.shareToken ? `/share/notes/${note.shareToken}` : null,
+      blocks: blocks.map((block) => ({
+        position: Number(block.position),
+        kind: block.kind,
+        featureName: block.featureName,
+        scenarioReference: block.scenarioReference,
+        // 人工改写优先（与公开页同口径）；summary 锚定 spec_change
+        summary: (block.summaryOverride ?? "").trim() || block.summary,
+        overridden: Boolean((block.summaryOverride ?? "").trim()),
+        highlightType: block.highlightType,
+        evidencePaths: [
+          ...evidencePathsFromSubject(block.beforeJson),
+          ...evidencePathsFromSubject(block.afterJson),
+        ],
+      })),
+    };
+  }
+
+  if (name === "get_digest") {
+    const digests = await queryRows<{ periodStart: string; periodEnd: string; contentJson: unknown; createdAt: Date }>(
+      execute("SELECT period_start AS periodStart, period_end AS periodEnd, content_json AS contentJson, created_at AS createdAt FROM digests WHERE product_id = ? ORDER BY period_start DESC LIMIT 1", [product.id]),
+    );
+    const digest = digests[0];
+    if (!digest) return {};
+    let content: { period?: { start: string; end: string }; changes?: Array<Record<string, unknown>>; audiences?: Record<string, Array<Record<string, unknown>>> } = {};
+    try {
+      content = typeof digest.contentJson === "string" ? JSON.parse(digest.contentJson) : (digest.contentJson as typeof content);
+    } catch {
+      return {};
+    }
+    return {
+      period: content.period ?? null,
+      changes: content.changes ?? [],
+      audienceCounts: Object.fromEntries(Object.entries(content.audiences ?? {}).map(([key, value]) => [key, value.length])),
+    };
+  }
+
   if (name === "send_feedback") {
     // feedback_reports 与会话用户耦合（createFeedbackReport 需要 SessionUser），
     // API key 身份直写：reporter_user_id 置 NULL，消息进 error_message（该表无独立 message 列）。
@@ -277,6 +337,18 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
 const METHOD_NOT_FOUND = -32601;
 const INVALID_PARAMS = -32602;
 const INTERNAL_ERROR = -32603;
+
+/** 从 before/after JSON 的场景 evidence 抽证据路径（与 release notes 生成路由同口径）。 */
+function evidencePathsFromSubject(subject: unknown): string[] {
+  if (typeof subject !== "object" || subject === null) return [];
+  const scenarios = (subject as { scenarios?: unknown }).scenarios;
+  if (!Array.isArray(scenarios)) return [];
+  return scenarios.flatMap((scenario) => {
+    const evidence = (scenario as { evidence?: unknown }).evidence;
+    if (!Array.isArray(evidence)) return [];
+    return evidence.map((item) => String((item as { path?: string }).path ?? "")).filter(Boolean);
+  });
+}
 
 /** 取行辅助：Execute 返回 unknown（mysql2 元组 [rows, fields]；测试 mock 可能直接给行数组）。 */
 async function queryRows<T>(promise: Promise<unknown>): Promise<T[]> {

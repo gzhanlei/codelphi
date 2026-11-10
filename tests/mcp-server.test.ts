@@ -22,7 +22,7 @@ describe("mcp server (A1)", () => {
   it("lists the read-only tool surface with JSON schemas", async () => {
     const response = await handleMcpRpc(runtime, rpc("tools/list"));
     const tools = (response?.result as { tools: Array<{ name: string }> }).tools;
-    expect(tools.map((tool) => tool.name)).toEqual(["list_projects", "get_project_summary", "get_feature", "get_scenario", "search_scenarios", "list_releases", "get_release", "send_feedback"]);
+    expect(tools.map((tool) => tool.name)).toEqual(["list_projects", "get_project_summary", "get_feature", "get_scenario", "search_scenarios", "list_releases", "get_release", "get_release_notes", "get_digest", "send_feedback"]);
   });
 
   it("returns no response for notifications (no id)", async () => {
@@ -79,6 +79,45 @@ describe("mcp server (A1)", () => {
   it("rejects unknown tools and methods with JSON-RPC errors", async () => {
     expect((await handleMcpRpc(runtime, rpc("tools/call", { name: "create_project" })))?.error?.code).toBe(-32601);
     expect((await handleMcpRpc(runtime, rpc("resources/list")))?.error?.code).toBe(-32601);
+  });
+
+  it("returns the published release note with human overrides and evidence paths (A2 工具面)", async () => {
+    execute.mockImplementation(async (sql: string) => {
+      if (String(sql).includes("FROM products WHERE organization_id")) return [[{ id: 9, slug: "radar", name: "Radar", description: "d" }]];
+      if (String(sql).includes("FROM release_notes WHERE release_id")) return [[{ id: 5, status: "published", emphasis: "重点", shareToken: "tok", publishedAt: new Date() }]];
+      if (String(sql).includes("FROM release_note_blocks b")) {
+        return [[
+          { position: 1, kind: "added", featureName: "助理聊天", scenarioReference: "HP-2", summary: "URL 可点", summaryOverride: "人工改写后的文案", highlightType: "News", beforeJson: null, afterJson: { scenarios: [{ evidence: [{ path: "lib/chat.ts" }] }] } },
+          { position: 2, kind: "changed", featureName: "定价答复", scenarioReference: "EC-1", summary: "确定性答复", summaryOverride: null, highlightType: null, beforeJson: null, afterJson: null },
+        ]];
+      }
+      return [[]];
+    });
+    const response = await handleMcpRpc(runtime, rpc("tools/call", { name: "get_release_notes", arguments: { slug: "radar", releaseId: 9 } }));
+    const result = (response?.result as { structuredContent: { status: string; publicUrl: string | null; blocks: Array<{ summary: string; overridden: boolean; evidencePaths: string[] }> } }).structuredContent;
+    expect(result.status).toBe("published");
+    expect(result.publicUrl).toContain("/share/notes/tok");
+    expect(result.blocks[0].summary).toBe("人工改写后的文案");
+    expect(result.blocks[0].overridden).toBe(true);
+    expect(result.blocks[0].evidencePaths).toEqual(["lib/chat.ts"]);
+    expect(result.blocks[1].summary).toBe("确定性答复");
+    expect(result.blocks[1].overridden).toBe(false);
+  });
+
+  it("returns empty for a release without a note and exposes digest audience counts", async () => {
+    execute.mockImplementation(async (sql: string) => {
+      if (String(sql).includes("FROM products WHERE organization_id")) return [[{ id: 9, slug: "radar", name: "Radar", description: "d" }]];
+      if (String(sql).includes("FROM digests WHERE product_id")) {
+        return [[{ periodStart: "2026-11-04", periodEnd: "2026-11-10", contentJson: JSON.stringify({ period: { start: "2026-11-04", end: "2026-11-10" }, changes: [{ id: 11 }], audiences: { support: [{ id: 11 }], sales: [], marketing: [{ id: 11 }] } }), createdAt: new Date() }]];
+      }
+      return [[]];
+    });
+    const noNote = await handleMcpRpc(runtime, rpc("tools/call", { name: "get_release_notes", arguments: { slug: "radar", releaseId: 404 } }));
+    expect((noNote?.result as { structuredContent: Record<string, unknown> }).structuredContent).toEqual({});
+    const digest = await handleMcpRpc(runtime, rpc("tools/call", { name: "get_digest", arguments: { slug: "radar" } }));
+    const result = (digest?.result as { structuredContent: { period: { start: string }; audienceCounts: Record<string, number> } }).structuredContent;
+    expect(result.period.start).toBe("2026-11-04");
+    expect(result.audienceCounts).toEqual({ support: 1, sales: 0, marketing: 1 });
   });
 
   it("never exposes write tools", () => {
