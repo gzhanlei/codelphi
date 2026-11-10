@@ -37,6 +37,28 @@ function compareCapabilities(a: { scenarioCount: number; name: string }, b: { sc
 
 const changeKindPriority: Record<string, number> = { added: 0, removed: 1, changed: 2 };
 
+/** 总览 02 面板的按功能聚合视图：大发布逐条列出会淹没在场景编号里，先给功能级摘要。 */
+function groupChangesByFeature(changes: Array<{ kind: string; featureName: string }>) {
+  const groups = new Map<string, { featureName: string; added: number; removed: number; changed: number }>();
+  for (const change of changes) {
+    const featureName = change.featureName || "未知功能";
+    const group = groups.get(featureName) ?? { featureName, added: 0, removed: 0, changed: 0 };
+    if (change.kind === "added") group.added += 1;
+    else if (change.kind === "removed") group.removed += 1;
+    else group.changed += 1;
+    groups.set(featureName, group);
+  }
+  return [...groups.values()].sort((a, b) => (b.added + b.removed + b.changed) - (a.added + a.removed + a.changed) || a.featureName.localeCompare(b.featureName));
+}
+
+export function changeGroupLabel(group: { added: number; removed: number; changed: number }) {
+  const parts = [];
+  if (group.added > 0) parts.push(`新增 ${group.added}`);
+  if (group.removed > 0) parts.push(`移除 ${group.removed}`);
+  if (group.changed > 0) parts.push(`更新 ${group.changed}`);
+  return parts.join(" · ") || "无行为变化";
+}
+
 export function buildProductOverview(input: ProductOverviewInput) {
   const latestRelease = input.releases[0];
   const specVersionId = latestRelease ? latestRelease.specVersionId : null;
@@ -48,6 +70,7 @@ export function buildProductOverview(input: ProductOverviewInput) {
     removed: latestChanges.filter((change) => change.kind === "removed").length,
     changed: latestChanges.filter((change) => change.kind !== "added" && change.kind !== "removed").length,
   };
+  const changeGroups = groupChangesByFeature(latestChanges);
   return {
     slug: input.product.slug,
     productBase: input.productBase,
@@ -69,6 +92,7 @@ export function buildProductOverview(input: ProductOverviewInput) {
       .sort((a, b) => (changeKindPriority[a.kind] ?? 9) - (changeKindPriority[b.kind] ?? 9) || a.id - b.id)
       .slice(0, 3),
     changeStats,
+    changeGroups,
     latestRelease,
     trust: {
       featureCount: input.features.length,

@@ -24,7 +24,9 @@ describe("product overview rendering", () => {
     expect(html).toContain("代码驱动的产品知识中心");
     expect(html).toContain("代码生成 · 1 个证据文件");
     expect(html).toContain("产品分析");
-    expect(html).toContain("新增分析能力");
+    expect(html).toContain("首版");
+    expect(html).toContain("overview-release-head");
+    expect(html).toContain("新增 1");
     expect(html).not.toContain("架构");
     expect(html).not.toContain("/architecture/");
   });
@@ -76,7 +78,7 @@ describe("product overview rendering", () => {
     expect(editable).toContain("description-dialog");
   });
 
-  it("prioritizes added and removed changes over wording updates and shows kind counts", () => {
+  it("aggregates latest-release changes per feature and shows the release head with kind counts", () => {
     const data = buildProductOverview({
       productBase: "/products/default/radar",
       product: { id: 1, slug: "radar", name: "Radar", description: "" },
@@ -94,8 +96,12 @@ describe("product overview rendering", () => {
     expect(data.changeStats).toEqual({ added: 1, removed: 1, changed: 2 });
     const html = renderToStaticMarkup(createElement(ProductOverview, { data }));
     const panel = html.slice(html.indexOf("最近改变了什么"));
-    expect(panel.indexOf("新增能力")).toBeLessThan(panel.indexOf("更早记录的更新"));
+    expect(panel).toContain("v2");
+    expect(panel).toContain("新增 1 · 移除 1 · 更新 2");
+    expect(panel).toContain("乙功能");
+    expect(panel).toContain("丙功能");
+    expect(panel).toContain("丁功能");
+    expect(panel).not.toContain("新增能力");
     expect(panel).not.toContain("场景更新");
-    expect(html).toContain("新增 1 · 移除 1 · 更新 2");
   });
 });

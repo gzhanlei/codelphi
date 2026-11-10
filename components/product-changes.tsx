@@ -51,7 +51,7 @@ export function ProductChanges({ slug, releases: initialReleases, changes: initi
       <div className="release-list-head">
         <a className="overview-text-link" href={`/api/products/${slug}/progress-summary?days=30`}>导出 30 天变更索引 ↓</a>
       </div>
-      {releases.map((release, index) => <ReleaseCard slug={slug} release={release} changes={changes} behaviorChanges={behaviorChanges} foldedChanges={foldedChanges} tasks={regressionTasks} canEdit={canEdit} defaultOpen={index === 0} key={release.id} />)}
+      {releases.map((release) => <ReleaseCard slug={slug} release={release} changes={changes} behaviorChanges={behaviorChanges} foldedChanges={foldedChanges} tasks={regressionTasks} canEdit={canEdit} key={release.id} />)}
       {hasMore ? (
         <div className="release-load-more">
           <button className="secondary-button" type="button" onClick={() => void loadMore()} disabled={loading}>

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { EditDescriptionButton } from "./edit-description-button";
-import type { ProductOverviewData } from "@/lib/product-overview";
+import { changeGroupLabel, type ProductOverviewData } from "@/lib/product-overview";
 
 function OverviewHero({ data, canEdit }: { data: ProductOverviewData; canEdit: boolean }) {
   return (
@@ -29,11 +29,20 @@ function CapabilitiesPanel({ data }: { data: ProductOverviewData }) {
 }
 
 function ReleaseChanges({ data }: { data: ProductOverviewData }) {
-  if (data.changes.length === 0) return <p className="overview-note">本次分析未发现规格行为变化。</p>;
+  const release = data.latestRelease;
+  if (!release || data.changes.length === 0) return <p className="overview-note">本次分析未发现规格行为变化。</p>;
   return (
     <div className="overview-change-list">
+      <div className="overview-release-head">
+        <strong>{release.title}</strong>
+        <span className="overview-release-meta">
+          <time>{new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium" }).format(new Date(release.committedAt))}</time>
+          {release.url ? <a href={release.url} target="_blank" rel="noreferrer"><code>{release.sha.slice(0, 7)}</code> ↗</a> : <code>{release.sha.slice(0, 7)}</code>}
+        </span>
+      </div>
+      {release.summary ? <p className="overview-release-summary">{release.summary}</p> : null}
       <p className="overview-change-stats">新增 {data.changeStats.added} · 移除 {data.changeStats.removed} · 更新 {data.changeStats.changed}</p>
-      {data.changes.map((change) => <div className="overview-change" key={change.id}><span className={`change-kind ${change.kind}`}>{change.kind}</span><strong>{change.featureName}{change.scenarioReference ? ` · ${change.scenarioReference}` : ""}</strong><p>{change.summary}</p></div>)}
+      {data.changeGroups.map((group) => <div className="overview-change" key={group.featureName}><strong>{group.featureName}</strong><p>{changeGroupLabel(group)}</p></div>)}
     </div>
   );
 }

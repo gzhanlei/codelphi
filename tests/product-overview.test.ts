@@ -50,6 +50,28 @@ describe("product overview", () => {
     expect(overview.freshness).toBe("尚未生成规格");
     expect(overview.trust.specVersionId).toBeNull();
     expect(overview.changes).toEqual([]);
+    expect(overview.changeGroups).toEqual([]);
+  });
+
+  it("aggregates the latest release changes per feature, largest first", () => {
+    const overview = buildProductOverview({
+      productBase: "/products/default/radar",
+      product: { id: 1, slug: "radar", name: "Radar", description: "" },
+      features: [], scenarios: [],
+      releases: [{ ...releases[0], id: 12 }],
+      behaviorChanges: [
+        { id: 1, releaseId: 12, kind: "added", entityType: "scenario", featureName: "规格", scenarioReference: "HP-2", summary: "", before: null, after: {} },
+        { id: 2, releaseId: 12, kind: "added", entityType: "scenario", featureName: "规格", scenarioReference: "HP-3", summary: "", before: null, after: {} },
+        { id: 3, releaseId: 12, kind: "removed", entityType: "scenario", featureName: "规格", scenarioReference: "ER-2", summary: "", before: {}, after: null },
+        { id: 4, releaseId: 12, kind: "changed", entityType: "feature", featureName: "登录", scenarioReference: "", summary: "", before: {}, after: {} },
+        { id: 5, releaseId: 7, kind: "added", entityType: "feature", featureName: "旧版本", scenarioReference: "", summary: "", before: null, after: {} },
+      ],
+      latestRun: { status: "succeeded" },
+    });
+    expect(overview.changeGroups).toEqual([
+      { featureName: "规格", added: 2, removed: 1, changed: 0 },
+      { featureName: "登录", added: 0, removed: 0, changed: 1 },
+    ]);
   });
 
   it("exposes generated description provenance and evidence", () => {
