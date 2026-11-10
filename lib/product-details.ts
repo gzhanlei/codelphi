@@ -7,7 +7,7 @@ import { loadRegressionTasks } from "./regression-tasks";
 import { annotateSuspectedRenames } from "./spec-rename";
 import { diffSpecWithFolded, type FoldedSpecChange, type SpecScenario } from "./spec-diff";
 import { loadBaseVersionMap, loadVersionFeatureMap } from "./spec-versions";
-import { loadCoverageReceipt } from "./analysis-coverage";
+import { loadCoverageReceipt, type CoverageReceiptRow } from "./analysis-coverage";
 import { loadCompletenessLedgerBySpecVersion } from "./completeness-ledger";
 import type { BehaviorChangeRow, ChangeRow, FeatureRow, FoldedBehaviorChangeRow, ReleaseRow, ScenarioRow } from "./types";
 
@@ -174,9 +174,18 @@ export async function getProductDetails(slug: string, organizationId?: number) {
   const releases = releaseRows[0] as ReleaseRow[];
   const releaseTotal = Number((countRows[0] as Array<{ total: number }>)[0]?.total ?? 0);
   const [scenarios, changes, behaviorChanges, regressionTasks, foldedChanges] = await Promise.all([loadScenarios(features), loadChanges(releases), loadBehaviorChanges(releases), loadRegressionTasks(product.id), loadFoldedChanges(releases)]);
-  // B1 覆盖披露：最新发布对应的覆盖率回执（migration 054 之前的历史版本无回执，为 null）
+  // B1 覆盖披露：最新发布对应的覆盖率回执（migration 054 之前的历史版本无回执，为 null）。
+  // BM-10 沿用版本不落自有回执 → 沿版本链向上取最近有效回执（沿用版本的覆盖面 = 被沿用版本的
+  // 覆盖面）；合成零回执（implFilesTotal = 0）同样视为无、跳过。
   const latestSpecVersionId = releases[0]?.specVersionId ?? null;
-  const coverage = latestSpecVersionId === null ? null : await loadCoverageReceipt(db.execute.bind(db) as (sql: string, params?: unknown[]) => Promise<unknown>, latestSpecVersionId);
+  let coverage: CoverageReceiptRow | null = null;
+  if (latestSpecVersionId !== null) {
+    const candidates = [...new Set([latestSpecVersionId, ...releases.map((release) => release.specVersionId).filter((id): id is number => typeof id === "number")])].slice(0, 6);
+    for (const candidateId of candidates) {
+      const receipt = await loadCoverageReceipt(db.execute.bind(db) as (sql: string, params?: unknown[]) => Promise<unknown>, candidateId);
+      if (receipt && receipt.implFilesTotal > 0) { coverage = receipt; break; }
+    }
+  }
   // R1 分析完整性账本：与覆盖率回执同源同点加载（run 级 best-effort 写入，历史版本为 null）
   const completeness = latestSpecVersionId === null ? null : await loadCompletenessLedgerBySpecVersion(db.execute.bind(db) as (sql: string, params?: unknown[]) => Promise<unknown>, latestSpecVersionId);
 

@@ -43,12 +43,7 @@ export function SpecWorkspace({ slug, productBase, tree, feature, scenarios, mod
 
   return (
     <div className="spec-workspace">
-      {coverage ? (
-        <p className="coverage-disclosure" title="证据覆盖率按本规格版本对应的完整实现面计算">
-          证据覆盖率 {(coverage.coverageRatio * 100).toFixed(1)}%（装配 {coverage.implFilesAssembled}/{coverage.implFilesTotal} 个实现文件，{coverage.partitionsUsed} 趟提取）
-          {coverage.partitionsCapped ? "；本规格未覆盖全部实现面（提取趟数触顶），未覆盖部分不产生结论。" : ""}
-        </p>
-      ) : null}
+      <div className="spec-disclosures">
       {completeness ? (() => {
         const details = toLedgerDetailsView(completeness.details);
         if (!details) return null;
@@ -63,6 +58,13 @@ export function SpecWorkspace({ slug, productBase, tree, feature, scenarios, mod
           </p>
         );
       })() : null}
+      {coverage ? (
+        <p className="coverage-disclosure" title="证据覆盖率按本规格版本对应的完整实现面计算">
+          证据覆盖率 {(coverage.coverageRatio * 100).toFixed(1)}%（装配 {coverage.implFilesAssembled}/{coverage.implFilesTotal} 个实现文件，{coverage.partitionsUsed} 趟提取）
+          {coverage.partitionsCapped ? "；本规格未覆盖全部实现面（提取趟数触顶），未覆盖部分不产生结论。" : ""}
+        </p>
+      ) : null}
+      </div>
       <div className="spec-search-bar">
         <SpecSearch slug={slug} productBase={productBase} />
         <SpecImpactQuery slug={slug} productBase={productBase} />

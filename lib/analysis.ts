@@ -14,7 +14,7 @@ import { resolveAnalysisMode } from "./incremental";
 import { compareIncrementalShadow } from "./incremental-shadow";
 import { analysisMaxPartitions, incrementalShadowEnabled } from "./env";
 import type { BehavioralEnumerationMetrics } from "./behavioral-enumeration";
-import { computeCoverageReceipt, enumerateImplementationSurface, saveCoverageReceipt, type AnalysisCoverageReceipt } from "./analysis-coverage";
+import { computeCoverageReceipt, loadCoverageReceipt, enumerateImplementationSurface, saveCoverageReceipt, type AnalysisCoverageReceipt } from "./analysis-coverage";
 import { mergeChunkResults, type ExtractionChunk } from "./extraction-merge";
 import { behavioralEnumerationEnabled } from "./env";
 import { behavioralChangePaths } from "./patch-scan";
