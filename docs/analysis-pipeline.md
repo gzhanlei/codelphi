@@ -129,7 +129,24 @@ incremental 请求 → 全部满足才走增量：
 3. **判定分歧**：低显著度行为（访客跳过重试、脱敏跳空值）在提取模型重要性先验下可被判「内部实现」——枚举保证显式回答，判断分歧走人工核实签发与更强模型重试
 4. **spec 内部矛盾**：枚举多通道产出可能语义矛盾并存——一致性核验为**局部语义矛盾检测**（同功能同错误 token 的否定/肯定并存），不覆盖跨场景逻辑矛盾、前置条件差异型归并错误、功能简介与场景冲突——自动消解未做，检出即转人工核实
 
-## 9. 运维旋钮
+## 9. 分析完整性账本（R1，2026-11-10 落地）
+
+run 级六维度完整性状态，落 `analysis_completeness_ledger`（run 唯一，details JSON 含全部计数），best-effort 写入（失败只告警）：
+
+| 维度 | 状态来源 | 典型 partial 原因 |
+|---|---|---|
+| sourceCoverage | 覆盖率回执（impl 装配 + diff 入选/遗漏） | 分区触顶 / diff 路径遗漏 |
+| behavioralEnumeration | 枚举指标（paths_total/enumerated/omitted、groups 完成失败） | 组帽截断 / 组失败 |
+| extractionCompletion | 分区趟数 / 重试 / 空结果趟 | 重试发生 / 无行为变化趟 |
+| evidenceIntegrity | sanitize 剔除计数 + all_candidates_rejected | 有剔除 / 候选全被拒 |
+| mergeIntegrity | changes 截断 / 场景去重 / 一致性冲突 / 坍缩 | 截断 / 冲突 / 坍缩 |
+| verification | 一致性冲突 + M9 影子 | 冲突 / 影子不一致（人工核实在外部生命周期） |
+
+整体状态 = 最差维度（禁止单一百分比）。**分析成功 ≠ 完整 ≠ 正确**。
+
+superset 实测（run 63）：sourceCoverage partial（35/2149，diff 57/120 入选 63 遗漏）、behavioralEnumeration partial（47/57，8/10 组）、extraction complete（6 趟零重试）、evidence complete（零剔除）、merge partial（去重 674、一致性冲突 1）、verification partial（1 冲突）→ **overall partial**。账本一行回答「完成了什么、没完成什么」。
+
+## 10. 运维旋钮
 
 | 环境变量 | 默认 | 作用 |
 |---|---|---|
@@ -145,7 +162,7 @@ incremental 请求 → 全部满足才走增量：
 
 **手动补跑路径**（无 push 场景）：服务器 `tsx` 脚本 `queueAnalysis` + 原子认领（`UPDATE started_at WHERE queued AND started_at IS NULL`）+ `await runAnalysis(id)`；sweep 只领 >10 分钟的 queued。
 
-## 10. 实测锚点（superset 盲评，同窗口同基线四跑）
+## 11. 实测锚点（superset 盲评，同窗口同基线四跑）
 
 | 轮次 | 机制 | 召回（15 条冻结预标） | 精确率（功能级） |
 |---|---|---|---|

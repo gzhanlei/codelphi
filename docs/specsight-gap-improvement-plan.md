@@ -388,7 +388,7 @@ P0 已当轮处理（diff 覆盖指标 migration 058、枚举完整性状态、�
 
 | # | 工单 | 要点 | 验收 |
 |---|---|---|---|
-| R1 | 分析完整性账本（Analysis Completeness Ledger） | run 级汇总关联现有 receipts：source coverage / behavioral enumeration / extraction completion / evidence integrity / merge integrity / verification 六维度；分维度 complete/partial/failed/not_applicable 状态 + 确定性规则推导整体状态；**禁止合并成单一百分比**（分析成功 ≠ 完整 ≠ 正确，三者分开） | 任一 run 可回答「完成了什么、没完成什么」 |
+| R1 | 分析完整性账本（Analysis Completeness Ledger） | run 级汇总关联现有 receipts：source coverage / behavioral enumeration / extraction completion / evidence integrity / merge integrity / verification 六维度；分维度 complete/partial/failed/not_applicable 状态 + 确定性规则推导整体状态；**禁止合并成单一百分比**（分析成功 ≠ 完整 ≠ 正确，三者分开） | **✅ 2026-11-10 当日落地**（migration 059 + lib/completeness-ledger.ts + run 63 端到端验证：superset 窗口 overall=partial，六维度齐全，一致性冲突 1 被检出）。待办：产品页/MCP 展示集成 |
 | R2 | changes 截断对回归任务的影响分析 | 确认 150 截断只影响 changelog 展示、回归任务不受影响的证据链；`changes_truncated` 进入完整性账本 | 截断事实可查且影响面有结论 |
 | R3 | 行为枚举 hunk 公平预算 | 400 行/文件帽改为 hunk 级公平（每个 hunk 至少核心 ±30 行保证入选）；截断 hunk 单独披露 | 多 hunk 大文件不再尾部漏采 |
 | R4 | M9 影子对比口径定义 | 两层比较（行为集合一致性 + 规格质量）、98% 分母定义、声明限定为「路径一致性指标」非召回证明 | M9 报告口径成文 |
