@@ -43,6 +43,9 @@ Next.js（App Router）· TypeScript · React · MySQL 8 · Vitest · OpenAI 兼
 - 发布稿（客户向 release notes）：从行为变化勾选生成草稿，块级人工校对（改写保留原文回退），人工发布后生成公开只读页（可复制链接 / Markdown 导出），下线即同 URL 撤下；每块锚定 spec_change 并附证据路径。
 - 周期行为摘要（Digest）：滚动 7 天窗口自动汇总，按 Highlight 分桶给 support / sales / marketing 视角，经 Slack/Webhook/邮件分发；无变化的周不发送。
 - 介绍材料：从行为账本事实清单生成结构化介绍大纲（受众/差异化/语气为人工定位输入，生成只逐字引用），每页要点可追溯到规格锚点，一键经 PPTCreator 烧成 PPTX/PDF 并可导出 Markdown/HTML/大纲 JSON。
+- 功能行为变迁史与关联功能：功能页内按发布分组的行为变化时间线（复盘"这个行为最后改于哪个版本"），以及基于共享证据文件的确定性功能连接（每条带依据，不宣称语义依赖）。
+- 知识健康视图：漂移条目、核实覆盖、回归四态、编辑者维护分布——只做事实统计，无综合健康分。
+- MCP 只读工具面：list_projects / get_feature / get_scenario / search_scenarios / list_releases / get_release / get_feature_connections / get_release_notes / get_digest / send_feedback，供 Claude、ChatGPT 等 AI 客户端读取规格与变化；组织级 API key 管理在设置页。
 - LLM 结构化输出校验、代码证据路径校验。
 - MySQL 版本化迁移、CoDelphi 自产品注册脚本。
 - 自动分析仅更新 generated 内容，不覆盖 manual 功能或场景；生成功能名作为稳定关联键不可直接修改。
