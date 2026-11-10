@@ -89,6 +89,8 @@ CoDelphi 不使用 Chandler 的业务表。生产环境建议按实际应用网�
 
 ### 3. 初始化并启动
 
+> 注意：`.env` 若指向生产数据库，本地 `next dev` 启动**不会**触发启动恢复与账务 sweep（development 默认跳过，见 `instrumentation.ts`）；确需本地联调这些链路时显式设置 `ALLOW_PROD_SIDE_EFFECTS=true`。
+
 ```bash
 npm install
 npm run db:create
