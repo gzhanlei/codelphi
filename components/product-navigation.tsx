@@ -65,13 +65,15 @@ interface ProductViewProps {
   featureId?: number;
   overview: ProductOverviewData;
   canEdit?: boolean;
+  /** 公开变更日志聚合页（仅公开 demo 产品展示入口）。 */
+  changelogHref?: string;
 }
 
-function ProductWorkspace({ view, productSlug, productBase, features, scenarios, releases, changes, behaviorChanges, foldedChanges, regressionTasks, releaseTotal, coverage, completeness, mode = "spec", featureId, canEdit }: Omit<ProductViewProps, "overview">) {
+function ProductWorkspace({ view, productSlug, productBase, features, scenarios, releases, changes, behaviorChanges, foldedChanges, regressionTasks, releaseTotal, coverage, completeness, mode = "spec", featureId, canEdit, changelogHref }: Omit<ProductViewProps, "overview">) {
   const selectedFeature = selectFeature(features, featureId);
   return view === "spec"
     ? <SpecWorkspace slug={productSlug} productBase={productBase} tree={buildFeatureTree(features)} feature={selectedFeature} scenarios={scenarios} mode={mode} coverage={coverage} completeness={completeness} />
-    : <ProductChanges slug={productSlug} releases={releases} changes={changes} behaviorChanges={behaviorChanges} foldedChanges={foldedChanges} regressionTasks={regressionTasks} releaseTotal={releaseTotal} canEdit={canEdit} />;
+    : <ProductChanges slug={productSlug} releases={releases} changes={changes} behaviorChanges={behaviorChanges} foldedChanges={foldedChanges} regressionTasks={regressionTasks} releaseTotal={releaseTotal} canEdit={canEdit} changelogHref={changelogHref} />;
 }
 
 export function ProductView(props: ProductViewProps) {

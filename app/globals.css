@@ -400,3 +400,18 @@ p { line-height: 1.7; }
 .feature-connection-file code { font-size: 11px; }
 .mcp-keys-endpoint { display: grid; gap: 3px; margin: 6px 0 10px; }
 .mcp-keys-endpoint code { font-size: 11px; word-break: break-all; color: #4a6659; }
+
+/* 可信 changelog 聚合页（/share/changelog，匿名只读） */
+.changelog-page { min-height: 100vh; max-width: 760px; margin: 0 auto; padding: 48px 20px; }
+.changelog-page h1 { font-family: Georgia, "Songti SC", serif; font-size: 32px; font-weight: 500; margin: 8px 0 6px; }
+.changelog-note { font-size: 13px; color: #888; }
+.changelog-entry { border-top: 1px solid #eee; margin-top: 22px; padding-top: 14px; }
+.changelog-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.changelog-head time { color: #666; font-size: 13px; }
+.changelog-head h2 { font-size: 19px; margin: 0; }
+.changelog-emphasis { margin: 8px 0 0; font-size: 14px; color: #7a6226; background: #faf3e2; border-radius: 6px; padding: 8px 12px; }
+.changelog-block { border-top: 1px solid #f2f2f2; padding: 10px 0; }
+.changelog-block .kind { font-size: 12px; color: #666; }
+.changelog-block p { margin: 4px 0 0; }
+.changelog-block .paths { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.changelog-block .path { font-family: monospace; font-size: 12px; color: #36c; }

@@ -109,7 +109,7 @@ function BlockEditor({ slug, noteId, block, canEdit, onSave, onReset }: {
 }
 
 /** 发布稿动线（GTM 桥面批次 1）：勾选 → 生成草稿 → 块级校对 → 人工发布 → 公开链接/下线。 */
-export function ReleaseNotesPanel({ slug, releaseId, canEdit }: { slug: string; releaseId: number; canEdit: boolean }) {
+export function ReleaseNotesPanel({ slug, releaseId, canEdit, changelogHref }: { slug: string; releaseId: number; canEdit: boolean; changelogHref?: string }) {
   const guard = useDemoGuard();
   const [state, setState] = useState<ReleaseNoteState | null>(null);
   const [loadFailed, setLoadFailed] = useState<string | null>(null);
@@ -221,6 +221,7 @@ export function ReleaseNotesPanel({ slug, releaseId, canEdit }: { slug: string; 
         {published && note?.publicUrl ? (
           <a className="overview-text-link" href={note.publicUrl} target="_blank" rel="noreferrer">公开页 ↗</a>
         ) : null}
+        {changelogHref ? <a className="overview-text-link" href={changelogHref} target="_blank" rel="noreferrer">公开变更日志 ↗</a> : null}
         {note ? (
           <a className="overview-text-link" href={`/api/products/${slug}/releases/${releaseId}/release-notes/markdown`}>导出 Markdown ↓</a>
         ) : null}

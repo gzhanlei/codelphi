@@ -159,7 +159,8 @@ function AiChangeList({ changes }: { changes: ChangeRow[] }) {
   return <div className="ai-change-section"><h3>变更说明（AI）</h3>{changes.map((change) => <ChangeItem change={change} key={change.id} />)}</div>;
 }
 
-export function ReleaseCard({ slug, release, changes, behaviorChanges, foldedChanges = [], tasks = [], canEdit = false, defaultOpen = false }: {
+export function ReleaseCard({ slug, release, changes, behaviorChanges, foldedChanges = [], tasks = [], canEdit = false, changelogHref, defaultOpen = false }: {
+  changelogHref?: string;
   slug: string;
   release: ReleaseRow;
   changes: ChangeRow[];
@@ -189,7 +190,7 @@ export function ReleaseCard({ slug, release, changes, behaviorChanges, foldedCha
           </summary>
           <BehaviorList slug={slug} release={release} changes={releaseBehaviorChanges} tasks={releaseTasks} canEdit={canEdit} />
           <AiChangeList changes={releaseChanges} />
-          <ReleaseNotesPanel slug={slug} releaseId={release.id} canEdit={canEdit} />
+          <ReleaseNotesPanel slug={slug} releaseId={release.id} canEdit={canEdit} changelogHref={changelogHref} />
         </details>
       ) : (
         <BehaviorList slug={slug} release={release} changes={releaseBehaviorChanges} tasks={releaseTasks} canEdit={canEdit} />
