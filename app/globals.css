@@ -379,3 +379,13 @@ p { line-height: 1.7; }
 .health-stale-date { color: #94a19c; white-space: nowrap; }
 .health-maintenance-row { display: flex; justify-content: space-between; padding: 5px 0; font-size: 12px; color: #3d4b44; border-bottom: 1px solid var(--line); }
 .health-maintenance-row:last-of-type { border-bottom: 0; }
+
+/* 功能行为变迁史（feature-detail 折叠区） */
+.feature-history { margin: 10px 0; border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 8px 12px; }
+.feature-history > summary { cursor: pointer; font-size: 12px; color: var(--green); }
+.feature-history-release { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.feature-history-release:last-child { border-bottom: 0; }
+.feature-history-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 12px; }
+.feature-history-head strong { font-size: 12px; }
+.feature-history-head time { color: #94a19c; font-size: 11px; }
+.feature-history-change { display: flex; gap: 6px; align-items: baseline; margin: 5px 0 0; font-size: 12px; color: #3d4b44; }
