@@ -40,17 +40,36 @@ export interface RunContext {
   analyzeMode?: "full" | "incremental";
 }
 
-export function assertEvidence(result: AnalysisResult, sources: Set<string>) {
-  const invalid: string[] = [];
-  const check = (path: string) => {
-    if (!sources.has(path)) invalid.push(path);
-  };
-  for (const item of result.product.evidence) check(item.path);
-  for (const feature of result.features) {
-    for (const scenario of feature.scenarios) scenario.evidence.forEach((item) => check(item.path));
+/**
+ * 证据清洗（替代整趟失败，2026-11-10 生产 run 185/186）：模型偶发引用「真实存在但本趟
+ * 未读」的文件（相邻目录命名先验 / 公开仓库训练记忆），整趟作废会让其余分区的干净产出
+ * 陪葬。只保留可溯源声明：不可溯源的场景 / 变化 / 功能整条剔除并留 warn 日志（红线不变：
+ * 进规格的事实必须带可追溯证据）。清洗后为空 = 本趟无行为变化窗口，按既有语义接受
+ * （空版本由坍缩护栏下游告警），不在此处抛错。
+ */
+export function sanitizeEvidence(result: AnalysisResult, sources: Set<string>, label: string) {
+  const droppedPaths = new Set<string>();
+  const keep = (items: AnalysisResult["product"]["evidence"]) =>
+    items.filter((item) => {
+      if (sources.has(item.path)) return true;
+      droppedPaths.add(item.path);
+      return false;
+    });
+  result.product.evidence = keep(result.product.evidence);
+  result.changes = result.changes.filter((change) => {
+    change.evidence = keep(change.evidence);
+    return change.evidence.length > 0;
+  });
+  result.features = result.features.filter((feature) => {
+    feature.scenarios = feature.scenarios.filter((scenario) => {
+      scenario.evidence = keep(scenario.evidence);
+      return scenario.evidence.length > 0;
+    });
+    return feature.scenarios.length > 0;
+  });
+  if (droppedPaths.size > 0) {
+    console.warn("[analysis] dropped evidence-untraceable claims", { label, paths: [...droppedPaths], keptFeatures: result.features.length });
   }
-  for (const change of result.changes) change.evidence.forEach((item) => check(item.path));
-  if (invalid.length > 0) throw new Error(`AI returned unknown evidence paths: ${[...new Set(invalid)].join(", ")}`);
 }
 
 /** 分区局部证据允许集：AI 只能引用本分区窗口与 diff 文件（逐趟口径校验）。 */
@@ -62,8 +81,9 @@ function evidenceAllowSet(partition: AnalysisPartition, change: ChangeContext) {
 }
 
 /**
- * 单趟提取失败重试一次：模型侧偶发（证据路径幻觉、JSON 键漂移）按趟重试而不是让整个
- * run 作废——重试调用的 LLM receipt 照常落库（成本如实记账），两次都失败才让 run 失败。
+ * 单趟提取失败重试一次：硬失败（解析 / 网络 / 网关）先重试一次而不是让整个 run 作废——
+ * 重试调用的 LLM receipt 照常落库（成本如实记账），两次都失败才让 run 失败。证据路径
+ * 清洗本身不再触发整趟作废（见 sanitizeEvidence；清洗后为空按无行为变化窗口接受）。
  */
 async function extractPassWithRetry(options: {
   sources: AnalysisPartition["sources"];
@@ -74,7 +94,7 @@ async function extractPassWithRetry(options: {
 }): Promise<AnalysisResult> {
   try {
     const result = await analyzeWithAI(options.sources, options.change, options.context);
-    assertEvidence(result, options.allowSet);
+    sanitizeEvidence(result, options.allowSet, options.label);
     return result;
   } catch (firstError) {
     console.warn("[analysis] extraction pass failed; retrying once", {
@@ -82,7 +102,7 @@ async function extractPassWithRetry(options: {
       error: firstError instanceof Error ? firstError.message.slice(0, 200) : String(firstError),
     });
     const result = await analyzeWithAI(options.sources, options.change, options.context);
-    assertEvidence(result, options.allowSet);
+    sanitizeEvidence(result, options.allowSet, `${options.label}/retry`);
     return result;
   }
 }

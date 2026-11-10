@@ -426,7 +426,9 @@ describe("analysis orchestration", () => {
     expect(connection.commit).toHaveBeenCalledOnce();
   });
 
-  it("fails the run when a chunk cites evidence outside its own partition", async () => {
+  it("drops cross-partition evidence citations instead of failing the run (sanitize, 2026-11-10 run 185/186)", async () => {
+    // 生产教训：模型引用「真实存在但本趟未读」的文件（相邻目录命名先验），整趟作废会让
+    // 其余分区的干净产出陪葬。清洗语义：不可溯源的场景整条剔除并留 warn，可溯源产出保留。
     runRows = [run];
     partitionedSourcesMock.mockResolvedValue({
       partitions: [
@@ -435,14 +437,49 @@ describe("analysis orchestration", () => {
       ],
       index: { readLines, listDir, listRoot },
     });
+    execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("JOIN repositories repo")) return [runRows];
+      if (sql.includes("source_roots")) return [[]];
+      if (sql.includes("SELECT id FROM analysis_runs WHERE repository_id = ? AND after_sha = ?")) return [existingRunRows];
+      if (sql.includes("INSERT INTO analysis_runs")) return [{ insertId: 58 }];
+      if (sql.includes("SELECT sf.name FROM spec_features")) return [[{ name: "统一登录" }]];
+      return [{}];
+    });
+    adapter.getChangeContext.mockResolvedValue({ message: "docs-only change", committedAt: "2026-11-01T00:00:00Z", url: "", files: [] });
     vi.mocked(analyzeWithAI)
-      .mockResolvedValueOnce({ product: { description: "d", evidence: [{ path: "lib/auth.ts", startLine: 1 }] }, release: { title: "v1", summary: "s" }, changes: [], features: [] } as never)
-      .mockResolvedValueOnce({ product: { description: "d2", evidence: [{ path: "lib/auth.ts", startLine: 1 }] }, release: { title: "v2", summary: "s2" }, changes: [], features: [] } as never);
-    await runAnalysis(8);
-    // 第二趟引用了第一趟分区的文件 → 逐趟 assertEvidence 失败 → run failed，不产出部分合并规格
-    const [stored] = execute.mock.calls.find(([sql]) => String(sql).includes("status = 'failed'"))?.[1] as unknown[];
-    expect(String(stored)).toContain("AI returned unknown evidence paths");
-    expect(vi.mocked(capture)).not.toHaveBeenCalled();
+      .mockResolvedValueOnce({ product: { description: "d", evidence: [{ path: "lib/auth.ts", startLine: 1 }] }, release: { title: "v1", summary: "s" }, changes: [], features: [{ name: "统一登录", summary: "s1", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy", evidence: [{ path: "lib/auth.ts", startLine: 1 }] }] }] } as never)
+      .mockResolvedValueOnce({ product: { description: "d2", evidence: [{ path: "lib/auth.ts", startLine: 1 }] }, release: { title: "v2", summary: "s2" }, changes: [], features: [{ name: "越权功能", summary: "s2", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy", evidence: [{ path: "lib/auth.ts", startLine: 1 }] }] }] } as never);
+    await expect(runAnalysis(8)).resolves.toBeUndefined();
+    // 第二趟引用第一趟分区文件（不在其允许集）→ 不可溯源的「越权功能」被剔除；第一趟产出保留
+    const savedResult = vi.mocked(insertSpecVersion).mock.calls[0][2] as AnalysisResult;
+    expect(savedResult.features.map((feature) => feature.name)).toEqual(["统一登录"]);
+    // 第二趟 product.evidence 被清洗为空，但合并只取第一趟 product——不受影响
+    expect(savedResult.product.evidence).toHaveLength(1);
+  });
+
+  it("accepts a sanitized-empty pass as a no-change window (collapse detection downstream)", async () => {
+    // 文档-only 窗口 + 全幻觉引用 → 清洗后为空：按「无行为变化」接受（既有契约：空版本
+    // 由坍缩护栏下游告警），run 不失败、不结算。
+    runRows = [run];
+    partitionedSourcesMock.mockResolvedValue({
+      partitions: [{ slice: { files: [{ path: "lib/auth.ts" }] }, sources: [{ path: "lib/auth.ts", content: "1: auth" }] }],
+      index: { readLines, listDir, listRoot },
+    });
+    execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("JOIN repositories repo")) return [runRows];
+      if (sql.includes("source_roots")) return [[]];
+      if (sql.includes("SELECT id FROM analysis_runs WHERE repository_id = ? AND after_sha = ?")) return [existingRunRows];
+      if (sql.includes("INSERT INTO analysis_runs")) return [{ insertId: 59 }];
+      if (sql.includes("SELECT sf.name FROM spec_features")) return [[{ name: "统一登录" }]];
+      return [{}];
+    });
+    adapter.getChangeContext.mockResolvedValue({ message: "docs-only change", committedAt: "2026-11-01T00:00:00Z", url: "", files: [] });
+    const hallucinated = { product: { description: "d", evidence: [{ path: "lib/invented.ts", startLine: 1 }] }, release: { title: "v1", summary: "s" }, changes: [], features: [{ name: "虚构功能", summary: "s", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy", evidence: [{ path: "lib/invented.ts", startLine: 1 }] }] }] } as never;
+    vi.mocked(analyzeWithAI).mockResolvedValue(hallucinated);
+    await expect(runAnalysis(8)).resolves.toBeUndefined();
+    expect(execute.mock.calls.some(([sql]) => String(sql).includes("status = 'failed'"))).toBe(false);
+    const savedResult = vi.mocked(insertSpecVersion).mock.calls[0][2] as AnalysisResult;
+    expect(savedResult.features).toEqual([]);
   });
 
   it("falls back to behavioral-set carry-forward when incremental resolution rejects (RC2)", async () => {
