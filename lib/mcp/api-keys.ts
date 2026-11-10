@@ -45,3 +45,40 @@ export async function verifyApiKey(connection: { execute: Execute }, plaintext: 
   if (!row || row.revokedAt) return null;
   return { keyId: Number(row.id), organizationId: Number(row.organizationId) };
 }
+
+export interface McpApiKeyView {
+  id: number;
+  name: string;
+  keyHint: string;
+  createdBy: string;
+  createdAt: Date | null;
+  revokedAt: Date | null;
+}
+
+/** 列表不含明文（库中只有哈希）；撤销行保留供审计。 */
+export async function listApiKeys(connection: { execute: Execute }, organizationId: number): Promise<McpApiKeyView[]> {
+  const [rows] = (await connection.execute(
+    `SELECT id, name, key_hint AS keyHint, created_by AS createdBy,
+            created_at AS createdAt, revoked_at AS revokedAt
+     FROM mcp_api_keys WHERE organization_id = ? ORDER BY id DESC`,
+    [organizationId],
+  )) as [Array<{ id: number; name: string; keyHint: string; createdBy: string; createdAt: Date | null; revokedAt: Date | null }>, unknown];
+  return rows.map((row) => ({
+    id: Number(row.id),
+    name: row.name,
+    keyHint: row.keyHint,
+    createdBy: row.createdBy,
+    createdAt: row.createdAt,
+    revokedAt: row.revokedAt,
+  }));
+}
+
+/** 软撤销（保留审计）；id 不属于该组织或已撤销返回 null/false 语义。 */
+export async function revokeApiKey(connection: { execute: Execute }, organizationId: number, id: number): Promise<boolean> {
+  const result = (await connection.execute(
+    "UPDATE mcp_api_keys SET revoked_at = NOW(3) WHERE id = ? AND organization_id = ? AND revoked_at IS NULL",
+    [id, organizationId],
+  )) as unknown;
+  const first = Array.isArray(result) ? result[0] : result;
+  return Number((first as { affectedRows?: number }).affectedRows ?? 0) > 0;
+}

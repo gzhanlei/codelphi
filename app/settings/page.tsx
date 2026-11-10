@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { WorkspaceTriggerDefaultSettings } from "@/components/workspace-trigger-default-settings";
+import { McpKeysSettings } from "@/components/mcp-keys-settings";
+import { listApiKeys } from "@/lib/mcp/api-keys";
 import { getWorkspaceTriggerDefault } from "@/lib/analysis-trigger";
 import { getDb } from "@/lib/db";
 import { requireSessionUser } from "@/lib/session";
@@ -120,6 +122,8 @@ export default async function SettingsPage() {
       </section>
 
       <WorkspaceTriggerDefaultSettings canEdit={canEdit} current={workspaceDefault} />
+
+      <McpKeysSettings canManage={canEdit} initialKeys={await listApiKeys(db, organization.id)} />
 
       <section className="overview-panel settings-panel">
         <div className="overview-panel-heading"><span>03</span><h2>各产品分析设置</h2></div>

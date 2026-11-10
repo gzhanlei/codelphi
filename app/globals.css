@@ -349,3 +349,20 @@ p { line-height: 1.7; }
 .intro-slide-notes { margin: 6px 0 0; font-size: 12px; color: #94a19c; }
 .intro-slide-anchors { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 6px; }
 .intro-slide-anchors code { font-size: 10px; background: #f0f4f1; border-radius: 4px; padding: 1px 5px; color: #4a6659; }
+
+/* MCP key 管理面板（设置页 06） */
+.mcp-keys-create { display: flex; gap: 8px; margin: 10px 0; }
+.mcp-keys-create input { flex: 1; max-width: 360px; height: 36px; border: 1px solid #ccd8d1; border-radius: 8px; background: #fbfcfb; padding: 0 12px; font: inherit; font-size: 13px; box-sizing: border-box; }
+.mcp-keys-create input:focus { border-color: var(--green); outline: none; background: #fff; }
+.mcp-keys-plaintext { display: flex; gap: 10px; align-items: center; margin: 8px 0; padding: 10px 12px; border: 1px solid #e5d3a1; border-radius: 8px; background: #faf3e2; }
+.mcp-keys-plaintext code { font-size: 13px; word-break: break-all; flex: 1; }
+.mcp-keys-list { margin-top: 10px; }
+.mcp-key-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.mcp-key-row:last-child { border-bottom: 0; }
+.mcp-key-row strong { font-size: 13px; }
+.mcp-key-hint { margin-left: 8px; font-size: 12px; color: #4a6659; background: #f0f4f1; border-radius: 4px; padding: 1px 6px; }
+.mcp-key-meta { display: block; margin-top: 3px; font-size: 11px; color: #94a19c; }
+.mcp-key-status { font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+.mcp-key-status.active { color: var(--green); }
+.mcp-key-status.revoked { color: #94a19c; }
+.mcp-key-revoke { border: 0; background: none; color: #c0392b; cursor: pointer; font: inherit; font-size: 12px; text-decoration: underline; padding: 0; }
