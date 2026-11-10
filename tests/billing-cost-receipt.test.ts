@@ -70,8 +70,8 @@ describe("llm call receipt persistence", () => {
       12: "cal-2026q4",
       18: "priced",
     });
-    // 1M 输入 × 2 + 0.1M 输出 × 8 + 0.2M 缓存 × 0.5 = 2 + 0.8 + 0.1 = 2.9 元
-    expect(params[17]).toBeCloseTo(2.9, 6);
+    // DeepSeek 语义：缓存命中按 cache 价替代 input 价——未命中 0.8M × 2 + 输出 0.1M × 8 + 命中 0.2M × 0.5 = 1.6 + 0.8 + 0.1 = 2.5 元
+    expect(params[17]).toBeCloseTo(2.5, 6);
   });
 
   it("writes unknown-usage receipts with null cost for failed and timeout calls", async () => {
