@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { PoolConnection } from "mysql2/promise";
 import type { AnalysisResult } from "../lib/ai";
 import type { RunContext } from "../lib/analysis";
-import { detectSpecCollapse, featureParentKey, insertSpecVersion, loadPreviousFeatureNames } from "../lib/spec-versions";
+import { detectFeatureCollapses, detectSpecCollapse, featureParentKey, insertSpecVersion, loadPreviousFeatureNames } from "../lib/spec-versions";
 
 const run: RunContext = { id: 8, repositoryId: 3, productId: 4, owner: "gzhanlei", name: "radar", beforeSha: "a", afterSha: "b", connectionId: null, provider: "github", organizationId: 1, productSlug: "radar", productName: "Radar" };
 const scenario = { reference: "HP-1", context: "Visitor", action: "Signs in", outcome: "Dashboard", category: "happy" as const, evidence: [] };
@@ -158,6 +158,57 @@ describe("detectSpecCollapse (护栏)", () => {
   it("ignores small specs and first versions", () => {
     expect(detectSpecCollapse({ features: featuresWithScenarios(19) }, featuresWithScenarios(0))).toBeNull();
     expect(detectSpecCollapse(null, featuresWithScenarios(0))).toBeNull();
+  });
+});
+
+describe("detectFeatureCollapses (BM-7 单功能坍缩护栏)", () => {
+  const scen = (reference: string, outcome: string, category: "happy" | "edge" | "error" = "happy") => ({ reference, context: "c", action: "a", outcome, category, evidence: [] });
+  const feature = (name: string, scenarios: ReturnType<typeof scen>[]) => ({ name, summary: "s", scenarios });
+
+  it("flags the 语义视图批量删除 shape: total grows while one feature loses most scenarios", () => {
+    // run 64–66 三轮复现实例：13 场景 → 5（8 条删除、3 条改写），总量被新功能增量掩盖
+    const previous = { features: [
+      feature("语义视图批量删除", [
+        scen("EC-1", "o1"), scen("EC-2", "o2"), scen("EC-3", "o3"), scen("EC-4", "o4"), scen("EC-5", "o5"), scen("EC-6", "o6"),
+        scen("ER-1", "o7", "error"), scen("ER-2", "o8", "error"), scen("ER-3", "o9", "error"),
+        scen("HP-1", "o10"), scen("HP-2", "o11"), scen("HP-3", "o12"), scen("HP-4", "o13"),
+      ]),
+      feature("新功能", [scen("HP-1", "new")]),
+    ] };
+    const current = [
+      feature("语义视图批量删除", [scen("EC-1", "o1x", "edge"), scen("EC-2", "o2x", "edge"), scen("HP-1", "o10x", "edge"), scen("HP-2", "o11x", "edge"), scen("HP-3", "o12x", "edge")]),
+      feature("新功能", [scen("HP-1", "new"), scen("HP-2", "new2")]),
+    ];
+    expect(detectFeatureCollapses(previous, current)).toEqual([
+      { featureName: "语义视图批量删除", previousScenarios: 13, currentScenarios: 5, removed: 8, rewritten: 5 },
+    ]);
+  });
+
+  it("does not flag a genuine update that keeps or grows the scenario set", () => {
+    // run 64 SQL 编辑器形态：3 条逐字保留 + 改写 + 大量新增（真实 RLS 更新）
+    const previous = { features: [feature("SQL 编辑器", [scen("ER-1", "e"), scen("HP-1", "h"), scen("HP-2", "h2", "error")])] };
+    const current = [feature("SQL 编辑器", [
+      scen("ER-1", "e"), scen("HP-1", "h"), scen("HP-2", "h2", "error"),
+      scen("EC-1", "rls", "edge"), scen("EC-2", "rls2", "edge"), scen("EC-3", "rls3", "edge"),
+    ])];
+    expect(detectFeatureCollapses(previous, current)).toEqual([]);
+  });
+
+  it("counts renumbered displacement as rewritten, not removed", () => {
+    // 同一行为换了引用号（EC-1 消失但 ER-9 行为等价）→ 位移，不触发删除阈值
+    const previous = { features: [feature("A", [scen("EC-1", "gone-ref"), scen("HP-1", "h1"), scen("HP-2", "h2"), scen("HP-3", "h3"), scen("HP-4", "h4")])] };
+    const current = [feature("A", [scen("ER-9", "gone-ref"), scen("HP-1", "h1"), scen("HP-2", "h2"), scen("HP-3", "h3"), scen("HP-4", "h4")])];
+    expect(detectFeatureCollapses(previous, current)).toEqual([]);
+  });
+
+  it("ignores small features and fully removed features", () => {
+    const previous = { features: [feature("小功能", [scen("HP-1", "a"), scen("HP-2", "b"), scen("HP-3", "c")]), feature("移除功能", [scen("HP-1", "x")])] };
+    const current = [feature("小功能", [scen("HP-1", "a")])];
+    expect(detectFeatureCollapses(previous, current)).toEqual([]);
+  });
+
+  it("returns empty for a first version", () => {
+    expect(detectFeatureCollapses(null, [feature("A", [scen("HP-1", "a")])])).toEqual([]);
   });
 });
 

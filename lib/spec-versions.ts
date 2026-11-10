@@ -3,7 +3,7 @@ import type { AnalysisResult, SpecAnchorFeature } from "./ai";
 import type { RunContext } from "./analysis";
 import { defaultExecute, type Execute } from "./db";
 import { evidenceItems } from "./evidence";
-import { diffSpec, mergeSpecSources, specFeatureKey, specScenarioKey, type SpecChange, type SpecFeature, type SpecScenario, type SpecTombstones } from "./spec-diff";
+import { diffSpec, mergeSpecSources, scenarioBehaviorEqual, specFeatureKey, specScenarioKey, type SpecChange, type SpecFeature, type SpecScenario, type SpecTombstones } from "./spec-diff";
 import { classifySpecHighlight } from "./spec-highlights";
 
 interface FeatureRow {
@@ -211,7 +211,7 @@ async function insertChanges(connection: PoolConnection, versionId: number, base
   }
 }
 
-export async function insertSpecVersion(connection: PoolConnection, run: RunContext, result: AnalysisResult, options: { affectedKeys?: ReadonlySet<string>; behavioralChangePaths?: ReadonlySet<string> } = {}): Promise<{ specVersionId: number; features: ReturnType<typeof mergeSpecSources>; collapse: SpecVersionCollapse | null; identityHijacksDropped: number }> {
+export async function insertSpecVersion(connection: PoolConnection, run: RunContext, result: AnalysisResult, options: { affectedKeys?: ReadonlySet<string>; behavioralChangePaths?: ReadonlySet<string> } = {}): Promise<{ specVersionId: number; features: ReturnType<typeof mergeSpecSources>; collapse: SpecVersionCollapse | null; featureCollapses: FeatureCollapse[]; identityHijacksDropped: number }> {
   const [previous, manual, tombstones] = await Promise.all([loadPreviousSpec(connection, run), loadManualSpec(connection, run.productId), loadManualTombstones(connection, run.productId)]);
   // M9 增量模式：受影响集之外的 generated 条目原样沿用上一版（三分合并：carried 种子 < AI < manual）。
   const affectedKeys = options.affectedKeys;
@@ -245,6 +245,7 @@ export async function insertSpecVersion(connection: PoolConnection, run: RunCont
   const features = mergeSpecSources(generated, manual, tombstones, carried);
   const changes = diffSpec(previous === null ? null : previous.features, features, options.behavioralChangePaths ? { behavioralChangePaths: options.behavioralChangePaths } : undefined);
   const collapse = detectSpecCollapse(previous, features);
+  const featureCollapses = detectFeatureCollapses(previous, features);
   const [versionResult] = await connection.execute(
     "INSERT INTO spec_versions (product_id, repository_id, analysis_run_id, sha) VALUES (?, ?, ?, ?)",
     [run.productId, run.repositoryId, run.id, run.afterSha],
@@ -253,7 +254,7 @@ export async function insertSpecVersion(connection: PoolConnection, run: RunCont
   await insertFeatures(connection, versionId, features);
   await insertChanges(connection, versionId, previous === null ? null : previous.id, changes);
   // 合并后的完整 spec 一并返回：M9 影子对比必须以 carry-forward 之后的规格为对象。
-  return { specVersionId: versionId, features, collapse, identityHijacksDropped };
+  return { specVersionId: versionId, features, collapse, featureCollapses, identityHijacksDropped };
 }
 
 /** 规格坍缩（护栏）：新版场景数较上一版骤降超过阈值。生产 v95（2026-11-08）178→83 即此形态。 */
@@ -265,6 +266,57 @@ export interface SpecVersionCollapse {
 export const SPEC_COLLAPSE_RATIO = 0.7;
 /** 低于该规模的新版不做坍缩判定，避免小规格的正常增删触发误报。 */
 export const SPEC_COLLAPSE_MIN_PREVIOUS = 20;
+
+/**
+ * 单功能坍缩护栏（BM-7，benchmark bm1-incremental-blind-eval §3 F4）：总护栏只看全量
+ * 场景数，增量模式下「受影响功能被窗口内容顶掉」会被新功能/新场景的增量掩盖
+ * （语义视图批量删除三轮 13→5、-8/-10 条复现，总量却在涨）。按 stable key 逐功能
+ * 对比上一版：场景数降幅过半程阈值、或无行为等价对应的场景删除数达阈值即告警
+ * （只告警不阻断，append-only + 人工核实签发）。重写（同引用行为不等价）与位移
+ * （引用消失但有行为等价对应）单独计数供排查，不单独触发告警。
+ */
+export interface FeatureCollapse {
+  featureName: string;
+  previousScenarios: number;
+  currentScenarios: number;
+  removed: number;
+  rewritten: number;
+}
+
+/** 单功能护栏的最小上一版场景数：低于此值正常增删即可触发，误报率高。 */
+export const FEATURE_COLLAPSE_MIN_PREVIOUS = 4;
+/** 无行为等价对应的场景删除数达到该值即告警（与降幅条件独立）。 */
+export const FEATURE_COLLAPSE_MIN_REMOVED = 3;
+
+export function detectFeatureCollapses(previous: { features: SpecFeature[] } | null, current: SpecFeature[]): FeatureCollapse[] {
+  if (!previous) return [];
+  const currentByKey = new Map(current.map((feature) => [specFeatureKey(feature.name), feature]));
+  const collapses: FeatureCollapse[] = [];
+  for (const prev of previous.features) {
+    const curr = currentByKey.get(specFeatureKey(prev.name));
+    // 功能整体移除由 diffSpec 的 feature removed 记录，不属单功能坍缩
+    if (!curr) continue;
+    const currentScenarios = curr.scenarios;
+    let removed = 0;
+    let rewritten = 0;
+    for (const prevScenario of prev.scenarios) {
+      const sameReference = currentScenarios.find((scenario) => scenario.reference === prevScenario.reference);
+      if (!sameReference) {
+        // 引用消失：行为等价场景仍在（重编号位移）计 rewritten，行为真的没了计 removed
+        if (currentScenarios.some((scenario) => scenarioBehaviorEqual(prevScenario, scenario))) rewritten += 1;
+        else removed += 1;
+        continue;
+      }
+      if (!scenarioBehaviorEqual(prevScenario, sameReference)) rewritten += 1;
+    }
+    const collapsed = prev.scenarios.length >= FEATURE_COLLAPSE_MIN_PREVIOUS
+      && (curr.scenarios.length < prev.scenarios.length * SPEC_COLLAPSE_RATIO || removed >= FEATURE_COLLAPSE_MIN_REMOVED);
+    if (collapsed) {
+      collapses.push({ featureName: prev.name, previousScenarios: prev.scenarios.length, currentScenarios: curr.scenarios.length, removed, rewritten });
+    }
+  }
+  return collapses;
+}
 
 function countScenarios(features: SpecFeature[]) {
   return features.reduce((total, feature) => total + feature.scenarios.length, 0);

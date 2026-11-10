@@ -88,11 +88,15 @@ function changeEvidence(change: NotificationChange): Evidence[] {
 }
 
 /** 通知消息与发布页 behavior-change-item 同构：功能/场景 + 变化类型 + 摘要 + 证据链接。 */
-export function renderNotificationText(productName: string, releaseUrl: string, changes: readonly NotificationChange[], evidenceUrls: ReadonlyArray<ReadonlyArray<string | null>>, collapse?: { previousScenarios: number; currentScenarios: number } | null): string | null {
+export function renderNotificationText(productName: string, releaseUrl: string, changes: readonly NotificationChange[], evidenceUrls: ReadonlyArray<ReadonlyArray<string | null>>, collapse?: { previousScenarios: number; currentScenarios: number } | null, featureCollapses?: ReadonlyArray<{ featureName: string; previousScenarios: number; currentScenarios: number; removed: number; rewritten: number }>): string | null {
   if (changes.length === 0) return null;
   const lines = [`【CoDelphi】${productName} 检测到 ${changes.length} 条规格行为变化`, releaseUrl];
   if (collapse) {
     lines.push(`⚠️ 疑似规格坍缩：场景数 ${collapse.previousScenarios} → ${collapse.currentScenarios}（降幅超 30%）。请核实发布页变化明细，必要时回溯上一版规格。`);
+  }
+  // BM-7 单功能坍缩护栏：受影响功能被窗口内容顶掉，逐功能警告供人工核实
+  for (const featureCollapse of featureCollapses ?? []) {
+    lines.push(`⚠️ 疑似单功能坍缩：「${featureCollapse.featureName}」场景 ${featureCollapse.previousScenarios} → ${featureCollapse.currentScenarios}（无等价对应删除 ${featureCollapse.removed}、改写 ${featureCollapse.rewritten}）。请核实该功能是否确有此变化。`);
   }
   changes.forEach((change, index) => {
     const subject = change.entityType === "scenario" && change.scenarioReference
@@ -111,6 +115,8 @@ export interface AnalysisNotificationInput {
   specVersionId: number | null;
   /** 坍缩护栏检测结果（lib/spec-versions detectSpecCollapse）；非空时通知正文与 payload 带警告。 */
   collapse?: { previousScenarios: number; currentScenarios: number } | null;
+  /** BM-7 单功能坍缩护栏检测结果（detectFeatureCollapses）；逐功能警告进通知正文。 */
+  featureCollapses?: ReadonlyArray<{ featureName: string; previousScenarios: number; currentScenarios: number; removed: number; rewritten: number }>;
 }
 
 export interface NotificationDependencies {
@@ -164,7 +170,7 @@ export async function deliverAnalysisNotifications(input: AnalysisNotificationIn
   const evidenceUrls = changes.map((change) =>
     changeEvidence(change).slice(0, maxEvidenceLinksPerChange).map((item) => evidenceUrl(run, run.afterSha, item)),
   );
-  const text = renderNotificationText(run.productName, releaseUrl, changes, evidenceUrls, input.collapse);
+  const text = renderNotificationText(run.productName, releaseUrl, changes, evidenceUrls, input.collapse, input.featureCollapses);
   if (text === null) return;
 
   const secret = notificationSecret();
@@ -173,6 +179,7 @@ export async function deliverAnalysisNotifications(input: AnalysisNotificationIn
     releaseUrl,
     specVersionId,
     collapse: input.collapse ?? null,
+    featureCollapses: input.featureCollapses ?? [],
     changes: changes.map((change, index) => ({
       kind: change.kind,
       entityType: change.entityType,

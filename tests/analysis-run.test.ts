@@ -55,7 +55,7 @@ const { compareIncrementalShadow } = vi.hoisted(() => ({ compareIncrementalShado
 vi.mock("../lib/incremental-shadow", () => ({ compareIncrementalShadow }));
 const { partitionedSourcesMock } = vi.hoisted(() => ({ partitionedSourcesMock: vi.fn() }));
 vi.mock("../lib/remote-analysis", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/remote-analysis")>(), getRemoteAnalysisSources: vi.fn(), getPartitionedAnalysisSources: partitionedSourcesMock }));
-vi.mock("../lib/spec-versions", () => ({ insertSpecVersion: vi.fn(async () => ({ specVersionId: 44, features: [{ name: "统一登录", summary: "s", scenarios: [] }] })), loadPreviousFeatureNames: vi.fn(async () => ["统一登录", "支付", "规格导出"]), loadPreviousSpecText: vi.fn(async () => [{ name: "统一登录", summary: "s", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy" }] }]) }));
+vi.mock("../lib/spec-versions", () => ({ insertSpecVersion: vi.fn(async () => ({ specVersionId: 44, features: [{ name: "统一登录", summary: "s", scenarios: [] }], collapse: null, featureCollapses: [], identityHijacksDropped: 0 })), loadPreviousFeatureNames: vi.fn(async () => ["统一登录", "支付", "规格导出"]), loadPreviousSpecText: vi.fn(async () => [{ name: "统一登录", summary: "s", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy" }] }]) }));
 vi.mock("../lib/architecture-version", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/architecture-version")>(), generateRepositoryArchitectureVersion: vi.fn(async () => ({ status: "accepted", errorMessage: null })) }));
 
 const run = {
@@ -340,7 +340,7 @@ describe("analysis orchestration", () => {
         merged.push({ ...feature });
       }
       mergedCalls.push(merged);
-      return { specVersionId: 44, features: merged, collapse: null, identityHijacksDropped: 0 };
+      return { specVersionId: 44, features: merged, collapse: null, featureCollapses: [], identityHijacksDropped: 0 };
     });
     return mergedCalls;
   };

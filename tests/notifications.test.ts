@@ -75,6 +75,13 @@ describe("notification rendering", () => {
     expect(text).not.toContain("坍缩");
   });
 
+  it("renders per-feature collapse warnings (BM-7)", () => {
+    const text = renderNotificationText("Radar", "https://codelphi.com/commit/abc", changes, [[], []], null, [
+      { featureName: "语义视图批量删除", previousScenarios: 13, currentScenarios: 5, removed: 8, rewritten: 3 },
+    ]);
+    expect(text).toContain("⚠️ 疑似单功能坍缩：「语义视图批量删除」场景 13 → 5（无等价对应删除 8、改写 3）");
+  });
+
   it("returns null when there is nothing to notify about", () => {
     expect(renderNotificationText("Radar", "https://codelphi.com/commit/abc", [], [])).toBeNull();
   });

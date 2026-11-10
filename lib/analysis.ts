@@ -236,7 +236,7 @@ async function saveResult(run: RunContext, result: AnalysisResult, change: Chang
       [result.product.description, JSON.stringify(result.product.evidence), run.productId],
     );
     const behavioralPaths = behavioralChangePaths(change.files);
-    const { specVersionId, features: mergedFeatures, collapse, identityHijacksDropped } = await insertSpecVersion(connection, run, result, { ...(affectedKeys ? { affectedKeys } : {}), behavioralChangePaths: behavioralPaths });
+    const { specVersionId, features: mergedFeatures, collapse, featureCollapses, identityHijacksDropped } = await insertSpecVersion(connection, run, result, { ...(affectedKeys ? { affectedKeys } : {}), behavioralChangePaths: behavioralPaths });
     await rebuildSpecFileIndex(connection, run.repositoryId, specVersionId);
     await markSpecDrift(connection, run.productId, specVersionId);
     // B1：覆盖率回执与规格版本同事务落库（append-only，历史版本可回溯）
@@ -247,7 +247,7 @@ async function saveResult(run: RunContext, result: AnalysisResult, change: Chang
     await upsertRelease(connection, run, result, change, specVersionId);
     await connection.execute("UPDATE analysis_runs SET status = 'succeeded', finished_at = CURRENT_TIMESTAMP(3) WHERE id = ?", [run.id]);
     await connection.commit();
-    return { specVersionId, features: mergedFeatures, collapse, identityHijacksDropped };
+    return { specVersionId, features: mergedFeatures, collapse, featureCollapses, identityHijacksDropped };
   } catch (error) {
     await connection.rollback();
     throw error;
@@ -480,7 +480,7 @@ async function runAnalysisBody(run: RunContext) {
     // 增强层失败不得被误认为完整成功
     console.log("[analysis] behavioral enumeration", { runId: run.id, ...enumerationMetrics });
   }
-  const { specVersionId, features: mergedFeatures, collapse, identityHijacksDropped } = await saveResult(run, result, change, affectedKeys, coverage);
+  const { specVersionId, features: mergedFeatures, collapse, featureCollapses, identityHijacksDropped } = await saveResult(run, result, change, affectedKeys, coverage);
   // W0-9 一致性核验：同功能内互斥结果并存（枚举多通道产物的语义矛盾）→ 告警供人工核实（append-only 已落库，不改写）
   const conflicts = detectOutcomeConflicts(mergedFeatures);
   if (conflicts.length > 0) {
@@ -493,6 +493,10 @@ async function runAnalysisBody(run: RunContext) {
   // 坍缩护栏：新版场景数骤降只告警不阻断（版本 append-only，可回溯）；通知带警告供人工核实。
   if (collapse) {
     console.error("[spec] suspected spec collapse", { runId: run.id, specVersionId, ...collapse });
+  }
+  // BM-7 单功能坍缩护栏：受影响功能被窗口内容顶掉（总量增量掩盖下的局部坍缩），逐功能告警。
+  if (featureCollapses.length > 0) {
+    console.error("[spec] feature-level collapse detected", { runId: run.id, specVersionId, featureCollapses });
   }
   // 结算捕获（契约 §9/§6.4）：主事务已提交，捕获失败不得改写 run 分析状态（D15）——
   // 只告警，sweep 扫描二会按 run 级结算请求缺失恢复结算。
@@ -516,7 +520,7 @@ async function runAnalysisBody(run: RunContext) {
   }
   // M1 通知分发：分析事务提交后 best-effort 投递；失败只记日志，不影响分析结果。
   try {
-    await deliverAnalysisNotifications({ run, releaseUrl: change.url, specVersionId, collapse });
+    await deliverAnalysisNotifications({ run, releaseUrl: change.url, specVersionId, collapse, featureCollapses });
   } catch (error) {
     console.error("[notifications] delivery failed", error);
   }
@@ -567,7 +571,7 @@ async function runAnalysisBody(run: RunContext) {
       }),
       extractionCompletion: deriveExtractionCompletion(partitions.length, passInfos.map((pass) => ({ retries: pass.retries, empty: pass.sanitize.empty }))),
       evidenceIntegrity: deriveEvidenceIntegrity(passInfos.map((pass) => pass.sanitize)),
-      mergeIntegrity: deriveMergeIntegrity({ changesTruncated: mergeStats.changesTruncated, scenariosDeduped: mergeStats.scenariosDeduped, identityHijacksDropped, outcomeConflicts: conflicts.length, collapse: Boolean(collapse) }),
+      mergeIntegrity: deriveMergeIntegrity({ changesTruncated: mergeStats.changesTruncated, scenariosDeduped: mergeStats.scenariosDeduped, identityHijacksDropped, featureCollapses: featureCollapses.length, outcomeConflicts: conflicts.length, collapse: Boolean(collapse) }),
       verification: deriveVerification({ outcomeConflicts: conflicts.length, shadowRan, shadowConsistent }),
     } as const;
     const overall = deriveOverallState([
