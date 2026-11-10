@@ -307,6 +307,6 @@ p { line-height: 1.7; }
 .completeness-disclosure.completeness-ok { color: var(--green); }
 
 /* 披露块：完整性行 + 覆盖率行竖排横跨全宽（spec-workspace 是两列 grid，直接子元素会掉进功能树列） */
-.spec-disclosures { grid-column: 1 / -1; display: grid; gap: 6px; margin-bottom: 14px; }
-.coverage-disclosure { margin: 0; font-size: 12px; line-height: 1.6; color: #94a19c; }
+.spec-disclosures { grid-column: 1 / -1; display: grid; gap: 6px; margin-bottom: 14px; font-size: 13px; line-height: 1.7; }
+.coverage-disclosure { margin: 0; color: #94a19c; }
 .completeness-disclosure { margin: 0; }
