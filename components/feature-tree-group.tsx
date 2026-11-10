@@ -6,9 +6,9 @@ export function FeatureTreeGroup({ feature, selectedId }: { feature: FeatureTree
   return (
     <div className="feature-tree-group">
       <details open>
-        <summary><Link className={selectedClass(selectedId === feature.id)} href={featureHref(feature.id)}>{feature.name}{feature.children.length > 0 ? <span>{feature.children.length}</span> : null}</Link></summary>
+        <summary><Link scroll={false} className={selectedClass(selectedId === feature.id)} href={featureHref(feature.id)}>{feature.name}{feature.children.length > 0 ? <span>{feature.children.length}</span> : null}</Link></summary>
         <div className="feature-tree-children">
-          {feature.children.map((child) => <Link className={selectedClass(selectedId === child.id)} href={featureHref(child.id)} key={child.id}>{child.name}</Link>)}
+          {feature.children.map((child) => <Link scroll={false} className={selectedClass(selectedId === child.id)} href={featureHref(child.id)} key={child.id}>{child.name}</Link>)}
         </div>
       </details>
     </div>
