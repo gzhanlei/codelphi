@@ -30,7 +30,7 @@ function ImplementationFiles({ scenarios }: { scenarios?: ScenarioRow[] }) {
 function FeatureDetailHeader({ slug, productBase, feature, onEdit, onDelete }: { slug: string; productBase: string; feature: FeatureRow; onEdit: () => void; onDelete: () => void }) {
   return (
     <div className="feature-detail-header">
-      <div><h2>{feature.name}{feature.staleSince ? <span className="drift-badge">可能过时</span> : null}</h2><p>{feature.summary}</p><span className="feature-source">{featureSourceLabel(feature.source)}</span>
+      <div><h2>{feature.name}{feature.staleSince ? <span className="drift-badge">可能过时</span> : null}</h2><p>{feature.summary}</p><span className="feature-source">{featureSourceLabel(feature.source)}</span>{feature.lastEditedBy ? <span className="edited-by" title={feature.lastEditedAt ? `最后编辑于 ${new Date(feature.lastEditedAt).toLocaleString("zh-CN")}` : undefined}>由 {feature.lastEditedBy} 编辑</span> : null}
         <Link className="stable-link" href={`${productBase}/spec/feature/${encodeURIComponent(specFeatureKey(feature.name))}`} title="始终解析到最新规格的稳定链接">稳定链接 <code>{specFeatureKey(feature.name)}</code></Link>
       </div>
       <div className="feature-actions"><VerifySpecButton slug={slug} entityType="feature" entityId={feature.id} item={feature} /><button className="text-button" type="button" onClick={onEdit}>编辑</button><button className="text-button danger-link" type="button" onClick={onDelete}>删除</button></div>

@@ -11,7 +11,7 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ id:
   const { id } = await context.params;
   const access = await requireFeatureProductAccess(user, routeEntityId(id), "editor");
   if (!access) return NextResponse.json(NOT_FOUND, { status: 404 });
-  return editorAction(async () => updateFeature(routeEntityId(id), await request.json(), access.product.organizationId));
+  return editorAction(async () => updateFeature(routeEntityId(id), await request.json(), access.product.organizationId, user.sub));
 }
 
 export async function DELETE(_request: NextRequest, context: { params: Promise<{ id: string }> }) {
@@ -19,5 +19,5 @@ export async function DELETE(_request: NextRequest, context: { params: Promise<{
   const { id } = await context.params;
   const access = await requireFeatureProductAccess(user, routeEntityId(id), "editor");
   if (!access) return NextResponse.json(NOT_FOUND, { status: 404 });
-  return editorAction(() => deleteFeature(routeEntityId(id), access.product.organizationId));
+  return editorAction(() => deleteFeature(routeEntityId(id), access.product.organizationId, user.sub));
 }

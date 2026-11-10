@@ -368,3 +368,4 @@ p { line-height: 1.7; }
 .mcp-key-revoke { border: 0; background: none; color: #c0392b; cursor: pointer; font: inherit; font-size: 12px; text-decoration: underline; padding: 0; }
 
 .page-actions .secondary-button.active { border-color: var(--green); color: var(--green); }
+.edited-by { display: inline-block; margin-left: 6px; font-size: 10px; color: #94a19c; }

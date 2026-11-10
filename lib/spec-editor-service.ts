@@ -84,21 +84,21 @@ function assertNameChangeAllowed(feature: { name: string; source: "generated" | 
   }
 }
 
-export async function createFeature(slug: string, value: unknown, organizationId?: number) {
+export async function createFeature(slug: string, value: unknown, organizationId?: number, editorSub?: string) {
   const input = featureInputSchema.parse(value);
   const product = await requireProduct(slug, organizationId);
   return withTransaction(async (connection) => {
     const features = await activeFeatures(product.id, connection, true);
     assertFeatureParent(features, null, input.parentId);
     const [result] = await connection.execute(
-      "INSERT INTO features (product_id, name, summary, parent_id, source, active) VALUES (?, ?, ?, ?, 'manual', 1)",
-      [product.id, input.name, input.summary, input.parentId],
+      "INSERT INTO features (product_id, name, summary, parent_id, source, active, last_edited_by, last_edited_at) VALUES (?, ?, ?, ?, 'manual', 1, ?, NOW(3))",
+      [product.id, input.name, input.summary, input.parentId, editorSub ?? null],
     );
     return { id: Number((result as { insertId: number }).insertId), name: input.name, summary: input.summary, parentId: input.parentId, source: "manual" };
   });
 }
 
-export async function updateFeature(id: number, value: unknown, organizationId?: number) {
+export async function updateFeature(id: number, value: unknown, organizationId?: number, editorSub?: string) {
   const input = featureInputSchema.parse(value);
   return withTransaction(async (connection) => {
     const productId = await featureProductId(id, connection, organizationId);
@@ -109,26 +109,26 @@ export async function updateFeature(id: number, value: unknown, organizationId?:
     const [result] = await connection.execute(
       // P1：修订 ≠ 核实——编辑只清确认状态（产生新内容），不再清除漂移标记；
       // stale 只能由核实动作或重新分析合并清除（见 docs/spec-verification-lifecycle-design.md 转换 3）。
-      "UPDATE features SET name = ?, summary = ?, parent_id = ?, source = 'manual', verified_at = NULL, verified_by = NULL WHERE id = ? AND active = 1",
-      [input.name, input.summary, input.parentId, id],
+      "UPDATE features SET name = ?, summary = ?, parent_id = ?, source = 'manual', verified_at = NULL, verified_by = NULL, last_edited_by = ?, last_edited_at = NOW(3) WHERE id = ? AND active = 1",
+      [input.name, input.summary, input.parentId, editorSub ?? null, id],
     );
     if ((result as { affectedRows: number }).affectedRows === 0) throw new SpecEditorError(404, "功能不存在或已删除");
     return { id, name: input.name, summary: input.summary, parentId: input.parentId, source: "manual" };
   });
 }
 
-export async function deleteFeature(id: number, organizationId?: number) {
+export async function deleteFeature(id: number, organizationId?: number, editorSub?: string) {
   return withTransaction(async (connection) => {
     const productId = await featureProductId(id, connection, organizationId);
     await connection.execute("SELECT id FROM features WHERE product_id = ? FOR UPDATE", [productId]);
     await connection.execute("UPDATE features SET parent_id = NULL, source = 'manual' WHERE parent_id = ? AND active = 1", [id]);
-    await connection.execute("UPDATE features SET active = 0, source = 'manual' WHERE id = ?", [id]);
-    await connection.execute("UPDATE scenarios SET active = 0, source = 'manual' WHERE feature_id = ?", [id]);
+    await connection.execute("UPDATE features SET active = 0, source = 'manual', last_edited_by = ?, last_edited_at = NOW(3) WHERE id = ?", [editorSub ?? null, id]);
+    await connection.execute("UPDATE scenarios SET active = 0, source = 'manual', last_edited_by = ?, last_edited_at = NOW(3) WHERE feature_id = ?", [editorSub ?? null, id]);
     return { status: "deleted" };
   });
 }
 
-export async function createScenario(featureId: number, value: unknown, organizationId?: number) {
+export async function createScenario(featureId: number, value: unknown, organizationId?: number, editorSub?: string) {
   const input = scenarioInputSchema.parse(value);
   return withTransaction(async (connection) => {
     const [features] = await connection.execute(
@@ -141,9 +141,9 @@ export async function createScenario(featureId: number, value: unknown, organiza
     const [rows] = await connection.execute("SELECT reference FROM scenarios WHERE feature_id = ?", [featureId]);
     const reference = nextScenarioReference(input.category, (rows as Array<{ reference: string }>).map((row) => row.reference));
     const [result] = await connection.execute(
-      `INSERT INTO scenarios (feature_id, reference, context, action, outcome, category, source, active, evidence)
-       VALUES (?, ?, ?, ?, ?, ?, 'manual', 1, '[]')`,
-      [featureId, reference, input.context, input.action, input.outcome, input.category],
+      `INSERT INTO scenarios (feature_id, reference, context, action, outcome, category, source, active, evidence, last_edited_by, last_edited_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'manual', 1, '[]', ?, NOW(3))`,
+      [featureId, reference, input.context, input.action, input.outcome, input.category, editorSub ?? null],
     );
     return { id: Number((result as { insertId: number }).insertId), reference, ...input, source: "manual" };
   });
@@ -159,20 +159,20 @@ async function requireScenario(id: number, organizationId?: number) {
   if ((rows as unknown[]).length === 0) throw new SpecEditorError(404, "场景不存在或已删除");
 }
 
-export async function updateScenario(id: number, value: unknown, organizationId?: number) {
+export async function updateScenario(id: number, value: unknown, organizationId?: number, editorSub?: string) {
   const input = scenarioInputSchema.parse(value);
   await requireScenario(id, organizationId);
   const [result] = await getDb().execute(
     // P1：修订 ≠ 核实（同 updateFeature 注释）。
-    "UPDATE scenarios SET context = ?, action = ?, outcome = ?, category = ?, source = 'manual', verified_at = NULL, verified_by = NULL WHERE id = ? AND active = 1",
-    [input.context, input.action, input.outcome, input.category, id],
+    "UPDATE scenarios SET context = ?, action = ?, outcome = ?, category = ?, source = 'manual', verified_at = NULL, verified_by = NULL, last_edited_by = ?, last_edited_at = NOW(3) WHERE id = ? AND active = 1",
+    [input.context, input.action, input.outcome, input.category, editorSub ?? null, id],
   );
   if ((result as { affectedRows: number }).affectedRows === 0) throw new SpecEditorError(404, "场景不存在或已删除");
   return { id, ...input, source: "manual" };
 }
 
-export async function deleteScenario(id: number, organizationId?: number) {
+export async function deleteScenario(id: number, organizationId?: number, editorSub?: string) {
   await requireScenario(id, organizationId);
-  await getDb().execute("UPDATE scenarios SET active = 0, source = 'manual' WHERE id = ?", [id]);
+  await getDb().execute("UPDATE scenarios SET active = 0, source = 'manual', last_edited_by = ?, last_edited_at = NOW(3) WHERE id = ?", [editorSub ?? null, id]);
   return { status: "deleted" };
 }

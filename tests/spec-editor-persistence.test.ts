@@ -38,7 +38,7 @@ describe("spec editor persistence", () => {
       return [{}];
     });
     await expect(updateFeature(1, { name: "Root", summary: "Updated", parentId: 4 })).resolves.toMatchObject({ id: 1, parentId: 4, source: "manual" });
-    expect(execute).toHaveBeenCalledWith("UPDATE features SET name = ?, summary = ?, parent_id = ?, source = 'manual', verified_at = NULL, verified_by = NULL WHERE id = ? AND active = 1", ["Root", "Updated", 4, 1]);
+    expect(execute).toHaveBeenCalledWith("UPDATE features SET name = ?, summary = ?, parent_id = ?, source = 'manual', verified_at = NULL, verified_by = NULL, last_edited_by = ?, last_edited_at = NOW(3) WHERE id = ? AND active = 1", ["Root", "Updated", 4, null, 1]);
     expect(execute).toHaveBeenCalledWith("SELECT id, parent_id AS parentId FROM features WHERE product_id = ? AND active = 1 FOR UPDATE", [2]);
     expect(connection.commit).toHaveBeenCalledOnce();
   });
@@ -113,8 +113,26 @@ describe("spec editor persistence", () => {
     });
     await expect(updateScenario(8, { context: "User", action: "Acts", outcome: "Done", category: "happy" })).resolves.toMatchObject({ id: 8, source: "manual" });
     expect(execute).toHaveBeenCalledWith(
-      "UPDATE scenarios SET context = ?, action = ?, outcome = ?, category = ?, source = 'manual', verified_at = NULL, verified_by = NULL WHERE id = ? AND active = 1",
-      ["User", "Acts", "Done", "happy", 8],
+      "UPDATE scenarios SET context = ?, action = ?, outcome = ?, category = ?, source = 'manual', verified_at = NULL, verified_by = NULL, last_edited_by = ?, last_edited_at = NOW(3) WHERE id = ? AND active = 1",
+      ["User", "Acts", "Done", "happy", null, 8],
+    );
+  });
+
+  it("records the editor identity on manual writes (P2 编辑归因)", async () => {
+    execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("SELECT id FROM scenarios")) return [[{ id: 8 }]];
+      if (sql.includes("UPDATE scenarios")) return [{ affectedRows: 1 }];
+      return [{}];
+    });
+    await updateScenario(8, { context: "User", action: "Acts", outcome: "Done", category: "happy" }, undefined, "user-42");
+    expect(execute).toHaveBeenCalledWith(
+      expect.stringContaining("last_edited_by = ?, last_edited_at = NOW(3)"),
+      ["User", "Acts", "Done", "happy", "user-42", 8],
+    );
+    await deleteScenario(8, undefined, "user-42");
+    expect(execute).toHaveBeenCalledWith(
+      "UPDATE scenarios SET active = 0, source = 'manual', last_edited_by = ?, last_edited_at = NOW(3) WHERE id = ?",
+      ["user-42", 8],
     );
   });
 
@@ -123,13 +141,13 @@ describe("spec editor persistence", () => {
     await deleteFeature(4);
     expect(execute).toHaveBeenCalledWith("SELECT id FROM features WHERE product_id = ? FOR UPDATE", [2]);
     expect(execute).toHaveBeenCalledWith("UPDATE features SET parent_id = NULL, source = 'manual' WHERE parent_id = ? AND active = 1", [4]);
-    expect(execute).toHaveBeenCalledWith("UPDATE features SET active = 0, source = 'manual' WHERE id = ?", [4]);
-    expect(execute).toHaveBeenCalledWith("UPDATE scenarios SET active = 0, source = 'manual' WHERE feature_id = ?", [4]);
+    expect(execute).toHaveBeenCalledWith("UPDATE features SET active = 0, source = 'manual', last_edited_by = ?, last_edited_at = NOW(3) WHERE id = ?", [null, 4]);
+    expect(execute).toHaveBeenCalledWith("UPDATE scenarios SET active = 0, source = 'manual', last_edited_by = ?, last_edited_at = NOW(3) WHERE feature_id = ?", [null, 4]);
     expect(connection.commit).toHaveBeenCalledOnce();
     expect(connection.release).toHaveBeenCalledOnce();
 
     execute.mockResolvedValue([{ affectedRows: 1 }]);
     await deleteScenario(9);
-    expect(execute).toHaveBeenCalledWith("UPDATE scenarios SET active = 0, source = 'manual' WHERE id = ?", [9]);
+    expect(execute).toHaveBeenCalledWith("UPDATE scenarios SET active = 0, source = 'manual', last_edited_by = ?, last_edited_at = NOW(3) WHERE id = ?", [null, 9]);
   });
 });

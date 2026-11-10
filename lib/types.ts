@@ -38,6 +38,9 @@ export interface FeatureRow {
   staleChangeId?: number | null;
   verifiedAt?: Date | string | null;
   verifiedBy?: string | null;
+  /** P2 编辑归因（migration 064）：最后一次人工编辑者与时间；自动分析不写。 */
+  lastEditedBy?: string | null;
+  lastEditedAt?: Date | string | null;
 }
 
 export interface ScenarioRow {
@@ -54,6 +57,9 @@ export interface ScenarioRow {
   staleChangeId?: number | null;
   verifiedAt?: Date | string | null;
   verifiedBy?: string | null;
+  /** P2 编辑归因（migration 064）：最后一次人工编辑者与时间；自动分析不写。 */
+  lastEditedBy?: string | null;
+  lastEditedAt?: Date | string | null;
 }
 
 export interface ReleaseRow {

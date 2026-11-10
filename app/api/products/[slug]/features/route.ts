@@ -9,7 +9,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
   const access = await requireProductAccess(user, slug, "editor");
   if (!access) return NextResponse.json({ error: "产品不存在或不属于当前工作区" }, { status: 404 });
   try {
-    const feature = await createFeature(slug, await request.json(), access.product.organizationId);
+    const feature = await createFeature(slug, await request.json(), access.product.organizationId, user.sub);
     return NextResponse.json(feature, { status: 201 });
   } catch (error) {
     const { status, message } = specEditorErrorInfo(error);
