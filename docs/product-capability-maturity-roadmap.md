@@ -66,8 +66,10 @@ CoDelphi 不负责宣称自己理解了整个软件系统，而是负责让团�
 | 规格确认状态（人工核实 ≠ 人工编辑，P1） | ✅ 已实现（2026-11-08） | migration `028_spec_verification.sql`（`verified_at`/`verified_by` + append-only `spec_verifications` 双版本历史）；状态由 `verified_at × stale_since` 推导（不存状态列）；核实动作 `POST /spec/verify`（editor）+ `lib/spec-verification.ts`；编辑清 stale 语义已移除，核实是唯一清 stale 的人工动作；UI：场景卡/功能头三态徽章 + 核实按钮 + 场景工具栏核实筛选；行为证据：`tests/spec-verification.test.ts` 等 8 项。**线上端到端验证待部署后执行** |
 | 知识健康视图（stale 分布 / 验证覆盖 / 维护分布） | ⚠️ 部分实现 | 可冷启动数据：`stale_since`（`product-details.ts:42,91` 已透出）、`regression_items.checked_by`（验证人，`checked_at`）。**缺口（2026-11-08 代码核实）：规格编辑归因未持久化**——`spec-editor-service.ts` 的全部 INSERT/UPDATE 均不记录编辑人，migrations 无归因列；「维护分布」维度缺数据基础（见 P2） |
 | 多代码托管（M12） | ⚠️ 部分实现 | adapter 抽象已建：`lib/code-hosting/`（`adapter.ts`/`registry.ts`）；仅 `github-provider.ts`，Gitee/GitLab 未实现 |
-| MCP server（M10） | ❌ 未实现 | — |
-| 可信 changelog / 分享页完整形态（M11） | ❌ 未实现 | 公开只读 demo 已有（见上），但「可信 changelog」形态未做 |
+| MCP server（M10） | ✅ 已实现 | A1（2026-11-10 上线）：8 只读工具、协议符合性 13/13、越权隔离、返回项带 stable link + 证据 URL（`lib/mcp/server.ts`、`lib/mcp/oauth.ts`、`migrations/055`/`056`）；key 签发 UI + 撤销路由（aa5fff5，`app/api/mcp-keys/*`）此前仅脚本路径 |
+| 发布稿（release notes）发布动线（M11 扩展） | ✅ 已实现（GTM 桥面批次 1，53c267e） | 真块级改写（migration 060 `summary_override`）、已发布只读 409、release 归属校验、share_token 重生成不换、公开页 `/share/notes/[token]` 限流 + override 渲染、Markdown 导出、发布卡面板（勾选不自动全选 → 生成 → 校对 → 发布 → 公开链接）；**待部署，产品证据待线上验证** |
+| 周期 Digest（内部周报） | ✅ 已实现（GTM 桥面，b08a02a） | 滚动 7 天窗口、无变化周不生成、digests 落库幂等、渠道+邮件投递（`lib/digest-sweep.ts`、sweep 注册 `digest-weekly`）；确定性组装零生成文本；**待部署** |
+| 介绍材料 + PPT（GTM 表达层） | ✅ 已实现（GTM 桥面批次 2，d321315） | 定位块（manual 主张只逐字引用）+ 账本事实清单 → AI 结构化大纲（锚定校验，悬空锚点整稿拒绝）→ PPTCreator（easymakeppt.com）/mcp partner 烧片（`lib/ppt-partner.ts`）；计费口径=免费+如实记账（`llm_call_receipts.call_kind='intro_material'`，migrations 061–063）；**待部署；PPT 链路生产实测待做** |
 | 外部仓库跟踪（M13，盯别人仓库） | ❌ 未实现 | — |
 | Bus Factor / 知识掌握确认机制 | ❌ 未实现 | — |
 | 跨模块调用图 / 运行时依赖分析 | ❌ 未实现 | 影响面基于规格证据路径匹配（`spec-file-index.ts`），非调用图 |

@@ -169,7 +169,19 @@ superset 实测（run 63）：sourceCoverage partial（35/2149，diff 57/120 入
 
 **手动补跑路径**（无 push 场景）：服务器 `tsx` 脚本 `queueAnalysis` + 原子认领（`UPDATE started_at WHERE queued AND started_at IS NULL`）+ `await runAnalysis(id)`；sweep 只领 >10 分钟的 queued。
 
-## 11. 实测锚点（superset 盲评，同窗口同基线四跑）
+## 11. M9 影子对比口径成文（R4，2026-11-11）
+
+**机制**：增量 run 落库成功后，另取一份单窗切片跑全量提取（`charge_component='platform_shadow'`，只对比不落库）。对比对象是 carry-forward 合并后的**完整规格**——增量 AI 输出只含受影响功能，直接比会恒等失败。多趟增量 run 无单一窗口时显式另取单窗切片（W0-6 要点 5），不用空输入、不静默失效。
+
+**两层比较**（`lib/incremental-shadow.ts`，门槛 `SHADOW_REFERENCE_GATE=0.70`）：
+1. **功能 key 集合强制一致**：missing/extra 均须为空，零容忍——原「≥98% 一致率」的语义转移到这一层（当前 100%）；数学上 98% 的原始提法不可达（全量 vs 全量噪声底实测 Jaccard≈0.80）。
+2. **(reference, category) 集合宏平均 Jaccard ≥ 0.70**：位于噪声底（0.80）之下、结构性故障态（0.33–0.5）之上，可检出增量链路真回归。场景文本签名不参与判定。
+
+**分母定义**：宏平均的分母 = 增量 ∪ 全量的功能 key 并集；功能缺失（missing/extra）该功能记 0 计入均值（存在性是一致性前提）；某功能双方场景集均为空时该功能记 1（union=0）。**双方共同漏掉的行为不在分母内**——影子一致率对「两边同时漏」结构性盲。
+
+**声明边界**：影子对比是「两种执行路径（增量 vs 单窗）的路径一致性指标」，不构成召回证明，也不能替代人工盲评（错误高度相关：同一模型/prompt/索引）。召回主张由 benchmark 盲评承担。影子失败只告警（best-effort），consistent=null 不进门槛判定，不回滚分析。
+
+## 12. 实测锚点（superset 盲评，同窗口同基线四跑）
 
 | 轮次 | 机制 | 召回（15 条冻结预标） | 精确率（功能级） |
 |---|---|---|---|
