@@ -10,6 +10,11 @@ vi.mock("../lib/db", () => ({ getDb: () => ({ execute: dbExecute, getConnection:
 vi.mock("../lib/session", () => ({ getSessionUser: vi.fn() }));
 vi.mock("../lib/product-access", () => ({ requireProductAccess: vi.fn() }));
 vi.mock("../lib/rate-limit", () => ({ enforceExportRateLimit: vi.fn(async () => null) }));
+vi.mock("next/server", async (importOriginal) => ({
+  ...await importOriginal<typeof import("next/server")>(),
+  // 测试无请求作用域：after 直接同步执行回调，验证改写链路可跑通
+  after: vi.fn(async (work: () => Promise<void>) => { await work(); }),
+}));
 
 import { GET, POST } from "../app/api/products/[slug]/releases/[id]/release-notes/route";
 import { GET as markdownGET } from "../app/api/products/[slug]/releases/[id]/release-notes/markdown/route";
