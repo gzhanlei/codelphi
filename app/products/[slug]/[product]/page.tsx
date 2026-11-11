@@ -2,6 +2,8 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import { AnalyzeButton } from "@/components/analyze-button";
+import { OverviewPublishButton } from "@/components/overview-publish-dialog";
+import { ProductDescriptionLine } from "@/components/product-description-line";
 import { AnalysisFeedbackButton } from "@/components/analysis-feedback-button";
 import { AppShell } from "@/components/app-shell";
 import { DemoShell } from "@/components/demo-shell";
@@ -47,8 +49,16 @@ function ProductPageBody({ productBase, view, mode, featureId, details, overview
   return (
     <>
       <div className="page-heading product-heading">
-        <div><span className="eyebrow">PRODUCT SPACE</span><h1>{details.product.name}</h1>{view === "overview" ? null : <p>{details.product.description}</p>}<RepositoryLink repository={details.repository} /></div>
-        <div className="page-actions">{actions}</div>
+        <div>
+          <span className="eyebrow">PRODUCT SPACE</span>
+          <h1>{details.product.name} <RepositoryLink repository={details.repository} /></h1>
+          <ProductDescriptionLine slug={details.product.slug} text={details.product.description} canEdit={canEdit} />
+        </div>
+        <div className="page-actions">
+          {actions}
+          {details.releases[0] ? <OverviewPublishButton slug={details.product.slug} releaseId={details.releases[0].id} releaseTitle={details.releases[0].title} features={overview.changeGroups.map((group) => ({ featureName: group.featureName, added: group.added, changed: group.changed, removed: group.removed }))} /> : null}
+          <details className="export-details"><summary>导出 ▾</summary><div className="export-details-menu"><a href={`/api/products/${details.product.slug}/spec.json`} target="_blank" rel="noreferrer">spec.json ↗</a><a href={`/api/products/${details.product.slug}/export/tests?format=gherkin`}>Gherkin ↓</a><a href={`/api/products/${details.product.slug}/export/tests?format=markdown`}>用例 Markdown ↓</a><a href={`/api/products/${details.product.slug}/explainer`} target="_blank" rel="noreferrer">Explainer ↗</a></div></details>
+        </div>
       </div>
       <RunStatus run={details.latestRun} />
       {details.driftCount > 0 ? <div className="drift-banner" role="status">⚠️ {details.driftCount} 条人工规格可能已过时（最近一次分析的行为变化触及了这些功能）。逐条「标记已核实」后标记会消除。{driftFeatureId ? <Link className="drift-banner-link" href={featureHref(driftFeatureId)}>去核实 →</Link> : null}</div> : null}

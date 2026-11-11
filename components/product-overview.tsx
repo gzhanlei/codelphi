@@ -1,20 +1,7 @@
 import Link from "next/link";
-import { EditDescriptionButton } from "./edit-description-button";
 import { KnowledgeHealthPanel } from "./knowledge-health-panel";
-import { OverviewPublishButton } from "./overview-publish-dialog";
 import { SpecAsk } from "./spec-ask";
-import { changeGroupLabel, type ProductOverviewData } from "@/lib/product-overview";
-
-function OverviewHero({ data, canEdit }: { data: ProductOverviewData; canEdit: boolean }) {
-  return (
-    <section className="overview-hero">
-      <span className="eyebrow">PRODUCT OVERVIEW</span>
-      <h2>{data.headline}{canEdit ? <EditDescriptionButton slug={data.slug} description={data.description} /> : null}</h2>
-      <div className="overview-meta"><span>{data.freshness}</span><span>{data.analysisLabel}</span>{data.headlineSource === "generated" ? <span>代码生成 · {data.headlineEvidence.length} 个证据文件</span> : null}</div>
-      <div className="overview-actions"><Link className="primary-button" href="?view=spec">查看产品规格</Link><Link className="secondary-button" href="?view=changes">查看最近变化</Link><span className="overview-publish-slot">{data.latestRelease ? <OverviewPublishButton slug={data.slug} releaseId={data.latestRelease.id} releaseTitle={data.latestRelease.title} features={data.changeGroups.map((group) => ({ featureName: group.featureName, added: group.added, changed: group.changed, removed: group.removed }))} /> : null}</span><details className="export-details"><summary>导出 ▾</summary><div className="export-details-menu"><a href={`/api/products/${data.slug}/spec.json`} target="_blank" rel="noreferrer">spec.json ↗</a><a href={`/api/products/${data.slug}/export/tests?format=gherkin`}>Gherkin ↓</a><a href={`/api/products/${data.slug}/export/tests?format=markdown`}>用例 Markdown ↓</a><a href={`/api/products/${data.slug}/explainer`} target="_blank" rel="noreferrer">Explainer ↗</a></div></details></div>
-    </section>
-  );
-}
+import type { ProductOverviewData } from "@/lib/product-overview";
 
 function CapabilityList({ capabilities }: { capabilities: ProductOverviewData["capabilities"] }) {
   if (capabilities.length === 0) return <p className="overview-note">尚无功能规格。</p>;
@@ -53,7 +40,7 @@ function ReleaseTimeline({ data }: { data: ProductOverviewData }) {
   if (data.timeline.length === 0) return null;
   return (
     <section className="overview-panel">
-      <div className="overview-panel-heading"><h2>发布时间线</h2><Link className="overview-text-link" href="?view=changes">全部发布变化 →</Link></div>
+      <div className="overview-panel-heading"><h2>发布时间线</h2><span className="overview-meta-inline">{data.freshness} · {data.analysisLabel}{data.headlineSource === "generated" ? ` · 代码生成 · ${data.headlineEvidence.length} 个证据文件` : ""}</span><Link className="overview-text-link" href="?view=changes">全部发布变化 →</Link></div>
       <div className="overview-timeline">
         {data.timeline.map((entry) => {
           const chip = entry.noteStatus ? STATUS_CHIP[entry.noteStatus] : null;
@@ -80,7 +67,6 @@ function TrustLine({ data }: { data: ProductOverviewData }) {
 export function ProductOverview({ data, canEdit = false }: { data: ProductOverviewData; canEdit?: boolean }) {
   return (
     <div className="product-overview">
-      <OverviewHero data={data} canEdit={canEdit} />
       <div className="overview-ask">
         <SpecAsk slug={data.slug} productBase={data.productBase} suggestions={["这个产品的核心功能是什么？", "有哪些使用限制或边界情况？", "怎么配置和启动它？"]} />
       </div>

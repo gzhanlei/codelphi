@@ -23,7 +23,7 @@ function completeOverview() {
 describe("product overview rendering (Specsight 原则版式)", () => {
   it("renders ask box, release timeline, capabilities and trust line without architecture content", () => {
     const html = renderToStaticMarkup(createElement(ProductOverview, { data: completeOverview() }));
-    expect(html).toContain("代码驱动的产品知识中心");
+    // 简介与 ✎ 编辑移到页头（单头部整合）；总览从提问框开始
     expect(html).toContain("代码生成 · 1 个证据文件");
     expect(html).toContain("这个产品的核心功能是什么？");
     expect(html).toContain("发布时间线");
@@ -92,14 +92,6 @@ describe("product overview rendering (Specsight 原则版式)", () => {
     const html = renderToStaticMarkup(createElement(ProductOverview, { data }));
     expect(html).toContain("人工维护");
     expect(html).toContain("Spec v0");
-  });
-
-  it("renders the overview edit pencil only for editors", () => {
-    const data = completeOverview();
-    expect(renderToStaticMarkup(createElement(ProductOverview, { data, canEdit: false }))).not.toContain("编辑产品概况");
-    const editable = renderToStaticMarkup(createElement(ProductOverview, { data, canEdit: true }));
-    expect(editable).toContain("编辑产品概况");
-    expect(editable).toContain("description-dialog");
   });
 
   it("aggregates latest-release changes per feature in the overview data (供发布产品对话框勾选)", () => {

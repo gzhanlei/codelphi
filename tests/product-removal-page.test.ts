@@ -77,8 +77,8 @@ describe("product page removal action (canonical org-qualified route)", () => {
     expect(notFound).toHaveBeenCalledTimes(2);
   });
 
-  it("shows the product description only outside the overview", async () => {
-    expect(await renderPage()).not.toContain("词典");
+  it("shows the product description on every view (header consolidation, clamped)", async () => {
+    expect(await renderPage()).toContain("词典");
     expect(await renderPage("spec")).toContain("词典");
   });
 
