@@ -61,6 +61,8 @@ export interface ProductMapStats {
   scenarioCount: number;
   edgeCount: number;
   truncatedEdgeCount: number;
+  /** 默认显示的强连接数（≤ MAP_DEFAULT_EDGES）。 */
+  visibleEdgeCount: number;
 }
 
 export interface ProductMap {
@@ -83,7 +85,7 @@ function connectionRows(features: FeatureRow[], scenarios: ScenarioRow[]): Scena
     .map((scenario) => ({ id: scenario.id, featureId: scenario.featureId, featureName: names.get(scenario.featureId)!, reference: scenario.reference, evidence: scenario.evidence }));
 }
 
-/** B3 连接按 feature 双向输出；按无序对去重成一条边。 */
+/** B3 连接按 feature 双向输出；按无序对去重成一条边（visible 稍后统一标记）。 */
 function uniqueEdges(entries: ReturnType<typeof buildFeatureConnections>): ProductMapEdge[] {
   const seen = new Set<string>();
   const edges: ProductMapEdge[] = [];
@@ -100,10 +102,70 @@ function uniqueEdges(entries: ReturnType<typeof buildFeatureConnections>): Produ
         targetName: connection.targetFeatureName,
         sharedFiles: connection.sharedFiles,
         weight: connection.sharedFiles.reduce((sum, file) => sum + file.sourceScenarios.length + file.targetScenarios.length, 0),
+        visible: false,
       });
     }
   }
   return edges;
+}
+
+/**
+ * 聚簇排序：按顶层功能子树间的连接权重做贪心链，强关联功能相邻落位，减少连线交叉。
+ * 起点取最强连接对，之后每步把「与链上已有功能权重之和最大」的功能接到链尾；
+ * 权重并列取 id 最小者，全程确定性。无连接的功能保持名称序收尾。
+ */
+function clusterOrder(tree: FeatureTreeItem[], edges: ProductMapEdge[]): FeatureTreeItem[] {
+  if (tree.length <= 2) return tree;
+  const rootOf = new Map<number, number>();
+  for (const item of tree) {
+    rootOf.set(item.id, item.id);
+    for (const child of item.children) rootOf.set(child.id, item.id);
+  }
+  const pairWeight = new Map<string, number>();
+  for (const edge of edges) {
+    const a = rootOf.get(edge.sourceId);
+    const b = rootOf.get(edge.targetId);
+    if (a === undefined || b === undefined || a === b) continue;
+    const key = a < b ? `${a}-${b}` : `${b}-${a}`;
+    pairWeight.set(key, (pairWeight.get(key) ?? 0) + edge.weight);
+  }
+  if (pairWeight.size === 0) return tree;
+  let start: [number, number] | null = null;
+  let startWeight = -1;
+  for (const [key, weight] of pairWeight) {
+    if (weight > startWeight) {
+      const [a, b] = key.split("-").map(Number);
+      start = [a, b];
+      startWeight = weight;
+    }
+  }
+  const byId = new Map(tree.map((item) => [item.id, item]));
+  const chain = [start![0], start![1]];
+  const remaining = new Set(tree.map((item) => item.id));
+  remaining.delete(start![0]);
+  remaining.delete(start![1]);
+  const weightToChain = (id: number) => {
+    let sum = 0;
+    for (const member of chain) {
+      const key = id < member ? `${id}-${member}` : `${member}-${id}`;
+      sum += pairWeight.get(key) ?? 0;
+    }
+    return sum;
+  };
+  while (remaining.size > 0) {
+    let pick: number | null = null;
+    let pickWeight = -1;
+    for (const id of remaining) {
+      const weight = weightToChain(id);
+      if (weight > pickWeight || (weight === pickWeight && pick !== null && id < pick)) {
+        pick = id;
+        pickWeight = weight;
+      }
+    }
+    chain.push(pick!);
+    remaining.delete(pick!);
+  }
+  return chain.map((id) => byId.get(id)!);
 }
 
 function layoutTree(tree: FeatureTreeItem[], scenarioCountByFeature: Map<number, number>): { nodes: ProductMapNode[]; height: number } {
@@ -156,33 +218,35 @@ function layoutTree(tree: FeatureTreeItem[], scenarioCountByFeature: Map<number,
 }
 
 /**
- * 确定性产品地图布局：顶层功能按名称序分带（每带 4 列），子功能纵向挂在父功能下；
- * 连接边按共享引用数降序取前 MAP_MAX_EDGES，截断数显式进 stats。
+ * 确定性产品地图布局：顶层功能按连接强度聚簇分带（每带 4 列），子功能纵向挂在父功能下；
+ * 连接边按共享引用数降序取前 MAP_MAX_EDGES，其中前 MAP_DEFAULT_EDGES 条默认显示，截断数显式进 stats。
  */
 export function buildProductMap(features: FeatureRow[], scenarios: ScenarioRow[]): ProductMap {
   const scenarioCountByFeature = new Map<number, number>();
   for (const scenario of scenarios) scenarioCountByFeature.set(scenario.featureId, (scenarioCountByFeature.get(scenario.featureId) ?? 0) + 1);
 
-  const tree = buildFeatureTree(features);
+  const rankedEdges = uniqueEdges(buildFeatureConnections(connectionRows(features, scenarios)));
+  rankedEdges.sort((a, b) => b.weight - a.weight || a.id.localeCompare(b.id));
+  const tree = clusterOrder(buildFeatureTree(features), rankedEdges);
   const width = CANVAS_PAD * 2 + Math.min(tree.length, BAND_COLS) * NODE_W + Math.max(Math.min(tree.length, BAND_COLS) - 1, 0) * COL_GAP;
   const { nodes, height } = layoutTree(tree, scenarioCountByFeature);
 
-  const allEdges = uniqueEdges(buildFeatureConnections(connectionRows(features, scenarios)));
-  allEdges.sort((a, b) => b.weight - a.weight || a.id.localeCompare(b.id));
-  const edges = allEdges.slice(0, MAP_MAX_EDGES);
+  const allEdges = rankedEdges.slice(0, MAP_MAX_EDGES);
+  allEdges.forEach((edge, index) => { edge.visible = index < MAP_DEFAULT_EDGES; });
 
   return {
     width: Math.max(width, 620),
     height: Math.max(height, 200),
     nodes,
-    edges,
+    edges: allEdges,
     stats: {
       featureCount: features.length,
       topLevelCount: tree.length,
       childCount: features.length - tree.length,
       scenarioCount: scenarios.length,
-      edgeCount: allEdges.length,
-      truncatedEdgeCount: Math.max(allEdges.length - edges.length, 0),
+      edgeCount: rankedEdges.length,
+      truncatedEdgeCount: Math.max(rankedEdges.length - allEdges.length, 0),
+      visibleEdgeCount: Math.min(allEdges.length, MAP_DEFAULT_EDGES),
     },
   };
 }
