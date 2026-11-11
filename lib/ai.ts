@@ -17,6 +17,9 @@ const scenarioSchema = z.object({
   action: z.string().min(1).max(2_000),
   outcome: z.string().min(1).max(2_000),
   category: z.enum(["happy", "edge", "error"]),
+  // W-DECISION 最小序列版：happy 场景 step=1..N 构成主步骤链，edge/error 的 step=分支自哪一步。
+  // 不确定/未编号可缺省；非法值在归一层丢弃（docs/w-decision-scenario-sequence-plan.md §1）。
+  step: z.number().int().min(1).max(40).optional(),
   evidence: z.array(evidenceSchema).max(5),
 });
 
@@ -97,6 +100,13 @@ export function normalizeScenarioAliases(value: unknown) {
       evidence: cleanEvidenceList(feature.evidence),
       scenarios: feature.scenarios?.map((scenario) => {
         const cleaned = { ...scenario, evidence: cleanEvidenceList(scenario.evidence) } as Record<string, unknown>;
+        // W-DECISION：step 非法（非整数/越界/空）直接丢弃并留痕，不拒绝整个响应——
+        // 顺序是呈现增强不是判定面，回退扇出形态（docs/w-decision-scenario-sequence-plan.md §1）。
+        const rawStep = cleaned.step;
+        if (rawStep !== undefined && (typeof rawStep !== "number" || !Number.isInteger(rawStep) || rawStep < 1 || rawStep > 40)) {
+          console.warn("[analysis] invalid scenario step dropped", { reference: String(scenario?.reference ?? "?"), step: rawStep });
+          delete cleaned.step;
+        }
         if (cleaned.outcome !== undefined || typeof cleaned.result !== "string") return cleaned;
         const { result, ...rest } = cleaned;
         return { ...rest, outcome: result };
@@ -192,6 +202,8 @@ export interface SpecAnchorScenario {
   action: string;
   outcome: string;
   category: string;
+  /** W-DECISION：有顺序标注的场景在锚定行里带上，受影响功能回显时保住主步骤链。 */
+  step?: number | null;
 }
 
 export interface SpecAnchorFeature {
@@ -210,7 +222,7 @@ export function specAnchoringSection(previousSpec?: SpecAnchorFeature[], maxChar
   for (const feature of features) {
     const head = `功能：${feature.name}（简介：${feature.summary}）`;
     const scenarioLines = feature.scenarios.map((scenario) =>
-      `- ${scenario.reference}｜${scenario.category}｜情境：${scenario.context}｜操作：${scenario.action}｜结果：${scenario.outcome}`,
+      `- ${scenario.reference}｜${scenario.category}${scenario.step ? `｜步骤 ${scenario.step}` : ""}｜情境：${scenario.context}｜操作：${scenario.action}｜结果：${scenario.outcome}`,
     );
     const block = [head, ...scenarioLines].join("\n");
     if (used + block.length > maxChars) {
@@ -279,11 +291,12 @@ export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext
     "用简体中文生成：1) 产品简介；2) 当前产品功能规格；3) 本次发布的用户可感知变化。",
     "产品简介用一到两句话说明服务对象和核心能力，不超过 200 字，必须概括整个代码库而不是本次提交，并给出输入文件中的 evidence；不要只写产品名或营销词。",
     "规格按功能组织，每个场景包含情境、操作、结果，分类为 happy/edge/error，reference 使用 HP-n/EC-n/ER-n。JSON 字段名必须与下方模板逐字一致：情境=context、操作=action、结果=outcome，禁止用 result 等同义键名。",
+    "场景可选标注 step：happy 场景按交付顺序标 step=1..N（同一功能同一情境内）；edge/error 场景的 step=其分支自的 happy 步骤号；不确定顺序时不写 step，不得编造。",
     coverageMandate,
     "优先保证功能覆盖，每个功能保留最关键的 1-5 个场景；不要因单个功能场景过多而遗漏其他功能。",
     "每个场景、变化和产品简介必须给 evidence；path 必须来自输入文件，startLine 使用输入的行号。没有用户变化的发布只生成 reviewed 项。",
     "只返回 JSON，不要 Markdown。结构：",
-    '{"product":{"description":"","evidence":[{"path":"","startLine":1}]},"release":{"title":"","summary":""},"changes":[{"featureName":"","kind":"added|changed|removed|fixed|reviewed","description":"","userImpact":"","evidence":[{"path":"","startLine":1}]}],"features":[{"name":"","summary":"","scenarios":[{"reference":"HP-1","context":"","action":"","outcome":"","category":"happy","evidence":[{"path":"","startLine":1}]}]}]}',
+    '{"product":{"description":"","evidence":[{"path":"","startLine":1}]},"release":{"title":"","summary":""},"changes":[{"featureName":"","kind":"added|changed|removed|fixed|reviewed","description":"","userImpact":"","evidence":[{"path":"","startLine":1}]}],"features":[{"name":"","summary":"","scenarios":[{"reference":"HP-1","context":"","action":"","outcome":"","category":"happy","step":1,"evidence":[{"path":"","startLine":1}]}]}]}',
     ...(anchor ? [anchor] : []),
     ...(continuity ? [continuity] : []),
     ...(scope ? [scope] : []),
@@ -475,10 +488,11 @@ export function behavioralJudgmentPrompt(descriptions: BehavioralDescription[], 
     "- 只有当你能明确断言该变更对任何外部观察者完全不可见时才不输出场景；拿不准 → 一律输出场景（宁可多写一条，不可漏写一条）。",
     "- 判为内部实现的条目 → 在 changes 里输出 kind=reviewed 的条目（附证据），保持完整性留痕。",
     "规格按功能组织，每个场景包含情境、操作、结果，分类为 happy/edge/error，reference 使用 HP-n/EC-n/ER-n。JSON 字段名必须与下方模板逐字一致：情境=context、操作=action、结果=outcome，禁止用 result 等同义键名。",
+    "场景可选标注 step：happy 场景按交付顺序标 step=1..N（同一功能同一情境内）；edge/error 场景的 step=其分支自的 happy 步骤号；不确定顺序时不写 step，不得编造。",
     "注意控制流语义：try/except(pass) 等被捕获的错误意味着该错误不再向上抛出——行为描述必须反映修改后的外部可见结果（如「创建不再因…而失败」），而不是把被捕获的错误写成输出行为。",
     names.length > 0 ? `功能名优先复用以下既有功能名（同属一个产品功能的场景归入同一功能）：${names.join("、")}` : "将同属一个产品功能的场景归入同一功能名。",
     "只返回 JSON，不要 Markdown。结构：",
-    '{"product":{"description":"","evidence":[{"path":"","startLine":1}]},"release":{"title":"","summary":""},"changes":[{"featureName":"","kind":"added|changed|removed|fixed|reviewed","description":"","userImpact":"","evidence":[{"path":"","startLine":1}]}],"features":[{"name":"","summary":"","scenarios":[{"reference":"HP-1","context":"","action":"","outcome":"","category":"happy","evidence":[{"path":"","startLine":1}]}]}]}',
+    '{"product":{"description":"","evidence":[{"path":"","startLine":1}]},"release":{"title":"","summary":""},"changes":[{"featureName":"","kind":"added|changed|removed|fixed|reviewed","description":"","userImpact":"","evidence":[{"path":"","startLine":1}]}],"features":[{"name":"","summary":"","scenarios":[{"reference":"HP-1","context":"","action":"","outcome":"","category":"happy","step":1,"evidence":[{"path":"","startLine":1}]}]}]}',
     `\n【本次提交】\n${change.message}`,
     "\n【变更文件（复述与上下文）】\n" + sections.join("\n"),
   ].join("\n");

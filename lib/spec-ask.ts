@@ -248,6 +248,8 @@ export type DecoratedSpecAnswer = SpecAnswer & {
   specVersionId: number | null;
   /** B2.2：AI 综合回答（只基于命中条目成文，带 used 锚点）；缺省 = 前端回退为纯卡片。 */
   aiAnswer?: { answer: string; used: Array<{ kind: "feature" | "scenario"; id: number }> } | null;
+  /** B2.2 拒答原因（模型判条目不足时给出的『规格缺什么』）；insufficient 时可能有值。 */
+  insufficientReason?: string | null;
 };
 
 /** IO：答案所属的规格版本，以及把证据变成 blob 链接所需的仓库坐标。verification loader 可注入，便于在隔离环境中测试。 */

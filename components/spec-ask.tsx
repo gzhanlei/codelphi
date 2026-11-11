@@ -82,6 +82,12 @@ export function SpecAnswerView({ answer, productBase }: { answer: DecoratedSpecA
           <p>{answer.aiAnswer.answer}</p>
         </div>
       ) : null}
+      {answer.insufficientReason ? (
+        <div className="spec-ask-ai-answer spec-ask-refusal">
+          <div className="spec-ask-ai-label">规格里没有能直接回答这个问题的条目。缺口：</div>
+          <p>{answer.insufficientReason}</p>
+        </div>
+      ) : null}
       <p className={answer.status === "uncovered" ? "spec-ask-uncovered" : "spec-ask-notice"}>{answer.notice}</p>
       {answer.specVersionId !== null ? <p className="spec-ask-version">基于规格版本 #{answer.specVersionId}；未覆盖结论仅对该版本有效。</p> : null}
       {answer.status === "matched" ? (

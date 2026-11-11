@@ -468,3 +468,6 @@ dialog.publish-dialog h3 { margin: 0 0 8px; font-size: 16px; }
 .spec-ask-ai-answer { background: #f0f7f3; border: 1px solid #cfe3d8; border-radius: 8px; padding: 10px 14px; margin-bottom: 10px; }
 .spec-ask-ai-answer p { margin: 4px 0 0; font-size: 14px; color: #1a1a1a; }
 .spec-ask-ai-label { font-size: 11px; color: #0d7a4f; font-weight: 600; }
+
+.spec-ask-refusal { background: #fdf3e0; border-color: #e5d3a1; }
+.spec-ask-refusal p { color: #7a6226; }
