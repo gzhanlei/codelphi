@@ -112,7 +112,26 @@ export function parseAnalysisContent(content: string): AnalysisResult {
   if (start < 0) throw new Error("AI response did not contain a JSON object");
   const json = trimmed.slice(start, end + 1);
   if (!json.endsWith("}")) throw new Error("AI response did not contain a JSON object");
-  return analysisSchema.parse(capEvidence(normalizeScenarioAliases(JSON.parse(json))));
+  return analysisSchema.parse(capScenariosPerFeature(capEvidence(normalizeScenarioAliases(JSON.parse(json)))));
+}
+
+/**
+ * 单功能场景数帽（schema max 40）：增量锚定会让 AI 原样回显上一版携带场景，
+ * 变体噪音累积的功能（BM-5 类）很容易突破 40 → schema 硬顶拒绝 → 整个 run 失败。
+ * 确定性截断（保序取前 40）让 run 成功；丢弃数打日志供账本/告警观察，根因治理在 BM-5 语义去重。
+ */
+export function capScenariosPerFeature(parsed: unknown, max = 40): unknown {
+  if (typeof parsed !== "object" || parsed === null) return parsed;
+  const features = (parsed as { features?: unknown }).features;
+  if (!Array.isArray(features)) return parsed;
+  for (const feature of features) {
+    const scenarios = (feature as { scenarios?: unknown }).scenarios;
+    if (!Array.isArray(scenarios) || scenarios.length <= max) continue;
+    const name = typeof (feature as { name?: unknown }).name === "string" ? (feature as { name: string }).name : "?";
+    console.warn(`[analysis] feature scenarios exceed cap ${scenarios.length}>${max}; truncating (BM-5 variant accumulation)`, { feature: name });
+    (feature as { scenarios: unknown }).scenarios = scenarios.slice(0, max);
+  }
+  return parsed;
 }
 
 export interface ChangeContext {

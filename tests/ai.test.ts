@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { analyzeBehavioralGroup, analyzeWithAI, behavioralDescribePrompt, behavioralJudgmentPrompt, capEvidence, featureContinuitySection, incrementalScopeSection, parseAnalysisContent, parseBehavioralDescriptions, specAnchoringSection } from "../lib/ai";
+import { analyzeBehavioralGroup, analyzeWithAI, behavioralDescribePrompt, behavioralJudgmentPrompt, capEvidence, featureContinuitySection, incrementalScopeSection, capScenariosPerFeature, parseAnalysisContent, parseBehavioralDescriptions, specAnchoringSection } from "../lib/ai";
 
 const result = {
   product: { description: "统一认证与产品知识中心。", evidence: [{ path: "app/auth/login/route.ts", startLine: 1 }] },
@@ -276,3 +276,13 @@ describe("behavioral enumeration two-step extraction (W0-9)", () => {
   });
 });
 
+describe("capScenariosPerFeature (BM-5 变体累积防线)", () => {
+  it("truncates scenarios beyond the cap and preserves order", () => {
+    const parsed = { features: [{ name: "A", scenarios: Array.from({ length: 45 }, (_, i) => ({ reference: `HP-${i + 1}`, context: "c", action: "a", outcome: "o", category: "happy", evidence: [] })) }, { name: "B", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy", evidence: [] }] }] };
+    const capped = capScenariosPerFeature(parsed, 40) as typeof parsed;
+    expect(capped.features[0].scenarios).toHaveLength(40);
+    expect(capped.features[0].scenarios[0].reference).toBe("HP-1");
+    expect(capped.features[0].scenarios[39].reference).toBe("HP-40");
+    expect(capped.features[1].scenarios).toHaveLength(1);
+  });
+});
