@@ -1,10 +1,12 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { getSessionUser } from "@/lib/session";
 import { requireProductAccess } from "@/lib/product-access";
 import { getDb } from "@/lib/db";
 import { randomBytes } from "node:crypto";
 import { buildDraftBlocks, canPublish, publishOrder, releaseNotePublicUrl, validateDraft } from "@/lib/release-notes";
 import { loadBlockViews, loadNoteByRelease, releaseChanges, releaseOwned } from "@/lib/release-notes-service";
+import { rewriteDraftBlocksToUserVoice } from "@/lib/release-notes-enhance";
+import { requestStructuredCompletion } from "@/lib/ai";
 import { appUrl } from "@/lib/env";
 
 /**
@@ -95,6 +97,24 @@ export async function POST(request: NextRequest) {
       );
     }
     await connection.commit();
+
+    // 草稿文案人话化（异步，不阻塞面板）：规格 diff 语言 → 用户影响语言。
+    // 锚定/证据不变（只写 summary_override），失败保留原文；面板刷新即见改写结果。
+    after(async () => {
+      try {
+        const blocks = await loadBlockViews(db.execute.bind(db), noteId);
+        if (blocks.length === 0) return;
+        const outcome = await rewriteDraftBlocksToUserVoice(
+          { execute: (sql: string, params?: unknown[]) => db.execute(sql, params as never) },
+          { completion: (messages, billing) => requestStructuredCompletion(messages, billing) },
+          { noteId, emphasis: String(body.emphasis ?? ""), blocks: blocks.map((block) => ({ position: block.position, kind: block.kind, featureName: block.featureName, scenarioReference: block.scenarioReference, summary: block.summary, highlightType: block.highlightType })) },
+        );
+        console.log("[release-notes] manual draft copy rewritten", { releaseId, ...outcome });
+      } catch (error) {
+        console.warn("[release-notes] manual draft rewrite skipped", { releaseId, error: error instanceof Error ? error.message.slice(0, 160) : String(error) });
+      }
+    });
+
     return NextResponse.json({ noteId, status: "draft", shareToken, publicUrl: releaseNotePublicUrl(appUrl(), shareToken) });
   } catch (cause) {
     await connection.rollback();

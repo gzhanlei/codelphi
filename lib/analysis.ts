@@ -586,7 +586,7 @@ async function runAnalysisBody(run: RunContext) {
             const outcome = await rewriteDraftBlocksToUserVoice(
               { execute: (sql: string, params?: unknown[]) => getDb().execute(sql, params as never) },
               { completion: (messages, billing) => requestStructuredCompletion(messages, billing) },
-              { noteId: note.id, releaseTitle: change.message.split("\n")[0].trim().slice(0, 120), blocks: blocks.map((block) => ({ position: block.position, kind: block.kind, featureName: block.featureName, scenarioReference: block.scenarioReference, summary: block.summary, highlightType: block.highlightType })) },
+              { noteId: note.id, emphasis: note.emphasis ?? "", blocks: blocks.map((block) => ({ position: block.position, kind: block.kind, featureName: block.featureName, scenarioReference: block.scenarioReference, summary: block.summary, highlightType: block.highlightType })) },
             );
             console.log("[release-notes] auto-draft copy rewritten to user voice", { runId: run.id, releaseId, ...outcome });
           }

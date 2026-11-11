@@ -74,7 +74,7 @@ export async function rewriteDraftBlocksToUserVoice(
     /** 结构化签名与 lib/ai.ts requestStructuredCompletion 对齐（调用方传入，保持本模块无 AI 依赖）。 */
     completion: (messages: Array<{ role: string; content: string }>, billing: { runId: number | null; accountId: number | null; chargeComponent: "main" | "platform_shadow"; callKind?: string | null }) => Promise<string>,
   },
-  input: { noteId: number; releaseTitle: string; blocks: DraftBlockForRewrite[] },
+  input: { noteId: number; emphasis: string; blocks: DraftBlockForRewrite[] },
 ): Promise<{ rewritten: number; failed: number }> {
   let rewritten = 0;
   let failed = 0;
@@ -93,7 +93,7 @@ export async function rewriteDraftBlocksToUserVoice(
             scenarioReference: block.scenarioReference,
             summary: block.summary,
             highlightType: block.highlightType,
-            emphasis: input.releaseTitle,
+            emphasis: input.emphasis,
             instruction: "面向产品的使用者（客户/同事）撰写：写他们能感知到什么变化，不要出现内部术语、场景编号或『场景』『规格』字样。",
           }) },
         ],
