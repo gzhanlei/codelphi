@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { answerSpecQuestion } from "../lib/spec-ask";
+import { buildAnswerSynthesisPrompt, parseAnswerSynthesis, answerSpecQuestion } from "../lib/spec-ask";
 import type { Execute } from "../lib/db";
 import type { SpecSearchResult } from "../lib/spec-search";
 
@@ -64,5 +64,31 @@ describe("ask spec (B2.1 retrieval-style answers)", () => {
     const answer = await answerSpecQuestion(3, "   ", spy);
     expect(spy).not.toHaveBeenCalled();
     expect(answer.status).toBe("uncovered");
+  });
+});
+
+describe("B2.2 AI 综合回答（合成与拒答）", () => {
+  it("prompt carries question, spec excerpts with anchors, and anti-fabrication rules", () => {
+    const prompt = buildAnswerSynthesisPrompt({
+      question: "异步操作图导出 是怎么工作的？",
+      specVersionId: 149,
+      features: [{ id: 5, name: "异步操作图导出", summary: "导出异步架构图" }],
+      scenarios: [{ id: 7, featureName: "异步操作图导出", reference: "HP-2", context: "用户", action: "导出", outcome: "得到 JSON" }],
+    });
+    expect(prompt).toContain("异步操作图导出 是怎么工作的？");
+    expect(prompt).toContain("[功能 #5]");
+    expect(prompt).toContain("[场景 #7]");
+    expect(prompt).toContain("answerable:false");
+    expect(prompt).toContain("禁止");
+  });
+
+  it("parses answerable answers and refuses honestly when the model says insufficient", () => {
+    const ok = parseAnswerSynthesis(JSON.stringify({ answerable: true, answer: "导出会生成 async-graph JSON。", used: [{ kind: "feature", id: 5 }] }));
+    expect(ok.answerable).toBe(true);
+    expect(ok.answer).toContain("async-graph");
+    const refuse = parseAnswerSynthesis(JSON.stringify({ answerable: false, answer: "", reason: "条目不足" }));
+    expect(refuse.answerable).toBe(false);
+    const fenced = parseAnswerSynthesis("```json\n{\"answerable\":true,\"answer\":\"可以导出。\",\"used\":[]}\n```");
+    expect(fenced.answerable).toBe(true);
   });
 });

@@ -1,13 +1,74 @@
+import { z } from "zod";
 import { defaultExecute, type Execute } from "./db";
 import { evidenceUrl } from "./evidence-url";
 import { searchSpec, type SpecSearchResult } from "./spec-search";
 import { loadLatestVerificationSpec } from "./spec-verification";
+import { stripScenarioRefs } from "./release-notes-enhance";
 import type { Evidence } from "./types";
 
 /** B2.1：答案就是规格原文。未覆盖状态在类型上不可能携带结果。 */
 export type SpecAnswer =
   | { status: "matched"; question: string; terms: string[]; features: SpecSearchResult["features"]; scenarios: SpecSearchResult["scenarios"]; notice: string }
   | { status: "uncovered"; question: string; terms: string[]; features: []; scenarios: []; notice: string };
+
+
+// ── B2.2 AI 综合回答（真实使用反馈 2026-11-12：命中后倒出原文卡不是答案）──────
+// 只基于命中条目成文；不可回答时如实 answerable:false（拒答机制与 B2.1 未覆盖一致）。
+// 卡片始终随响应返回作溯源；AI 失败时 aiAnswer 缺省，前端回退为纯卡片展示。
+
+export interface SpecAnswerSynthesis {
+  answer: string;
+  used: Array<{ kind: "feature" | "scenario"; id: number }>;
+}
+
+const synthesisSchema = z.object({
+  answerable: z.boolean(),
+  answer: z.string().max(800).default(""),
+  used: z.array(z.object({ kind: z.enum(["feature", "scenario"]), id: z.number().int() })).max(16).default([]),
+});
+
+export function buildAnswerSynthesisPrompt(input: {
+  question: string;
+  specVersionId: number | null;
+  features: Array<{ id: number; name: string; summary: string }>;
+  scenarios: Array<{ id: number; featureName: string; reference: string; context: string; action: string; outcome: string }>;
+}): string {
+  const featureLines = input.features.map((feature) => `- [功能 #${feature.id}] ${feature.name}：${feature.summary}`);
+  const scenarioLines = input.scenarios.map((scenario) => `- [场景 #${scenario.id}] ${scenario.featureName} · ${scenario.reference}：${scenario.context} → ${scenario.action} → ${scenario.outcome}`);
+  return [
+    "基于下面的产品规格条目回答用户问题。用简体中文。",
+    "硬规则：",
+    "1. 只使用条目里的事实；条目不足以回答时，返回 answerable:false 并给出 reason（说明规格缺哪部分），不要猜测。",
+    "2. 回答 1-3 句、不超过 200 字；直接回答问题本身（用户能得到什么/怎么工作/限制是什么）。",
+    "3. 每个用到的条目在 used 里登记（kind=feature 或 scenario，id 用条目标注的编号）。",
+    "4. 禁止出现 EC-n/ER-n/HP-n 场景编号与内部术语；条目编号（#数字）只在 used 里登记，不写进正文。",
+    '只返回 JSON：{"answerable":true,"answer":"...","used":[{"kind":"feature","id":0}]}',
+    "",
+    `【用户问题】${input.question}`,
+    input.specVersionId !== null ? `【规格版本】v${input.specVersionId}` : "",
+    "",
+    "【规格条目】",
+    ...featureLines,
+    ...scenarioLines,
+  ].join("\n");
+}
+
+export interface ParsedSpecAnswerSynthesis {
+  answerable: boolean;
+  answer: string;
+  used: Array<{ kind: "feature" | "scenario"; id: number }>;
+}
+
+export function parseAnswerSynthesis(content: string): ParsedSpecAnswerSynthesis {
+  const stripped = content.replace(/^\s*```(?:json)?/i, "").replace(/```\s*$/i, "").trim();
+  const start = stripped.indexOf("{");
+  const end = stripped.lastIndexOf("}");
+  if (start < 0 || end <= start) throw new Error("AI 输出不含 JSON 结构");
+  const parsed = synthesisSchema.safeParse(JSON.parse(stripped.slice(start, end + 1)));
+  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "结构不合格");
+  if (!parsed.data.answerable || !parsed.data.answer.trim()) return { answerable: false, answer: "", used: [] };
+  return { answerable: true, answer: stripScenarioRefs(parsed.data.answer.trim()), used: parsed.data.used };
+}
 
 export interface QueryTerm {
   value: string;
@@ -112,7 +173,11 @@ export interface SpecAnswerContext {
   sha: string | null;
 }
 
-export type DecoratedSpecAnswer = SpecAnswer & { specVersionId: number | null };
+export type DecoratedSpecAnswer = SpecAnswer & {
+  specVersionId: number | null;
+  /** B2.2：AI 综合回答（只基于命中条目成文，带 used 锚点）；缺省 = 前端回退为纯卡片。 */
+  aiAnswer?: { answer: string; used: Array<{ kind: "feature" | "scenario"; id: number }> } | null;
+};
 
 /** IO：答案所属的规格版本，以及把证据变成 blob 链接所需的仓库坐标。verification loader 可注入，便于在隔离环境中测试。 */
 export async function loadSpecAnswerContext(

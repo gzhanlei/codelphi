@@ -65,6 +65,12 @@ export function SpecAsk({ slug, productBase, suggestions = [] }: { slug: string;
 export function SpecAnswerView({ answer, productBase }: { answer: DecoratedSpecAnswer; productBase: string }) {
   return (
     <div className="spec-ask-answer">
+      {answer.aiAnswer?.answer ? (
+        <div className="spec-ask-ai-answer">
+          <div className="spec-ask-ai-label">AI 综合回答 · 仅基于下方规格条目，未采信条目之外的内容</div>
+          <p>{answer.aiAnswer.answer}</p>
+        </div>
+      ) : null}
       <p className={answer.status === "uncovered" ? "spec-ask-uncovered" : "spec-ask-notice"}>{answer.notice}</p>
       {answer.specVersionId !== null ? <p className="spec-ask-version">基于规格版本 #{answer.specVersionId}；未覆盖结论仅对该版本有效。</p> : null}
       {answer.status === "matched" ? (
