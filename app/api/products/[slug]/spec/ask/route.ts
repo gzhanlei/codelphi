@@ -59,15 +59,30 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
         ],
         { runId: null, accountId: null, chargeComponent: "main", callKind: "spec_ask_answer" },
       );
-      // 词法命中优先；否则 AI 选功能。模型输出非确定：选择为空时重试一次（两次皆空才如实未覆盖）
+      // 词法命中优先；否则 AI 选功能。模型输出非确定：选择为空重试两次；
+      // 仍空时兜底退化为"名称含问句任一 2-gram 的功能"（宁多勿漏——综合层对不足部分如实拒答）
       let relevant = [...lexicalIds];
       if (relevant.length === 0) {
-        const selectContent = await selectCall();
-        relevant = parseFeatureSelection(selectContent, validIds);
-        if (relevant.length === 0) {
-          const retryContent = await selectCall();
-          relevant = parseFeatureSelection(retryContent, validIds);
+        for (let attempt = 0; attempt < 2 && relevant.length === 0; attempt += 1) {
+          const selectContent = await selectCall();
+          relevant = parseFeatureSelection(selectContent, validIds);
         }
+      }
+      if (relevant.length === 0) {
+        const questionGrams = new Set<string>();
+        for (const chunk of decorated.question.split(/[^\u4e00-\u9fa5A-Za-z0-9]+/)) {
+          for (let index = 0; index + 1 <= chunk.length; index += 1) {
+            const gram = chunk.slice(index, index + 2);
+            if (gram.length === 2) questionGrams.add(gram);
+          }
+        }
+        relevant = catalog
+          .filter((item) => {
+            const haystack = item.name + (item.summary ?? "") + (item.scenarioHints ?? []).join("");
+            for (const gram of questionGrams) if (haystack.includes(gram)) return true;
+            return false;
+          })
+          .map((item) => item.id);
       }
       if (relevant.length === 0) return NextResponse.json({ ...decorated, aiAnswer: null });
       const [productRow] = (await getDb().execute("SELECT name FROM products WHERE id = ?", [access.productId]) as unknown) as Array<{ name: string }>;
