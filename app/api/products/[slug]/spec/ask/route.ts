@@ -33,15 +33,23 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
       const featureRows = (Array.isArray(featureResult) ? featureResult[0] : featureResult) as Array<{ id: number; name: string; summary: string }>;
       const catalog = featureRows ?? [];
       if (catalog.length === 0) return NextResponse.json({ ...decorated, aiAnswer: null });
-      const selectContent = await requestStructuredCompletion(
+      const [productRow] = (await getDb().execute("SELECT name FROM products WHERE id = ?", [access.productId]) as unknown) as Array<{ name: string }>;
+      const productNameForAsk = productRow?.name ?? "";
+      const selectCall = () => requestStructuredCompletion(
         [
           { role: "system", content: "你是检索助手，只输出合规 JSON。" },
-          { role: "user", content: buildFeatureSelectPrompt({ question: decorated.question, catalog: catalog.map((item) => ({ id: item.id, name: item.name, summary: item.summary ?? "" })) }) },
+          { role: "user", content: buildFeatureSelectPrompt({ question: decorated.question, productName: productNameForAsk, catalog: catalog.map((item) => ({ id: item.id, name: item.name, summary: item.summary ?? "" })) }) },
         ],
         { runId: null, accountId: null, chargeComponent: "main", callKind: "spec_ask_answer" },
       );
       const validIds = new Set(catalog.map((item) => item.id));
-      const relevant = parseFeatureSelection(selectContent, validIds);
+      const selectContent = await selectCall();
+      let relevant = parseFeatureSelection(selectContent, validIds);
+      // 模型输出非确定：选择为空时重试一次（两次皆空才如实未覆盖）
+      if (relevant.length === 0) {
+        const retryContent = await selectCall();
+        relevant = parseFeatureSelection(retryContent, validIds);
+      }
       if (relevant.length === 0) return NextResponse.json({ ...decorated, aiAnswer: null });
       const idList = relevant.join(",");
       const scenarioResult = await getDb().execute(

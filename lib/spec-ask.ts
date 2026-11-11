@@ -76,9 +76,9 @@ export function parseAnswerSynthesis(content: string): ParsedSpecAnswerSynthesis
 
 const featureSelectSchema = z.object({ relevant: z.array(z.number().int()).max(10).default([]) });
 
-export function buildFeatureSelectPrompt(input: { question: string; catalog: Array<{ id: number; name: string; summary: string }> }): string {
+export function buildFeatureSelectPrompt(input: { question: string; productName: string; catalog: Array<{ id: number; name: string; summary: string }> }): string {
   return [
-    "用户针对一个产品提问。下面是产品的功能清单（名称：简介）。",
+    `用户正在询问产品「${input.productName}」。下面是该产品的功能清单（名称：简介）。用户问题里的『本项目/这个产品』即指它。`,
     "任务：判断哪些功能与用户问题相关，返回它们的 id。只基于名称与简介判断，宁缺毋滥——拿不准就不要选；没有任何相关功能时返回空数组。",
     '只返回 JSON：{"relevant":[1,2]}',
     "",
