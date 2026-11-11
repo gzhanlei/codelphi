@@ -40,9 +40,8 @@ Next.js（App Router）· TypeScript · React · MySQL 8 · Vitest · OpenAI 兼
 - 当前版本不生成或展示系统架构图，也不外接架构服务；产品卡片只等待 `queued/running` 分析结束。
 - 不可变 Spec Version 快照，合并人工功能与场景，并计算确定性的功能/场景行为 Diff。
 - 发布页优先展示行为变化及前后差异，Commit 与 AI 摘要仅作为证据和补充。
-- 发布稿（客户向 release notes）：从行为变化勾选生成草稿，块级人工校对（改写保留原文回退），人工发布后生成公开只读页（可复制链接 / Markdown 导出），下线即同 URL 撤下；每块锚定 spec_change 并附证据路径。
+- 发布稿（客户向 release notes）：分析成功后自动预生成草稿（仅含 Highlight 分类变化，可在面板调整勾选重新生成），人工校对后发布；也支持从行为变化手动勾选生成草稿，块级人工校对（改写保留原文回退），人工发布后生成公开只读页（可复制链接 / Markdown 导出），下线即同 URL 撤下；每块锚定 spec_change 并附证据路径。
 - 周期行为摘要（Digest）：滚动 7 天窗口自动汇总，按 Highlight 分桶给 support / sales / marketing 视角，经 Slack/Webhook/邮件分发；无变化的周不发送。
-- 介绍材料：从行为账本事实清单生成结构化介绍大纲（受众/差异化/语气为人工定位输入，生成只逐字引用），每页要点可追溯到规格锚点，一键经 PPTCreator 烧成 PPTX/PDF 并可导出 Markdown/HTML/大纲 JSON。
 - 功能行为变迁史与关联功能：功能页内按发布分组的行为变化时间线（复盘"这个行为最后改于哪个版本"），以及基于共享证据文件的确定性功能连接（每条带依据，不宣称语义依赖）。
 - 知识健康视图：漂移条目、核实覆盖、回归四态、编辑者维护分布——只做事实统计，无综合健康分。
 - 公开变更日志：`/share/changelog/{org}/{product}` 聚合全部已发布发布稿（公开演示产品；逐发布 share 页之上的一站式对外页）。
@@ -226,7 +225,7 @@ curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3008/login
 说明：
 
 - 服务器建议通过只读的 GitHub deploy key 拉取代码。
-- 2026-11-11 版本部署清单：执行迁移 060–064（`npm run db:migrate`）；可选配置 `PPT_PARTNER_KEY`/`PPT_PARTNER_URL`（介绍材料的 PPT 烧片走 PPTCreator partner MCP，未配置时该端点返回 501，大纲生成与 release notes 不受影响）；Digest 周报 sweep 首次运行会为窗口内有发布的产品各生成一期近 7 天摘要并投递（幂等键 = 产品+周期起点，仅一次）。
+- 2026-11-11 版本部署清单：执行迁移 060–064（`npm run db:migrate`）；（2026-11-11 裁决：介绍材料/PPT 押后，相关端点已移除；`PPT_PARTNER_*` 配置保留无用可清理）；Digest 周报 sweep 首次运行会为窗口内有发布的产品各生成一期近 7 天摘要并投递（幂等键 = 产品+周期起点，仅一次）。
 - 数据库迁移未纳入部署流程，schema 变更需在服务器上手动执行 `npm run db:migrate`。
 - Explainer 导出需要 Chrome/Chromium（常规产品分析不依赖它）：服务器安装 `chromium` 后，Archify 运行时会自动发现标准路径下的 `chromium-browser`/`chrome`；也可通过 Archify 运行时认读的环境变量 `ARCHIFY_CHROME` 显式指定可执行文件路径。注意只装 `chromium-headless` 子包（二进制名不匹配）不会被自动发现。
 

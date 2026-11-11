@@ -26,6 +26,7 @@ import type { SpecAnchorFeature } from "./spec-versions";
 import { markSpecDrift } from "./spec-drift";
 import { deliverAnalysisNotifications } from "./notifications";
 import { ensureRegressionTasks } from "./regression-tasks";
+import { ensureAutoReleaseNoteDraft } from "./release-notes-service";
 
 export interface RunContext {
   id: number;
@@ -213,6 +214,7 @@ export async function upsertRelease(connection: PoolConnection, run: RunContext,
   const hasChanges = Number((changeRows as Array<{ count: number }>)[0]?.count ?? 0) > 0;
   if (hasChanges) {
     await ensureRegressionTasks(connection, releaseId);
+    await ensureAutoReleaseNoteDraft(connection, releaseId);
     return;
   }
 
@@ -224,6 +226,7 @@ export async function upsertRelease(connection: PoolConnection, run: RunContext,
     );
   }
   await ensureRegressionTasks(connection, releaseId);
+  await ensureAutoReleaseNoteDraft(connection, releaseId);
 }
 
 async function saveResult(run: RunContext, result: AnalysisResult, change: ChangeContext, affectedKeys: ReadonlySet<string> | null = null, coverage?: AnalysisCoverageReceipt) {

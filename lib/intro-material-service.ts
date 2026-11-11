@@ -1,3 +1,8 @@
+/**
+ * 【已暂停 2026-11-11，用户裁决】介绍材料/PPT 生成押后：PPT 不能只基于代码，
+ * 还需要产品与市场分析等输入；本模块（含 service/定位块/迁移 061–063）保留为
+ * 休眠资产，git 历史 d321315 可整体恢复。当前对外生成面只保留 release notes。
+ */
 import type { IntroMaterialDraft } from "./intro-material";
 import { getDb } from "./db";
 import { parseJsonValue } from "./json";

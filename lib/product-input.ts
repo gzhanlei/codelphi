@@ -16,23 +16,15 @@ export const descriptionUpdateSchema = z.object({
   description: z.string().max(1_000, "产品简介不能超过 1000 字"),
 });
 
-/** 定位块（介绍材料的「主张层」）：产品负责人的人工输入，AI 生成时只逐字引用。 */
-export const positioningSchema = z.object({
-  audience: z.string().max(200, "受众描述过长").default(""),
-  differentiation: z.string().max(500, "差异化主张过长").default(""),
-  tone: z.string().max(100, "语气描述过长").default(""),
-});
-
-/** PATCH /api/products/[slug]：改名 / 改 slug / 改概况 / 定位块 / 公开演示开关，至少提供一项。 */
+/** PATCH /api/products/[slug]：改名 / 改 slug / 改概况 / 公开演示开关，至少提供一项。 */
 export const productUpdateSchema = z
   .object({
     name: z.string().trim().min(1, "请输入产品名称").max(100, "产品名称过长").optional(),
     slug: z.string().trim().toLowerCase().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Slug 只能包含小写字母、数字和单个连字符").max(64).optional(),
     description: z.string().max(1_000, "产品简介不能超过 1000 字").optional(),
-    positioning: positioningSchema.optional(),
     isPublicDemo: z.boolean().optional(),
   })
-  .refine((data) => data.name !== undefined || data.slug !== undefined || data.description !== undefined || data.positioning !== undefined || data.isPublicDemo !== undefined, "请提供要修改的内容");
+  .refine((data) => data.name !== undefined || data.slug !== undefined || data.description !== undefined || data.isPublicDemo !== undefined, "请提供要修改的内容");
 
 export function slugifyProductName(value: string) {
   return value

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { updateProductDescription, updateProductPositioning } from "@/lib/product-description";
+import { updateProductDescription } from "@/lib/product-description";
 import { updateProductIdentity } from "@/lib/product-rename";
 import { requireOrganization } from "@/lib/organizations";
 import { requireProductAccess } from "@/lib/product-access";
@@ -19,7 +19,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ s
   const parsed = productUpdateSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "产品信息无效" }, { status: 400 });
 
-  const { name, slug: newSlug, description, positioning, isPublicDemo } = parsed.data;
+  const { name, slug: newSlug, description, isPublicDemo } = parsed.data;
   let currentSlug = slug;
   let currentName = access.product.name;
   if (name !== undefined || newSlug !== undefined || isPublicDemo !== undefined) {
@@ -36,10 +36,6 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ s
   if (description !== undefined) {
     const result = await updateProductDescription(currentSlug, access.product.organizationId, description.trim());
     if (!result) return NextResponse.json(NOT_FOUND, { status: 404 });
-  }
-  if (positioning !== undefined) {
-    const saved = await updateProductPositioning(currentSlug, access.product.organizationId, positioning);
-    if (!saved) return NextResponse.json(NOT_FOUND, { status: 404 });
   }
   return NextResponse.json({ status: "updated", slug: currentSlug, name: currentName, organizationSlug: access.organization.slug });
 }

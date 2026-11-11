@@ -19,6 +19,9 @@ function connectionWithCount(count: number) {
     execute: vi.fn(async (sql: string) => {
       if (sql.includes("SELECT id FROM releases")) return [[{ id: 10 }]];
       if (sql.includes("SELECT COUNT(*)")) return [[{ count }]];
+      // 自动发布稿草稿（ensureAutoReleaseNoteDraft）：无 Highlight 变化 → 无草稿，不追加调用
+      if (sql.includes("FROM spec_changes c")) return [[]];
+      if (sql.includes("FROM release_notes WHERE release_id")) return [[]];
       return [{}];
     }),
   } as unknown as PoolConnection;
@@ -40,13 +43,14 @@ describe("analysis persistence guards", () => {
   it("does not duplicate changes for an existing release", async () => {
     const connection = connectionWithCount(1);
     await upsertRelease(connection, run, result, change);
-    expect(connection.execute).toHaveBeenCalledTimes(6);
+    // +1 = 自动发布稿草稿的候选查询（无 Highlight → 不生成）
+    expect(connection.execute).toHaveBeenCalledTimes(7);
   });
 
   it("inserts changes when the release has none", async () => {
     const connection = connectionWithCount(0);
     await upsertRelease(connection, run, result, change);
-    expect(connection.execute).toHaveBeenCalledTimes(7);
+    expect(connection.execute).toHaveBeenCalledTimes(8);
     expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO changes"), [10, "Auth", "changed", "Changed", "", "[]"]);
   });
 

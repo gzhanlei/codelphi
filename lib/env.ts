@@ -12,27 +12,6 @@ export function chandlerBaseUrl() {
   return (process.env.CHANDLER_BASE_URL ?? "https://api.chandler.work").replace(/\/$/, "");
 }
 
-export interface PptPartnerConfig {
-  /** PPTCreator Streamable HTTP MCP 端点。 */
-  url: string;
-  /** Partner API key（PPT_CREATOR 侧 PARTNER_API_KEYS 已配置的对端值）。 */
-  key: string;
-  orgId: string | null;
-  memberId: string | null;
-}
-
-/** PPTCreator 服务（easymakeppt）partner 接入：PPT_PARTNER_KEY 未配置时返回 null（功能明确降级）。 */
-export function pptPartnerConfig(): PptPartnerConfig | null {
-  const key = process.env.PPT_PARTNER_KEY?.trim();
-  if (!key) return null;
-  return {
-    url: (process.env.PPT_PARTNER_URL ?? "https://easymakeppt.com/mcp").replace(/\/$/, ""),
-    key,
-    orgId: process.env.PPT_PARTNER_ORG?.trim() || null,
-    memberId: process.env.PPT_PARTNER_MEMBER?.trim() || null,
-  };
-}
-
 export function allowedEmails() {
   return new Set(
     (process.env.AUTH_ALLOWED_EMAILS ?? "")

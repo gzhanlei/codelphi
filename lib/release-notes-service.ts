@@ -1,4 +1,6 @@
-import { applySummaryOverride, type ReleaseNoteBlockView, type ReleaseNoteChange } from "./release-notes";
+import { randomBytes } from "node:crypto";
+import type { PoolConnection } from "mysql2/promise";
+import { applySummaryOverride, buildDraftBlocks, canPublish, validateDraft, type ReleaseNoteBlockView, type ReleaseNoteChange } from "./release-notes";
 import type { getDb } from "./db";
 
 /**
@@ -106,4 +108,47 @@ export async function loadBlockViews(execute: Execute, noteId: number): Promise<
     evidencePaths: [...collectEvidencePaths(row.beforeJson), ...collectEvidencePaths(row.afterJson)],
     emphasis: row.emphasis ?? "",
   }));
+}
+
+/**
+ * 自动发布稿草稿（用户裁决 2026-11-11「先只做自动的 release notes 生成」）：
+ * 分析事务内为含 Highlight 变化的发布预生成草稿。「不自动全选」红线不变——
+ * 仅 Highlight 项入选（owner 可调整勾选重新生成）；无 Highlight 的发布不自动生成。
+ * status 恒为 draft：人工校对 + 发布门禁（canPublish）不变，自动生成永不发布；
+ * 已有草稿（含人工建/改的）一律跳过，不覆盖。
+ */
+export async function ensureAutoReleaseNoteDraft(connection: Pick<PoolConnection, "execute">, releaseId: number): Promise<number | null> {
+  const changes = await releaseChanges(connection.execute.bind(connection), releaseId);
+  const highlighted = changes.filter((change) => change.highlightType);
+  if (highlighted.length === 0) return null;
+  const existing = await loadNoteByRelease(connection.execute.bind(connection), releaseId);
+  if (existing) return null;
+  const blocks = buildDraftBlocks(changes, highlighted.map((change) => change.id));
+  const validation = validateDraft(blocks, changes);
+  if (!validation.ok) return null;
+  const gate = canPublish(blocks, new Set(changes.map((change) => change.id)));
+  if (gate) return null;
+  const shareToken = randomBytes(16).toString("hex");
+  const insertResult = await connection.execute(
+    `INSERT INTO release_notes (product_id, release_id, voice_id, emphasis, status, share_token, created_by)
+     SELECT product_id, ?, NULL, '', 'draft', ?, NULL FROM releases WHERE id = ?`,
+    [releaseId, shareToken, releaseId],
+  );
+  const insertFirst = Array.isArray(insertResult) ? insertResult[0] : insertResult;
+  let noteId = Number((insertFirst as { insertId?: number }).insertId ?? 0);
+  if (noteId <= 0) {
+    // ODKU/驱动差异兜底：按唯一键反查
+    const idResult = await connection.execute("SELECT id FROM release_notes WHERE release_id = ?", [releaseId]);
+    const idRows = (Array.isArray(idResult) ? idResult[0] : idResult) as Array<{ id: number }>;
+    noteId = Number(idRows?.[0]?.id ?? 0);
+  }
+  if (noteId <= 0) return null;
+  for (const block of blocks) {
+    await connection.execute(
+      `INSERT INTO release_note_blocks (release_note_id, position, spec_change_id, emphasis, summary_override)
+       VALUES (?, ?, ?, ?, NULL)`,
+      [noteId, block.position, block.specChangeId, block.emphasis],
+    );
+  }
+  return noteId;
 }
