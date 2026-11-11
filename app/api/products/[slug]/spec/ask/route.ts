@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { answerSpecQuestion, buildAnswerSynthesisPrompt, decorateSpecAnswer, loadSpecAnswerContext, parseAnswerSynthesis, buildFeatureSelectPrompt, parseFeatureSelection, type SpecAnswer } from "@/lib/spec-ask";
 import { getDb } from "@/lib/db";
 import { resolveSpecReadProductId } from "@/lib/spec-read-access";
+import { getSessionUser } from "@/lib/session";
 import { requestStructuredCompletion } from "@/lib/ai";
 import { enforceExportRateLimit } from "@/lib/rate-limit";
 
@@ -13,7 +14,10 @@ import { enforceExportRateLimit } from "@/lib/rate-limit";
  */
 export async function GET(request: NextRequest, context: { params: Promise<{ slug: string }> }) {
   const { slug } = await context.params;
-  const limited = await enforceExportRateLimit(request, null, { anonymous: 10, user: 60 });
+  const user = await getSessionUser();
+  // 登录用户按身份计桶（60/时）；匿名（公开 demo 访客）按 IP 共享 10/时。
+  // 此前恒用 IP 桶：owner 自己的浏览器与所有测试 curl 同桶，10 次即耗尽。
+  const limited = await enforceExportRateLimit(request, user?.sub ?? null, { anonymous: 10, user: 60 });
   if (limited) return limited;
   const access = await resolveSpecReadProductId(slug);
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
