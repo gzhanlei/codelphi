@@ -82,7 +82,7 @@ export function SpecAnswerView({ answer, productBase }: { answer: DecoratedSpecA
               <p>{feature.summary}</p>
             </div>
           ))}
-          {answer.scenarios.map((scenario) => (
+          {answer.scenarios.slice(0, 8).map((scenario) => (
             // 卡片不能整体包 <a>：证据里的 blob 链接也是 <a>，嵌套链接是无效 HTML。
             <div className="spec-search-hit" key={`s${scenario.id}`}>
               <span className="spec-search-kind">场景</span>
@@ -91,6 +91,7 @@ export function SpecAnswerView({ answer, productBase }: { answer: DecoratedSpecA
               <div className="spec-ask-evidence"><EvidenceLinks value={scenario.evidence} /></div>
             </div>
           ))}
+          {answer.scenarios.length > 8 ? <p className="spec-ask-hint">其余 {answer.scenarios.length - 8} 条命中条目已省略——可换更具体的问法收窄范围。</p> : null}
         </div>
       ) : null}
     </div>
