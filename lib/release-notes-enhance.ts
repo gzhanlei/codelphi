@@ -143,11 +143,11 @@ export function buildFeatureCopyPrompt(input: { featureName: string; emphasis: s
 }
 
 const featureCopySchema = z.object({
-  section: z.enum(["新增", "改进", "修复", "移除"]),
-  text: z.string().min(1).max(600),
+  section: z.enum(["新增", "改进", "修复", "移除", "省略"]),
+  text: z.string().max(600).default(""),
 });
 
-export function parseFeatureCopy(content: string): { section: CopySection; text: string } {
+export function parseFeatureCopy(content: string): { section: CopySection | "省略"; text: string } {
   const parsed = featureCopySchema.safeParse(JSON.parse(unwrapJson(content)));
   if (parsed.success) return { section: parsed.data.section, text: stripScenarioRefs(parsed.data.text.trim()) };
   throw new Error(parsed.error.issues[0]?.message ?? "结构不合格");
@@ -212,7 +212,9 @@ export async function rewriteReleaseNoteCopy(
         { runId: null, accountId: null, chargeComponent: "main", callKind: "release_note_enhance" },
       );
       const parsed = parseFeatureCopy(content);
-      entries.push({ feature: group.featureName, section: parsed.section, text: parsed.text });
+      if (parsed.section !== "省略" && parsed.text.trim()) {
+        entries.push({ feature: group.featureName, section: parsed.section, text: parsed.text });
+      }
     } catch (error) {
       failed += 1;
       console.warn("[release-notes] feature copy failed; keeping raw summaries", { noteId: input.noteId, feature: group.featureName, error: error instanceof Error ? error.message.slice(0, 120) : String(error) });
