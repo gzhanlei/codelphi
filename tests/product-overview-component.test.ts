@@ -25,7 +25,8 @@ describe("product overview rendering (Specsight 原则版式)", () => {
     const html = renderToStaticMarkup(createElement(ProductOverview, { data: completeOverview() }));
     // 简介与 ✎ 编辑移到页头（单头部整合）；总览从提问框开始
     expect(html).toContain("代码生成 · 1 个证据文件");
-    expect(html).toContain("这个产品的核心功能是什么？");
+    // 建议问法从产品能力名生成（检索必命中自己）
+    expect(html).toContain("产品分析 是怎么工作的？");
     expect(html).toContain("发布时间线");
     expect(html).toContain('href="?view=changes#release-8"');
     expect(html).toContain("产品分析");
