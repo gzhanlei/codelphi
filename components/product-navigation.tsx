@@ -2,6 +2,7 @@ import Link from "next/link";
 import { AnalysisStatusRefresh } from "./analysis-status-refresh";
 import { ProductChanges } from "./product-changes";
 import { ProductOverview } from "./product-overview";
+import { ReleaseNotesView } from "./release-notes-view";
 import { buildProductOverview, type ProductOverviewData } from "@/lib/product-overview";
 import { SpecWorkspace } from "./spec-workspace";
 import { buildFeatureTree, selectFeature } from "@/lib/feature-tree";
@@ -35,11 +36,12 @@ export function RunStatus({ run }: { run?: { status: string; errorMessage?: stri
   return <div className={`run-status ${run.status}`} role="status" aria-live="polite"><span>最近一次分析：{run.status}</span><RunError message={run.errorMessage} /><AnalysisStatusRefresh status={run.status} /></div>;
 }
 
-export function ProductTabs({ productBase, view, featureCount, releaseCount, showSettings = false }: { productBase: string; view: string; featureCount: number; releaseCount: number; showSettings?: boolean }) {
+export function ProductTabs({ productBase, view, featureCount, releaseCount, noteBadge, showSettings = false }: { productBase: string; view: string; featureCount: number; releaseCount: number; noteBadge?: string; showSettings?: boolean }) {
   return (
     <nav className="view-tabs" aria-label="产品视图">
       <Link className={selectedClass(view === "overview")} href={productBase}>概览</Link>
       <Link className={selectedClass(view === "spec")} href={`${productBase}?view=spec`}>产品规格 <span>{featureCount}</span></Link>
+      {releaseCount > 0 ? <Link className={selectedClass(view === "notes")} href={`${productBase}?view=notes`}>发布稿{noteBadge ? <span className="notes-badge">{noteBadge}</span> : null}</Link> : null}
       <Link className={selectedClass(view === "changes")} href={`${productBase}?view=changes`}>发布变化 <span>{releaseCount}</span></Link>
       {showSettings ? <Link className={selectedClass(view === "settings")} href={`${productBase}?view=settings`}>设置</Link> : null}
     </nav>
@@ -67,6 +69,8 @@ interface ProductViewProps {
   canEdit?: boolean;
   /** 公开变更日志聚合页（仅公开 demo 产品展示入口）。 */
   changelogHref?: string;
+  /** 最新发布的 id（发布稿视图用；无发布时不显示该 Tab）。 */
+  latestReleaseId?: number;
 }
 
 function ProductWorkspace({ view, productSlug, productBase, features, scenarios, releases, changes, behaviorChanges, foldedChanges, regressionTasks, releaseTotal, coverage, completeness, mode = "spec", featureId, canEdit, changelogHref }: Omit<ProductViewProps, "overview">) {
@@ -77,5 +81,9 @@ function ProductWorkspace({ view, productSlug, productBase, features, scenarios,
 }
 
 export function ProductView(props: ProductViewProps) {
-  return props.view === "overview" ? <ProductOverview data={props.overview} canEdit={props.canEdit} /> : <ProductWorkspace {...props} />;
+  if (props.view === "overview") return <ProductOverview data={props.overview} canEdit={props.canEdit} />;
+  if (props.view === "notes") {
+    return props.latestReleaseId ? <ReleaseNotesView slug={props.productSlug} releaseId={props.latestReleaseId} canEdit={Boolean(props.canEdit)} changelogHref={props.changelogHref} /> : <p className="overview-note">尚无发布，先生成一次分析。</p>;
+  }
+  return <ProductWorkspace {...props} />;
 }
