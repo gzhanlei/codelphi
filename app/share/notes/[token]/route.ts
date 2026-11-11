@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { enforceExportRateLimit } from "@/lib/rate-limit";
 import { applySummaryOverride } from "@/lib/release-notes";
-import { renderChangelogDocument } from "@/lib/changelog";
+import { renderChangelogDocument, parseFeatureCopyRows } from "@/lib/changelog";
 
 /**
  * A2 公开只读页（M11）：匿名访问，按 share_token 定位单条发布稿。
@@ -16,7 +16,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ tok
   if (limited) return limited;
   const db = getDb();
   const [noteRows] = await db.execute(
-    `SELECT n.id, n.status, n.emphasis, n.published_at AS publishedAt, n.release_id AS releaseId,
+    `SELECT n.id, n.status, n.emphasis, n.headline, n.lead_override AS leadOverride, n.feature_copy_json AS featureCopyJson, n.published_at AS publishedAt, n.release_id AS releaseId,
             r.title AS releaseTitle, r.summary AS releaseSummary, r.sha AS releaseSha, r.url AS releaseUrl, r.committed_at AS committedAt,
             p.name AS productName
      FROM release_notes n JOIN releases r ON r.id = n.release_id JOIN products p ON p.id = n.product_id
@@ -24,7 +24,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ tok
     [token],
   );
   const note = (noteRows as Array<{
-    id: number; status: string; emphasis: string; publishedAt: Date; releaseId: number;
+    id: number; status: string; emphasis: string; headline: string | null; leadOverride: string | null; featureCopyJson: unknown; publishedAt: Date; releaseId: number;
     releaseTitle: string; releaseSummary: string | null; releaseSha: string; releaseUrl: string | null; committedAt: Date; productName: string;
   }>)[0];
   if (!note) return NextResponse.json({ error: "发布稿不存在或已下线" }, { status: 404 });
