@@ -79,6 +79,10 @@ function appendScenarioNode(nodes: FlowNode[], edges: FlowEdge[], startId: strin
   edges.push({ id: `${startId}-${scenario.reference}`, from: startId, to: scenario.reference });
 }
 
+function validStep(scenario: SpecScenario): number | null {
+  return typeof scenario.step === "number" && Number.isInteger(scenario.step) && scenario.step >= 1 && scenario.step <= 40 ? scenario.step : null;
+}
+
 export function buildFeatureFlow(scenarios: SpecScenario[]): FeatureFlow {
   const groups = contextGroups(scenarios);
   if (groups.length === 0) {
@@ -95,12 +99,34 @@ export function buildFeatureFlow(scenarios: SpecScenario[]): FeatureFlow {
 
     const happy = group.filter((scenario) => scenario.category === "happy");
     const branches = group.filter((scenario) => scenario.category !== "happy");
-    happy.forEach((scenario, index) => {
-      appendScenarioNode(nodes, edges, startId, scenario, "scenario", 200 + index * 190, y);
+
+    // W-DECISION 最小序列版（docs/w-decision-scenario-sequence-plan.md §4）：
+    // 有 step 的 happy 场景按 step 升序连成主链 START→1→2→…；无 step 场景与其余分支保持扇出。
+    // step 不入判定面（顺序抖动不虚报），呈现层对 NULL-step 数据与旧形态逐像素一致。
+    const stepped = happy.filter((scenario) => validStep(scenario) !== null).sort((a, b) => validStep(a)! - validStep(b)! || a.reference.localeCompare(b.reference));
+    const unstepped = happy.filter((scenario) => validStep(scenario) === null);
+    const chain: Array<{ node: FlowNode; step: number }> = [];
+    stepped.forEach((scenario, index) => {
+      const node: FlowNode = { id: scenario.reference, kind: "scenario", reference: scenario.reference, title: scenario.action, outcome: scenario.outcome, category: scenario.category, x: 200 + index * 190, y };
+      chain.push({ node, step: validStep(scenario)! });
+      nodes.push(node);
+    });
+    if (chain.length > 0) {
+      edges.push({ id: `${startId}-${chain[0].node.id}`, from: startId, to: chain[0].node.id });
+      for (let index = 1; index < chain.length; index += 1) {
+        edges.push({ id: `${chain[index - 1].node.id}-${chain[index].node.id}`, from: chain[index - 1].node.id, to: chain[index].node.id });
+      }
+    }
+    unstepped.forEach((scenario, index) => {
+      appendScenarioNode(nodes, edges, startId, scenario, "scenario", 200 + (chain.length + index) * 190, y);
     });
 
     branches.forEach((scenario, index) => {
-      appendScenarioNode(nodes, edges, startId, scenario, "branch", 200 + index * 190, y + 90);
+      const attachStep = validStep(scenario);
+      const attachNode = attachStep === null ? undefined : chain.find((entry) => entry.step === attachStep)?.node;
+      const branchNode: FlowNode = { id: scenario.reference, kind: "branch", reference: scenario.reference, title: scenario.action, outcome: scenario.outcome, category: scenario.category, x: 200 + index * 190, y: y + 90 };
+      nodes.push(branchNode);
+      edges.push({ id: `${attachNode?.id ?? startId}-${branchNode.id}`, from: attachNode?.id ?? startId, to: branchNode.id });
     });
   });
 

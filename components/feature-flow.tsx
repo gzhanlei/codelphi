@@ -51,7 +51,7 @@ export function FeatureFlow({ featureName, scenarios }: { featureName: string; s
   const flow = buildFeatureFlow(scenarios.map((scenario) => ({ ...scenario, evidence: evidenceItems(scenario.evidence) })));
   return (
     <section className="feature-flow">
-      <div className="flow-note">每个场景从使用情境独立展开，节点内即操作与结果；连线表示情境归属而非先后顺序，也不添加额外结束条件。颜色：绿=正常路径，黄=边界情况，红=错误路径（错误节点突出用户可见结果）。</div>
+      <div className="flow-note">绿色实线链是分析标注的步骤顺序（同一情境的主流程，step 1..N）；虚线分支表示情境归属与出错结果，不是顺序。没有顺序标注的场景从起点独立展开。颜色：绿=正常路径，黄=边界情况，红=错误路径（错误节点突出用户可见结果）。</div>
       {flow.nodes.length === 0 ? <div className="empty-state">暂无可推导的场景。</div> : (
       <div className="flow-canvas">
         <svg role="img" aria-label={`${featureName} 流程图`} viewBox={`0 0 ${flow.width} ${flow.height}`}>
