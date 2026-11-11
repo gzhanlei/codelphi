@@ -416,3 +416,6 @@ p { line-height: 1.7; }
 .changelog-block .paths { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
 .changelog-block .path { font-family: monospace; font-size: 12px; color: #36c; }
 .release-note-cta { background: #eef7f0; border-radius: 7px; padding: 8px 12px; color: var(--green); }
+
+.release-notes-feature { margin: 10px 0 4px; }
+.release-notes-feature-name { margin: 0 0 6px; font-size: 12px; color: var(--green); border-bottom: 1px dashed var(--line); padding-bottom: 3px; }

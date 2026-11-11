@@ -262,8 +262,14 @@ export function ReleaseNotesPanel({ slug, releaseId, canEdit, changelogHref }: {
               </div>
             </>
           ) : (
-            state.blocks.map((block) => (
-              <BlockEditor key={block.position} slug={slug} noteId={note.id} block={block} canEdit={editable} onSave={saveBlock} onReset={resetBlock} />
+            // 合并发布：草稿按功能分组校对（同一功能的多块相邻展示）
+            [...new Set(state.blocks.map((block) => block.featureName))].map((featureName) => (
+              <div className="release-notes-feature" key={featureName}>
+                <h4 className="release-notes-feature-name">{featureName}</h4>
+                {state.blocks.filter((block) => block.featureName === featureName).map((block) => (
+                  <BlockEditor key={block.position} slug={slug} noteId={note.id} block={block} canEdit={editable} onSave={saveBlock} onReset={resetBlock} />
+                ))}
+              </div>
             ))
           )}
           <div className="release-notes-actions">

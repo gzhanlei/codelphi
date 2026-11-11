@@ -69,9 +69,9 @@ function ChangesContent({ data }: { data: ProductOverviewData }) {
 function ChangesPanel({ data }: { data: ProductOverviewData }) {
   const note = data.latestReleaseNote;
   const noteStatus = note?.status === "published"
-    ? { label: `发布稿已发布（${note.blocks} 条变化）`, href: `?view=changes`, linkText: "查看发布稿 →" }
+    ? { label: `发布稿已发布（${note.blocks} 条变化）`, href: `?view=changes#release-${note.releaseId}`, linkText: "查看发布稿 →" }
     : note?.status === "draft"
-      ? { label: `发布稿草稿已生成（${note.blocks} 条，待人工校对）`, href: `?view=changes`, linkText: "去校对并发布 →" }
+      ? { label: `发布稿草稿已生成（${note.blocks} 条，待人工校对）`, href: `?view=changes#release-${note.releaseId}`, linkText: "去校对并发布 →" }
       : null;
   return (
     <section className="overview-panel">

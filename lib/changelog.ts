@@ -103,6 +103,13 @@ export function renderChangelogDocument(input: {
       sections.set(label, [...(sections.get(label) ?? []), block]);
     }
     const ordered = SECTION_ORDER.filter((label) => sections.has(label)).concat([...sections.keys()].filter((label) => !SECTION_ORDER.includes(label)));
+    // 合并发布（用户裁决）：同一功能的多条变化合并为一个条目，句子用「；」连接
+    const mergedBySection = new Map<string, Array<{ featureName: string; text: string }>>();
+    for (const [label, blocks] of sections) {
+      const byFeature = new Map<string, string[]>();
+      for (const block of blocks) byFeature.set(block.featureName, [...(byFeature.get(block.featureName) ?? []), block.summary]);
+      mergedBySection.set(label, [...byFeature.entries()].map(([featureName, summaries]) => ({ featureName, text: summaries.join("；") })));
+    }
     // 按功能分组的「全部变化」（折叠区）：内部锚点藏在链接后
     const byFeature = new Map<string, typeof entry.blocks>();
     for (const block of entry.blocks) byFeature.set(block.featureName, [...(byFeature.get(block.featureName) ?? []), block]);
@@ -113,7 +120,7 @@ export function renderChangelogDocument(input: {
 ${entry.releaseSummary ? `<p class="cl-lead">${esc(entry.releaseSummary)}</p>` : ""}
 ${(entry.emphasis ?? "").trim() ? `<p class="cl-emphasis">${esc(entry.emphasis!.trim())}</p>` : ""}
 ${ordered.map((label) => `<h3 class="cl-section">${esc(label)}</h3>
-<ul class="cl-list">${(sections.get(label) ?? []).map((block) => `<li><strong>${esc(block.featureName)}</strong>${block.summary ? `：${esc(block.summary)}` : ""}</li>`).join("")}</ul>`).join("\n")}
+<ul class="cl-list">${(mergedBySection.get(label) ?? []).map((item) => `<li><strong>${esc(item.featureName)}</strong>${item.text ? `：${esc(item.text)}` : ""}</li>`).join("")}</ul>`).join("\n")}
 <details class="cl-all"><summary>全部变化（按功能）</summary>
 ${[...byFeature.entries()].map(([feature, blocks]) => {
     const paths = [...new Set(blocks.flatMap((block) => block.evidencePaths ?? []))];

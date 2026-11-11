@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { BehaviorChangeRow, ChangeRow, FoldedBehaviorChangeRow, ReleaseRow } from "@/lib/types";
 import { hitTypeLabels, regressionStatusLabels, type RegressionTaskStatus, type RegressionTaskView } from "@/lib/regression-task-view";
 import { errorMessage } from "@/lib/error-message";
@@ -171,19 +171,28 @@ export function ReleaseCard({ slug, release, changes, behaviorChanges, foldedCha
   defaultOpen?: boolean;
 }) {
   const releaseChanges = changes.filter((change) => change.releaseId === release.id);
+  // 深链定位（总览 CTA「去校对并发布」）：命中 #release-{id} 时自动展开并滚动到卡片
+  const [openByHash, setOpenByHash] = useState(false);
+  const sectionRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (window.location.hash === `#release-${release.id}`) {
+      setOpenByHash(true);
+      sectionRef.current?.scrollIntoView({ block: "start" });
+    }
+  }, [release.id]);
   const releaseBehaviorChanges = behaviorChanges.filter((change) => change.releaseId === release.id);
   const releaseFolded = foldedChanges.filter((change) => change.releaseId === release.id);
   const releaseTasks = tasks.filter((task) => task.releaseId === release.id);
   const hasDetails = releaseBehaviorChanges.length > 0 || releaseChanges.length > 0;
   return (
-    <section className="release-card">
+    <section className="release-card" id={`release-${release.id}`} ref={sectionRef}>
       <div className="release-header">
         <div><time>{new Intl.DateTimeFormat("zh-CN", { dateStyle: "long" }).format(new Date(release.committedAt))}</time><h2>{release.title}</h2></div>
         <a href={release.url} target="_blank" rel="noreferrer"><code>{release.sha.slice(0, 7)}</code> ↗</a>
       </div>
       <p className="release-summary">{release.summary}</p>
       {hasDetails ? (
-        <details className="release-details" open={defaultOpen}>
+        <details className="release-details" open={defaultOpen || openByHash}>
           <summary>
             <span>行为变化 {releaseBehaviorChanges.length} 条 · 变更说明 {releaseChanges.length} 条</span>
             <span className="release-details-toggle">{defaultOpen ? "收起" : "展开"}</span>

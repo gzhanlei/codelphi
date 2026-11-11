@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { PoolConnection } from "mysql2/promise";
-import { applySummaryOverride, buildDraftBlocks, canPublish, publishOrder, validateDraft, type ReleaseNoteBlockView, type ReleaseNoteChange } from "./release-notes";
+import { applySummaryOverride, buildDraftBlocks, canPublish, validateDraft, type ReleaseNoteBlockView, type ReleaseNoteChange } from "./release-notes";
 import type { getDb } from "./db";
 
 /**
@@ -119,15 +119,12 @@ export async function loadBlockViews(execute: Execute, noteId: number): Promise<
  */
 export async function ensureAutoReleaseNoteDraft(connection: Pick<PoolConnection, "execute">, releaseId: number): Promise<number | null> {
   const changes = await releaseChanges(connection.execute.bind(connection), releaseId);
-  const highlighted = changes.filter((change) => change.highlightType);
-  if (highlighted.length === 0) return null;
+  if (changes.length === 0) return null;
   const existing = await loadNoteByRelease(connection.execute.bind(connection), releaseId);
   if (existing) return null;
-  // Top-N 截断：超大窗口可能宽匹配出几十条 Highlight，草稿要可校对；
-  // owner 可在面板「调整勾选」按需放宽（publishOrder 已按九类优先级排序）
-  const AUTO_DRAFT_MAX_BLOCKS = 12;
-  const selected = publishOrder(highlighted).slice(0, AUTO_DRAFT_MAX_BLOCKS).map((change) => change.id);
-  const blocks = buildDraftBlocks(changes, selected);
+  // 合并发布（用户裁决 2026-11-11）：草稿覆盖该 release 的全部行为变化（跨功能全量），
+  // 不再只挑 Highlight 零碎项；超大草稿在面板按功能分组校对，公开页按功能合并成条目
+  const blocks = buildDraftBlocks(changes);
   const validation = validateDraft(blocks, changes);
   if (!validation.ok) return null;
   const gate = canPublish(blocks, new Set(changes.map((change) => change.id)));
