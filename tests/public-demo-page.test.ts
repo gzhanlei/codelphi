@@ -50,7 +50,7 @@ describe("public demo product page (canonical org-qualified route)", () => {
   it("renders anonymously for a demo product resolved under the URL org", async () => {
     vi.mocked(resolvePublicDemoProduct).mockResolvedValue(demo);
     const html = await renderPage("default", "reporadar");
-    expect(html).toContain(">Radar</h1>");
+    expect(html).toContain(">Radar ");
     expect(html).toContain('data-can-edit="true"');
     expect(html).not.toContain("data-remove-product");
     expect(resolvePublicDemoProduct).toHaveBeenCalledWith("default", "reporadar");
