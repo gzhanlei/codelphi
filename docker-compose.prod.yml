@@ -1,0 +1,38 @@
+# CoDelphi 生产部署（无源码）：服务器上只需要本文件 + .env + data/。
+# 用法见 docs/docker-migration-plan.md §6；部署/回滚脚本 deploy.sh / rollback.sh。
+# 迁移：docker compose -f docker-compose.prod.yml --profile migrate up migrate（幂等）
+# 启动：docker compose -f docker-compose.prod.yml up -d
+services:
+  app:
+    image: ${CODELPHI_IMAGE:?CODELPHI_IMAGE required (ghcr.io/gzhanlei/codelphi-server:sha-xxxx)}
+    env_file: [.env]
+    ports:
+      - "127.0.0.1:3008:3000"
+    # PPTCreator 在宿主机 127.0.0.1:3100：容器内经 host-gateway 访问（PPT_PARTNER_URL 用 host.docker.internal）
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  migrate:
+    profiles: ["migrate"]
+    image: ${CODELPHI_IMAGE:?CODELPHI_IMAGE required}
+    env_file: [.env]
+    working_dir: /app
+    command: ["npm", "run", "db:migrate"]
+    restart: "no"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

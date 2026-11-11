@@ -1,0 +1,10 @@
+node_modules
+.next
+.git
+.env
+.env.*
+*.md
+!README.md
+77hlw1qt
+ch533d4t
+t17ly42o
