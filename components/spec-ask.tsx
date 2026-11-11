@@ -10,7 +10,7 @@ import { EvidenceLinks } from "./evidence-links";
  * 没有对话历史、没有模型新写的文字；未命中明确声明「规格未覆盖」。
  * 显式提交而非逐字触发：一次回答最多会跑 8 组检索，不能绑在每次按键上。
  */
-export function SpecAsk({ slug, productBase }: { slug: string; productBase: string }) {
+export function SpecAsk({ slug, productBase, suggestions = [] }: { slug: string; productBase: string; suggestions?: string[] }) {
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState<DecoratedSpecAnswer | null>(null);
   const [pending, setPending] = useState(false);
@@ -48,6 +48,13 @@ export function SpecAsk({ slug, productBase }: { slug: string; productBase: stri
           {pending ? "查询中…" : "查规格"}
         </button>
       </div>
+      {suggestions.length > 0 ? (
+        <div className="spec-ask-suggestions">
+          {suggestions.map((suggestion) => (
+            <button key={suggestion} className="spec-ask-suggestion" type="button" disabled={pending} onClick={() => { setQuestion(suggestion); void ask(); }}>{suggestion}</button>
+          ))}
+        </div>
+      ) : null}
       {failed ? <p className="spec-search-hint" role="alert">查询暂时不可用，请稍后重试。</p> : null}
       {answer ? <SpecAnswerView answer={answer} productBase={productBase} /> : null}
     </div>

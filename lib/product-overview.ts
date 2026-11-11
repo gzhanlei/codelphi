@@ -12,6 +12,10 @@ interface ProductOverviewInput {
   behaviorChanges: BehaviorChangeRow[];
   latestRun?: { status: string; errorMessage?: string };
   latestReleaseNote?: { status: string; releaseId: number; publishedAt: Date | string | null; blocks: number } | null;
+  /** 发布稿映射（总览时间线的状态徽章用）。 */
+  releaseNotes?: Array<{ releaseId: number; status: string; headline: string | null }>;
+  /** 覆盖率回执（信任行用）。 */
+  coverage?: { coverageRatio: number; implFilesAssembled: number; implFilesTotal: number; partitionsCapped: boolean } | null;
 }
 
 function analysisLabel(status?: string) {
@@ -72,6 +76,25 @@ export function buildProductOverview(input: ProductOverviewInput) {
     changed: latestChanges.filter((change) => change.kind !== "added" && change.kind !== "removed").length,
   };
   const changeGroups = groupChangesByFeature(latestChanges);
+  const timeline = input.releases.map((release) => {
+    const note = input.releaseNotes?.find((candidate) => candidate.releaseId === release.id);
+    const flat = release.summary.replace(/\s*\n\s*/g, " ").trim();
+    const sentenceEnd = flat.search(/[。；！？]/);
+    const firstLine = sentenceEnd > 0 ? flat.slice(0, sentenceEnd + 1) : flat;
+    return {
+      id: release.id,
+      committedAt: release.committedAt,
+      title: release.title,
+      sha: release.sha,
+      url: release.url,
+      firstLine: firstLine.length > 80 ? `${firstLine.slice(0, 80)}…` : firstLine,
+      noteStatus: note?.status ?? null,
+      headline: note?.headline ?? null,
+      dateLabel: new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" }).format(new Date(release.committedAt)),
+    };
+  });
+  const coverageLine = input.coverage ? `覆盖率 ${Math.round(input.coverage.coverageRatio * 1000) / 10}%（${input.coverage.implFilesAssembled}/${input.coverage.implFilesTotal} 个实现文件）` : null;
+
   return {
     slug: input.product.slug,
     productBase: input.productBase,
@@ -96,6 +119,9 @@ export function buildProductOverview(input: ProductOverviewInput) {
     changeGroups,
     latestRelease,
     latestReleaseNote: input.latestReleaseNote ?? null,
+    noteByRelease: Object.fromEntries((input.releaseNotes ?? []).map((note) => [String(note.releaseId), { status: note.status, headline: note.headline }])),
+    timeline,
+    coverageLine,
     trust: {
       featureCount: input.features.length,
       scenarioCount: input.scenarios.length,
@@ -103,6 +129,7 @@ export function buildProductOverview(input: ProductOverviewInput) {
       manualScenarioCount: input.scenarios.filter((scenario) => scenario.source === "manual").length,
       evidencePathCount: evidencePaths.size,
       specVersionId,
+      coverageRatio: input.coverage ? `${Math.round(input.coverage.coverageRatio * 1000) / 10}%` : null as string | null,
     },
   };
 }

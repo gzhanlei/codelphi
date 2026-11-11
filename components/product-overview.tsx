@@ -2,6 +2,7 @@ import Link from "next/link";
 import { EditDescriptionButton } from "./edit-description-button";
 import { KnowledgeHealthPanel } from "./knowledge-health-panel";
 import { OverviewPublishButton } from "./overview-publish-dialog";
+import { SpecAsk } from "./spec-ask";
 import { changeGroupLabel, type ProductOverviewData } from "@/lib/product-overview";
 
 function OverviewHero({ data, canEdit }: { data: ProductOverviewData; canEdit: boolean }) {
@@ -10,7 +11,7 @@ function OverviewHero({ data, canEdit }: { data: ProductOverviewData; canEdit: b
       <span className="eyebrow">PRODUCT OVERVIEW</span>
       <h2>{data.headline}{canEdit ? <EditDescriptionButton slug={data.slug} description={data.description} /> : null}</h2>
       <div className="overview-meta"><span>{data.freshness}</span><span>{data.analysisLabel}</span>{data.headlineSource === "generated" ? <span>代码生成 · {data.headlineEvidence.length} 个证据文件</span> : null}</div>
-      <div className="overview-actions"><Link className="primary-button" href="?view=spec">查看产品规格</Link><Link className="secondary-button" href="?view=changes">查看最近变化</Link><a className="explainer-link" href={`/api/products/${data.slug}/spec.json`} target="_blank" rel="noreferrer">导出 spec.json ↗</a><a className="explainer-link" href={`/api/products/${data.slug}/export/tests?format=gherkin`}>导出 Gherkin ↓</a><a className="explainer-link" href={`/api/products/${data.slug}/export/tests?format=markdown`}>导出 Markdown ↓</a><a className="explainer-link" href={`/api/products/${data.slug}/explainer`} target="_blank" rel="noreferrer">导出 Explainer ↗</a><span className="overview-publish-slot">{data.latestRelease ? <OverviewPublishButton slug={data.slug} releaseId={data.latestRelease.id} releaseTitle={data.latestRelease.title} features={data.changeGroups.map((group) => ({ featureName: group.featureName, added: group.added, changed: group.changed, removed: group.removed }))} /> : null}</span></div>
+      <div className="overview-actions"><Link className="primary-button" href="?view=spec">查看产品规格</Link><Link className="secondary-button" href="?view=changes">查看最近变化</Link><span className="overview-publish-slot">{data.latestRelease ? <OverviewPublishButton slug={data.slug} releaseId={data.latestRelease.id} releaseTitle={data.latestRelease.title} features={data.changeGroups.map((group) => ({ featureName: group.featureName, added: group.added, changed: group.changed, removed: group.removed }))} /> : null}</span><details className="export-details"><summary>导出 ▾</summary><div className="export-details-menu"><a href={`/api/products/${data.slug}/spec.json`} target="_blank" rel="noreferrer">spec.json ↗</a><a href={`/api/products/${data.slug}/export/tests?format=gherkin`}>Gherkin ↓</a><a href={`/api/products/${data.slug}/export/tests?format=markdown`}>用例 Markdown ↓</a><a href={`/api/products/${data.slug}/explainer`} target="_blank" rel="noreferrer">Explainer ↗</a></div></details></div>
     </section>
   );
 }
@@ -21,78 +22,58 @@ function CapabilityList({ capabilities }: { capabilities: ProductOverviewData["c
 }
 
 function CapabilitiesPanel({ data }: { data: ProductOverviewData }) {
+  if (data.capabilities.length === 0) return <p className="overview-note">尚无功能规格。</p>;
   return (
     <section className="overview-panel">
-      <div className="overview-panel-heading"><span>01</span><h2>当前核心能力</h2></div>
-      <p>按场景覆盖排序，点击进入现有规格工作台。</p>
+      <div className="overview-panel-heading"><h2>当前核心能力</h2><p>按场景覆盖排序，点击进入规格工作台。</p></div>
       <CapabilityList capabilities={data.capabilities} />
     </section>
   );
 }
 
-function ReleaseChanges({ data }: { data: ProductOverviewData }) {
-  const release = data.latestRelease;
-  if (!release || data.changes.length === 0) return <p className="overview-note">本次分析未发现规格行为变化。</p>;
-  return (
-    <div className="overview-change-list">
-      <div className="overview-release-head">
-        <strong>{release.title}</strong>
-        <span className="overview-release-meta">
-          <time>{new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium" }).format(new Date(release.committedAt))}</time>
-          {release.url ? <a href={release.url} target="_blank" rel="noreferrer"><code>{release.sha.slice(0, 7)}</code> ↗</a> : <code>{release.sha.slice(0, 7)}</code>}
-        </span>
-      </div>
-      {release.summary ? <p className="overview-release-summary">{release.summary}</p> : null}
-      <p className="overview-change-stats">新增 {data.changeStats.added} · 移除 {data.changeStats.removed} · 更新 {data.changeStats.changed}</p>
-      {data.changeGroups.map((group) => <div className="overview-change" key={group.featureName}><strong>{group.featureName}</strong><p>{changeGroupLabel(group)}</p></div>)}
-    </div>
-  );
+const STATUS_CHIP: Record<string, { label: string; className: string }> = {
+  draft: { label: "发布稿待校对", className: "tl-chip-draft" },
+  published: { label: "已发布", className: "tl-chip-published" },
+  unpublished: { label: "已下线", className: "tl-chip-unpublished" },
+};
+
+function firstLine(text: string, max = 70) {
+  const flat = text.replace(/\s*\n\s*/g, " ").trim();
+  const cut = flat.search(/[。；！？]/);
+  const line = cut > 0 ? flat.slice(0, cut + 1) : flat;
+  return line.length > max ? `${line.slice(0, max)}…` : line;
 }
 
-function QuietRelease({ release }: { release: NonNullable<ProductOverviewData["latestRelease"]> }) {
-  return (
-    <div className="overview-change-list">
-      <div className="overview-change">
-        <strong>{release.title}</strong>
-        <p>{release.summary}</p>
-        <p className="overview-note">本次发布没有规格行为 Diff，详情见发布变化。</p>
-      </div>
-    </div>
-  );
+function dayLabel(date: Date | string) {
+  return new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" }).format(new Date(date));
 }
 
-function ChangesContent({ data }: { data: ProductOverviewData }) {
-  if (!data.latestRelease) return <p className="overview-note">尚无发布记录。</p>;
-  if (data.changes.length === 0) return <QuietRelease release={data.latestRelease} />;
-  return <ReleaseChanges data={data} />;
-}
-
-function ChangesPanel({ data }: { data: ProductOverviewData }) {
-  const note = data.latestReleaseNote;
-  const noteStatus = note?.status === "published"
-    ? { label: `本次发布的发布稿已发布（${note.blocks} 条变化）`, href: `?view=changes#release-${note.releaseId}`, linkText: "查看发布稿 →" }
-    : note?.status === "draft"
-      ? { label: `本次发布的发布稿草稿待校对（${note.blocks} 条）`, href: `?view=changes#release-${note.releaseId}`, linkText: "去校对并发布 →" }
-      : null;
+/** 发布时间线：行为账本的发布点投影（日期 + 发布稿状态徽章 + 一句话），条目点击进入发布卡详情。 */
+function ReleaseTimeline({ data }: { data: ProductOverviewData }) {
+  if (data.timeline.length === 0) return null;
   return (
     <section className="overview-panel">
-      <div className="overview-panel-heading"><span>02</span><h2>最近改变了什么</h2></div>
-      <p>优先展示确定性的行为 Diff，而不是 Commit 列表或 AI 摘要。</p>
-      <ChangesContent data={data} />
-      {noteStatus ? <p className="overview-note release-note-cta">{noteStatus.label} <Link className="text-button" href={noteStatus.href}>{noteStatus.linkText}</Link></p> : null}
-      <Link className="overview-text-link" href="?view=changes">查看全部发布变化 →</Link>
+      <div className="overview-panel-heading"><h2>发布时间线</h2><Link className="overview-text-link" href="?view=changes">全部发布变化 →</Link></div>
+      <div className="overview-timeline">
+        {data.timeline.map((entry) => {
+          const chip = entry.noteStatus ? STATUS_CHIP[entry.noteStatus] : null;
+          return (
+            <div className="tl-item" key={entry.id}>
+              <div className="tl-date">{entry.dateLabel}{chip ? <span className={`tl-chip ${chip.className}`}>{chip.label}</span> : null}</div>
+              <Link className="tl-title" href={`?view=changes#release-${entry.id}`}>{entry.headline || entry.title}</Link>
+              {entry.firstLine ? <p className="tl-summary">{entry.firstLine}</p> : null}
+            </div>
+          );
+        })}
+      </div>
     </section>
   );
 }
 
-function TrustPanel({ data }: { data: ProductOverviewData }) {
-  const { trust } = data;
+function TrustLine({ data }: { data: ProductOverviewData }) {
+  const { trust, coverageLine } = data;
   return (
-    <section className="overview-panel trust-panel">
-      <div className="overview-panel-heading"><span>03</span><h2>证据覆盖率</h2></div>
-      <p>每条结论都关联规格版本、代码证据与人工修订；证据覆盖描述证据范围，不等于结论正确，采纳前应经人工核实。</p>
-      <dl className="trust-grid"><div><dt>功能 / 场景</dt><dd>{trust.featureCount} / {trust.scenarioCount}</dd></div><div><dt>人工功能 / 场景</dt><dd>{trust.manualFeatureCount} / {trust.manualScenarioCount}</dd></div><div><dt>证据文件</dt><dd>{trust.evidencePathCount}</dd></div><div><dt>规格版本</dt><dd>{trust.specVersionId === null ? "未生成" : trust.specVersionId}</dd></div></dl>
-    </section>
+    <p className="overview-trust-line">证据覆盖率 {trust.coverageRatio ?? "—"} · 证据文件 {trust.evidencePathCount} 个 · 人工条目 {trust.manualFeatureCount + trust.manualScenarioCount} 条{trust.specVersionId !== null ? ` · Spec v${trust.specVersionId}` : ""}{coverageLine ? ` · ${coverageLine}` : ""}。证据覆盖描述证据范围，不等于结论正确，采纳前应经人工核实。</p>
   );
 }
 
@@ -100,7 +81,12 @@ export function ProductOverview({ data, canEdit = false }: { data: ProductOvervi
   return (
     <div className="product-overview">
       <OverviewHero data={data} canEdit={canEdit} />
-      <div className="overview-grid"><CapabilitiesPanel data={data} /><ChangesPanel data={data} /><TrustPanel data={data} /></div>
+      <div className="overview-ask">
+        <SpecAsk slug={data.slug} productBase={data.productBase} suggestions={["这个产品的核心功能是什么？", "有哪些使用限制或边界情况？", "怎么配置和启动它？"]} />
+      </div>
+      <ReleaseTimeline data={data} />
+      <CapabilitiesPanel data={data} />
+      <TrustLine data={data} />
       <KnowledgeHealthPanel slug={data.slug} />
     </div>
   );

@@ -193,8 +193,13 @@ export async function getProductDetails(slug: string, organizationId?: number) {
   const afterSha = (runs as Array<{ status: string; errorMessage?: string; afterSha?: string | null }>)[0]?.afterSha;
   const source: EvidenceSource | undefined = repository && afterSha ? { owner: repository.owner, name: repository.name, revision: afterSha } : undefined;
 
-  // 发布稿状态（入口提亮）：最近一次发布的草稿/已发布状态
+  // 发布稿状态（入口提亮 + 总览时间线）：全量映射（状态 + 合成标题）+ 最近一次发布的详细状态
   const [noteRows] = await db.execute(
+    "SELECT id, release_id AS releaseId, status, headline FROM release_notes WHERE product_id = ?",
+    [product.id],
+  );
+  const releaseNotes = noteRows as Array<{ id: number; releaseId: number; status: string; headline: string | null }>;
+  const [noteDetailRows] = await db.execute(
     `SELECT n.status, n.release_id AS releaseId, n.published_at AS publishedAt,
             (SELECT COUNT(*) FROM release_note_blocks b WHERE b.release_note_id = n.id) AS blocks
      FROM release_notes n
@@ -202,10 +207,11 @@ export async function getProductDetails(slug: string, organizationId?: number) {
      LIMIT 1`,
     [product.id, product.id],
   );
-  const latestReleaseNote = (noteRows as Array<{ status: string; releaseId: number; publishedAt: Date | null; blocks: number }>)[0] ?? null;
+  const latestReleaseNote = (noteDetailRows as Array<{ status: string; releaseId: number; publishedAt: Date | null; blocks: number }>)[0] ?? null;
 
   return {
     product: { ...product, descriptionEvidence: decorateEvidence(parseJsonValue(product.descriptionEvidence), source) },
+    releaseNotes,
     latestReleaseNote: latestReleaseNote ?? null,
     repository,
     latestRun: (runs as Array<{ status: string; errorMessage?: string }>)[0],
