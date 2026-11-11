@@ -24,6 +24,7 @@ export interface SpecAnswerSynthesis {
 const synthesisSchema = z.object({
   answerable: z.boolean(),
   answer: z.string().max(800).default(""),
+  reason: z.string().max(300).default(""),
   used: z.array(z.object({ kind: z.enum(["feature", "scenario"]), id: z.number().int() })).max(16).default([]),
 });
 
@@ -38,7 +39,7 @@ export function buildAnswerSynthesisPrompt(input: {
   return [
     "基于下面的产品规格条目回答用户问题。用简体中文。",
     "硬规则：",
-    "1. 只使用条目里的事实；条目不足以回答时，返回 answerable:false 并给出 reason（说明规格缺哪部分），不要猜测。",
+    "1. 只使用条目里的事实；条目不足以回答时，返回 answerable:false，reason 字段写清楚规格里缺什么（如『规格未记载容量/规模限制』），不要猜测。",
     "2. 回答 1-3 句、不超过 200 字；直接回答问题本身（用户能得到什么/怎么工作/限制是什么）。",
     "3. 每个用到的条目在 used 里登记（kind=feature 或 scenario，id 用条目标注的编号）。",
     "4. 禁止出现 EC-n/ER-n/HP-n 场景编号与内部术语；条目编号（#数字）只在 used 里登记，不写进正文。",
@@ -56,6 +57,7 @@ export function buildAnswerSynthesisPrompt(input: {
 export interface ParsedSpecAnswerSynthesis {
   answerable: boolean;
   answer: string;
+  reason: string;
   used: Array<{ kind: "feature" | "scenario"; id: number }>;
 }
 
@@ -66,8 +68,10 @@ export function parseAnswerSynthesis(content: string): ParsedSpecAnswerSynthesis
   if (start < 0 || end <= start) throw new Error("AI 输出不含 JSON 结构");
   const parsed = synthesisSchema.safeParse(JSON.parse(stripped.slice(start, end + 1)));
   if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "结构不合格");
-  if (!parsed.data.answerable || !parsed.data.answer.trim()) return { answerable: false, answer: "", used: [] };
-  return { answerable: true, answer: stripScenarioRefs(parsed.data.answer.trim()), used: parsed.data.used };
+  if (!parsed.data.answerable || !parsed.data.answer.trim()) {
+    return { answerable: false, answer: "", used: [], reason: parsed.data.reason.trim() };
+  }
+  return { answerable: true, answer: stripScenarioRefs(parsed.data.answer.trim()), reason: "", used: parsed.data.used };
 }
 
 

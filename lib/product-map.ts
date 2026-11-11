@@ -12,6 +12,9 @@ import type { FeatureRow, ScenarioRow } from "./types";
 /** 地图上可见的连接边上限；超出按共享引用数降序截断并显式披露（不静默丢弃）。 */
 export const MAP_MAX_EDGES = 60;
 
+/** 默认在画布上显示的强连接条数；其余连线仍在 DOM 中，「显示全部连线」开关可见（降噪默认值）。 */
+export const MAP_DEFAULT_EDGES = 20;
+
 const NODE_W = 200;
 const NODE_H = 64;
 const CHILD_H = 52;
@@ -47,6 +50,8 @@ export interface ProductMapEdge {
   sharedFiles: FeatureConnection["sharedFiles"];
   /** 排序权重：共享文件两侧场景引用总数。 */
   weight: number;
+  /** 前 MAP_DEFAULT_EDGES 条强连接默认显示；其余仍渲染在 DOM，由「显示全部连线」开关展开。 */
+  visible: boolean;
 }
 
 export interface ProductMapStats {

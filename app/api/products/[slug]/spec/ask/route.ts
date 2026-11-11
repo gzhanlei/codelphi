@@ -119,7 +119,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
       );
       const synthesis = parseAnswerSynthesis(synthesisContent);
       if (!synthesis.answerable) {
-        return NextResponse.json({ ...decorated, aiAnswer: null, answerInsufficient: true });
+        return NextResponse.json({ ...decorated, aiAnswer: null, answerInsufficient: true, insufficientReason: synthesis.reason || null });
       }
       const fallbackAnswer = {
         status: "matched",
