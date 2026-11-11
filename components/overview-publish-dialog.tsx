@@ -68,7 +68,7 @@ export function OverviewPublishButton({ slug, releaseId, releaseTitle, features 
           {done ? (
             <div className="publish-done">
               <p>发布稿草稿已生成（{selected.size} 个功能）。</p>
-              <Link className="primary-button" href={`?view=notes`}>去校对并发布 →</Link>
+              <Link className="primary-button" href="?view=notes" onClick={() => setOpen(false)}>去校对并发布 →</Link>
             </div>
           ) : features.length === 0 ? (
             <p className="overview-note">本次发布没有规格行为变化（纯文档/测试/版本号提交），无可宣布项。历史发布可在发布变化视图的发布卡里手动生成。</p>
