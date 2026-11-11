@@ -36,7 +36,8 @@ describe("mergeChunkResults", () => {
     ]);
     expect(merged.features).toHaveLength(1);
     const feature = merged.features[0];
-    // 两趟重复提取的同一行为被去重；新行为（锁定账户）保留
+    // 行为等价去重（情境/操作/结果同义）硬折叠；骨架变体保留但打 variantOf 标记（可审计，成文层合并）
+    // 骨架通道撤出合并决策（fixture 实证误合真差异）——行为等价去重恢复原语义
     expect(feature.scenarios).toHaveLength(2);
     expect(feature.scenarios.map((item) => item.reference)).toEqual(["HP-1", "HP-2"]);
     // 摘要归属：场景数最多的趟（第二趟 2 条 > 第一趟 1 条）
@@ -48,8 +49,10 @@ describe("mergeChunkResults", () => {
       chunk([{ name: "规格导出", summary: "s", scenarios: [scenario("HP-1", "导出 Markdown 附件")] }]),
       chunk([{ name: "规格导出", summary: "s", scenarios: [scenario("HP-1", "导出 Explainer HTML 页面")] }]),
     ]);
-    const references = merged.features[0].scenarios.map((item) => item.reference);
-    expect(references).toEqual(["HP-1", "HP-2"]);
+    const scenarios = merged.features[0].scenarios as Array<{ reference: string; variantOf?: string }>;
+    // 真差异（不同导出格式）不被骨架误折：两条都保留且无 variantOf 标记
+    expect(scenarios.map((item) => item.reference)).toEqual(["HP-1", "HP-2"]);
+    expect(scenarios.every((item) => !item.variantOf)).toBe(true);
   });
 
   it("merges features across chunks and sorts by name", () => {

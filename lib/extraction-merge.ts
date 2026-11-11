@@ -52,7 +52,10 @@ export function mergeChunkResults(chunks: ExtractionChunk[], onStats?: (stats: {
         group.summaryScenarioCount = feature.scenarios.length;
       }
       for (const scenario of feature.scenarios) {
-        // 行为等价去重：情境/操作/结果同义即同一行为（category 只是呈现标签，BM-5）
+        // 行为等价去重（BM-5）：情境/操作/结果同义即同一行为（category 只是呈现标签）。
+        // 骨架词判定实证不可用（fixture 实证误合真差异："跳转 dashboard" vs "锁定账户"
+        // 骨架共享但行为不同）——变体合并职责在发布稿成文层（AI prompt 显式合并变体，
+        // 人工可校），不在账本去重层。
         if (group.scenarios.some((existing) => scenarioBehaviorEqual(existing, scenario))) {
           scenariosDeduped += 1;
           continue;
@@ -60,7 +63,7 @@ export function mergeChunkResults(chunks: ExtractionChunk[], onStats?: (stats: {
         // 引用冲突：同引用已存在但行为不同 → 前缀重编号（spec_scenarios 唯一键 (feature, reference)）
         const reference = group.references.includes(scenario.reference) ? nextReference(group.references, scenario.reference) : scenario.reference;
         group.references.push(reference);
-        group.scenarios.push({ ...scenario, reference });
+        group.scenarios.push({ ...scenario, reference } as typeof scenario & { variantOf?: string });
       }
     }
   }

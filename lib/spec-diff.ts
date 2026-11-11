@@ -84,6 +84,36 @@ function editDistance(left: string, right: string) {
  *    （0.8 < 0.85）不被折叠，而「…当前产品」→「…该产品」（0.83，12 字）被折叠。
  * 真实中文行为变化通常替换关键字符（成功→失败 0.5、允许→禁止 0.33），远低于阈值。
  */
+
+/**
+ * BM-5 内容词 Jaccard 近似通道（编辑距离的补充）：同义替换（检测场景→检测内容→检测
+ * 情形→检查）改变大量字符使编辑距离失效，但**内容词**几乎不变。去停用词后按 2-gram
+ * 计 Jaccard，≥ 阈值视为近似。确定性、零模型调用。
+ */
+const CONTENT_STOP_GRAMS = new Set(["一项", "用户", "该功", "功能", "对应", "查看", "新增", "更新", "使用", "可以", "进行", "相关", "情况", "结果", "随之", "变化", "不再", "包含", "原先", "涉及", "部分", "同时", "相应"]);
+
+function contentGrams(text: string): Set<string> {
+  const grams = new Set<string>();
+  for (const chunk of normalizeSpecText(text).split(/[^\u4e00-\u9fa5A-Za-z0-9]+/)) {
+    for (let index = 0; index + 2 <= chunk.length; index += 1) {
+      const gram = chunk.slice(index, index + 2);
+      if (CONTENT_STOP_GRAMS.has(gram)) continue;
+      grams.add(gram);
+    }
+  }
+  return grams;
+}
+
+export function contentJaccard(left: string, right: string): number {
+  const a = contentGrams(left);
+  const b = contentGrams(right);
+  if (a.size === 0 || b.size === 0) return 0;
+  let intersection = 0;
+  for (const gram of a) if (b.has(gram)) intersection += 1;
+  const union = a.size + b.size - intersection;
+  return intersection / union;
+}
+
 export function specTextEquivalent(before: string, after: string) {
   const left = specContent(before);
   const right = specContent(after);
@@ -127,6 +157,16 @@ function changeSummary(kind: SpecChange["kind"], entityType: SpecChange["entityT
 
 function featureChange(kind: "added" | "removed" | "changed", feature: SpecFeature, before: SpecFeature | null, after: SpecFeature | null): SpecChange {
   return { kind, entityType: "feature", featureName: feature.name, scenarioReference: null, summary: changeSummary(kind, "feature", feature.name, null), before, after };
+}
+
+
+export function scenarioSkeletonEquivalent(left: string, right: string, featureName: string): boolean {
+  const stripFeature = (text: string) => normalizeSpecText(text).replace(normalizeSpecText(featureName), "");
+  const a = contentGrams(stripFeature(left));
+  const b = contentGrams(stripFeature(right));
+  if (a.size === 0 || b.size === 0) return false;
+  for (const gram of a) if (b.has(gram)) return true;
+  return false;
 }
 
 export function scenarioBehaviorEqual(previous: SpecScenario, current: SpecScenario) {
