@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { EditDescriptionButton } from "./edit-description-button";
 import { KnowledgeHealthPanel } from "./knowledge-health-panel";
+import { OverviewPublishButton } from "./overview-publish-dialog";
 import { changeGroupLabel, type ProductOverviewData } from "@/lib/product-overview";
 
 function OverviewHero({ data, canEdit }: { data: ProductOverviewData; canEdit: boolean }) {
@@ -9,7 +10,7 @@ function OverviewHero({ data, canEdit }: { data: ProductOverviewData; canEdit: b
       <span className="eyebrow">PRODUCT OVERVIEW</span>
       <h2>{data.headline}{canEdit ? <EditDescriptionButton slug={data.slug} description={data.description} /> : null}</h2>
       <div className="overview-meta"><span>{data.freshness}</span><span>{data.analysisLabel}</span>{data.headlineSource === "generated" ? <span>代码生成 · {data.headlineEvidence.length} 个证据文件</span> : null}</div>
-      <div className="overview-actions"><Link className="primary-button" href="?view=spec">查看产品规格</Link><Link className="secondary-button" href="?view=changes">查看最近变化</Link><a className="explainer-link" href={`/api/products/${data.slug}/spec.json`} target="_blank" rel="noreferrer">导出 spec.json ↗</a><a className="explainer-link" href={`/api/products/${data.slug}/export/tests?format=gherkin`}>导出 Gherkin ↓</a><a className="explainer-link" href={`/api/products/${data.slug}/export/tests?format=markdown`}>导出 Markdown ↓</a><a className="explainer-link" href={`/api/products/${data.slug}/explainer`} target="_blank" rel="noreferrer">导出 Explainer ↗</a></div>
+      <div className="overview-actions"><Link className="primary-button" href="?view=spec">查看产品规格</Link><Link className="secondary-button" href="?view=changes">查看最近变化</Link><a className="explainer-link" href={`/api/products/${data.slug}/spec.json`} target="_blank" rel="noreferrer">导出 spec.json ↗</a><a className="explainer-link" href={`/api/products/${data.slug}/export/tests?format=gherkin`}>导出 Gherkin ↓</a><a className="explainer-link" href={`/api/products/${data.slug}/export/tests?format=markdown`}>导出 Markdown ↓</a><a className="explainer-link" href={`/api/products/${data.slug}/explainer`} target="_blank" rel="noreferrer">导出 Explainer ↗</a><span className="overview-publish-slot">{data.latestRelease && canEdit ? <OverviewPublishButton slug={data.slug} releaseId={data.latestRelease.id} releaseTitle={data.latestRelease.title} features={data.changeGroups.map((group) => ({ featureName: group.featureName, added: group.added, changed: group.changed, removed: group.removed }))} /> : null}</span></div>
     </section>
   );
 }
@@ -69,9 +70,9 @@ function ChangesContent({ data }: { data: ProductOverviewData }) {
 function ChangesPanel({ data }: { data: ProductOverviewData }) {
   const note = data.latestReleaseNote;
   const noteStatus = note?.status === "published"
-    ? { label: `发布稿已发布（${note.blocks} 条变化）`, href: `?view=changes#release-${note.releaseId}`, linkText: "查看发布稿 →" }
+    ? { label: `本次发布的发布稿已发布（${note.blocks} 条变化）`, href: `?view=changes#release-${note.releaseId}`, linkText: "查看发布稿 →" }
     : note?.status === "draft"
-      ? { label: `发布稿草稿已生成（${note.blocks} 条，待人工校对）`, href: `?view=changes#release-${note.releaseId}`, linkText: "去校对并发布 →" }
+      ? { label: `本次发布的发布稿草稿待校对（${note.blocks} 条）`, href: `?view=changes#release-${note.releaseId}`, linkText: "去校对并发布 →" }
       : null;
   return (
     <section className="overview-panel">

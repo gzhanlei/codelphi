@@ -53,7 +53,7 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ sl
 export async function POST(request: NextRequest) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "未登录" }, { status: 401 });
-  const body = (await request.json().catch(() => ({}))) as { slug?: string; releaseId?: number; selectedIds?: number[]; emphasis?: string; voiceId?: number | null };
+  const body = (await request.json().catch(() => ({}))) as { slug?: string; releaseId?: number; selectedIds?: number[]; features?: string[]; emphasis?: string; voiceId?: number | null };
   const slug = String(body.slug ?? "");
   const releaseId = Number(body.releaseId ?? 0);
   const access = await requireProductAccess(user, slug, "editor");
@@ -68,7 +68,12 @@ export async function POST(request: NextRequest) {
   if (existing?.status === "published") {
     return NextResponse.json({ error: "已发布只读：先下线才能重新生成" }, { status: 409 });
   }
-  const changes = await releaseChanges(db.execute.bind(db), releaseId);
+  let changes = await releaseChanges(db.execute.bind(db), releaseId);
+  // 功能级勾选（总览「发布产品」入口）：勾中哪些功能，就合并该功能在本次发布的全部变化
+  const featureFilter = Array.isArray(body.features) ? body.features.map(String) : null;
+  if (featureFilter && featureFilter.length > 0) {
+    changes = changes.filter((change) => featureFilter.includes(change.featureName));
+  }
   const blocks = buildDraftBlocks(changes, body.selectedIds);
   // 生成阶段引用存在性校验（§4.3 验收第 2 条，类似 assertEvidence 的引用校验）
   const validation = validateDraft(blocks, changes);

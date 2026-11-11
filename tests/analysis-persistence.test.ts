@@ -43,14 +43,13 @@ describe("analysis persistence guards", () => {
   it("does not duplicate changes for an existing release", async () => {
     const connection = connectionWithCount(1);
     await upsertRelease(connection, run, result, change);
-    // +1 = 自动发布稿草稿的候选查询（无 Highlight → 不生成）
-    expect(connection.execute).toHaveBeenCalledTimes(7);
+    expect(connection.execute).toHaveBeenCalledTimes(6);
   });
 
   it("inserts changes when the release has none", async () => {
     const connection = connectionWithCount(0);
     await upsertRelease(connection, run, result, change);
-    expect(connection.execute).toHaveBeenCalledTimes(8);
+    expect(connection.execute).toHaveBeenCalledTimes(7);
     expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO changes"), [10, "Auth", "changed", "Changed", "", "[]"]);
   });
 

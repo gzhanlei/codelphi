@@ -419,3 +419,13 @@ p { line-height: 1.7; }
 
 .release-notes-feature { margin: 10px 0 4px; }
 .release-notes-feature-name { margin: 0 0 6px; font-size: 12px; color: var(--green); border-bottom: 1px dashed var(--line); padding-bottom: 3px; }
+
+.overview-publish-slot { display: inline-flex; }
+dialog.publish-dialog { min-width: min(520px, 92vw); border: 1px solid var(--line); border-radius: 12px; padding: 22px; background: var(--surface); color: var(--ink); }
+dialog.publish-dialog h3 { margin: 0 0 8px; font-size: 16px; }
+.publish-features { display: grid; gap: 6px; margin: 10px 0; max-height: 300px; overflow: auto; }
+.publish-feature { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; cursor: pointer; }
+.publish-feature input { margin-top: 3px; }
+.publish-feature strong { font-size: 13px; }
+.publish-feature-count { display: block; font-size: 11px; color: #94a19c; }
+.publish-done { margin: 10px 0; }

@@ -29,7 +29,6 @@ import { rewriteDraftBlocksToUserVoice } from "./release-notes-enhance";
 import { requestStructuredCompletion } from "./ai";
 import { loadNoteByRelease, loadBlockViews } from "./release-notes-service";
 import { ensureRegressionTasks } from "./regression-tasks";
-import { ensureAutoReleaseNoteDraft } from "./release-notes-service";
 
 export interface RunContext {
   id: number;
@@ -217,7 +216,6 @@ export async function upsertRelease(connection: PoolConnection, run: RunContext,
   const hasChanges = Number((changeRows as Array<{ count: number }>)[0]?.count ?? 0) > 0;
   if (hasChanges) {
     await ensureRegressionTasks(connection, releaseId);
-    await ensureAutoReleaseNoteDraft(connection, releaseId);
     return releaseId;
   }
 
@@ -229,7 +227,6 @@ export async function upsertRelease(connection: PoolConnection, run: RunContext,
     );
   }
   await ensureRegressionTasks(connection, releaseId);
-  await ensureAutoReleaseNoteDraft(connection, releaseId);
   return releaseId;
 }
 
@@ -582,11 +579,12 @@ async function runAnalysisBody(run: RunContext) {
         const note = await loadNoteByRelease(getDb().execute.bind(getDb()), releaseId);
         if (note && note.status === "draft") {
           const blocks = await loadBlockViews(getDb().execute.bind(getDb()), note.id);
-          if (blocks.length > 0) {
+          const editable = blocks.filter((block) => !block.overridden);
+          if (editable.length > 0) {
             const outcome = await rewriteDraftBlocksToUserVoice(
               { execute: (sql: string, params?: unknown[]) => getDb().execute(sql, params as never) },
               { completion: (messages, billing) => requestStructuredCompletion(messages, billing) },
-              { noteId: note.id, emphasis: note.emphasis ?? "", blocks: blocks.map((block) => ({ position: block.position, kind: block.kind, featureName: block.featureName, scenarioReference: block.scenarioReference, summary: block.summary, highlightType: block.highlightType })) },
+              { noteId: note.id, emphasis: note.emphasis ?? "", blocks: editable.map((block) => ({ position: block.position, kind: block.kind, featureName: block.featureName, scenarioReference: block.scenarioReference, summary: block.summary, highlightType: block.highlightType })) },
             );
             console.log("[release-notes] auto-draft copy rewritten to user voice", { runId: run.id, releaseId, ...outcome });
           }
