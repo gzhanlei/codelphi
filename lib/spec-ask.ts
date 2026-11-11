@@ -70,6 +70,34 @@ export function parseAnswerSynthesis(content: string): ParsedSpecAnswerSynthesis
   return { answerable: true, answer: stripScenarioRefs(parsed.data.answer.trim()), used: parsed.data.used };
 }
 
+
+// ── B2.2b 词汇鸿沟兜底：词法检索未命中 ≠ 规格没答案（例：问『语言』，条目写的是 Next.js/Go）。
+// 一次 AI 调用从功能清单选出相关功能，再走既有综合链路。宁缺毋滥：无相关功能如实返回空。
+
+const featureSelectSchema = z.object({ relevant: z.array(z.number().int()).max(10).default([]) });
+
+export function buildFeatureSelectPrompt(input: { question: string; catalog: Array<{ id: number; name: string; summary: string }> }): string {
+  return [
+    "用户针对一个产品提问。下面是产品的功能清单（名称：简介）。",
+    "任务：判断哪些功能与用户问题相关，返回它们的 id。只基于名称与简介判断，宁缺毋滥——拿不准就不要选；没有任何相关功能时返回空数组。",
+    '只返回 JSON：{"relevant":[1,2]}',
+    "",
+    `【用户问题】${input.question}`,
+    "【功能清单】",
+    ...input.catalog.map((item) => `- #${item.id} ${item.name}：${item.summary}`),
+  ].join("\n");
+}
+
+export function parseFeatureSelection(content: string, validIds: ReadonlySet<number>): number[] {
+  const stripped = content.replace(/^\s*```(?:json)?/i, "").replace(/```\s*$/i, "").trim();
+  const start = stripped.indexOf("{");
+  const end = stripped.lastIndexOf("}");
+  if (start < 0 || end <= start) return [];
+  const parsed = featureSelectSchema.safeParse(JSON.parse(stripped.slice(start, end + 1)));
+  if (!parsed.success) return [];
+  return parsed.data.relevant.filter((id) => validIds.has(id));
+}
+
 export interface QueryTerm {
   value: string;
   /** 英文 / 数字词：单个命中即可作为依据；中文 2-gram 需要两个不同词共同命中。 */
