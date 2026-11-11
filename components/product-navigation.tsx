@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AnalysisStatusRefresh } from "./analysis-status-refresh";
 import { ProductChanges } from "./product-changes";
+import { ProductMapView } from "./product-map-view";
 import { ProductOverview } from "./product-overview";
 import { ReleaseNotesView } from "./release-notes-view";
 import { buildProductOverview, type ProductOverviewData } from "@/lib/product-overview";
@@ -40,6 +41,8 @@ export function ProductTabs({ productBase, view, featureCount, releaseCount, not
   return (
     <nav className="view-tabs" aria-label="产品视图">
       <Link className={selectedClass(view === "overview")} href={productBase}>概览</Link>
+      {/* 产品地图始终展示（含 0 功能空态），不因数据为空被隐藏（入口偏好）。 */}
+      <Link className={selectedClass(view === "map")} href={`${productBase}?view=map`}>产品地图</Link>
       <Link className={selectedClass(view === "spec")} href={`${productBase}?view=spec`}>产品规格 <span>{featureCount}</span></Link>
       {releaseCount > 0 ? <Link className={selectedClass(view === "notes")} href={`${productBase}?view=notes`}>发布稿{noteBadge ? <span className="notes-badge">{noteBadge}</span> : null}</Link> : null}
       <Link className={selectedClass(view === "changes")} href={`${productBase}?view=changes`}>发布变化 <span>{releaseCount}</span></Link>
@@ -82,6 +85,7 @@ function ProductWorkspace({ view, productSlug, productBase, features, scenarios,
 
 export function ProductView(props: ProductViewProps) {
   if (props.view === "overview") return <ProductOverview data={props.overview} canEdit={props.canEdit} />;
+  if (props.view === "map") return <ProductMapView features={props.features} scenarios={props.scenarios} />;
   if (props.view === "notes") {
     return props.latestReleaseId ? <ReleaseNotesView slug={props.productSlug} releaseId={props.latestReleaseId} canEdit={Boolean(props.canEdit)} changelogHref={props.changelogHref} /> : <p className="overview-note">尚无发布，先生成一次分析。</p>;
   }

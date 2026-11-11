@@ -36,22 +36,34 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
         [access.productId],
       ) as unknown;
       const featureRows = (Array.isArray(featureResult) ? featureResult[0] : featureResult) as Array<{ id: number; name: string; summary: string }>;
-      const catalog = featureRows ?? [];
+      const hintResult = await getDb().execute(
+        `SELECT s.feature_id AS featureId, s.context, s.outcome FROM scenarios s JOIN features f ON f.id = s.feature_id
+         WHERE f.product_id = ? AND s.active = 1 AND f.active = 1 ORDER BY s.feature_id, s.id LIMIT 400`,
+        [access.productId],
+      ) as unknown;
+      const hintRows = (Array.isArray(hintResult) ? hintResult[0] : hintResult) as Array<{ featureId: number; context: string; outcome: string }>;
+      const hintsByFeature = new Map<number, string[]>();
+      for (const row of hintRows ?? []) {
+        const list = hintsByFeature.get(Number(row.featureId)) ?? [];
+        if (list.length < 3) list.push(`${row.context ?? ""}${row.outcome ? `→${row.outcome}` : ""}`.slice(0, 80));
+        hintsByFeature.set(Number(row.featureId), list);
+      }
+      const catalog = featureRows.map((item) => ({ ...item, scenarioHints: hintsByFeature.get(Number(item.id)) ?? [] }));
       if (catalog.length === 0) return NextResponse.json({ ...decorated, aiAnswer: null });
       const validIds = new Set(catalog.map((item) => item.id));
       const lexicalIds = new Set(matchFeaturesByNameGrams(decorated.question, catalog).map((feature) => feature.id));
+      const selectCall = () => requestStructuredCompletion(
+        [
+          { role: "system", content: "你是检索助手，只输出合规 JSON。" },
+          { role: "user", content: buildFeatureSelectPrompt({ question: decorated.question, productName: productNameForAsk, catalog: catalog.map((item) => ({ id: item.id, name: item.name, summary: item.summary ?? "" })) }) },
+        ],
+        { runId: null, accountId: null, chargeComponent: "main", callKind: "spec_ask_answer" },
+      );
+      // 词法命中优先；否则 AI 选功能。模型输出非确定：选择为空时重试一次（两次皆空才如实未覆盖）
       let relevant = [...lexicalIds];
       if (relevant.length === 0) {
-        const selectCall = () => requestStructuredCompletion(
-          [
-            { role: "system", content: "你是检索助手，只输出合规 JSON。" },
-            { role: "user", content: buildFeatureSelectPrompt({ question: decorated.question, productName: productNameForAsk, catalog: catalog.map((item) => ({ id: item.id, name: item.name, summary: item.summary ?? "" })) }) },
-          ],
-          { runId: null, accountId: null, chargeComponent: "main", callKind: "spec_ask_answer" },
-        );
         const selectContent = await selectCall();
         relevant = parseFeatureSelection(selectContent, validIds);
-        // 模型输出非确定：选择为空时重试一次（两次皆空才如实未覆盖）
         if (relevant.length === 0) {
           const retryContent = await selectCall();
           relevant = parseFeatureSelection(retryContent, validIds);

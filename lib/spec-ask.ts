@@ -76,15 +76,26 @@ export function parseAnswerSynthesis(content: string): ParsedSpecAnswerSynthesis
 
 const featureSelectSchema = z.object({ relevant: z.array(z.number().int()).max(10).default([]) });
 
-export function buildFeatureSelectPrompt(input: { question: string; productName: string; catalog: Array<{ id: number; name: string; summary: string }> }): string {
+export interface FeatureCatalogItem {
+  id: number;
+  name: string;
+  summary: string;
+  /** 场景摘要抽样（前几条的 context/outcome）：限制/边界信号常在这里而不是功能摘要里。 */
+  scenarioHints?: string[];
+}
+
+export function buildFeatureSelectPrompt(input: { question: string; productName: string; catalog: FeatureCatalogItem[] }): string {
   return [
-    `用户正在询问产品「${input.productName}」。下面是该产品的功能清单（名称：简介）。用户问题里的『本项目/这个产品』即指它。`,
-    "任务：判断哪些功能与用户问题相关，返回它们的 id。只基于名称与简介判断，宁缺毋滥——拿不准就不要选；没有任何相关功能时返回空数组。",
+    `用户正在询问产品「${input.productName}」。下面是该产品的功能清单（名称：简介，部分附场景线索）。用户问题里的『本项目/这个产品』即指它。`,
+    "任务：判断哪些功能与用户问题相关，返回它们的 id。相关判定看功能简介**和**场景线索（例如问『支持多大规模』应选中含大小/数量/限制线索的功能）。只基于清单判断，宁缺毋滥——没有任何相关功能时返回空数组。",
     '只返回 JSON：{"relevant":[1,2]}',
     "",
     `【用户问题】${input.question}`,
     "【功能清单】",
-    ...input.catalog.map((item) => `- #${item.id} ${item.name}：${item.summary}`),
+    ...input.catalog.map((item) => {
+      const hints = item.scenarioHints?.length ? `｜场景线索：${item.scenarioHints.join("；")}` : "";
+      return `- #${item.id} ${item.name}：${item.summary}${hints}`;
+    }),
   ].join("\n");
 }
 
