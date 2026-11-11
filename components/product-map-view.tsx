@@ -1,5 +1,6 @@
 import { featureHref } from "@/lib/spec-editor-ui";
 import { buildProductMap, type ProductMapEdge, type ProductMapNode } from "@/lib/product-map";
+import { MapEdgesToggle } from "./product-map-edges-toggle";
 import type { FeatureRow, ScenarioRow } from "@/lib/types";
 
 /**
@@ -37,7 +38,7 @@ function MapEdgePath({ edge, nodes }: { edge: ProductMapEdge; nodes: ProductMapN
   const bend = Math.max(Math.abs(x2 - x1) / 2, 40);
   const tooltip = `${edge.sourceName} ⇄ ${edge.targetName} · 共享证据面（前 ${edge.sharedFiles.length} 个文件）：${edge.sharedFiles.map((file) => file.path).join("、")}`;
   return (
-    <path className="map-edge" d={`M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`}>
+    <path className={edge.visible ? "map-edge" : "map-edge extra"} d={`M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`}>
       <title dangerouslySetInnerHTML={{ __html: tooltip }} />
     </path>
   );
@@ -56,9 +57,9 @@ export function ProductMapView({ features, scenarios }: { features: FeatureRow[]
   return (
     <section className="product-map">
       <div className="map-note">
-        {stats.topLevelCount} 个顶层功能（含 {stats.childCount} 个子功能）· {stats.scenarioCount} 场景 · {stats.edgeCount} 条共享证据面连接{stats.truncatedEdgeCount > 0 ? `（按共享引用数只显前 60，其余 ${stats.truncatedEdgeCount} 条见下方依据清单）` : ""}。节点点击进入功能详情；悬停连线查看两个功能如何关联。连接来自 B3 确定性层（共享证据文件），不表示调用或依赖方向。
+        {stats.topLevelCount} 个顶层功能（含 {stats.childCount} 个子功能）· {stats.scenarioCount} 场景 · {stats.edgeCount} 条共享证据面连接{stats.edgeCount > stats.visibleEdgeCount ? `，默认只显前 ${stats.visibleEdgeCount} 条强连接` : ""}{stats.truncatedEdgeCount > 0 ? `（超出上限的 ${stats.truncatedEdgeCount} 条见下方依据清单）` : ""}。节点点击进入功能详情；悬停连线查看两个功能如何关联。连接来自 B3 确定性层（共享证据文件），不表示调用或依赖方向。
       </div>
-      <div className="map-canvas">
+      <MapEdgesToggle extraCount={Math.max(map.edges.filter((edge) => !edge.visible).length, 0)}>
         <svg role="img" aria-label="产品行为地图" viewBox={`0 0 ${map.width} ${map.height}`}>
           {map.edges.map((edge) => <MapEdgePath edge={edge} nodes={map.nodes} key={edge.id} />)}
           {map.nodes.map((node) => (
@@ -67,7 +68,7 @@ export function ProductMapView({ features, scenarios }: { features: FeatureRow[]
             </a>
           ))}
         </svg>
-      </div>
+      </MapEdgesToggle>
       {stats.edgeCount === 0 ? (
         <div className="empty-state">暂无功能间共享证据面连接：B3 确定性层未发现跨功能共享的证据文件（常见于功能边界清晰的产品）。功能节点仍完整列出，不表示功能彼此独立。</div>
       ) : (

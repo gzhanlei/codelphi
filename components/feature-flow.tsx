@@ -38,7 +38,7 @@ function NodeText({ node }: { node: FlowNode }) {
 function Node({ node }: { node: FlowNode }) {
   const tooltip = `${node.title}${node.outcome ? ` → ${node.outcome}` : ""}`;
   return (
-    <g className={`flow-node ${node.kind}`}>
+    <g className={`flow-node ${node.kind} cat-${node.category ?? "happy"}`}>
       <rect x={node.x} y={node.y} width={160} height={70} rx={8} />
       {/* React 19 会把 <title> 当文档元数据提升到 head，SVG 内的悬浮提示必须用原始 HTML 注入。 */}
       <title dangerouslySetInnerHTML={{ __html: tooltip }} />
@@ -51,7 +51,7 @@ export function FeatureFlow({ featureName, scenarios }: { featureName: string; s
   const flow = buildFeatureFlow(scenarios.map((scenario) => ({ ...scenario, evidence: evidenceItems(scenario.evidence) })));
   return (
     <section className="feature-flow">
-      <div className="flow-note">每个场景从使用情境独立展开，节点内即操作与结果；不按编号推断先后顺序，也不添加额外结束条件。</div>
+      <div className="flow-note">每个场景从使用情境独立展开，节点内即操作与结果；连线表示情境归属而非先后顺序，也不添加额外结束条件。颜色：绿=正常路径，黄=边界情况，红=错误路径（错误节点突出用户可见结果）。</div>
       {flow.nodes.length === 0 ? <div className="empty-state">暂无可推导的场景。</div> : (
       <div className="flow-canvas">
         <svg role="img" aria-label={`${featureName} 流程图`} viewBox={`0 0 ${flow.width} ${flow.height}`}>

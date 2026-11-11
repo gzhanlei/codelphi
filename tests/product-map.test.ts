@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAP_MAX_EDGES, buildProductMap } from "../lib/product-map";
+import { MAP_DEFAULT_EDGES, MAP_MAX_EDGES, buildProductMap } from "../lib/product-map";
 import type { FeatureRow, ScenarioRow } from "../lib/types";
 
 const feature = (id: number, name: string, parentId: number | null = null, summary = `${name}摘要`): FeatureRow =>
@@ -37,6 +37,40 @@ describe("product map layout (B3.2 产品级合成)", () => {
     expect(map.stats.truncatedEdgeCount).toBe(0);
   });
 
+  it("clusters strongly-connected features into adjacent columns instead of alphabetical order", () => {
+    // 名称序 = 甲(2), 乙(3), 丙(1)；连接强度链 = 丙↔甲(10) 强于 甲↔乙(1) → 列序应为 丙, 甲, 乙
+    const map = buildProductMap(
+      [feature(1, "丙"), feature(2, "甲"), feature(3, "乙")],
+      [
+        scenario(1, 1, "HP-1", ["heavy.ts"]), scenario(2, 2, "HP-1", ["heavy.ts"]),
+        scenario(3, 2, "HP-1", ["light.ts"]), scenario(4, 3, "HP-1", ["light.ts"]),
+      ],
+    );
+    const bing = map.nodes.find((node) => node.id === 1)!;
+    const jia = map.nodes.find((node) => node.id === 2)!;
+    const yi = map.nodes.find((node) => node.id === 3)!;
+    expect(bing.x).toBeLessThan(jia.x);
+    expect(jia.x).toBeLessThan(yi.x);
+  });
+
+  it("marks the first MAP_DEFAULT_EDGES edges visible and the rest as toggleable extras", () => {
+    const map = buildProductMap(
+      Array.from({ length: 10 }, (_, index) => feature(index + 1, `功能${index + 1}`)),
+      Array.from({ length: 10 * 10 }, (_, index) => {
+        const a = Math.floor(index / 10) + 1;
+        const b = (index % 10) + 1;
+        return scenario(index + 1, a, "HP-1", b === a ? [`self-${a}.ts`] : [`pair-${Math.min(a, b)}-${Math.max(a, b)}.ts`, `pair-${Math.min(a, b)}-${Math.max(a, b)}.ts`]);
+      }),
+    );
+    expect(map.edges.length).toBeLessThanOrEqual(MAP_MAX_EDGES);
+    expect(map.stats.visibleEdgeCount).toBe(Math.min(map.edges.length, MAP_DEFAULT_EDGES));
+    const visible = map.edges.filter((edge) => edge.visible);
+    const extras = map.edges.filter((edge) => !edge.visible);
+    expect(visible).toHaveLength(map.stats.visibleEdgeCount);
+    // 可见边权重不低于任何被折叠边
+    expect(Math.min(...visible.map((edge) => edge.weight))).toBeGreaterThanOrEqual(Math.max(...extras.map((edge) => edge.weight), 0));
+  });
+
   it("is deterministic for identical input", () => {
     const features = [feature(1, "登录"), feature(2, "导出"), feature(3, "找回", 1)];
     const scenarios = [scenario(1, 1, "HP-1", ["a.ts"]), scenario(2, 2, "HP-1", ["a.ts"])];
@@ -60,6 +94,9 @@ describe("product map layout (B3.2 产品级合成)", () => {
     expect(map.edges).toHaveLength(MAP_MAX_EDGES);
     expect(map.stats.edgeCount).toBe((featureCount * (featureCount - 1)) / 2);
     expect(map.stats.truncatedEdgeCount).toBe(map.stats.edgeCount - MAP_MAX_EDGES);
+    expect(map.stats.visibleEdgeCount).toBe(MAP_DEFAULT_EDGES);
+    expect(map.edges[0].visible).toBe(true);
+    expect(map.edges[MAP_MAX_EDGES - 1].visible).toBe(false);
     // 降序：首边权重不低于末边
     expect(map.edges[0].weight).toBeGreaterThanOrEqual(map.edges[MAP_MAX_EDGES - 1].weight);
   });
