@@ -1,4 +1,5 @@
 import { getDb } from "./db";
+import { parseJsonValue } from "./json";
 import { loadBlockViews, type ReleaseNoteRow } from "./release-notes-service";
 
 /**
@@ -7,11 +8,27 @@ import { loadBlockViews, type ReleaseNoteRow } from "./release-notes-service";
  * 门控 = 产品公开演示开关（migration 025 语义），非公开产品 404。
  */
 
+export interface FeatureCopyRow {
+  feature: string;
+  section: "新增" | "改进" | "修复" | "移除";
+  text: string;
+}
+
+export function parseFeatureCopyRows(value: unknown): FeatureCopyRow[] {
+  const parsed = parseJsonValue(value);
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter((item): item is FeatureCopyRow => Boolean(item && typeof item === "object" && typeof (item as { feature?: unknown }).feature === "string" && typeof (item as { text?: unknown }).text === "string"));
+}
+
 export interface ChangelogEntry {
   releaseId: number;
   releaseTitle: string;
   /** 发布级摘要（AI 生成，面向用户可感知变化）——公开页的导语。 */
   releaseSummary: string;
+  /** 导语改写（用户影响语言）；非空时优先于 releaseSummary。 */
+  leadOverride: string | null;
+  /** 功能级成文（合并发布：每功能一条）；非空时公开正文优先用它。 */
+  featureCopy: FeatureCopyRow[];
   releaseSha: string;
   releaseUrl: string | null;
   committedAt: Date;
@@ -25,7 +42,7 @@ export async function loadPublishedChangelog(productId: number, limit = 30): Pro
   const noteResult = await db.execute(
     `SELECT n.id, n.status, n.emphasis, n.voice_id AS voiceId, n.share_token AS shareToken,
             n.published_at AS publishedAt, n.unpublished_at AS unpublishedAt, n.release_id AS releaseId,
-            r.title AS releaseTitle, r.summary AS releaseSummary, r.sha AS releaseSha, r.url AS releaseUrl, r.committed_at AS committedAt
+            r.title AS releaseTitle, r.summary AS releaseSummary, n.lead_override AS leadOverride, n.feature_copy_json AS featureCopyJson, r.sha AS releaseSha, r.url AS releaseUrl, r.committed_at AS committedAt
      FROM release_notes n JOIN releases r ON r.id = n.release_id
      WHERE n.product_id = ? AND n.status = 'published'
      ORDER BY n.published_at DESC LIMIT ${limit}`,
@@ -33,7 +50,7 @@ export async function loadPublishedChangelog(productId: number, limit = 30): Pro
   ) as unknown;
   const noteRows = (Array.isArray(noteResult) ? noteResult[0] : noteResult) as Array<Omit<ReleaseNoteRow, "status" | "emphasis" | "voiceId" | "shareToken" | "publishedAt" | "unpublishedAt" | "releaseId"> & {
     status: string; emphasis: string; voiceId: number | null; shareToken: string | null; publishedAt: Date | null; unpublishedAt: Date | null; releaseId: number;
-    releaseTitle: string; releaseSummary: string | null; releaseSha: string; releaseUrl: string | null; committedAt: Date;
+    releaseTitle: string; releaseSummary: string | null; leadOverride: string | null; featureCopyJson: unknown; releaseSha: string; releaseUrl: string | null; committedAt: Date;
   }>;
   const notes = noteRows ?? [];
   const entries: ChangelogEntry[] = [];
@@ -43,6 +60,8 @@ export async function loadPublishedChangelog(productId: number, limit = 30): Pro
       releaseId: note.releaseId,
       releaseTitle: note.releaseTitle,
       releaseSummary: note.releaseSummary ?? "",
+      leadOverride: note.leadOverride ?? null,
+      featureCopy: parseFeatureCopyRows(note.featureCopyJson),
       releaseSha: note.releaseSha,
       releaseUrl: note.releaseUrl,
       committedAt: note.committedAt,
@@ -90,6 +109,10 @@ export interface ChangelogDocEntry {
   releaseTitle: string;
   /** 合成公告标题（Specsight 的 H1）；缺省回退 releaseTitle。 */
   headline?: string | null;
+  /** 功能级成文（合并发布正文）：每功能一条用户可读说明按分类分节；缺省回退块合并。 */
+  featureCopy?: Array<{ feature: string; section: string; text: string }>;
+  /** 导语改写（用户影响语言）；缺省用 releaseSummary。 */
+  leadOverride?: string | null;
   releaseSummary?: string | null;
   releaseSha: string;
   releaseUrl?: string | null;
@@ -105,27 +128,41 @@ export function renderChangelogDocument(input: {
   entries: ChangelogDocEntry[];
 }): string {
   const body = input.entries.map((entry: ChangelogDocEntry & { emphasis?: string | null }) => {
-    const sections = new Map<string, typeof entry.blocks>();
-    for (const block of entry.blocks) {
-      const label = sectionOf(block);
-      sections.set(label, [...(sections.get(label) ?? []), block]);
+    // 合并发布成文优先：feature_copy_json 的每功能一条用户可读说明按分类分节；
+    // 未生成时回退为块条目，并把同一功能的多条合并成一个条目（句子「；」连接）
+    const fromCopy = entry.featureCopy !== undefined && entry.featureCopy !== null;
+    const sections = new Map<string, Array<{ featureName: string; text: string }>>();
+    if (fromCopy) {
+      for (const copy of entry.featureCopy!) {
+        sections.set(copy.section, [...(sections.get(copy.section) ?? []), { featureName: copy.feature, text: copy.text }]);
+      }
+    } else {
+      for (const block of entry.blocks) {
+        const label = sectionOf(block);
+        sections.set(label, [...(sections.get(label) ?? []), { featureName: block.featureName, text: block.summary }]);
+      }
     }
-    const ordered = SECTION_ORDER.filter((label) => sections.has(label)).concat([...sections.keys()].filter((label) => !SECTION_ORDER.includes(label)));
-    // 合并发布（用户裁决）：同一功能的多条变化合并为一个条目，句子用「；」连接
-    const mergedBySection = new Map<string, Array<{ featureName: string; text: string }>>();
-    for (const [label, blocks] of sections) {
-      const byFeature = new Map<string, string[]>();
-      for (const block of blocks) byFeature.set(block.featureName, [...(byFeature.get(block.featureName) ?? []), block.summary]);
-      mergedBySection.set(label, [...byFeature.entries()].map(([featureName, summaries]) => ({ featureName, text: summaries.join("；") })));
+    const ordered = [...new Set([...SECTION_ORDER.filter((label) => sections.has(label)), ...sections.keys()])];
+    let mergedBySection: Map<string, Array<{ featureName: string; text: string }>>;
+    if (fromCopy) {
+      mergedBySection = sections;
+    } else {
+      mergedBySection = new Map<string, Array<{ featureName: string; text: string }>>();
+      for (const [label, blocks] of sections) {
+        const byFeature = new Map<string, string[]>();
+        for (const item of blocks) byFeature.set(item.featureName, [...(byFeature.get(item.featureName) ?? []), item.text]);
+        mergedBySection.set(label, [...byFeature.entries()].map(([featureName, summaries]) => ({ featureName, text: summaries.join("；") })));
+      }
     }
     // 按功能分组的「全部变化」（折叠区）：内部锚点藏在链接后
     const byFeature = new Map<string, typeof entry.blocks>();
     for (const block of entry.blocks) byFeature.set(block.featureName, [...(byFeature.get(block.featureName) ?? []), block]);
+    const leadText = entry.leadOverride ?? entry.releaseSummary;
 
     return `<section class="cl-entry">
 <div class="cl-meta">来源 · ${esc(formatDate(entry.publishedAt))}${entry.releaseUrl ? ` · <a href="${esc(entry.releaseUrl)}" rel="noreferrer">源码 ↗</a>` : ` · <code>${esc(entry.releaseSha.slice(0, 7))}</code>`}</div>
 <h2>${esc(entry.headline || entry.releaseTitle)}</h2>
-${entry.releaseSummary ? `<p class="cl-lead">${esc(entry.releaseSummary)}</p>` : ""}
+${leadText ? `<p class="cl-lead">${esc(leadText)}</p>` : ""}
 ${(entry.emphasis ?? "").trim() ? `<p class="cl-emphasis">${esc(entry.emphasis!.trim())}</p>` : ""}
 ${ordered.map((label) => `<h3 class="cl-section">${esc(label)}</h3>
 <ul class="cl-list">${(mergedBySection.get(label) ?? []).map((item) => `<li><strong>${esc(item.featureName)}</strong>${item.text ? `：${esc(item.text)}` : ""}</li>`).join("")}</ul>`).join("\n")}

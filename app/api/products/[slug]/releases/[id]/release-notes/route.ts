@@ -5,7 +5,7 @@ import { getDb } from "@/lib/db";
 import { randomBytes } from "node:crypto";
 import { buildDraftBlocks, canPublish, publishOrder, releaseNotePublicUrl, validateDraft } from "@/lib/release-notes";
 import { loadBlockViews, loadNoteByRelease, releaseChanges, releaseOwned } from "@/lib/release-notes-service";
-import { rewriteDraftBlocksToUserVoice, composeHeadline } from "@/lib/release-notes-enhance";
+import { rewriteReleaseNoteCopy } from "@/lib/release-notes-enhance";
 import { requestStructuredCompletion } from "@/lib/ai";
 import { appUrl } from "@/lib/env";
 
@@ -104,23 +104,25 @@ export async function POST(request: NextRequest) {
     }
     await connection.commit();
 
-    // 草稿文案人话化（异步，不阻塞面板）：规格 diff 语言 → 用户影响语言。
-    // 锚定/证据不变（只写 summary_override），失败保留原文；面板刷新即见改写结果。
+    // 草稿文案成文化（异步，不阻塞面板）：按功能合并变化 → 用户影响语言 + 公告标题。
+    // 锚定/证据不变（feature_copy_json + summary_override 承载），失败保留原文。
     after(async () => {
       try {
         const blocks = await loadBlockViews(db.execute.bind(db), noteId);
         if (blocks.length === 0) return;
-        const outcome = await rewriteDraftBlocksToUserVoice(
+        const groups = [...new Set(blocks.map((block) => block.featureName))].map((featureName) => ({
+          featureName,
+          blocks: blocks.filter((block) => block.featureName === featureName).map((block) => ({ kind: block.kind, featureName: block.featureName, summary: block.summary })),
+        }));
+        const releaseResult = await db.execute("SELECT summary FROM releases WHERE id = ?", [releaseId]) as unknown;
+        const releaseRows = (Array.isArray(releaseResult) ? releaseResult[0] : releaseResult) as Array<{ summary: string }>;
+        const releaseSummary = releaseRows?.[0]?.summary ?? "";
+        const outcome = await rewriteReleaseNoteCopy(
           { execute: (sql: string, params?: unknown[]) => db.execute(sql, params as never) },
           { completion: (messages, billing) => requestStructuredCompletion(messages, billing) },
-          { noteId, emphasis: String(body.emphasis ?? ""), blocks: blocks.map((block) => ({ position: block.position, kind: block.kind, featureName: block.featureName, scenarioReference: block.scenarioReference, summary: block.summary, highlightType: block.highlightType })) },
+          { noteId, releaseTitle: changes[0]?.featureName ?? "", emphasis: String(body.emphasis ?? ""), releaseSummary, groups },
         );
-        const headlineOutcome = await composeHeadline(
-          { execute: (sql: string, params?: unknown[]) => db.execute(sql, params as never) },
-          { completion: (messages, billing) => requestStructuredCompletion(messages, billing) },
-          { noteId, bullets: blocks.map((block) => block.summary), releaseTitle: String(body.emphasis ?? "") },
-        );
-        console.log("[release-notes] manual draft copy rewritten", { releaseId, ...outcome, headline: headlineOutcome.headline });
+        console.log("[release-notes] manual draft copy rewritten", { releaseId, ...outcome });
       } catch (error) {
         console.warn("[release-notes] manual draft rewrite skipped", { releaseId, error: error instanceof Error ? error.message.slice(0, 160) : String(error) });
       }

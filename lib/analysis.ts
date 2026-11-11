@@ -25,7 +25,7 @@ import type { SpecFeature } from "./spec-diff";
 import type { SpecAnchorFeature } from "./spec-versions";
 import { markSpecDrift } from "./spec-drift";
 import { deliverAnalysisNotifications } from "./notifications";
-import { rewriteDraftBlocksToUserVoice, composeHeadline } from "./release-notes-enhance";
+import { rewriteReleaseNoteCopy } from "./release-notes-enhance";
 import { requestStructuredCompletion } from "./ai";
 import { loadNoteByRelease, loadBlockViews } from "./release-notes-service";
 import { ensureRegressionTasks } from "./regression-tasks";
@@ -571,9 +571,7 @@ async function runAnalysisBody(run: RunContext) {
   // M1 通知分发：分析事务提交后 best-effort 投递；失败只记日志，不影响分析结果。
   try {
     await deliverAnalysisNotifications({ run, releaseUrl: change.url, specVersionId, collapse, featureCollapses, misplacedCount: misplacedScenarios.length });
-    // 发布稿草稿文案人话化（业界共识：公告写用户影响，不写规格 diff 语言）：
-    // 自动草稿落库后批量 AI 改写为用户影响语言（锚定/证据不变，summary_override 承载，
-    // 人工发布门禁不变）。best-effort：改写失败保留规格原文，不回滚分析。
+    // 发布稿草稿文案成文化（best-effort）：按功能合并 → 用户影响语言 + 公告标题。
     try {
       if (releaseId) {
         const note = await loadNoteByRelease(getDb().execute.bind(getDb()), releaseId);
@@ -581,17 +579,16 @@ async function runAnalysisBody(run: RunContext) {
           const blocks = await loadBlockViews(getDb().execute.bind(getDb()), note.id);
           const editable = blocks.filter((block) => !block.overridden);
           if (editable.length > 0) {
-            const outcome = await rewriteDraftBlocksToUserVoice(
+            const groups = [...new Set(editable.map((block) => block.featureName))].map((featureName) => ({
+              featureName,
+              blocks: editable.filter((block) => block.featureName === featureName).map((block) => ({ kind: block.kind, featureName: block.featureName, summary: block.summary })),
+            }));
+            const outcome = await rewriteReleaseNoteCopy(
               { execute: (sql: string, params?: unknown[]) => getDb().execute(sql, params as never) },
               { completion: (messages, billing) => requestStructuredCompletion(messages, billing) },
-              { noteId: note.id, emphasis: note.emphasis ?? "", blocks: editable.map((block) => ({ position: block.position, kind: block.kind, featureName: block.featureName, scenarioReference: block.scenarioReference, summary: block.summary, highlightType: block.highlightType })) },
+              { noteId: note.id, releaseTitle: change.message.split("\n")[0].trim().slice(0, 120), emphasis: note.emphasis ?? "", releaseSummary: "", groups },
             );
-            const headlineOutcome = await composeHeadline(
-              { execute: (sql: string, params?: unknown[]) => getDb().execute(sql, params as never) },
-              { completion: (messages, billing) => requestStructuredCompletion(messages, billing) },
-              { noteId: note.id, bullets: editable.map((block) => block.summary), releaseTitle: change.message.split("\n")[0].trim().slice(0, 120) },
-            );
-            console.log("[release-notes] auto-draft copy rewritten to user voice", { runId: run.id, releaseId, ...outcome, headline: headlineOutcome.headline });
+            console.log("[release-notes] draft copy rewritten", { runId: run.id, releaseId, ...outcome, headline: outcome.headline });
           }
         }
       }
