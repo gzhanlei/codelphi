@@ -159,7 +159,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
       return NextResponse.json({ ...decorated, aiAnswer: { answer: synthesis.answer, used: synthesis.used } });
     }
     // 模型如实拒答：条目不足以成文
-    return NextResponse.json({ ...decorated, aiAnswer: null, answerInsufficient: true });
+    return NextResponse.json({ ...decorated, aiAnswer: null, answerInsufficient: true, insufficientReason: synthesis.reason || "规格未包含可回答该问题的条目" });
   } catch (error) {
     console.warn("[spec-ask] answer synthesis failed; falling back to raw cards", { slug, error: error instanceof Error ? error.message.slice(0, 160) : String(error) });
     return NextResponse.json(decorated);
