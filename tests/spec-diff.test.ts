@@ -415,3 +415,27 @@ describe("mergeSpecSources with carried features (M9)", () => {
     expect(tombstoned).toEqual([]);
   });
 });
+
+describe("scenario step (W-DECISION 判定面裁决)", () => {
+  it("does not count a step-only difference as a behavior change", () => {
+    const chained: SpecFeature = {
+      ...authentication,
+      scenarios: [{ ...authentication.scenarios[0], step: 1 }],
+    };
+    expect(diffSpec([authentication], [chained])).toEqual([]);
+    expect(diffSpec([chained], [authentication])).toEqual([]);
+  });
+
+  it("still counts behavior changes when step also differs", () => {
+    const chainedAndChanged: SpecFeature = {
+      ...authentication,
+      scenarios: [{ ...authentication.scenarios[0], step: 1, outcome: "Opens the billing page" }],
+    };
+    const result = diffSpec([authentication], [chainedAndChanged]);
+    expect(result).toHaveLength(1);
+    expect(result[0].kind).toBe("changed");
+    // 账本如实记录 step：before/after 序列化包含 step 字段
+    const scenarioChange = result.find((change) => change.entityType === "scenario");
+    expect((scenarioChange?.after as { step?: number }).step).toBe(1);
+  });
+});

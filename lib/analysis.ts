@@ -155,18 +155,19 @@ async function upsertFeature(connection: PoolConnection, run: RunContext, featur
   for (const scenario of feature.scenarios) {
     await connection.execute(
       `INSERT INTO scenarios
-         (feature_id, reference, context, action, outcome, category, source, active, evidence)
-       VALUES (?, ?, ?, ?, ?, ?, 'generated', 1, ?)
+         (feature_id, reference, context, action, outcome, category, step_order, source, active, evidence)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'generated', 1, ?)
        ON DUPLICATE KEY UPDATE
          context = IF(source = 'generated', VALUES(context), context),
          action = IF(source = 'generated', VALUES(action), action),
          outcome = IF(source = 'generated', VALUES(outcome), outcome),
          category = IF(source = 'generated', VALUES(category), category),
+         step_order = IF(source = 'generated', VALUES(step_order), step_order),
          evidence = IF(source = 'generated', VALUES(evidence), evidence),
          verified_at = IF(source = 'generated' AND (context <> VALUES(context) OR action <> VALUES(action) OR outcome <> VALUES(outcome) OR category <> VALUES(category)), NULL, verified_at),
          verified_by = IF(source = 'generated' AND (context <> VALUES(context) OR action <> VALUES(action) OR outcome <> VALUES(outcome) OR category <> VALUES(category)), NULL, verified_by),
          active = IF(source = 'generated', 1, active)`,
-      [featureId, scenario.reference, scenario.context, scenario.action, scenario.outcome, scenario.category, JSON.stringify(scenario.evidence)],
+      [featureId, scenario.reference, scenario.context, scenario.action, scenario.outcome, scenario.category, scenario.step ?? null, JSON.stringify(scenario.evidence)],
     );
   }
 }

@@ -113,3 +113,43 @@ describe("FeatureFlow component", () => {
     expect(html).toContain(longOutcome);
   });
 });
+
+describe("scenario step chain (W-DECISION 最小序列版)", () => {
+  const stepped = [
+    { reference: "HP-1", context: "Visitor", action: "Connect a repository", outcome: "Repository linked", category: "happy" as const, step: 1, evidence: [] },
+    { reference: "HP-2", context: "Visitor", action: "Trigger first analysis", outcome: "Spec generated", category: "happy" as const, step: 2, evidence: [] },
+    { reference: "EC-1", context: "Visitor", action: "Repository over size limit", outcome: "Warning with limit request", category: "edge" as const, step: 1, evidence: [] },
+    { reference: "ER-1", context: "Visitor", action: "Token rejected", outcome: "Reconnect banner", category: "error" as const, evidence: [] },
+  ];
+
+  it("chains stepped happy scenarios in step order and attaches branches to their step", () => {
+    const flow = buildFeatureFlow(stepped);
+    expect(flow.edges).toContainEqual(expect.objectContaining({ from: "start-0", to: "HP-1" }));
+    expect(flow.edges).toContainEqual(expect.objectContaining({ from: "HP-1", to: "HP-2" }));
+    expect(flow.edges).toContainEqual(expect.objectContaining({ from: "HP-1", to: "EC-1" }));
+    // 无 step 的错误场景保持从起点扇出
+    expect(flow.edges).toContainEqual(expect.objectContaining({ from: "start-0", to: "ER-1" }));
+    const hp1 = flow.nodes.find((node) => node.id === "HP-1")!;
+    const hp2 = flow.nodes.find((node) => node.id === "HP-2")!;
+    const ec1 = flow.nodes.find((node) => node.id === "EC-1")!;
+    expect(hp1.x).toBeLessThan(hp2.x);
+    expect(ec1.y).toBeGreaterThan(hp1.y);
+  });
+
+  it("keeps stepless data rendering identical to the legacy fan-out", () => {
+    const legacy = buildFeatureFlow([
+      { reference: "HP-1", context: "Visitor", action: "Signs in", outcome: "Dashboard", category: "happy", evidence: [] },
+      { reference: "HP-2", context: "Visitor", action: "Signs out", outcome: "Login", category: "happy", evidence: [] },
+    ]);
+    expect(legacy.edges.map((edge) => [edge.from, edge.to])).toEqual([["start-0", "HP-1"], ["start-0", "HP-2"]]);
+    expect(legacy.nodes.find((node) => node.id === "HP-2")).toMatchObject({ x: 390, y: 60 });
+  });
+
+  it("ignores out-of-range steps deterministically", () => {
+    const flow = buildFeatureFlow([
+      { reference: "HP-1", context: "Visitor", action: "Signs in", outcome: "Dashboard", category: "happy", step: 99, evidence: [] },
+    ]);
+    expect(flow.edges).toContainEqual(expect.objectContaining({ from: "start-0", to: "HP-1" }));
+    expect(flow.edges.filter((edge) => edge.from === "HP-1")).toHaveLength(0);
+  });
+});
