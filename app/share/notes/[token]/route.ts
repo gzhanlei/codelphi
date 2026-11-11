@@ -64,7 +64,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ tok
       blocks,
     }],
   });
-  return new NextResponse(html, { headers: { "content-type": "text/html; charset=utf-8", "x-debug-release": "20261112-feature-copy" } });
+  return new NextResponse(html, { headers: { "content-type": "text/html; charset=utf-8" } });
 }
 
 function evidencePathsOf(subject: unknown): string[] {

@@ -68,7 +68,12 @@ export function ProductOverview({ data, canEdit = false }: { data: ProductOvervi
   return (
     <div className="product-overview">
       <div className="overview-ask">
-        <SpecAsk slug={data.slug} productBase={data.productBase} suggestions={["这个产品的核心功能是什么？", "有哪些使用限制或边界情况？", "怎么配置和启动它？"]} />
+        <SpecAsk
+          slug={data.slug}
+          productBase={data.productBase}
+          // 建议问法从产品自己的能力名生成：检索必命中自己，避免推荐了却答「未覆盖」
+          suggestions={data.capabilities.slice(0, 3).map((capability) => `${capability.name} 是怎么工作的？`)}
+        />
       </div>
       <ReleaseTimeline data={data} />
       <CapabilitiesPanel data={data} />
