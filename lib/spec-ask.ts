@@ -98,6 +98,34 @@ export function parseFeatureSelection(content: string, validIds: ReadonlySet<num
   return parsed.data.relevant.filter((id) => validIds.has(id));
 }
 
+
+/** 确定性功能名匹配：问句与功能名共享中文 2-gram 即视为相关（例：问『架构图』命中『架构事实检测』）。
+ * 词法兜底先于 AI 选功能：同一问句两次调用结果一致，消除模型非确定性导致的『有时能答有时未覆盖』。 */
+export function matchFeaturesByNameGrams(
+  question: string,
+  features: Array<{ id: number; name: string; summary: string }>,
+): Array<{ id: number; name: string; summary: string }> {
+  const normalized = question.trim().slice(0, MAX_QUESTION_LENGTH);
+  const questionGrams = new Set<string>();
+  for (const chunk of normalized.split(/[^\u4e00-\u9fa5]+/)) {
+    for (let index = 0; index + 2 <= chunk.length; index += 1) {
+      const gram = chunk.slice(index, index + 2);
+      if ([...gram].some((character) => STOP_CHARACTERS.has(character))) continue;
+      questionGrams.add(gram);
+    }
+  }
+  return features.filter((feature) => {
+    for (const chunk of feature.name.split(/[^\u4e00-\u9fa5]+/)) {
+      for (let index = 0; index + 2 <= chunk.length; index += 1) {
+        const gram = chunk.slice(index, index + 2);
+        if ([...gram].some((character) => STOP_CHARACTERS.has(character))) continue;
+        if (questionGrams.has(gram)) return true;
+      }
+    }
+    return false;
+  });
+}
+
 export interface QueryTerm {
   value: string;
   /** 英文 / 数字词：单个命中即可作为依据；中文 2-gram 需要两个不同词共同命中。 */

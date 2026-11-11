@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { answerSpecQuestion, buildAnswerSynthesisPrompt, decorateSpecAnswer, loadSpecAnswerContext, parseAnswerSynthesis, buildFeatureSelectPrompt, parseFeatureSelection, type SpecAnswer } from "@/lib/spec-ask";
+import { answerSpecQuestion, buildAnswerSynthesisPrompt, decorateSpecAnswer, loadSpecAnswerContext, parseAnswerSynthesis, buildFeatureSelectPrompt, parseFeatureSelection, matchFeaturesByNameGrams, type SpecAnswer } from "@/lib/spec-ask";
 import { getDb } from "@/lib/db";
 import { resolveSpecReadProductId } from "@/lib/spec-read-access";
 import { getSessionUser } from "@/lib/session";
@@ -28,7 +28,8 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
 
   if (decorated.status !== "matched") {
     // B2.2b 词汇鸿沟兜底：词法检索未命中 ≠ 规格没答案（例：问『语言』，条目写的是 Next.js/Go）。
-    // 一次 AI 调用从功能清单选相关功能；选出后取其场景走既有综合链路。两次失败如实返回未覆盖。
+    // 确定性优先：功能名与问句共享 2-gram 的功能直接入选（零模型调用、两次结果一致）；
+    // 词法全空才交给 AI 选功能（模型输出非确定，空选择重试一次）。两次皆空如实返回未覆盖。
     try {
       const featureResult = await getDb().execute(
         "SELECT id, name, summary FROM features WHERE product_id = ? AND active = 1 ORDER BY id LIMIT 100",
@@ -37,24 +38,28 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
       const featureRows = (Array.isArray(featureResult) ? featureResult[0] : featureResult) as Array<{ id: number; name: string; summary: string }>;
       const catalog = featureRows ?? [];
       if (catalog.length === 0) return NextResponse.json({ ...decorated, aiAnswer: null });
-      const [productRow] = (await getDb().execute("SELECT name FROM products WHERE id = ?", [access.productId]) as unknown) as Array<{ name: string }>;
-      const productNameForAsk = productRow?.name ?? "";
-      const selectCall = () => requestStructuredCompletion(
-        [
-          { role: "system", content: "你是检索助手，只输出合规 JSON。" },
-          { role: "user", content: buildFeatureSelectPrompt({ question: decorated.question, productName: productNameForAsk, catalog: catalog.map((item) => ({ id: item.id, name: item.name, summary: item.summary ?? "" })) }) },
-        ],
-        { runId: null, accountId: null, chargeComponent: "main", callKind: "spec_ask_answer" },
-      );
       const validIds = new Set(catalog.map((item) => item.id));
-      const selectContent = await selectCall();
-      let relevant = parseFeatureSelection(selectContent, validIds);
-      // 模型输出非确定：选择为空时重试一次（两次皆空才如实未覆盖）
+      const lexicalIds = new Set(matchFeaturesByNameGrams(decorated.question, catalog).map((feature) => feature.id));
+      let relevant = [...lexicalIds];
       if (relevant.length === 0) {
-        const retryContent = await selectCall();
-        relevant = parseFeatureSelection(retryContent, validIds);
+        const selectCall = () => requestStructuredCompletion(
+          [
+            { role: "system", content: "你是检索助手，只输出合规 JSON。" },
+            { role: "user", content: buildFeatureSelectPrompt({ question: decorated.question, productName: productNameForAsk, catalog: catalog.map((item) => ({ id: item.id, name: item.name, summary: item.summary ?? "" })) }) },
+          ],
+          { runId: null, accountId: null, chargeComponent: "main", callKind: "spec_ask_answer" },
+        );
+        const selectContent = await selectCall();
+        relevant = parseFeatureSelection(selectContent, validIds);
+        // 模型输出非确定：选择为空时重试一次（两次皆空才如实未覆盖）
+        if (relevant.length === 0) {
+          const retryContent = await selectCall();
+          relevant = parseFeatureSelection(retryContent, validIds);
+        }
       }
       if (relevant.length === 0) return NextResponse.json({ ...decorated, aiAnswer: null });
+      const [productRow] = (await getDb().execute("SELECT name FROM products WHERE id = ?", [access.productId]) as unknown) as Array<{ name: string }>;
+      const productNameForAsk = productRow?.name ?? "";
       const idList = relevant.join(",");
       const scenarioResult = await getDb().execute(
         `SELECT s.id, s.feature_id AS featureId, f.name AS featureName, s.reference, s.context, s.action, s.outcome, s.evidence
