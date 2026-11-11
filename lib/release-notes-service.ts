@@ -52,6 +52,7 @@ export interface ReleaseNoteRow {
   id: number;
   status: string;
   emphasis: string;
+  headline: string | null;
   voiceId: number | null;
   shareToken: string | null;
   publishedAt: Date | null;
@@ -61,7 +62,7 @@ export interface ReleaseNoteRow {
 
 export async function loadNoteByRelease(execute: Execute, releaseId: number): Promise<ReleaseNoteRow | null> {
   const [rows] = await execute(
-    `SELECT id, status, emphasis, voice_id AS voiceId, share_token AS shareToken,
+    `SELECT id, status, emphasis, headline, voice_id AS voiceId, share_token AS shareToken,
             published_at AS publishedAt, unpublished_at AS unpublishedAt, release_id AS releaseId
      FROM release_notes WHERE release_id = ?`,
     [releaseId],
@@ -71,7 +72,7 @@ export async function loadNoteByRelease(execute: Execute, releaseId: number): Pr
 
 export async function loadNoteById(execute: Execute, noteId: number, productId: number): Promise<ReleaseNoteRow | null> {
   const [rows] = await execute(
-    `SELECT id, status, emphasis, voice_id AS voiceId, share_token AS shareToken,
+    `SELECT id, status, emphasis, headline, voice_id AS voiceId, share_token AS shareToken,
             published_at AS publishedAt, unpublished_at AS unpublishedAt, release_id AS releaseId
      FROM release_notes WHERE id = ? AND product_id = ?`,
     [noteId, productId],

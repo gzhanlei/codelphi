@@ -55,7 +55,13 @@ export async function loadPublishedChangelog(productId: number, limit = 30): Pro
 }
 
 const KIND_SECTION: Record<string, string> = { added: "新增", changed: "改进", removed: "移除" };
-const SECTION_ORDER = ["新增", "改进", "移除"];
+const SECTION_ORDER = ["新增", "改进", "修复", "移除"];
+
+/** 修复分节判定（确定性）：summary 含修复/fix 语义信号 → Fixed；其余按 kind。 */
+function sectionOf(block: { kind: string; summary: string }): string {
+  if (/修复|fix(ed)?\s|bug/i.test(block.summary)) return "修复";
+  return KIND_SECTION[block.kind] ?? "改进";
+}
 
 function esc(value: string) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -82,6 +88,8 @@ export interface ChangelogDocBlock {
 
 export interface ChangelogDocEntry {
   releaseTitle: string;
+  /** 合成公告标题（Specsight 的 H1）；缺省回退 releaseTitle。 */
+  headline?: string | null;
   releaseSummary?: string | null;
   releaseSha: string;
   releaseUrl?: string | null;
@@ -99,7 +107,7 @@ export function renderChangelogDocument(input: {
   const body = input.entries.map((entry: ChangelogDocEntry & { emphasis?: string | null }) => {
     const sections = new Map<string, typeof entry.blocks>();
     for (const block of entry.blocks) {
-      const label = KIND_SECTION[block.kind] ?? "改进";
+      const label = sectionOf(block);
       sections.set(label, [...(sections.get(label) ?? []), block]);
     }
     const ordered = SECTION_ORDER.filter((label) => sections.has(label)).concat([...sections.keys()].filter((label) => !SECTION_ORDER.includes(label)));
@@ -116,7 +124,7 @@ export function renderChangelogDocument(input: {
 
     return `<section class="cl-entry">
 <div class="cl-meta">来源 · ${esc(formatDate(entry.publishedAt))}${entry.releaseUrl ? ` · <a href="${esc(entry.releaseUrl)}" rel="noreferrer">源码 ↗</a>` : ` · <code>${esc(entry.releaseSha.slice(0, 7))}</code>`}</div>
-<h2>${esc(entry.releaseTitle)}</h2>
+<h2>${esc(entry.headline || entry.releaseTitle)}</h2>
 ${entry.releaseSummary ? `<p class="cl-lead">${esc(entry.releaseSummary)}</p>` : ""}
 ${(entry.emphasis ?? "").trim() ? `<p class="cl-emphasis">${esc(entry.emphasis!.trim())}</p>` : ""}
 ${ordered.map((label) => `<h3 class="cl-section">${esc(label)}</h3>

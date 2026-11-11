@@ -60,6 +60,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ s
   const noteId = Number(noteIdParam);
   const body = (await request.json().catch(() => ({}))) as {
     emphasis?: string;
+    headline?: string;
     blocks?: Array<{ position: number; emphasis?: string; summaryOverride?: string | null }>;
   };
   const user = await getSessionUser();
@@ -72,14 +73,18 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ s
   if (note.status === "published") return NextResponse.json({ error: "已发布只读：先下线才能改" }, { status: 409 });
 
   const updates = (body.blocks ?? []).filter((block) => Number.isInteger(block.position) && block.position > 0);
-  if (body.emphasis === undefined && updates.length === 0) {
+  if (body.emphasis === undefined && body.headline === undefined && updates.length === 0) {
     return NextResponse.json({ error: "没有要保存的修改" }, { status: 400 });
   }
   const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
-    if (body.emphasis !== undefined) {
-      await connection.execute("UPDATE release_notes SET emphasis = ? WHERE id = ?", [String(body.emphasis), noteId]);
+    if (body.emphasis !== undefined || body.headline !== undefined) {
+      const fields: string[] = [];
+      const values: string[] = [];
+      if (body.emphasis !== undefined) { fields.push("emphasis = ?"); values.push(String(body.emphasis)); }
+      if (body.headline !== undefined) { fields.push("headline = ?"); values.push(String(body.headline).slice(0, 400)); }
+      await connection.execute(`UPDATE release_notes SET ${fields.join(", ")} WHERE id = ?`, [...values, noteId]);
     }
     for (const block of updates) {
       const fields: string[] = [];

@@ -5,7 +5,7 @@ import { getDb } from "@/lib/db";
 import { randomBytes } from "node:crypto";
 import { buildDraftBlocks, canPublish, publishOrder, releaseNotePublicUrl, validateDraft } from "@/lib/release-notes";
 import { loadBlockViews, loadNoteByRelease, releaseChanges, releaseOwned } from "@/lib/release-notes-service";
-import { rewriteDraftBlocksToUserVoice } from "@/lib/release-notes-enhance";
+import { rewriteDraftBlocksToUserVoice, composeHeadline } from "@/lib/release-notes-enhance";
 import { requestStructuredCompletion } from "@/lib/ai";
 import { appUrl } from "@/lib/env";
 
@@ -39,6 +39,7 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ sl
       id: note.id,
       status: note.status,
       emphasis: note.emphasis ?? "",
+      headline: note.headline,
       voiceId: note.voiceId,
       shareToken: note.shareToken,
       publicUrl: releaseNotePublicUrl(appUrl(), note.shareToken),
@@ -114,7 +115,12 @@ export async function POST(request: NextRequest) {
           { completion: (messages, billing) => requestStructuredCompletion(messages, billing) },
           { noteId, emphasis: String(body.emphasis ?? ""), blocks: blocks.map((block) => ({ position: block.position, kind: block.kind, featureName: block.featureName, scenarioReference: block.scenarioReference, summary: block.summary, highlightType: block.highlightType })) },
         );
-        console.log("[release-notes] manual draft copy rewritten", { releaseId, ...outcome });
+        const headlineOutcome = await composeHeadline(
+          { execute: (sql: string, params?: unknown[]) => db.execute(sql, params as never) },
+          { completion: (messages, billing) => requestStructuredCompletion(messages, billing) },
+          { noteId, bullets: blocks.map((block) => block.summary), releaseTitle: String(body.emphasis ?? "") },
+        );
+        console.log("[release-notes] manual draft copy rewritten", { releaseId, ...outcome, headline: headlineOutcome.headline });
       } catch (error) {
         console.warn("[release-notes] manual draft rewrite skipped", { releaseId, error: error instanceof Error ? error.message.slice(0, 160) : String(error) });
       }

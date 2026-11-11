@@ -205,6 +205,23 @@ export function ReleaseNotesView({ slug, releaseId, canEdit, changelogHref }: {
         </>
       ) : (
         <>
+          {editable ? (
+            <div className="release-notes-emphasis">
+              <label htmlFor={`notes-headline-${releaseId}`}>公告标题（发布稿的 H1，AI 合成后可修改）</label>
+              <input
+                id={`notes-headline-${releaseId}`}
+                defaultValue={note.headline ?? ""}
+                readOnly={!editable || pending}
+                placeholder="一句话公告标题，如：一条命令连接产品规格与 AI 助手"
+                onBlur={(event) => {
+                  if (event.target.value !== (note.headline ?? "")) act(async () => {
+                    await saveNoteEdits(slug, note.id, { headline: event.target.value });
+                    await load();
+                  }, "标题已保存");
+                }}
+              />
+            </div>
+          ) : note.headline ? <h2 className="notes-headline">{note.headline}</h2> : null}
           {note.emphasis || editable ? (
             <div className="release-notes-emphasis">
               <label htmlFor={`notes-emphasis-${releaseId}`}>重点强调（可选）</label>

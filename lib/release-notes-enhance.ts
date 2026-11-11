@@ -27,7 +27,8 @@ export function buildEnhancePrompt(input: EnhanceBlockInput): string {
     "硬规则：",
     "1. 只基于【原文】给出的事实改写措辞，禁止新增原文没有的功能、数字、日期或承诺。",
     "2. 不改变事实含义；不确定的地方保持原文表述。",
-    "3. 长度 1-3 句；客户可读，避免内部术语、代码路径名与 EC-n/ER-n/HP-n 场景编号（也不要写『场景』二字）。",
+    "3. 输出一段话（20-60 字）：行为陈述式——写『谁能做什么 / 什么情况下会发生什么』，含具体动作与结果；如有边界条件（限流、重试、除非…否则）一并写出。避免内部术语、代码路径名与 EC-n/ER-n/HP-n 场景编号（也不要写『场景』二字）。",
+    "4. 语气：事实、平实、无感叹号、无营销腔。",
     ...(input.emphasis.trim() ? [`4. 全篇强调语是「${input.emphasis.trim()}」，改写向它对齐。`] : []),
     ...(input.instruction.trim() ? [`5. 用户指令：${input.instruction.trim().slice(0, 200)}`] : []),
     "",
@@ -62,6 +63,41 @@ export function parseEnhancedSummary(content: string): string {
   const text = stripped.trim();
   if (!text || text.length > 4000) throw new Error("AI 改写为空或超长");
   return stripScenarioRefs(text);
+}
+
+export interface HeadlineInput {
+  releaseTitle: string;
+  /** 该发布全部条目的改写后文案（用户影响语言）。 */
+  bullets: string[];
+}
+
+/** 合成公告标题（Specsight 形态）：一句平实的公告式标题，非 commit 信息。 */
+export function buildHeadlinePrompt(input: HeadlineInput): string {
+  return [
+    "为一次产品发布写一条公告标题。用简体中文。",
+    "要求：一句话、不超过 40 字；平实的行为/能力陈述（如『一条命令连接 Claude 与产品规格』），不要营销腔、不要感叹号、不要泛泛的『优化体验』；概括下面全部条目中最主要的一两件事。",
+    "只返回 JSON：{\"headline\":\"...\"}",
+    "",
+    "【发布条目】",
+    ...input.bullets.map((bullet, index) => `${index + 1}. ${bullet}`),
+    input.releaseTitle ? `【提交标题（仅供参考，不要照抄）】${input.releaseTitle}` : "",
+  ].join("\n");
+}
+
+const headlineSchema = z.object({ headline: z.string().min(1).max(200) });
+
+export function parseHeadline(content: string): string {
+  const stripped = content.replace(/^\s*```(?:json)?/i, "").replace(/```\s*$/i, "").trim();
+  const start = stripped.indexOf("{");
+  const end = stripped.lastIndexOf("}");
+  if (start >= 0 && end > start) {
+    const parsed = headlineSchema.safeParse(JSON.parse(stripped.slice(start, end + 1)));
+    if (parsed.success) return stripScenarioRefs(parsed.data.headline.trim());
+    throw new Error(parsed.error.issues[0]?.message ?? "标题结构不合格");
+  }
+  const text = stripScenarioRefs(stripped.trim());
+  if (!text || text.length > 200) throw new Error("AI 标题为空或超长");
+  return text;
 }
 
 export interface DraftBlockForRewrite {
@@ -119,4 +155,31 @@ export async function rewriteDraftBlocksToUserVoice(
     }
   }
   return { rewritten, failed };
+}
+
+export interface HeadlineRewriteOutcome {
+  headline: string | null;
+}
+
+/** 合成公告标题并落库（release_notes.headline，人工可改）。best-effort：失败返回 null。 */
+export async function composeHeadline(
+  execute: { execute: (sql: string, params?: unknown[]) => Promise<unknown> },
+  deps: { completion: (messages: Array<{ role: string; content: string }>, billing: { runId: number | null; accountId: number | null; chargeComponent: "main" | "platform_shadow"; callKind?: string | null }) => Promise<string> },
+  input: { noteId: number; bullets: string[]; releaseTitle: string },
+): Promise<HeadlineRewriteOutcome> {
+  try {
+    const content = await deps.completion(
+      [
+        { role: "system", content: "你是产品公告编辑，只输出合规的标题。" },
+        { role: "user", content: buildHeadlinePrompt({ releaseTitle: input.releaseTitle, bullets: input.bullets }) },
+      ],
+      { runId: null, accountId: null, chargeComponent: "main", callKind: "release_note_enhance" },
+    );
+    const headline = parseHeadline(content);
+    await execute.execute("UPDATE release_notes SET headline = ? WHERE id = ?", [headline, input.noteId]);
+    return { headline };
+  } catch (error) {
+    console.warn("[release-notes] headline compose failed", { noteId: input.noteId, error: error instanceof Error ? error.message.slice(0, 120) : String(error) });
+    return { headline: null };
+  }
 }

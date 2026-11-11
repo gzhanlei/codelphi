@@ -13,6 +13,7 @@ export interface ReleaseNoteState {
     id: number;
     status: string;
     emphasis: string;
+    headline: string | null;
     voiceId: number | null;
     shareToken: string | null;
     publicUrl: string | null;
@@ -41,7 +42,7 @@ export async function generateDraft(slug: string, releaseId: number, selectedIds
 export async function saveNoteEdits(
   slug: string,
   noteId: number,
-  payload: { emphasis?: string; blocks?: Array<{ position: number; emphasis?: string; summaryOverride?: string | null }> },
+  payload: { emphasis?: string; headline?: string; blocks?: Array<{ position: number; emphasis?: string; summaryOverride?: string | null }> },
   fetcher: Fetcher = fetch,
 ) {
   const response = await fetcher(`/api/products/${slug}/release-notes/${noteId}`, {

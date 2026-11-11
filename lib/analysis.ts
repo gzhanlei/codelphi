@@ -25,7 +25,7 @@ import type { SpecFeature } from "./spec-diff";
 import type { SpecAnchorFeature } from "./spec-versions";
 import { markSpecDrift } from "./spec-drift";
 import { deliverAnalysisNotifications } from "./notifications";
-import { rewriteDraftBlocksToUserVoice } from "./release-notes-enhance";
+import { rewriteDraftBlocksToUserVoice, composeHeadline } from "./release-notes-enhance";
 import { requestStructuredCompletion } from "./ai";
 import { loadNoteByRelease, loadBlockViews } from "./release-notes-service";
 import { ensureRegressionTasks } from "./regression-tasks";
@@ -586,7 +586,12 @@ async function runAnalysisBody(run: RunContext) {
               { completion: (messages, billing) => requestStructuredCompletion(messages, billing) },
               { noteId: note.id, emphasis: note.emphasis ?? "", blocks: editable.map((block) => ({ position: block.position, kind: block.kind, featureName: block.featureName, scenarioReference: block.scenarioReference, summary: block.summary, highlightType: block.highlightType })) },
             );
-            console.log("[release-notes] auto-draft copy rewritten to user voice", { runId: run.id, releaseId, ...outcome });
+            const headlineOutcome = await composeHeadline(
+              { execute: (sql: string, params?: unknown[]) => getDb().execute(sql, params as never) },
+              { completion: (messages, billing) => requestStructuredCompletion(messages, billing) },
+              { noteId: note.id, bullets: editable.map((block) => block.summary), releaseTitle: change.message.split("\n")[0].trim().slice(0, 120) },
+            );
+            console.log("[release-notes] auto-draft copy rewritten to user voice", { runId: run.id, releaseId, ...outcome, headline: headlineOutcome.headline });
           }
         }
       }
