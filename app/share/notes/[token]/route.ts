@@ -37,6 +37,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ tok
      WHERE b.release_note_id = ? ORDER BY b.position`,
     [note.id],
   );
+  console.log("[share-notes-dbg] row:", JSON.stringify({ id: note.id, leadOverride: note.leadOverride, featureCopyJson: note.featureCopyJson === null ? null : String(note.featureCopyJson).slice(0, 80), status: note.status }));
   const blocks = (blockRows as Array<{ position: number; summaryOverride: string | null; kind: string; featureName: string; scenarioReference: string; summary: string; highlightType: string | null; beforeJson: unknown; afterJson: unknown }>).map((row) => ({
     position: Number(row.position),
     kind: row.kind,
@@ -51,6 +52,9 @@ export async function GET(request: NextRequest, context: { params: Promise<{ tok
     specBase: null,
     entries: [{
       releaseTitle: note.releaseTitle,
+      headline: note.headline,
+      leadOverride: note.leadOverride,
+      featureCopy: parseFeatureCopyRows(note.featureCopyJson),
       releaseSummary: note.releaseSummary ?? "",
       releaseSha: note.releaseSha,
       releaseUrl: note.releaseUrl,
