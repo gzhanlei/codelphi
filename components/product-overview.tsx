@@ -67,11 +67,18 @@ function ChangesContent({ data }: { data: ProductOverviewData }) {
 }
 
 function ChangesPanel({ data }: { data: ProductOverviewData }) {
+  const note = data.latestReleaseNote;
+  const noteStatus = note?.status === "published"
+    ? { label: `发布稿已发布（${note.blocks} 条变化）`, href: `?view=changes`, linkText: "查看发布稿 →" }
+    : note?.status === "draft"
+      ? { label: `发布稿草稿已生成（${note.blocks} 条，待人工校对）`, href: `?view=changes`, linkText: "去校对并发布 →" }
+      : null;
   return (
     <section className="overview-panel">
       <div className="overview-panel-heading"><span>02</span><h2>最近改变了什么</h2></div>
       <p>优先展示确定性的行为 Diff，而不是 Commit 列表或 AI 摘要。</p>
       <ChangesContent data={data} />
+      {noteStatus ? <p className="overview-note release-note-cta">{noteStatus.label} <Link className="text-button" href={noteStatus.href}>{noteStatus.linkText}</Link></p> : null}
       <Link className="overview-text-link" href="?view=changes">查看全部发布变化 →</Link>
     </section>
   );

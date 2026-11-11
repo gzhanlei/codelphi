@@ -25,6 +25,9 @@ import type { SpecFeature } from "./spec-diff";
 import type { SpecAnchorFeature } from "./spec-versions";
 import { markSpecDrift } from "./spec-drift";
 import { deliverAnalysisNotifications } from "./notifications";
+import { rewriteDraftBlocksToUserVoice } from "./release-notes-enhance";
+import { requestStructuredCompletion } from "./ai";
+import { loadNoteByRelease, loadBlockViews } from "./release-notes-service";
 import { ensureRegressionTasks } from "./regression-tasks";
 import { ensureAutoReleaseNoteDraft } from "./release-notes-service";
 
@@ -215,7 +218,7 @@ export async function upsertRelease(connection: PoolConnection, run: RunContext,
   if (hasChanges) {
     await ensureRegressionTasks(connection, releaseId);
     await ensureAutoReleaseNoteDraft(connection, releaseId);
-    return;
+    return releaseId;
   }
 
   for (const item of result.changes) {
@@ -227,6 +230,7 @@ export async function upsertRelease(connection: PoolConnection, run: RunContext,
   }
   await ensureRegressionTasks(connection, releaseId);
   await ensureAutoReleaseNoteDraft(connection, releaseId);
+  return releaseId;
 }
 
 async function saveResult(run: RunContext, result: AnalysisResult, change: ChangeContext, affectedKeys: ReadonlySet<string> | null = null, coverage?: AnalysisCoverageReceipt) {
@@ -247,10 +251,10 @@ async function saveResult(run: RunContext, result: AnalysisResult, change: Chang
     // P0(I1):下线基准必须是 carry-forward 合并后的完整规格——用 AI 原始输出会让
     // 增量模式把未受影响的 generated 功能全部下线,工作台坍缩为本次触及的功能。
     await upsertGeneratedSpec(connection, run, mergedFeatures);
-    await upsertRelease(connection, run, result, change, specVersionId);
+    const releaseId = await upsertRelease(connection, run, result, change, specVersionId);
     await connection.execute("UPDATE analysis_runs SET status = 'succeeded', finished_at = CURRENT_TIMESTAMP(3) WHERE id = ?", [run.id]);
     await connection.commit();
-    return { specVersionId, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped };
+    return { specVersionId, releaseId, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped };
   } catch (error) {
     await connection.rollback();
     throw error;
@@ -521,7 +525,7 @@ async function runAnalysisBody(run: RunContext) {
     console.log("[analysis] behavioral enumeration", { runId: run.id, ...enumerationMetrics });
   }
   } // else：提取分支结束（BM-10 零行为变更窗口不进入）
-  const { specVersionId, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped } = await saveResult(run, result, change, affectedKeys, coverage);
+  const { specVersionId, releaseId, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped } = await saveResult(run, result, change, affectedKeys, coverage);
   // W0-9 一致性核验：同功能内互斥结果并存（枚举多通道产物的语义矛盾）→ 告警供人工核实（append-only 已落库，不改写）
   const conflicts = detectOutcomeConflicts(mergedFeatures);
   if (conflicts.length > 0) {
@@ -570,6 +574,27 @@ async function runAnalysisBody(run: RunContext) {
   // M1 通知分发：分析事务提交后 best-effort 投递；失败只记日志，不影响分析结果。
   try {
     await deliverAnalysisNotifications({ run, releaseUrl: change.url, specVersionId, collapse, featureCollapses, misplacedCount: misplacedScenarios.length });
+    // 发布稿草稿文案人话化（业界共识：公告写用户影响，不写规格 diff 语言）：
+    // 自动草稿落库后批量 AI 改写为用户影响语言（锚定/证据不变，summary_override 承载，
+    // 人工发布门禁不变）。best-effort：改写失败保留规格原文，不回滚分析。
+    try {
+      if (releaseId) {
+        const note = await loadNoteByRelease(getDb().execute.bind(getDb()), releaseId);
+        if (note && note.status === "draft") {
+          const blocks = await loadBlockViews(getDb().execute.bind(getDb()), note.id);
+          if (blocks.length > 0) {
+            const outcome = await rewriteDraftBlocksToUserVoice(
+              { execute: (sql: string, params?: unknown[]) => getDb().execute(sql, params as never) },
+              { completion: (messages, billing) => requestStructuredCompletion(messages, billing) },
+              { noteId: note.id, releaseTitle: change.message.split("\n")[0].trim().slice(0, 120), blocks: blocks.map((block) => ({ position: block.position, kind: block.kind, featureName: block.featureName, scenarioReference: block.scenarioReference, summary: block.summary, highlightType: block.highlightType })) },
+            );
+            console.log("[release-notes] auto-draft copy rewritten to user voice", { runId: run.id, releaseId, ...outcome });
+          }
+        }
+      }
+    } catch (error) {
+      console.warn("[release-notes] draft copy rewrite skipped", { runId: run.id, error: error instanceof Error ? error.message.slice(0, 160) : String(error) });
+    }
   } catch (error) {
     console.error("[notifications] delivery failed", error);
   }

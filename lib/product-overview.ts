@@ -11,6 +11,7 @@ interface ProductOverviewInput {
   releases: ReleaseRow[];
   behaviorChanges: BehaviorChangeRow[];
   latestRun?: { status: string; errorMessage?: string };
+  latestReleaseNote?: { status: string; releaseId: number; publishedAt: Date | string | null; blocks: number } | null;
 }
 
 function analysisLabel(status?: string) {
@@ -94,6 +95,7 @@ export function buildProductOverview(input: ProductOverviewInput) {
     changeStats,
     changeGroups,
     latestRelease,
+    latestReleaseNote: input.latestReleaseNote ?? null,
     trust: {
       featureCount: input.features.length,
       scenarioCount: input.scenarios.length,

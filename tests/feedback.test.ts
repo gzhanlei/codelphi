@@ -15,6 +15,7 @@ const details = {
   product: { id: 3, slug: "chandler", name: "Chandler", description: "test", descriptionSource: "manual", descriptionEvidence: null },
   repository: { owner: "gzhanlei", name: "workmembership", defaultBranch: "main" },
   latestRun: { status: "failed", errorMessage: "No architecture components detected" },
+  latestReleaseNote: null,
   features: [],
   scenarios: [],
   releases: [{ id: 8, title: "v1", summary: "", sha: "abcdef1234567890", url: "", committedAt: new Date(), specVersionId: 8 }],
@@ -27,7 +28,7 @@ const details = {
   regressionTasks: [],
   releaseTotal: 0,
   completeness: null,
-} as NonNullable<Awaited<ReturnType<typeof import("../lib/product-details").getProductDetails>>>;
+} as unknown as NonNullable<Awaited<ReturnType<typeof import("../lib/product-details").getProductDetails>>>;
 
 import { analysisFeedbackLabel } from "../components/analysis-feedback-button";
 import { issueActionLabel } from "../components/feedback-issue-button";

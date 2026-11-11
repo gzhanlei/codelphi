@@ -52,3 +52,60 @@ export function parseEnhancedSummary(content: string): string {
   if (!text || text.length > 4000) throw new Error("AI 改写为空或超长");
   return text;
 }
+
+export interface DraftBlockForRewrite {
+  position: number;
+  kind: string;
+  featureName: string;
+  scenarioReference: string;
+  summary: string;
+  highlightType: string | null;
+}
+
+/**
+ * 批量把草稿块的「规格 diff 语言」改写为「用户影响语言」（业界共识：公告只写
+ * 用户能做什么/什么被修了，内部场景号与类型码不进正文）。每块一次调用，
+ * 锚定与证据不变（只写 summary_override，人工发布门禁不变）；单块失败回退原文不阻塞。
+ * 计费与单块 Enhance 同通道（call_kind='release_note_enhance'，receipt-only）。
+ */
+export async function rewriteDraftBlocksToUserVoice(
+  execute: { execute: (sql: string, params?: unknown[]) => Promise<unknown> },
+  deps: {
+    /** 结构化签名与 lib/ai.ts requestStructuredCompletion 对齐（调用方传入，保持本模块无 AI 依赖）。 */
+    completion: (messages: Array<{ role: string; content: string }>, billing: { runId: number | null; accountId: number | null; chargeComponent: "main" | "platform_shadow"; callKind?: string | null }) => Promise<string>,
+  },
+  input: { noteId: number; releaseTitle: string; blocks: DraftBlockForRewrite[] },
+): Promise<{ rewritten: number; failed: number }> {
+  let rewritten = 0;
+  let failed = 0;
+  for (const block of input.blocks) {
+    if (!block.summary.trim()) {
+      failed += 1;
+      continue;
+    }
+    try {
+      const content = await deps.completion(
+        [
+          { role: "system", content: "你是严谨的发布说明编辑，只改写措辞不改变事实。" },
+          { role: "user", content: buildEnhancePrompt({
+            kind: block.kind,
+            featureName: block.featureName,
+            scenarioReference: block.scenarioReference,
+            summary: block.summary,
+            highlightType: block.highlightType,
+            emphasis: input.releaseTitle,
+            instruction: "面向产品的使用者（客户/同事）撰写：写他们能感知到什么变化，不要出现内部术语、场景编号或『场景』『规格』字样。",
+          }) },
+        ],
+        { runId: null, accountId: null, chargeComponent: "main", callKind: "release_note_enhance" },
+      );
+      const suggestion = parseEnhancedSummary(content);
+      await execute.execute("UPDATE release_note_blocks SET summary_override = ? WHERE release_note_id = ? AND position = ?", [suggestion, input.noteId, block.position]);
+      rewritten += 1;
+    } catch (error) {
+      failed += 1;
+      console.warn("[release-notes] block rewrite failed; keeping spec summary", { noteId: input.noteId, position: block.position, error: error instanceof Error ? error.message.slice(0, 120) : String(error) });
+    }
+  }
+  return { rewritten, failed };
+}
