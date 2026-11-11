@@ -48,6 +48,7 @@ describe("product details", () => {
       if (sql.includes("FROM analysis_coverage_receipts")) return [[{ specVersionId: 3, implFilesAssembled: 1, implFilesTotal: 2, implBytesAssembled: 1000, implBytesTotal: 4000, coverageRatio: 0.25, partitionsUsed: 1, partitionsCapped: 0 }]];
       if (sql.includes("analysis_completeness_ledger")) return [[{ runId: 9, sourceCoverage: "partial", behavioralEnumeration: "complete", extractionCompletion: "complete", evidenceIntegrity: "complete", mergeIntegrity: "partial", verification: "not_applicable", overall: "partial", details: { sourceCoverage: { state: "partial" }, behavioralEnumeration: { state: "complete" }, extractionCompletion: { state: "complete" }, evidenceIntegrity: { state: "complete" }, mergeIntegrity: { state: "partial" }, verification: { state: "not_applicable" }, overall: "partial" } }]];
       if (!sql) return [[]];
+      if (sql.includes("FROM release_notes WHERE product_id")) return [[{ id: 1, releaseId: 10, status: "published", headline: null }]];
       throw new Error(`Unexpected query: ${sql}`);
     });
     const details = await getProductDetails("radar");
@@ -86,6 +87,7 @@ describe("product details", () => {
       if (sql.includes("FROM analysis_coverage_receipts")) return [[{ specVersionId: 3, implFilesAssembled: 1, implFilesTotal: 2, implBytesAssembled: 1000, implBytesTotal: 4000, coverageRatio: 0.25, partitionsUsed: 1, partitionsCapped: 0 }]];
       if (sql.includes("analysis_completeness_ledger")) return [[{ runId: 9, sourceCoverage: "partial", behavioralEnumeration: "complete", extractionCompletion: "complete", evidenceIntegrity: "complete", mergeIntegrity: "partial", verification: "not_applicable", overall: "partial", details: { sourceCoverage: { state: "partial" }, behavioralEnumeration: { state: "complete" }, extractionCompletion: { state: "complete" }, evidenceIntegrity: { state: "complete" }, mergeIntegrity: { state: "partial" }, verification: { state: "not_applicable" }, overall: "partial" } }]];
       if (!sql) return [[]];
+      if (sql.includes("FROM release_notes WHERE product_id")) return [[{ id: 1, releaseId: 10, status: "published", headline: null }]];
       throw new Error(`Unexpected query: ${sql}`);
     });
     const details = await getProductDetails("radar");
@@ -115,6 +117,7 @@ describe("product details", () => {
       if (sql.includes("FROM analysis_coverage_receipts")) return [[{ specVersionId: 3, implFilesAssembled: 1, implFilesTotal: 2, implBytesAssembled: 1000, implBytesTotal: 4000, coverageRatio: 0.25, partitionsUsed: 1, partitionsCapped: 0 }]];
       if (sql.includes("analysis_completeness_ledger")) return [[{ runId: 9, sourceCoverage: "partial", behavioralEnumeration: "complete", extractionCompletion: "complete", evidenceIntegrity: "complete", mergeIntegrity: "partial", verification: "not_applicable", overall: "partial", details: { sourceCoverage: { state: "partial" }, behavioralEnumeration: { state: "complete" }, extractionCompletion: { state: "complete" }, evidenceIntegrity: { state: "complete" }, mergeIntegrity: { state: "partial" }, verification: { state: "not_applicable" }, overall: "partial" } }]];
       if (!sql) return [[]];
+      if (sql.includes("FROM release_notes WHERE product_id")) return [[{ id: 1, releaseId: 10, status: "published", headline: null }]];
       throw new Error(`Unexpected query: ${sql}`);
     });
     const details = await getProductDetails("radar");

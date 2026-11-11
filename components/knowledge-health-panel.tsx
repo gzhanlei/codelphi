@@ -30,7 +30,7 @@ export function KnowledgeHealthPanel({ slug }: { slug: string }) {
 
   return (
     <section className="overview-panel knowledge-health-panel">
-      <div className="overview-panel-heading"><span>05</span><h2>知识健康</h2></div>
+      <div className="overview-panel-heading"><h2>知识健康</h2></div>
       <p>事实统计，不是健康分——每项数字都可点开追溯；采纳前应经人工核实。</p>
       <div className="stats-grid">
         <div className="stat-card"><span>待核实漂移</span><strong>{report.staleCount}</strong><small>条人工规格可能过时</small></div>

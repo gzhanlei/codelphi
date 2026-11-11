@@ -429,3 +429,29 @@ dialog.publish-dialog h3 { margin: 0 0 8px; font-size: 16px; }
 .publish-feature strong { font-size: 13px; }
 .publish-feature-count { display: block; font-size: 11px; color: #94a19c; }
 .publish-done { margin: 10px 0; }
+
+/* 总览页（Specsight 原则版式：提问框 + 发布时间线 + 信任行） */
+.overview-ask { margin: 4px 0 18px; }
+.overview-ask .spec-ask { max-width: 720px; }
+.spec-ask-suggestions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.spec-ask-suggestion { border: 1px solid #ccd8d1; border-radius: 999px; background: #fbfcfb; color: #3d4b44; font-size: 12px; padding: 3px 12px; cursor: pointer; }
+.spec-ask-suggestion:hover { border-color: var(--green); color: var(--green); }
+.spec-ask-suggestion:disabled { opacity: 0.5; cursor: default; }
+.export-details { position: relative; display: inline-block; }
+.export-details summary { list-style: none; cursor: pointer; }
+.export-details summary::-webkit-details-marker { display: none; }
+.export-details-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 180px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.10); padding: 6px 0; }
+.export-details-menu a { display: block; padding: 7px 14px; font-size: 13px; color: var(--ink); text-decoration: none; }
+.export-details-menu a:hover { background: #f0f4f1; color: var(--green); }
+.overview-timeline { position: relative; padding-left: 22px; border-left: 2px solid #e3ebe6; margin-top: 8px; }
+.tl-item { position: relative; padding: 7px 0 12px; }
+.tl-item::before { content: ""; position: absolute; left: -29px; top: 14px; width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+.tl-date { font-size: 11px; color: #94a19c; display: flex; gap: 8px; align-items: center; }
+.tl-chip { font-size: 10px; border-radius: 4px; padding: 1px 7px; font-weight: 600; }
+.tl-chip-draft { background: #fdf3e0; color: #b07d2b; }
+.tl-chip-published { background: #e6f2ea; color: var(--green); }
+.tl-chip-unpublished { background: #edf0ee; color: #94a19c; }
+.tl-title { display: inline-block; margin-top: 2px; color: var(--ink); font-weight: 600; text-decoration: none; }
+.tl-title:hover { color: var(--green); }
+.tl-summary { margin: 3px 0 0; font-size: 13px; color: #66716b; }
+.overview-trust-line { font-size: 12px; color: #83918a; margin: 14px 0 0; }
