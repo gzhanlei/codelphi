@@ -52,7 +52,11 @@ async function callTool(config: PptPartnerConfig, jobId: string, name: string, a
   try {
     response = await fetch(config.url, {
       method: "POST",
-      headers: partnerHeaders(config, jobId),
+      headers: {
+        ...partnerHeaders(config, jobId),
+        // Streamable HTTP MCP 规范要求：缺 accept 头会被对端 406 拒绝
+        accept: "application/json, text/event-stream",
+      },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }),
       cache: "no-store",
       signal: AbortSignal.timeout(60_000),
