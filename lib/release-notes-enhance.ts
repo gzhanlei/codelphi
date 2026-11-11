@@ -27,7 +27,7 @@ export function buildEnhancePrompt(input: EnhanceBlockInput): string {
     "硬规则：",
     "1. 只基于【原文】给出的事实改写措辞，禁止新增原文没有的功能、数字、日期或承诺。",
     "2. 不改变事实含义；不确定的地方保持原文表述。",
-    "3. 长度 1-3 句；客户可读，避免内部术语与代码路径名。",
+    "3. 长度 1-3 句；客户可读，避免内部术语、代码路径名与 EC-n/ER-n/HP-n 场景编号（也不要写『场景』二字）。",
     ...(input.emphasis.trim() ? [`4. 全篇强调语是「${input.emphasis.trim()}」，改写向它对齐。`] : []),
     ...(input.instruction.trim() ? [`5. 用户指令：${input.instruction.trim().slice(0, 200)}`] : []),
     "",
@@ -37,6 +37,17 @@ export function buildEnhancePrompt(input: EnhanceBlockInput): string {
 
 const outputSchema = z.object({ summary: z.string().min(1).max(4000) });
 
+/**
+ * 展示文本净化（机械兜底）：prompt 已禁场景编号，模型仍偶发漏网——
+ * 公告正文不得出现 EC-n/ER-n/HP-n 内部编号（调研红线），确定性剥除；
+ * 锚定数据（spec_change id / scenario_reference）在库不变，仅影响展示文本。
+ */
+export function stripScenarioRefs(text: string): string {
+  let out = text.replace(/[（(]?\s*(?:场景\s*)?(?:EC|ER|HP)-\d+\s*[）)]?\s*/g, "");
+  out = out.replace(/涉及场景[。，；]?/g, "").replace(/场景。/g, "。");
+  return out.replace(/\s{2,}/g, " ").trim();
+}
+
 /** 解析 AI 输出：容忍围栏/前后缀，取首个 { 到末个 }；结构不合格抛错（不落库）。 */
 export function parseEnhancedSummary(content: string): string {
   const stripped = content.replace(/^\s*```(?:json)?/i, "").replace(/```\s*$/i, "").trim();
@@ -44,13 +55,13 @@ export function parseEnhancedSummary(content: string): string {
   const end = stripped.lastIndexOf("}");
   if (start >= 0 && end > start) {
     const parsed = outputSchema.safeParse(JSON.parse(stripped.slice(start, end + 1)));
-    if (parsed.success) return parsed.data.summary.trim();
+    if (parsed.success) return stripScenarioRefs(parsed.data.summary.trim());
     throw new Error(parsed.error.issues[0]?.message ?? "AI 改写结构不合格");
   }
   // 纯文本输出直接采纳（更宽容的解析路径，仍受长度上限约束）
   const text = stripped.trim();
   if (!text || text.length > 4000) throw new Error("AI 改写为空或超长");
-  return text;
+  return stripScenarioRefs(text);
 }
 
 export interface DraftBlockForRewrite {
