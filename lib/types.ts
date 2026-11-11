@@ -51,6 +51,8 @@ export interface ScenarioRow {
   action: string;
   outcome: string;
   category: "happy" | "edge" | "error";
+  /** W-DECISION 最小序列版：主步骤链序号/分支归属步骤；null=未标注（判定面之外，仅呈现）。 */
+  step?: number | null;
   source: "generated" | "manual";
   evidence: unknown;
   staleSince?: Date | string | null;

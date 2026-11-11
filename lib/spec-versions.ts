@@ -22,6 +22,7 @@ interface ScenarioRow {
   action: string;
   outcome: string;
   category: SpecScenario["category"];
+  step?: number | null;
   source: "generated" | "manual";
   evidence: unknown;
 }
@@ -45,6 +46,7 @@ function featuresFromRows(featureRows: FeatureRow[], scenarioRows: ScenarioRow[]
       action: scenario.action,
       outcome: scenario.outcome,
       category: scenario.category,
+      step: scenario.step === undefined || scenario.step === null ? null : Number(scenario.step),
       source: scenario.source,
       evidence: evidenceItems(scenario.evidence),
     })),
@@ -59,7 +61,7 @@ async function loadScenarioRows(connection: PoolConnection, features: FeatureRow
     ? { table: "scenarios", column: "feature_id", condition: `source = 'manual' AND active = 1 AND feature_id IN (${placeholders})` }
     : { table: "spec_scenarios", column: "spec_feature_id", condition: `spec_feature_id IN (${placeholders})` };
   const [rows] = await connection.execute(
-    `SELECT ${config.column} AS featureId, reference, context, action, outcome, category, source, evidence
+    `SELECT ${config.column} AS featureId, reference, context, action, outcome, category, step_order AS step, source, evidence
      FROM ${config.table} WHERE ${config.condition}`,
     ids,
   );
@@ -114,7 +116,7 @@ export async function loadVersionFeatureMap(execute: Execute, versionIds: number
   const [featureResult, scenarioResult] = await Promise.all([
     execute(`SELECT id, spec_version_id AS versionId, name, summary, parent_key AS parentKey, source FROM spec_features WHERE spec_version_id IN (${placeholders}) ORDER BY position`, versionIds),
     execute(
-      `SELECT sf.spec_version_id AS versionId, ss.spec_feature_id AS featureId, ss.reference, ss.context, ss.action, ss.outcome, ss.category, ss.source, ss.evidence
+      `SELECT sf.spec_version_id AS versionId, ss.spec_feature_id AS featureId, ss.reference, ss.context, ss.action, ss.outcome, ss.category, ss.step_order AS step, ss.source, ss.evidence
        FROM spec_scenarios ss JOIN spec_features sf ON sf.id = ss.spec_feature_id
        WHERE sf.spec_version_id IN (${placeholders})`,
       versionIds,
@@ -176,9 +178,9 @@ async function insertFeatures(connection: PoolConnection, versionId: number, fea
     for (const scenario of feature.scenarios) {
       await connection.execute(
         `INSERT INTO spec_scenarios
-          (spec_feature_id, reference, context, action, outcome, category, source, evidence)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [featureId, scenario.reference, scenario.context, scenario.action, scenario.outcome, scenario.category, scenario.source === undefined ? "generated" : scenario.source, JSON.stringify(scenario.evidence)],
+          (spec_feature_id, reference, context, action, outcome, category, step_order, source, evidence)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [featureId, scenario.reference, scenario.context, scenario.action, scenario.outcome, scenario.category, scenario.step ?? null, scenario.source === undefined ? "generated" : scenario.source, JSON.stringify(scenario.evidence)],
       );
     }
   }
@@ -421,19 +423,19 @@ export async function loadPreviousSpecText(repositoryId: number, execute: Execut
   const ids = featureRows.map((feature) => feature.id);
   const placeholders = ids.map(() => "?").join(",");
   const scenarioResult = await execute(
-    `SELECT spec_feature_id AS featureId, reference, context, action, outcome, category
+    `SELECT spec_feature_id AS featureId, reference, context, action, outcome, category, step_order AS step
      FROM spec_scenarios WHERE spec_feature_id IN (${placeholders})`,
     ids,
   );
   const scenarioPayload = Array.isArray(scenarioResult) ? scenarioResult[0] : [];
-  const scenarioRows = (Array.isArray(scenarioPayload) ? scenarioPayload : []) as Array<{ featureId: number; reference: string; context: string; action: string; outcome: string; category: string }>;
+  const scenarioRows = (Array.isArray(scenarioPayload) ? scenarioPayload : []) as Array<{ featureId: number; reference: string; context: string; action: string; outcome: string; category: string; step: number | null }>;
 
   return featureRows.map((feature) => ({
     name: feature.name,
     summary: feature.summary,
     scenarios: scenarioRows
       .filter((scenario) => scenario.featureId === feature.id)
-      .map((scenario) => ({ reference: scenario.reference, context: scenario.context, action: scenario.action, outcome: scenario.outcome, category: scenario.category })),
+      .map((scenario) => ({ reference: scenario.reference, context: scenario.context, action: scenario.action, outcome: scenario.outcome, category: scenario.category, step: scenario.step })),
   }));
 }
 
@@ -450,7 +452,7 @@ export async function loadLatestSpecFeatures(repositoryId: number, execute: Exec
   const featurePayload = Array.isArray(featureResult) ? featureResult[0] : featureResult;
   const featureRows = (featurePayload ?? []) as FeatureRow[];
   const scenarioResult = await execute(
-    `SELECT spec_feature_id AS featureId, reference, context, action, outcome, category, source, evidence
+    `SELECT spec_feature_id AS featureId, reference, context, action, outcome, category, step_order AS step, source, evidence
      FROM spec_scenarios WHERE spec_feature_id IN (${featureRows.map(() => "?").join(",") || "NULL"})`,
     featureRows.map((feature) => feature.id),
   );

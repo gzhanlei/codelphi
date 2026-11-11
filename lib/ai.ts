@@ -19,7 +19,7 @@ const scenarioSchema = z.object({
   category: z.enum(["happy", "edge", "error"]),
   // W-DECISION 最小序列版：happy 场景 step=1..N 构成主步骤链，edge/error 的 step=分支自哪一步。
   // 不确定/未编号可缺省；非法值在归一层丢弃（docs/w-decision-scenario-sequence-plan.md §1）。
-  step: z.number().int().min(1).max(40).optional(),
+  step: z.number().int().min(1).max(40).nullish(),
   evidence: z.array(evidenceSchema).max(5),
 });
 
@@ -89,7 +89,7 @@ export function normalizeScenarioAliases(value: unknown) {
   const input = value as {
     product?: { evidence?: unknown };
     changes?: Array<{ evidence?: unknown }>;
-    features?: Array<{ scenarios?: Array<{ evidence?: unknown }>; evidence?: unknown }>;
+    features?: Array<{ scenarios?: Array<{ evidence?: unknown; reference?: unknown; step?: unknown }>; evidence?: unknown }>;
   };
   return {
     ...input,

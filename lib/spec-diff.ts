@@ -7,6 +7,10 @@ export interface SpecScenario {
   action: string;
   outcome: string;
   category: "happy" | "edge" | "error";
+  /** W-DECISION 最小序列版：主步骤链序号（happy）/分支归属步骤（edge/error）。
+   *  判定面裁决：不参与 scenarioBehaviorChanged / scenarioBehaviorEqual——顺序抖动不虚报
+   *  （docs/w-decision-scenario-sequence-plan.md §2），但 before/after 序列化如实记录。 */
+  step?: number | null;
   evidence: Evidence[];
   source?: "generated" | "manual";
 }

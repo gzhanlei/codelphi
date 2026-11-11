@@ -43,7 +43,7 @@ async function queryByIds<T>(ids: number[], query: string) {
 }
 
 async function loadScenarios(features: FeatureRow[]) {
-  return queryByIds<ScenarioRow>(features.map((feature) => feature.id), "SELECT id, feature_id AS featureId, reference, context, action, outcome, category, source, evidence, stale_since AS staleSince, stale_change_id AS staleChangeId, verified_at AS verifiedAt, verified_by AS verifiedBy, last_edited_by AS lastEditedBy, last_edited_at AS lastEditedAt FROM scenarios WHERE active = 1 AND feature_id IN ({{placeholders}}) ORDER BY reference");
+  return queryByIds<ScenarioRow>(features.map((feature) => feature.id), "SELECT id, feature_id AS featureId, reference, context, action, outcome, category, step_order AS step, source, evidence, stale_since AS staleSince, stale_change_id AS staleChangeId, verified_at AS verifiedAt, verified_by AS verifiedBy, last_edited_by AS lastEditedBy, last_edited_at AS lastEditedAt FROM scenarios WHERE active = 1 AND feature_id IN ({{placeholders}}) ORDER BY reference");
 }
 
 async function loadChanges(releases: ReleaseRow[]) {
