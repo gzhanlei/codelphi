@@ -53,6 +53,18 @@ describe("ensureAutoReleaseNoteDraft (自动 release notes 草稿)", () => {
     expect(conn.execute.mock.calls.some(([sql]) => String(sql).includes("INSERT INTO release_notes"))).toBe(false);
   });
 
+  it("caps auto-draft selection at 12 blocks for reviewability (超大窗口宽匹配披露)", async () => {
+    const many = Array.from({ length: 30 }, (_, index) => change(100 + index, "Security"));
+    prime({ changeRows: many });
+    const noteId = await ensureAutoReleaseNoteDraft(conn, 9);
+    expect(noteId).toBe(12);
+    const blockInserts = conn.execute.mock.calls.filter(([sql]) => String(sql).includes("INSERT INTO release_note_blocks"));
+    expect(blockInserts).toHaveLength(12);
+    // publishOrder 九类序：全部 Security 同级 → 按 id 升序取前 12
+    expect(blockInserts[0][1]).toEqual([12, 1, 100, ""]);
+    expect(blockInserts[11][1]).toEqual([12, 12, 111, ""]);
+  });
+
   it("never overwrites an existing draft or published note", async () => {
     prime({ noteRows: [{ id: 4, status: "draft" }], changeRows: [change(11, "News")] });
     expect(await ensureAutoReleaseNoteDraft(conn, 9)).toBeNull();
