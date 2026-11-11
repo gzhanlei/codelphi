@@ -130,7 +130,7 @@ export function renderChangelogDocument(input: {
   const body = input.entries.map((entry: ChangelogDocEntry & { emphasis?: string | null }) => {
     // 合并发布成文优先：feature_copy_json 的每功能一条用户可读说明按分类分节；
     // 未生成时回退为块条目，并把同一功能的多条合并成一个条目（句子「；」连接）
-    const fromCopy = entry.featureCopy !== undefined && entry.featureCopy !== null;
+    const fromCopy = Array.isArray(entry.featureCopy) && entry.featureCopy.length > 0;
     const sections = new Map<string, Array<{ featureName: string; text: string }>>();
     if (fromCopy) {
       for (const copy of entry.featureCopy!) {
