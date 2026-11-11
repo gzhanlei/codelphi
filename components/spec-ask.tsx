@@ -14,20 +14,30 @@ export function SpecAsk({ slug, productBase, suggestions = [] }: { slug: string;
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState<DecoratedSpecAnswer | null>(null);
   const [pending, setPending] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
+  const [rateLimitedUntil, setRateLimitedUntil] = useState<Date | null>(null);
 
   async function ask() {
     const trimmed = question.trim();
     if (!trimmed || pending) return;
     setPending(true);
-    setFailed(false);
+    setFailed(null);
+    setRateLimitedUntil(null);
     try {
       const response = await fetch(`/api/products/${slug}/spec/ask?q=${encodeURIComponent(trimmed)}`, { cache: "no-store" });
+      // 限流必须明说原因与恢复时间，不许笼统化成「查询不可用」。
+      if (response.status === 429) {
+        const retryAfter = Number(response.headers.get("Retry-After") ?? "0");
+        const minutes = Math.max(1, Math.ceil(retryAfter / 60));
+        setRateLimitedUntil(new Date(Date.now() + retryAfter * 1000));
+        setFailed(`提问频率已达上限（每 IP 每小时 10 次），约 ${minutes} 分钟后可再试。`);
+        return;
+      }
       if (!response.ok) throw new Error(`ask failed: ${response.status}`);
       setAnswer(await response.json() as DecoratedSpecAnswer);
-    } catch {
-      // 匿名 demo 已由 spec-read-access 放行；网络或服务端异常仍要给可见失败态，不静默无结果。
-      setFailed(true);
+    } catch (cause: unknown) {
+      // 限流已在上面明说；其余异常给可见失败态，不静默无结果。
+      if (!String((cause as Error)?.message ?? "").includes("提问频率")) setFailed("查询暂时不可用，请稍后重试。");
     } finally {
       setPending(false);
     }
@@ -55,7 +65,8 @@ export function SpecAsk({ slug, productBase, suggestions = [] }: { slug: string;
           ))}
         </div>
       ) : null}
-      {failed ? <p className="spec-search-hint" role="alert">查询暂时不可用，请稍后重试。</p> : null}
+      {rateLimitedUntil ? <p className="spec-search-hint" role="status">提问频率已达上限，{rateLimitedUntil.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} 后可再试。</p> : null}
+      {failed ? <p className="spec-search-hint" role="alert">{failed}</p> : null}
       {answer ? <SpecAnswerView answer={answer} productBase={productBase} /> : null}
     </div>
   );
