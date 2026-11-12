@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildFeatureFlow, clipFlowLabel, findEdgeNodes, sortScenarios } from "../lib/feature-flow";
+import { buildFeatureFlow, clipFlowLabel, findEdgeNodes, hasFlowStructure, sortScenarios } from "../lib/feature-flow";
 import type { SpecScenario } from "../lib/spec-diff";
 
 const scenarios = [
@@ -16,51 +16,63 @@ describe("feature flow generation", () => {
     expect(clipFlowLabel("123456789012345678901234")).toBe("1234567890123456789…");
     expect(clipFlowLabel("一二三四五六七八九十甲")).toBe("一二三四五六七八九…");
   });
-  it("represents each scenario independently without terminal placeholders", () => {
+  it("reports a single stepless context as unstructured while still laying out nodes", () => {
     const flow = buildFeatureFlow(scenarios);
     const start = flow.nodes.find((node) => node.kind === "start");
     const hp1 = flow.nodes.find((node) => node.id === "HP-1");
     const hp2 = flow.nodes.find((node) => node.id === "HP-2");
     const error = flow.nodes.find((node) => node.id === "ER-1");
     const end = flow.nodes.find((node) => node.id === "end-0");
-    expect(start).toBeDefined();
-    expect(hp1).toBeDefined();
-    expect(hp2).toBeDefined();
-    expect(error).toBeDefined();
-    expect(end).toBeUndefined();
-    expect(start).toMatchObject({ title: "开始：Visitor" });
-    expect(flow.edges).toContainEqual(expect.objectContaining({ from: start!.id, to: "HP-1" }));
-    expect(flow.edges).toContainEqual(expect.objectContaining({ from: start!.id, to: "HP-2" }));
-    expect(flow.edges).toContainEqual(expect.objectContaining({ from: start!.id, to: "ER-1" }));
-    expect(flow.edges).not.toContainEqual(expect.objectContaining({ from: "HP-1", to: "HP-2" }));
-    expect(hp1!.x).toBeLessThan(hp2!.x);
+    expect(flow.structured).toBe(false);
+    expect(start).toMatchObject({ id: "start", title: "开始工作", x: 20, y: 60 });
     expect(hp1).toMatchObject({ x: 200, y: 60 });
-    expect(hp2).toMatchObject({ x: 390, y: 60 });
-    expect(error).toMatchObject({ x: 200, y: 150 });
-    expect(flow).toMatchObject({ width: 640, height: 230 });
+    expect(hp2).toMatchObject({ x: 200, y: 140 });
+    expect(error).toMatchObject({ kind: "branch", x: 200, y: 220 });
+    expect(end).toBeUndefined();
+    expect(flow.edges.map((edge) => [edge.from, edge.to])).toEqual([["start", "HP-1"], ["start", "HP-2"], ["start", "ER-1"]]);
+    expect(flow.edges[0].label).toBe("Visitor");
+    expect(flow.edges[1].label).toBeUndefined();
+    expect(flow.edges[2].label).toBeUndefined();
+    expect(flow).toMatchObject({ width: 640, height: 350 });
   });
 
-  it("handles multiple contexts and empty features", () => {
+  it("folds multiple contexts into one entry with condition-labeled edges", () => {
     const flow = buildFeatureFlow([
       { reference: "HP-1", context: "Visitor", action: "Signs in", outcome: "Dashboard", category: "happy", evidence: [] },
       { reference: "HP-2", context: "Signed in", action: "Signs out", outcome: "Login", category: "happy", evidence: [] },
     ]);
-    expect(flow.nodes.filter((node) => node.kind === "start")).toHaveLength(2);
+    expect(flow.structured).toBe(true);
+    expect(flow.nodes.filter((node) => node.kind === "start")).toHaveLength(1);
     expect(flow.edges).toHaveLength(2);
-    expect(flow.edges).toContainEqual(expect.objectContaining({ from: "start-0", to: "HP-1" }));
-    expect(flow.edges).toContainEqual(expect.objectContaining({ from: "start-1", to: "HP-2" }));
+    expect(flow.edges).toContainEqual(expect.objectContaining({ from: "start", to: "HP-1", label: "Visitor" }));
+    expect(flow.edges).toContainEqual(expect.objectContaining({ from: "start", to: "HP-2", label: "Signed in" }));
     expect(flow.edges).not.toContainEqual(expect.objectContaining({ from: "end-0", to: "start-1" }));
-    expect(flow.nodes.find((node) => node.id === "start-1")).toMatchObject({ title: "开始：Signed in", x: 20, y: 250 });
-    expect(flow.nodes.find((node) => node.id === "end-1")).toBeUndefined();
-    expect(flow).toMatchObject({ width: 640, height: 420 });
+    expect(flow.nodes.find((node) => node.id === "start")).toMatchObject({ title: "开始工作", x: 20, y: 60 });
+    expect(flow.nodes.find((node) => node.id === "HP-1")).toMatchObject({ x: 200, y: 60 });
+    expect(flow.nodes.find((node) => node.id === "HP-2")).toMatchObject({ x: 200, y: 160 });
+    expect(flow).toMatchObject({ width: 640, height: 290 });
 
     const empty = buildFeatureFlow([]);
     expect(empty.nodes).toEqual([]);
     expect(empty.edges).toEqual([]);
+    expect(empty.structured).toBe(false);
     expect(empty).toMatchObject({ width: 640, height: 230 });
     const single = buildFeatureFlow([scenarios[0]]);
+    expect(single.structured).toBe(false);
     expect(findEdgeNodes(single.edges[0], single.nodes)).toEqual({ source: single.nodes[0], target: single.nodes[1] });
     expect(findEdgeNodes({ id: "missing", from: "none", to: "HP-2" }, single.nodes)).toBeUndefined();
+  });
+
+  it("labels only the first edge of each context group", () => {
+    const flow = buildFeatureFlow([
+      { reference: "HP-1", context: "Visitor", action: "Signs in", outcome: "Dashboard", category: "happy", evidence: [] },
+      { reference: "HP-3", context: "Visitor", action: "Resets password", outcome: "Email sent", category: "happy", evidence: [] },
+      { reference: "HP-2", context: "Signed in", action: "Signs out", outcome: "Login", category: "happy", evidence: [] },
+    ]);
+    expect(flow.edges).toContainEqual(expect.objectContaining({ from: "start", to: "HP-1", label: "Visitor" }));
+    expect(flow.edges).toContainEqual(expect.objectContaining({ from: "start", to: "HP-3" }));
+    expect(flow.edges.find((edge) => edge.to === "HP-3")!.label).toBeUndefined();
+    expect(flow.edges).toContainEqual(expect.objectContaining({ from: "start", to: "HP-2", label: "Signed in" }));
   });
 
   it("sorts categories, numeric references and lexical tie breakers", () => {
@@ -80,19 +92,19 @@ describe("feature flow generation", () => {
     expect(flow.nodes.filter((node) => node.kind === "scenario").map((node) => node.id)).toEqual(ordered.slice(0, 6));
     expect(flow.nodes.filter((node) => node.reference).map((node) => node.id)).toEqual(ordered);
     expect(flow.nodes.filter((node) => node.kind === "branch").map((node) => node.id)).toEqual(["EC-10", "ER-2"]);
-    expect(flow.width).toBe(1330);
+    expect(flow.width).toBe(640);
   });
 
-  it("connects excess branches to the context start", () => {
+  it("connects stepless branches to the shared entry", () => {
     const flow = buildFeatureFlow([
       { reference: "HP-1", context: "Visitor", action: "Acts", outcome: "Done", category: "happy", evidence: [] },
       { reference: "EC-1", context: "Visitor", action: "Edges", outcome: "Edge", category: "edge", evidence: [] },
       { reference: "ER-1", context: "Visitor", action: "Fails", outcome: "Error", category: "error", evidence: [] },
     ]);
-    expect(flow.edges).toContainEqual(expect.objectContaining({ from: "start-0", to: "EC-1" }));
-    expect(flow.edges).toContainEqual(expect.objectContaining({ from: "start-0", to: "ER-1" }));
+    expect(flow.edges).toContainEqual(expect.objectContaining({ from: "start", to: "EC-1" }));
+    expect(flow.edges).toContainEqual(expect.objectContaining({ from: "start", to: "ER-1" }));
     expect(flow.edges).not.toContainEqual(expect.objectContaining({ from: "HP-1", to: "EC-1" }));
-    expect(flow.nodes.find((node) => node.id === "ER-1")).toMatchObject({ x: 390, y: 150 });
+    expect(flow.nodes.find((node) => node.id === "ER-1")).toMatchObject({ x: 200, y: 220 });
   });
 });
 
@@ -102,15 +114,28 @@ describe("FeatureFlow component", () => {
     const { renderToStaticMarkup } = await import("react-dom/server");
     const { FeatureFlow } = await import("../components/feature-flow");
     const longOutcome = "这是一个特别长的结果描述，用来验证截断之后完整文本仍然出现在悬浮提示里不丢失";
+    const base = {
+      id: 1, featureId: 1, reference: "HP-1", context: "情境", action: "操作", outcome: longOutcome,
+      category: "happy", source: "generated", active: 1, evidence: "[]", staleSince: null, staleChangeId: null,
+    };
     const html = renderToStaticMarkup(createElement(FeatureFlow, {
       featureName: "测试功能",
-      scenarios: [{
-        id: 1, featureId: 1, reference: "HP-1", context: "情境", action: "操作", outcome: longOutcome,
-        category: "happy", source: "generated", active: 1, evidence: "[]", staleSince: null, staleChangeId: null,
-      } as never],
+      scenarios: [base as never, { ...base, id: 2, reference: "HP-2", context: "另一情境" } as never],
     }));
     expect(html).toContain(clipFlowLabel(longOutcome));
     expect(html).toContain(longOutcome);
+  });
+  it("renders the structure fallback instead of an SVG when no control structure exists", async () => {
+    const { createElement } = await import("react");
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const { FeatureFlow } = await import("../components/feature-flow");
+    const scenario = {
+      id: 1, featureId: 1, reference: "HP-1", context: "单一情境", action: "操作", outcome: "结果",
+      category: "happy", source: "generated", active: 1, evidence: "[]", staleSince: null, staleChangeId: null,
+    } as never;
+    const html = renderToStaticMarkup(createElement(FeatureFlow, { featureName: "测试功能", scenarios: [scenario] }));
+    expect(html).not.toContain("<svg");
+    expect(html).toContain("暂不渲染流程图");
   });
 });
 
@@ -124,32 +149,52 @@ describe("scenario step chain (W-DECISION 最小序列版)", () => {
 
   it("chains stepped happy scenarios in step order and attaches branches to their step", () => {
     const flow = buildFeatureFlow(stepped);
-    expect(flow.edges).toContainEqual(expect.objectContaining({ from: "start-0", to: "HP-1" }));
+    expect(flow.structured).toBe(true);
+    expect(flow.edges).toContainEqual(expect.objectContaining({ from: "start", to: "HP-1", label: "Visitor" }));
     expect(flow.edges).toContainEqual(expect.objectContaining({ from: "HP-1", to: "HP-2" }));
     expect(flow.edges).toContainEqual(expect.objectContaining({ from: "HP-1", to: "EC-1" }));
-    // 无 step 的错误场景保持从起点扇出
-    expect(flow.edges).toContainEqual(expect.objectContaining({ from: "start-0", to: "ER-1" }));
+    // 无 step 的错误场景并入左列堆叠，从入口干线接入
+    expect(flow.edges).toContainEqual(expect.objectContaining({ from: "start", to: "ER-1" }));
     const hp1 = flow.nodes.find((node) => node.id === "HP-1")!;
     const hp2 = flow.nodes.find((node) => node.id === "HP-2")!;
     const ec1 = flow.nodes.find((node) => node.id === "EC-1")!;
+    const er1 = flow.nodes.find((node) => node.id === "ER-1")!;
     expect(hp1.x).toBeLessThan(hp2.x);
-    expect(ec1.y).toBeGreaterThan(hp1.y);
+    expect(ec1).toMatchObject({ x: 200, y: 150 });
+    expect(er1).toMatchObject({ x: 200, y: 230 });
+    expect(er1.y).toBeGreaterThan(ec1.y);
+    expect(flow.height).toBe(360);
   });
 
-  it("keeps stepless data rendering identical to the legacy fan-out", () => {
+  it("renders stepless single-context fan-out from the shared entry", () => {
     const legacy = buildFeatureFlow([
       { reference: "HP-1", context: "Visitor", action: "Signs in", outcome: "Dashboard", category: "happy", evidence: [] },
       { reference: "HP-2", context: "Visitor", action: "Signs out", outcome: "Login", category: "happy", evidence: [] },
     ]);
-    expect(legacy.edges.map((edge) => [edge.from, edge.to])).toEqual([["start-0", "HP-1"], ["start-0", "HP-2"]]);
-    expect(legacy.nodes.find((node) => node.id === "HP-2")).toMatchObject({ x: 390, y: 60 });
+    expect(legacy.edges.map((edge) => [edge.from, edge.to])).toEqual([["start", "HP-1"], ["start", "HP-2"]]);
+    expect(legacy.nodes.find((node) => node.id === "HP-2")).toMatchObject({ x: 200, y: 140 });
+    expect(legacy.structured).toBe(false);
   });
 
   it("ignores out-of-range steps deterministically", () => {
     const flow = buildFeatureFlow([
       { reference: "HP-1", context: "Visitor", action: "Signs in", outcome: "Dashboard", category: "happy", step: 99, evidence: [] },
     ]);
-    expect(flow.edges).toContainEqual(expect.objectContaining({ from: "start-0", to: "HP-1" }));
+    expect(flow.edges).toContainEqual(expect.objectContaining({ from: "start", to: "HP-1" }));
     expect(flow.edges.filter((edge) => edge.from === "HP-1")).toHaveLength(0);
+  });
+});
+
+describe("hasFlowStructure", () => {
+  it("requires either multiple context groups or a stepped happy chain", () => {
+    expect(hasFlowStructure([])).toBe(false);
+    expect(hasFlowStructure([{ reference: "HP-1", context: "A", action: "Act", outcome: "Done", category: "happy", evidence: [] }])).toBe(false);
+    expect(hasFlowStructure([
+      { reference: "HP-1", context: "A", action: "Act", outcome: "Done", category: "happy", evidence: [] },
+      { reference: "HP-2", context: "B", action: "Act", outcome: "Done", category: "happy", evidence: [] },
+    ])).toBe(true);
+    expect(hasFlowStructure([
+      { reference: "HP-1", context: "A", action: "Act", outcome: "Done", category: "happy", step: 1, evidence: [] },
+    ])).toBe(true);
   });
 });
