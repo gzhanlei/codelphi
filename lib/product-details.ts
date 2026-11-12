@@ -1,11 +1,12 @@
-import { getDb } from "./db";
+import { defaultExecute, getDb } from "./db";
 import { evidenceItems } from "./evidence";
+import { loadFeatureFlowGraphs } from "./feature-flow-store";
 import { evidenceUrl } from "./evidence-url";
 import { parseJsonValue } from "./json";
 import { RELEASE_PAGE_SIZE, type ReleasePagePayload } from "./release-client";
 import { loadRegressionTasks } from "./regression-tasks";
 import { annotateSuspectedRenames } from "./spec-rename";
-import { diffSpecWithFolded, type FoldedSpecChange, type SpecScenario } from "./spec-diff";
+import { diffSpecWithFolded, type FoldedSpecChange, type SpecFeature, type SpecScenario } from "./spec-diff";
 import { loadBaseVersionMap, loadVersionFeatureMap } from "./spec-versions";
 import { loadCoverageReceipt, type CoverageReceiptRow } from "./analysis-coverage";
 import { loadCompletenessLedgerBySpecVersion } from "./completeness-ledger";
@@ -188,6 +189,22 @@ export async function getProductDetails(slug: string, organizationId?: number) {
   }
   // R1 分析完整性账本：与覆盖率回执同源同点加载（run 级 best-effort 写入，历史版本为 null）
   const completeness = latestSpecVersionId === null ? null : await loadCompletenessLedgerBySpecVersion(db.execute.bind(db) as (sql: string, params?: unknown[]) => Promise<unknown>, latestSpecVersionId);
+  const finalSpecFeatures: SpecFeature[] = features.map((feature) => ({
+    name: feature.name,
+    summary: feature.summary,
+    source: feature.source,
+    scenarios: scenarios.filter((scenario) => scenario.featureId === feature.id).map((scenario) => ({
+      reference: scenario.reference,
+      context: scenario.context,
+      action: scenario.action,
+      outcome: scenario.outcome,
+      category: scenario.category,
+      step: scenario.step,
+      source: scenario.source,
+      evidence: evidenceItems(scenario.evidence),
+    })),
+  }));
+  const featureFlows = latestSpecVersionId === null ? new Map() : await loadFeatureFlowGraphs(defaultExecute, latestSpecVersionId, finalSpecFeatures);
 
   const repository = (repositories as Array<{ provider?: string; owner: string; name: string; defaultBranch: string }>)[0];
   const afterSha = (runs as Array<{ status: string; errorMessage?: string; afterSha?: string | null }>)[0]?.afterSha;
@@ -216,6 +233,7 @@ export async function getProductDetails(slug: string, organizationId?: number) {
     repository,
     latestRun: (runs as Array<{ status: string; errorMessage?: string }>)[0],
     features,
+    featureFlows,
     scenarios: scenarios.map((scenario) => ({ ...scenario, evidence: decorateEvidence(scenario.evidence, source) })),
     releases,
     releaseTotal,

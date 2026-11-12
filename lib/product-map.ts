@@ -1,5 +1,5 @@
 import { buildFeatureConnections, type FeatureConnection, type ScenarioEvidenceRow } from "./feature-connections";
-import { clipFlowLabel } from "./feature-flow";
+import { clipFlowLabel } from "./flow-label";
 import { buildFeatureTree, type FeatureTreeItem } from "./feature-tree";
 import type { FeatureRow, ScenarioRow } from "./types";
 

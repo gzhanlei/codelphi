@@ -114,8 +114,10 @@ p { line-height: 1.7; }
 .flow-canvas .react-flow { color: var(--ink); }
 .flow-loading { display: grid; place-items: center; height: 100%; color: var(--muted); font-size: 12px; }
 .flow-react-node { width: 100%; height: 100%; border: 1px solid #a9bdb2; border-radius: 10px; background: #fff; box-shadow: 0 3px 10px #193c2a0a; }
-.flow-react-node.start { border-color: #6b9e85; border-radius: 8px; background: #eaf4ee; }
-.flow-react-node.branch { border-color: #c8a16b; background: #fffaf2; }
+.flow-react-node.start, .flow-react-node.end { border-color: #6b9e85; border-radius: 8px; background: #eaf4ee; }
+.flow-react-node.decision { border-color: #9b8ab8; border-radius: 16px; background: #f8f5fc; }
+.flow-react-node.error { border-color: #cd8b82; background: #fff5f3; }
+.flow-react-node.waiting, .flow-react-node.external { border-color: #c8a16b; background: #fffaf2; }
 .flow-react-node.cat-error { border-color: #cd8b82; background: #fff5f3; }
 .flow-react-node .react-flow__handle { opacity: 0; pointer-events: none; }
 .flow-node-content { display: flex; flex-direction: column; justify-content: center; gap: 5px; width: 100%; height: 100%; margin: 0; padding: 11px 14px; border: 0; border-radius: inherit; background: transparent; color: inherit; text-align: left; cursor: pointer; }
@@ -123,16 +125,23 @@ p { line-height: 1.7; }
 .flow-node-content:where(button):focus-visible { outline: 3px solid #407b61; outline-offset: 3px; }
 .flow-node-kind { align-self: flex-start; padding: 1px 5px; border-radius: 3px; background: #2f7254; color: #fff; font-size: 8px; font-weight: 750; letter-spacing: .5px; }
 .flow-react-node.start .flow-node-kind { align-self: center; }
-.flow-title { display: -webkit-box; overflow: hidden; color: var(--ink); font-size: 13px; font-weight: 650; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.flow-title { display: -webkit-box; overflow: hidden; color: var(--ink); font-size: 13px; font-weight: 650; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .flow-outcome { overflow: hidden; color: var(--muted); font-size: 10px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
 .flow-react-node.cat-error .flow-outcome { color: #9b4237; }
 .react-flow__node.selected .flow-react-node { border-color: #39775a; box-shadow: 0 0 0 3px #4e8b6d24, 0 8px 20px #193c2a12; }
 .flow-react-edge .react-flow__edge-path { stroke: #82998d; stroke-width: 1.4; }
 .flow-react-edge.branch .react-flow__edge-path { stroke: #b38a52; stroke-dasharray: 6 4; }
+.flow-react-edge.retry .react-flow__edge-path { stroke: #9b8ab8; stroke-dasharray: 3 4; }
 .react-flow__edge.selected .react-flow__edge-path { stroke: #39775a; stroke-width: 2; }
 .react-flow__edge-text { fill: #63776c; font-size: 10px; }
 .react-flow__edge-textbg { fill: #fff; }
-.flow-fanout-label { position: absolute; max-width: 220px; overflow: hidden; padding: 3px 6px; border: 1px solid #e0e7e2; border-radius: 4px; background: #fffffff2; color: #63776c; font-size: 10px; line-height: 1.3; pointer-events: none; text-overflow: ellipsis; white-space: nowrap; }
+.flow-routed-label { position: absolute; max-width: 230px; padding: 3px 6px; border: 1px solid #e0e7e2; border-radius: 4px; background: #fffffff5; color: #63776c; font-size: 10px; line-height: 1.35; pointer-events: none; text-align: center; }
+.flow-excluded { margin: 14px 18px 18px; border-top: 1px solid var(--line); padding-top: 12px; color: var(--muted); font-size: 11px; }
+.flow-excluded summary { cursor: pointer; font-weight: 650; }
+.flow-excluded ul { display: grid; gap: 8px; margin: 10px 0 0; padding: 0; list-style: none; }
+.flow-excluded li { display: grid; grid-template-columns: auto auto 1fr; gap: 8px; align-items: baseline; }
+.flow-excluded li > span { padding: 1px 5px; border-radius: 4px; background: #f0f3f1; font-size: 9px; }
+.flow-excluded p { margin: 0; line-height: 1.5; }
 .flow-canvas .react-flow__controls { overflow: hidden; border: 1px solid #d6e0da; border-radius: 8px; box-shadow: 0 4px 14px #193c2a12; }
 .flow-canvas .react-flow__controls-button { width: 32px; height: 32px; border-bottom-color: #e3eae6; background: #fff; color: #345b48; }
 .flow-canvas .react-flow__controls-button:hover { background: #edf4f0; }
