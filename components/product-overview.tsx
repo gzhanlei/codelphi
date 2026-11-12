@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { KnowledgeHealthPanel } from "./knowledge-health-panel";
 import { SpecAsk } from "./spec-ask";
-import type { ProductOverviewData } from "@/lib/product-overview";
+import type { ProductOverviewData, TimelineEntry } from "@/lib/product-overview";
 
 function CapabilityList({ capabilities }: { capabilities: ProductOverviewData["capabilities"] }) {
   if (capabilities.length === 0) return <p className="overview-note">尚无功能规格。</p>;
@@ -35,23 +35,31 @@ function dayLabel(date: Date | string) {
   return new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" }).format(new Date(date));
 }
 
-/** 发布时间线：行为账本的发布点投影（日期 + 发布稿状态徽章 + 一句话），条目点击进入发布卡详情。 */
+/** 发布时间线：行为账本的发布点投影（日期 + 发布稿状态徽章 + 一句话），条目点击进入发布卡详情。连续零变化发布折叠为一组（details 展开，无 JS 依赖）。 */
 function ReleaseTimeline({ data }: { data: ProductOverviewData }) {
-  if (data.timeline.length === 0) return null;
+  if (data.timelineGroups.length === 0) return null;
+  const renderEntry = (entry: TimelineEntry) => {
+    const chip = entry.noteStatus ? STATUS_CHIP[entry.noteStatus] : null;
+    return (
+      <div className="tl-item" key={entry.id}>
+        <div className="tl-date">{entry.dateLabel}{chip ? <span className={`tl-chip ${chip.className}`}>{chip.label}</span> : null}</div>
+        <Link className="tl-title" href={`?view=changes#release-${entry.id}`}>{entry.headline || entry.title}</Link>
+        {entry.firstLine ? <p className="tl-summary">{entry.firstLine}</p> : null}
+      </div>
+    );
+  };
   return (
     <section className="overview-panel">
       <div className="overview-panel-heading"><h2>发布时间线</h2><span className="overview-meta-inline">{data.freshness} · {data.analysisLabel}{data.headlineSource === "generated" ? ` · 代码生成 · ${data.headlineEvidence.length} 个证据文件` : ""}</span><Link className="overview-text-link" href="?view=changes">全部发布变化 →</Link></div>
       <div className="overview-timeline">
-        {data.timeline.map((entry) => {
-          const chip = entry.noteStatus ? STATUS_CHIP[entry.noteStatus] : null;
-          return (
-            <div className="tl-item" key={entry.id}>
-              <div className="tl-date">{entry.dateLabel}{chip ? <span className={`tl-chip ${chip.className}`}>{chip.label}</span> : null}</div>
-              <Link className="tl-title" href={`?view=changes#release-${entry.id}`}>{entry.headline || entry.title}</Link>
-              {entry.firstLine ? <p className="tl-summary">{entry.firstLine}</p> : null}
-            </div>
-          );
-        })}
+        {data.timelineGroups.map((group) => group.kind === "single"
+          ? renderEntry(group.release)
+          : (
+            <details className="tl-quiet-run" key={`quiet-${group.releases[0].id}`}>
+              <summary>{group.count} 次提交均未发现规格行为变化 · 展开提交记录</summary>
+              {group.releases.map(renderEntry)}
+            </details>
+          ))}
       </div>
     </section>
   );

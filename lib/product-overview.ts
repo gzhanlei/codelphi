@@ -103,6 +103,26 @@ function buildUserImpact(
   };
 }
 
+/** 时间线条目（发布时间线的单条投影），quiet-run 分组展开后保持同构数据。 */
+export interface TimelineEntry {
+  id: number;
+  committedAt: Date;
+  title: string;
+  sha: string;
+  url: string;
+  firstLine: string;
+  noteStatus: string | null;
+  headline: string | null;
+  dateLabel: string;
+}
+
+/**
+ * 发布时间线分组（设计 §8）：仅折叠连续的零行为变化发布，审计语义保留——
+ * 展开后数据与单条发布同构；单个零变化发布不分组，非连续不合并不重排。
+ * 零行为变化以该发布没有 spec_changes（wording_only=0）条目为准。
+ */
+export type TimelineGroup = { kind: "single"; release: TimelineEntry } | { kind: "quiet-run"; count: number; releases: TimelineEntry[] };
+
 export function buildProductOverview(input: ProductOverviewInput) {
   const latestRelease = input.releases[0];
   const specVersionId = latestRelease ? latestRelease.specVersionId : null;
@@ -115,7 +135,8 @@ export function buildProductOverview(input: ProductOverviewInput) {
     changed: latestChanges.filter((change) => change.kind !== "added" && change.kind !== "removed").length,
   };
   const changeGroups = groupChangesByFeature(latestChanges);
-  const timeline = input.releases.map((release) => {
+  const changedReleaseIds = new Set(input.behaviorChanges.map((change) => change.releaseId));
+  const entries: TimelineEntry[] = input.releases.map((release) => {
     const note = input.releaseNotes?.find((candidate) => candidate.releaseId === release.id);
     const flat = release.summary.replace(/\s*\n\s*/g, " ").trim();
     const sentenceEnd = flat.search(/[。；！？]/);
@@ -132,6 +153,24 @@ export function buildProductOverview(input: ProductOverviewInput) {
       dateLabel: new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" }).format(new Date(release.committedAt)),
     };
   });
+  const timelineGroups: TimelineGroup[] = [];
+  for (const entry of entries) {
+    const quiet = !changedReleaseIds.has(entry.id);
+    const last = timelineGroups[timelineGroups.length - 1];
+    if (quiet && last?.kind === "quiet-run") {
+      last.releases.push(entry);
+      last.count += 1;
+    } else if (quiet) {
+      timelineGroups.push({ kind: "quiet-run", count: 1, releases: [entry] });
+    } else {
+      timelineGroups.push({ kind: "single", release: entry });
+    }
+  }
+  // 单条零变化发布直接展示，连续多条才折叠成组。
+  for (let index = timelineGroups.length - 1; index >= 0; index -= 1) {
+    const group = timelineGroups[index];
+    if (group.kind === "quiet-run" && group.count === 1) timelineGroups[index] = { kind: "single", release: group.releases[0] };
+  }
   const coverageLine = input.coverage ? `覆盖率 ${Math.round(input.coverage.coverageRatio * 1000) / 10}%（${input.coverage.implFilesAssembled}/${input.coverage.implFilesTotal} 个实现文件）` : null;
   const userImpact = buildUserImpact(input, latestRelease, latestChanges, changeStats);
 
@@ -161,7 +200,7 @@ export function buildProductOverview(input: ProductOverviewInput) {
     latestRelease,
     latestReleaseNote: input.latestReleaseNote ?? null,
     noteByRelease: Object.fromEntries((input.releaseNotes ?? []).map((note) => [String(note.releaseId), { status: note.status, headline: note.headline }])),
-    timeline,
+    timelineGroups,
     coverageLine,
     trust: {
       featureCount: input.features.length,

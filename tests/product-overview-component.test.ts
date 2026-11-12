@@ -86,6 +86,25 @@ describe("product overview rendering (Specsight 原则版式)", () => {
     expect(html).not.toContain("不应显示");
   });
 
+  it("collapses consecutive quiet releases with a truthful label and keeps each release expandable (审计语义)", () => {
+    const quiet = (id: number, title: string) => ({ id, title, summary: `${title}的摘要。`, sha: `sha${id}abcdef`, url: "", committedAt: new Date("2026-11-10"), specVersionId: 8 });
+    const data = buildProductOverview({
+      productBase: "/products/default/radar",
+      product: { id: 1, slug: "radar", name: "Radar", description: "" },
+      features: [], scenarios: [],
+      releases: [quiet(12, "文档更新"), quiet(11, "依赖升级"), { id: 10, title: "行为版本", summary: "有行为变化的发布。", sha: "sha10abcde", url: "", committedAt: new Date("2026-11-08"), specVersionId: 8 }],
+      behaviorChanges: [{ id: 4, releaseId: 10, kind: "changed", entityType: "scenario", featureName: "A", scenarioReference: "HP-1", summary: "场景更新", before: {}, after: {} }],
+      latestRun: { status: "succeeded" },
+    });
+    const html = renderToStaticMarkup(createElement(ProductOverview, { data }));
+    expect(html).toContain("2 次提交均未发现规格行为变化 · 展开提交记录");
+    // 展开后每条原始发布完整保留（标题 + 深链），不做字符串匹配折叠
+    expect(html).toContain("文档更新");
+    expect(html).toContain("依赖升级");
+    expect(html).toContain('href="?view=changes#release-12"');
+    expect(html).toContain('href="?view=changes#release-10"');
+  });
+
   it("renders manual capabilities and a zero version defensively", () => {
     const data = completeOverview();
     data.capabilities[0].source = "manual";

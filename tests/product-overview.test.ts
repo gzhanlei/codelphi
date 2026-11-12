@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildProductOverview } from "../lib/product-overview";
-import type { ChangeRow, FeatureRow, ReleaseRow, ScenarioRow } from "../lib/types";
+import type { BehaviorChangeRow, ChangeRow, FeatureRow, ReleaseRow, ScenarioRow } from "../lib/types";
 
 const features: FeatureRow[] = [
   { id: 3, name: "发布", summary: "Releases", parentId: null, source: "generated" },
@@ -173,5 +173,69 @@ describe("product overview user impact projection", () => {
     expect(empty.userImpact.priorBehavioralRelease).toBeNull();
     const legacy = buildProductOverview({ productBase: "/products/default/radar", product: { id: 1, slug: "radar", name: "Radar", description: "" }, features: [], scenarios: [], releases: [release(8, 1)], behaviorChanges: [], latestRun: { status: "succeeded" } });
     expect(legacy.userImpact.state).toBe("quiet");
+  });
+});
+
+describe("product overview quiet-release grouping", () => {
+  const release = (id: number, days: number): ReleaseRow => ({ id, title: `发布${id}`, summary: `发布${id}摘要`, sha: `sha${id}abcdef`, url: "", committedAt: new Date(`2026-11-${String(days).padStart(2, "0")}`), specVersionId: id });
+  const change = (id: number, releaseId: number): BehaviorChangeRow => ({ id, releaseId, kind: "changed", entityType: "scenario", featureName: "功能", scenarioReference: "HP-1", summary: "变化", before: {}, after: {} });
+
+  it("groups only consecutive zero-change releases and keeps loud releases visible", () => {
+    const overview = buildProductOverview({
+      productBase: "/products/default/radar",
+      product: { id: 1, slug: "radar", name: "Radar", description: "" },
+      features: [], scenarios: [],
+      releases: [release(12, 10), release(11, 9), release(10, 8), release(8, 1)],
+      behaviorChanges: [change(1, 10), change(2, 8)],
+      latestRun: { status: "succeeded" },
+    });
+    expect(overview.timelineGroups).toEqual([
+      { kind: "quiet-run", count: 2, releases: [
+        expect.objectContaining({ id: 12, title: "发布12" }),
+        expect.objectContaining({ id: 11, title: "发布11" }),
+      ] },
+      { kind: "single", release: expect.objectContaining({ id: 10 }) },
+      { kind: "single", release: expect.objectContaining({ id: 8 }) },
+    ]);
+  });
+
+  it("does not merge non-consecutive quiet releases and keeps a single quiet release ungrouped", () => {
+    const overview = buildProductOverview({
+      productBase: "/products/default/radar",
+      product: { id: 1, slug: "radar", name: "Radar", description: "" },
+      features: [], scenarios: [],
+      releases: [release(11, 9), release(10, 8), release(9, 7)],
+      behaviorChanges: [change(1, 10)],
+      latestRun: { status: "succeeded" },
+    });
+    expect(overview.timelineGroups.map((group) => group.kind)).toEqual(["single", "single", "single"]);
+  });
+
+  it("keeps expanded release data complete inside a quiet run", () => {
+    const overview = buildProductOverview({
+      productBase: "/products/default/radar",
+      product: { id: 1, slug: "radar", name: "Radar", description: "" },
+      features: [], scenarios: [],
+      releases: [release(12, 10), release(11, 9)],
+      behaviorChanges: [],
+      latestRun: { status: "succeeded" },
+    });
+    const group = overview.timelineGroups[0];
+    expect(group.kind).toBe("quiet-run");
+    if (group.kind !== "quiet-run") return;
+    expect(group.count).toBe(2);
+    for (const entry of group.releases) {
+      expect(entry.title).toBeTruthy();
+      expect(entry.sha).toBeTruthy();
+      expect(entry.firstLine).toBeTruthy();
+      expect(entry.dateLabel).toBeTruthy();
+    }
+    // 分组不改变统计口径：零变化不计入行为变化数量
+    expect(overview.changeStats).toEqual({ added: 0, removed: 0, changed: 0 });
+  });
+
+  it("keeps empty timelines empty", () => {
+    const overview = buildProductOverview({ productBase: "/products/default/radar", product: { id: 1, slug: "radar", name: "Radar", description: "" }, features: [], scenarios: [], releases: [], behaviorChanges: [], latestRun: { status: "succeeded" } });
+    expect(overview.timelineGroups).toEqual([]);
   });
 });
