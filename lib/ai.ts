@@ -39,11 +39,15 @@ export const analysisSchema = z.object({
     userImpact: z.string().max(4_000).default(""),
     evidence: z.array(evidenceSchema).max(5),
   })).max(150),
+  // 空 features 是合法回答（run 289，2026-11-12）：分区提取遇到 docs/测试/配置为主的窗口，
+  // 模型会返回 product/release/changes 齐全但缺 features 键的 JSON。空趟按「无行为变化窗口」
+  // 接受是既有语义（sanitizeEvidence 注释、parseBehavioralContent 同款回填），空版本由坍缩
+  // 护栏（detectSpecCollapse）下游只告警不阻断，版本 append-only 可回溯。
   features: z.array(z.object({
     name: z.string().min(1).max(191),
     summary: z.string().min(1).max(4_000),
     scenarios: z.array(scenarioSchema).max(40),
-  })).min(1).max(50),
+  })).max(50),
 });
 
 export type AnalysisResult = z.infer<typeof analysisSchema>;
@@ -115,6 +119,42 @@ export function normalizeScenarioAliases(value: unknown) {
   };
 }
 
+/**
+ * 顶层集合键归一（run 289 教训，2026-11-12）：分区提取遇到无用户可感知功能的窗口，
+ * ds-flash 两次重试都稳定返回 product/release/changes 齐全但缺 features 键的 JSON
+ * （重试对输入 token 完全一致 = 同 prompt 确定性漂移）。解析层归一不改落库口径：
+ * ① features/changes 缺键或非数组 → 空数组（空趟=合法回答，同 result→outcome 先例 ce92430）；
+ * ② features 整体漂移到未知键 → 按 {name, scenarios} 形状识别提升（键名漂移同先例）。
+ * product/release 不在此回填——主提取缺它们是真实失败，交由重试与 run 失败如实暴露。
+ */
+const KNOWN_TOP_LEVEL_KEYS = new Set(["product", "release", "changes", "features"]);
+
+function isFeatureShaped(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as { name?: unknown; scenarios?: unknown };
+  return typeof candidate.name === "string" && Array.isArray(candidate.scenarios);
+}
+
+export function normalizeTopLevelCollections(json: Record<string, unknown>): Record<string, unknown> {
+  if (!Array.isArray(json.features)) {
+    const drifted = Object.entries(json).filter(
+      ([key, value]) => !KNOWN_TOP_LEVEL_KEYS.has(key) && Array.isArray(value) && value.length > 0 && value.every(isFeatureShaped),
+    );
+    if (drifted.length === 1) {
+      console.warn("[analysis] drifted top-level features key promoted", { from: drifted[0][0], size: (drifted[0][1] as unknown[]).length });
+      json.features = drifted[0][1];
+    } else {
+      console.warn("[analysis] features collection missing in model output; normalized to empty", { keys: Object.keys(json).join(","), driftedCandidates: drifted.length });
+      json.features = [];
+    }
+  }
+  if (!Array.isArray(json.changes)) {
+    console.warn("[analysis] changes collection missing in model output; normalized to empty", { keys: Object.keys(json).join(",") });
+    json.changes = [];
+  }
+  return json;
+}
+
 export function parseAnalysisContent(content: string): AnalysisResult {
   const trimmed = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
   const start = trimmed.indexOf("{");
@@ -122,7 +162,7 @@ export function parseAnalysisContent(content: string): AnalysisResult {
   if (start < 0) throw new Error("AI response did not contain a JSON object");
   const json = trimmed.slice(start, end + 1);
   if (!json.endsWith("}")) throw new Error("AI response did not contain a JSON object");
-  return analysisSchema.parse(capScenariosPerFeature(capEvidence(normalizeScenarioAliases(JSON.parse(json)))));
+  return analysisSchema.parse(capScenariosPerFeature(capEvidence(normalizeScenarioAliases(normalizeTopLevelCollections(JSON.parse(json))))));
 }
 
 /**

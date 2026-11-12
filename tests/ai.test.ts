@@ -33,6 +33,44 @@ describe("AI analysis output", () => {
     expect((parsed.features[0].scenarios[0] as unknown as Record<string, unknown>).result).toBeUndefined();
   });
 
+  it("normalizes a missing features key to an empty pass (run 289)", () => {
+    // 生产事故复刻（run 289）：分区提取返回 product/release/changes 齐全但缺 features 键
+    const drifted = structuredClone(result) as Record<string, unknown>;
+    delete drifted.features;
+    const parsed = parseAnalysisContent(JSON.stringify(drifted));
+    expect(parsed.features).toEqual([]);
+    expect(parsed.release.title).toBe("改进登录");
+  });
+
+  it("accepts an explicit empty features array as a no-behavior-change window", () => {
+    const empty = structuredClone(result);
+    empty.features = [];
+    expect(parseAnalysisContent(JSON.stringify(empty)).features).toEqual([]);
+  });
+
+  it("promotes a drifted top-level features key by shape", () => {
+    const drifted = structuredClone(result) as Record<string, unknown>;
+    drifted["功能"] = drifted.features;
+    delete drifted.features;
+    const parsed = parseAnalysisContent(JSON.stringify(drifted));
+    expect(parsed.features[0].name).toBe("认证");
+    expect((parsed as unknown as Record<string, unknown>)["功能"]).toBeUndefined();
+  });
+
+  it("does not promote unknown keys that are not feature-shaped", () => {
+    const drifted = structuredClone(result) as Record<string, unknown>;
+    drifted["功能列表"] = ["认证", "发布"];
+    delete drifted.features;
+    const parsed = parseAnalysisContent(JSON.stringify(drifted));
+    expect(parsed.features).toEqual([]);
+  });
+
+  it("normalizes a missing changes key to an empty array", () => {
+    const drifted = structuredClone(result) as Record<string, unknown>;
+    delete drifted.changes;
+    expect(parseAnalysisContent(JSON.stringify(drifted)).changes).toEqual([]);
+  });
+
   it("strips invisible characters from evidence paths before the allow-set check", () => {
     // W0-2 superset 重跑实测：模型在合法 diff 路径前后带零宽字符，精确匹配被误杀
     const drifted = structuredClone(result);
