@@ -1,8 +1,8 @@
 # CoDelphi Docker 化部署迁移方案
 
-> 2026-11-12 起草。目标：生产部署从「git checkout + 服务器侧构建」迁移到「无源码 Docker Compose 产物部署」，对齐本机 SalesBuddy 已验证的部署形态（`/data/www/salesbuddy`：GHCR sha 固定镜像、部署锁、last_good/prev_good 回滚、迁移 profile、冒烟检查）。
+> 2026-11-12 起草。目标：生产部署从「git checkout + 服务器侧构建」迁移到「无源码 Docker Compose 产物部署」，对齐本机 SalesBuddy 已验证的部署形态（`/data/www/salesbuddy`：sha 固定镜像、部署锁、last_good/prev_good 回滚、迁移 profile、冒烟检查）。
 >
-> 状态：**方案待评审**，未实施。实施窗口需 owner 确认（nginx 切换期间有秒级请求失败窗口）。
+> 状态：**✅ 已实施并完成首次部署**（2026-11-12，镜像 `codelphi-server:sha-dcea71b`，systemd 已停用保留应急）。首次走 GitHub 不可达窗口 → 实际通道 = 本地构建 `docker save | gzip | ssh docker load`（约 320MB 镜像，秒级切换，零错误日志）。实施实况与两个踩坑见 §9。
 
 ## 1. 现状（事实）
 
@@ -66,8 +66,9 @@ CMD ["npm", "start"]
 
 | 键 | 容器内值 | 说明 |
 |---|---|---|
+| PORT / HOSTNAME | `3000` / `0.0.0.0` | 旧 .env 是 `3008`/`127.0.0.1`，原样复制会让容器监听错端口（见 §9 踩坑） |
 | DATABASE_URL | 不变（VPC IP 直连，bridge 出站可达） | SalesBuddy 同款已验证 |
-| PPT_PARTNER_URL | `http://host.docker.internal:3100/mcp`（需 extra_hosts） | 容器内 127.0.0.1 ≠ 宿主机 |
+| PPT_PARTNER_URL | `https://easymakeppt.com/mcp` | host-gateway 到不了只绑 127.0.0.1 的宿主服务（见 §9 踩坑） |
 | 其余 CHANDLER_*/AI_*/SESSION_SECRET | 原值经 env_file 注入 | 无需改动 |
 
 ## 6. 迁移步骤（切换窗口 ≈ 5 分钟）
@@ -92,3 +93,28 @@ CMD ["npm", "start"]
 - 不做 Kubernetes/多机编排；不做镜像瘦身极限优化（保留全量 node_modules 换 migrate 可用性，后续可再裁）
 - 不动 MySQL/Redis/nginx/PPTCreator 的部署形态
 - 服务器 git checkout 保留为回滚路径（`.git` 目录不删），但日常部署不再使用它
+
+## 9. 首次部署实施实况（2026-11-12）
+
+实际执行顺序与结果（全部成功，冒烟 3 秒绿，零错误日志）：
+
+1. 本地构建 `docker build --platform linux/amd64 -t codelphi-server:sha-dcea71b .`（~320MB）
+2. 传输：`docker save | gzip -1 | ssh 'gunzip | docker load'`（GitHub 不可达期间的主通道，非兜底）
+3. 部署件 scp 到 **`/data/www/codelphi-docker/`**：compose + deploy.sh/rollback.sh/deploy-lib.sh + `.env`（从旧目录复制后改，chmod 600）
+4. `--profile migrate up migrate`：容器→VPC MySQL 链路验证 ✓，顺带应用 `067_scenario_step.sql`（并行会话 W-DECISION 的迁移随镜像首次上生产）
+5. `systemctl stop/disable codelphi.service`（释放 3008，保留 unit 文件应急）→ `./deploy.sh codelphi-server:sha-dcea71b`（pull 跳过→migrate 幂等→up→smoke→state.env 记账）
+6. 验证：容器 health=healthy；`/login` 200；匿名产品页 `/products/u-a8811be775/codelphi` 200（PUBLIC_DEMO_SLUGS 放行）；8 个 sweep 全启动（含 digest-weekly）；容器内 DB 查询正常（3 篇已发布稿）
+
+### 踩坑记录（下次部署照抄）
+
+| 坑 | 现象 | 正解 |
+|---|---|---|
+| `.env` 的 PORT/HOSTNAME | 旧值 `3008`/`127.0.0.1` 原样进容器 → 监听错端口、compose 端口映射失效 | 复制后必改：`PORT=3000`、`HOSTNAME=0.0.0.0` |
+| host-gateway 到不了宿主 loopback | `host.docker.internal:3100` ECONNREFUSED（pptcreator-web 只绑 127.0.0.1） | PPT_PARTNER_URL 用公网域名 `https://easymakeppt.com/mcp`（同机 nginx 回环，实测 401 通） |
+| compose 插值变量 | `up` 报 `CODELPHI_IMAGE required`（compose 插值不读 env_file 的 app 变量） | 显式传：`CODELPHI_IMAGE=<image> docker compose -f docker-compose.prod.yml up -d app`（deploy.sh 已封装） |
+
+### 回滚路径（当前有效）
+
+- **容器间回滚**：`cd /data/www/codelphi-docker && sudo ./rollback.sh`（回 PREV_GOOD_IMAGE；首次部署 prev 为空）
+- **退回 systemd**：`docker compose down` 释放 3008 → `systemctl start codelphi.service`（旧 checkout + 旧 .env 仍在 `/data/www/codelphi`）
+
