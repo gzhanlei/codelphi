@@ -90,7 +90,7 @@ describe("product overview user impact projection", () => {
   const release = (id: number, days: number): ReleaseRow => ({ id, title: `发布${id}`, summary: "Summary", sha: `sha${id}abcdef`, url: "", committedAt: new Date(`2026-11-${String(days).padStart(2, "0")}`), specVersionId: id });
   const impact = (id: number, releaseId: number, featureName: string, userImpact: string): ChangeRow => ({ id, releaseId, featureName, kind: "changed", description: "", userImpact, evidence: [] });
 
-  it("uses only the latest release impacts, filters blanks, caps at 3 and keeps original order", () => {
+  it("uses only the latest release impacts, filters blanks, groups per feature and caps at 3 groups", () => {
     const overview = buildProductOverview({
       productBase: "/products/default/radar",
       product: { id: 1, slug: "radar", name: "Radar", description: "" },
@@ -109,9 +109,31 @@ describe("product overview user impact projection", () => {
     });
     expect(overview.userImpact.state).toBe("impacts");
     expect(overview.userImpact.items).toEqual([
-      { releaseId: 12, featureName: "甲", userImpact: "影响一" },
-      { releaseId: 12, featureName: "丙", userImpact: "影响二" },
-      { releaseId: 12, featureName: "丁", userImpact: "影响三" },
+      { releaseId: 12, featureName: "甲", userImpacts: ["影响一"] },
+      { releaseId: 12, featureName: "丙", userImpacts: ["影响二"] },
+      { releaseId: 12, featureName: "丁", userImpacts: ["影响三"] },
+    ]);
+  });
+
+  it("merges impacts of the same feature into one group keeping every text in order", () => {
+    const overview = buildProductOverview({
+      productBase: "/products/default/radar",
+      product: { id: 1, slug: "radar", name: "Radar", description: "" },
+      features: [], scenarios: [],
+      releases: [release(12, 10)],
+      behaviorChanges: [],
+      changes: [
+        impact(1, 12, "甲功能", "影响一"),
+        impact(2, 12, "甲功能", "影响二"),
+        impact(3, 12, "乙功能", "影响三"),
+        impact(4, 12, "甲功能", "影响四"),
+      ],
+      latestRun: { status: "succeeded" },
+    });
+    // 同功能三条合并为一组，全部文本按原顺序保留，不产生三张同名卡片
+    expect(overview.userImpact.items).toEqual([
+      { releaseId: 12, featureName: "甲功能", userImpacts: ["影响一", "影响二", "影响四"] },
+      { releaseId: 12, featureName: "乙功能", userImpacts: ["影响三"] },
     ]);
   });
 

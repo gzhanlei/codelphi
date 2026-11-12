@@ -165,13 +165,18 @@ describe("product overview task-oriented panels (设计 §4-§7)", () => {
       features: [], scenarios: [],
       releases: [{ id: 12, title: "导出功能增强", summary: "导出格式支持自定义字段。", sha: "sha12abcde", url: "", committedAt: new Date("2026-11-10"), specVersionId: 8 }],
       behaviorChanges: [],
-      changes: [{ id: 30, releaseId: 12, featureName: "导出", kind: "changed", description: "", userImpact: "导出文件新增可选字段，旧脚本不受影响。", evidence: [] }],
+      changes: [
+        { id: 30, releaseId: 12, featureName: "导出", kind: "changed", description: "", userImpact: "导出文件新增可选字段，旧脚本不受影响。", evidence: [] },
+        { id: 31, releaseId: 12, featureName: "导出", kind: "changed", description: "", userImpact: "字段缺失时保留旧行为并记录 omission。", evidence: [] },
+      ],
       latestRun: { status: "succeeded" },
     });
     const html = renderToStaticMarkup(createElement(ProductOverview, { data: impacts }));
     expect(html).toContain("本次发布对用户的影响");
-    expect(html).toContain("导出功能增强");
+    // 同功能多条影响合并为一张卡片：功能名只出现一次，全部文本保留
+    expect((html.match(/<strong>导出<\/strong>/g) ?? []).length).toBe(1);
     expect(html).toContain("导出文件新增可选字段，旧脚本不受影响。");
+    expect(html).toContain("字段缺失时保留旧行为并记录 omission。");
     expect(html).toContain('href="?view=changes#release-12"');
   });
 

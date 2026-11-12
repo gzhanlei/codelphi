@@ -72,8 +72,9 @@ export function changeGroupLabel(group: { added: number; removed: number; change
 
 /**
  * 最新发布的用户影响投影（设计 §6）：只复用已落库的 changes.user_impact 文本，
- * 不在展示层生成事实。最新发布没有非空用户影响时按确定性数据回退，
- * 不用更早发布冒充最新发布。
+ * 不在展示层生成事实。同一功能的多条影响合并为一组（不产生同名重复卡片），
+ * 全部文本按原顺序保留；最多展示 3 个功能组。最新发布没有非空用户影响时
+ * 按确定性数据回退，不用更早发布冒充最新发布。
  */
 function buildUserImpact(
   input: ProductOverviewInput,
@@ -81,12 +82,16 @@ function buildUserImpact(
   latestChanges: BehaviorChangeRow[],
   changeStats: { added: number; removed: number; changed: number },
 ) {
-  const items = latestRelease
-    ? (input.changes ?? [])
-        .filter((change) => change.releaseId === latestRelease.id && change.userImpact.trim().length > 0)
-        .slice(0, 3)
-        .map((change) => ({ releaseId: latestRelease.id, featureName: change.featureName, userImpact: change.userImpact }))
-    : [];
+  const groups = new Map<string, { releaseId: number; featureName: string; userImpacts: string[] }>();
+  if (latestRelease) {
+    for (const change of input.changes ?? []) {
+      if (change.releaseId !== latestRelease.id || change.userImpact.trim().length === 0) continue;
+      const group = groups.get(change.featureName) ?? { releaseId: latestRelease.id, featureName: change.featureName, userImpacts: [] };
+      group.userImpacts.push(change.userImpact);
+      groups.set(change.featureName, group);
+    }
+  }
+  const items = [...groups.values()].slice(0, 3);
   const state = items.length > 0 ? "impacts" : latestRelease ? (latestChanges.length > 0 ? "changes" : "quiet") : "none";
   // 供「查看最近一次有行为变化的发布」导航：显式带日期与发布身份，不与「本次发布」混称。
   const priorBehavioralRelease = latestRelease

@@ -32,9 +32,9 @@ function UserImpactPanel({ data }: { data: ProductOverviewData }) {
       {userImpact.state === "impacts" ? (
         <div className="impact-list">
           {userImpact.items.map((item) => (
-            <div className="impact-item" key={`${item.releaseId}-${item.featureName}-${item.userImpact.slice(0, 8)}`}>
+            <div className="impact-item" key={`${item.releaseId}-${item.featureName}`}>
               <strong>{item.featureName}</strong>
-              <p>{item.userImpact}</p>
+              {item.userImpacts.map((text) => <p key={text.slice(0, 16)}>{text}</p>)}
               <Link className="overview-text-link" href={deepLink}>查看前后差异 →</Link>
             </div>
           ))}
