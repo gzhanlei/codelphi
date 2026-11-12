@@ -35,6 +35,7 @@ function UserImpactPanel({ data }: { data: ProductOverviewData }) {
             <div className="impact-item" key={`${item.releaseId}-${item.featureName}`}>
               <strong>{item.featureName}</strong>
               {item.userImpacts.map((text) => <p key={text.slice(0, 16)}>{text}</p>)}
+              {item.moreCount > 0 ? <p className="impact-more">另有 {item.moreCount} 条影响说明，见全部前后差异。</p> : null}
               <Link className="overview-text-link" href={deepLink}>查看前后差异 →</Link>
             </div>
           ))}

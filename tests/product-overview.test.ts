@@ -109,9 +109,9 @@ describe("product overview user impact projection", () => {
     });
     expect(overview.userImpact.state).toBe("impacts");
     expect(overview.userImpact.items).toEqual([
-      { releaseId: 12, featureName: "甲", userImpacts: ["影响一"] },
-      { releaseId: 12, featureName: "丙", userImpacts: ["影响二"] },
-      { releaseId: 12, featureName: "丁", userImpacts: ["影响三"] },
+      { releaseId: 12, featureName: "甲", userImpacts: ["影响一"], moreCount: 0 },
+      { releaseId: 12, featureName: "丙", userImpacts: ["影响二"], moreCount: 0 },
+      { releaseId: 12, featureName: "丁", userImpacts: ["影响三"], moreCount: 0 },
     ]);
   });
 
@@ -132,8 +132,23 @@ describe("product overview user impact projection", () => {
     });
     // 同功能三条合并为一组，全部文本按原顺序保留，不产生三张同名卡片
     expect(overview.userImpact.items).toEqual([
-      { releaseId: 12, featureName: "甲功能", userImpacts: ["影响一", "影响二", "影响四"] },
-      { releaseId: 12, featureName: "乙功能", userImpacts: ["影响三"] },
+      { releaseId: 12, featureName: "甲功能", userImpacts: ["影响一", "影响二", "影响四"], moreCount: 0 },
+      { releaseId: 12, featureName: "乙功能", userImpacts: ["影响三"], moreCount: 0 },
+    ]);
+  });
+
+  it("caps per-feature texts at 3 and reports the overflow count instead of dumping the release", () => {
+    const overview = buildProductOverview({
+      productBase: "/products/default/radar",
+      product: { id: 1, slug: "radar", name: "Radar", description: "" },
+      features: [], scenarios: [],
+      releases: [release(12, 10)],
+      behaviorChanges: [],
+      changes: [impact(1, 12, "甲功能", "影响一"), impact(2, 12, "甲功能", "影响二"), impact(3, 12, "甲功能", "影响三"), impact(4, 12, "甲功能", "影响四"), impact(5, 12, "甲功能", "影响五")],
+      latestRun: { status: "succeeded" },
+    });
+    expect(overview.userImpact.items).toEqual([
+      { releaseId: 12, featureName: "甲功能", userImpacts: ["影响一", "影响二", "影响三"], moreCount: 2 },
     ]);
   });
 

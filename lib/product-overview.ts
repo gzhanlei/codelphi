@@ -72,22 +72,26 @@ export function changeGroupLabel(group: { added: number; removed: number; change
 
 /**
  * 最新发布的用户影响投影（设计 §6）：只复用已落库的 changes.user_impact 文本，
- * 不在展示层生成事实。同一功能的多条影响合并为一组（不产生同名重复卡片），
- * 全部文本按原顺序保留；最多展示 3 个功能组。最新发布没有非空用户影响时
- * 按确定性数据回退，不用更早发布冒充最新发布。
+ * 不在展示层生成事实。同一功能的多条影响合并为一组（不产生同名重复卡片）；
+ * 每组保留前 3 条文本并给出溢出计数（概览是轻量投影，全量文本在发布卡），
+ * 最多展示 3 个功能组。最新发布没有非空用户影响时按确定性数据回退，
+ * 不用更早发布冒充最新发布。
  */
+const IMPACT_TEXTS_PER_FEATURE = 3;
+
 function buildUserImpact(
   input: ProductOverviewInput,
   latestRelease: ReleaseRow | undefined,
   latestChanges: BehaviorChangeRow[],
   changeStats: { added: number; removed: number; changed: number },
 ) {
-  const groups = new Map<string, { releaseId: number; featureName: string; userImpacts: string[] }>();
+  const groups = new Map<string, { releaseId: number; featureName: string; userImpacts: string[]; moreCount: number }>();
   if (latestRelease) {
     for (const change of input.changes ?? []) {
       if (change.releaseId !== latestRelease.id || change.userImpact.trim().length === 0) continue;
-      const group = groups.get(change.featureName) ?? { releaseId: latestRelease.id, featureName: change.featureName, userImpacts: [] };
-      group.userImpacts.push(change.userImpact);
+      const group = groups.get(change.featureName) ?? { releaseId: latestRelease.id, featureName: change.featureName, userImpacts: [], moreCount: 0 };
+      if (group.userImpacts.length < IMPACT_TEXTS_PER_FEATURE) group.userImpacts.push(change.userImpact);
+      else group.moreCount += 1;
       groups.set(change.featureName, group);
     }
   }
