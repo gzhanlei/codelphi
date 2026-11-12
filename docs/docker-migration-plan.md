@@ -118,3 +118,10 @@ CMD ["npm", "start"]
 - **容器间回滚**：`cd /data/www/codelphi-docker && sudo ./rollback.sh`（回 PREV_GOOD_IMAGE；首次部署 prev 为空）
 - **退回 systemd**：`docker compose down` 释放 3008 → `systemctl start codelphi.service`（旧 checkout + 旧 .env 仍在 `/data/www/codelphi`）
 
+
+## 10. 语义流程图批次（已部署）
+
+- 生产镜像：`codelphi-server:sha-dce6973`（含 CJS 回填入口修复）；migration `068_feature_flows.sql` 已应用，容器 healthy，部署冒烟通过。
+- 单工作台 feature `9176` 回填完成：14 节点、13 边、16 个说明/重复场景独立排除；未执行全库回填。
+- 线上 RepoMap 路径验收通过：主链、分支、终态清晰，连线未穿文字，节点详情与证据可用；390px 窄屏通过。
+- 本地 203 个测试文件 0 真实失败、typecheck、生产构建均通过。WD-4 重放仍未执行。

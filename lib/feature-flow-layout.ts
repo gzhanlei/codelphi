@@ -1,123 +1,171 @@
-import ELK from "elkjs/lib/elk.bundled";
+import ELK, { type ElkExtendedEdge, type ElkNode, type ElkPoint, type ElkShape } from "elkjs/lib/elk.bundled";
 import { MarkerType, type Edge, type Node } from "@xyflow/react";
-import type { FeatureFlow, FlowNode } from "./feature-flow";
+import type { FeatureFlowGraph, SemanticFlowNode } from "./semantic-feature-flow";
 import type { ScenarioRow } from "./types";
-
-export const FLOW_NODE_SIZE = {
-  start: { width: 144, height: 56 },
-  scenario: { width: 240, height: 88 },
-  branch: { width: 240, height: 88 },
-} as const;
 
 const LAYOUT_PADDING = 40;
 
+export interface PositionedSemanticFlowNode extends SemanticFlowNode {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface PositionedLabel {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export type RoutedSemanticFlowEdge = FeatureFlowGraph["edges"][number] & {
+  points: ElkPoint[];
+  labelPosition?: PositionedLabel;
+};
+
+export interface LayoutedFeatureFlow {
+  nodes: PositionedSemanticFlowNode[];
+  edges: RoutedSemanticFlowEdge[];
+  width: number;
+  height: number;
+}
+
 export type FeatureFlowNodeData = {
   title: string;
-  reference?: string;
-  outcome?: string;
-  kind: FlowNode["kind"];
-  category?: FlowNode["category"];
+  kind: SemanticFlowNode["kind"];
   scenarios: ScenarioRow[];
 };
 
 export type FeatureFlowReactNode = Node<FeatureFlowNodeData, "feature">;
+export type FeatureFlowEdgeData = {
+  points: ElkPoint[];
+  labelPosition?: PositionedLabel;
+};
 
-export function flowNodeSize(node: FlowNode) {
-  return FLOW_NODE_SIZE[node.kind];
+function characterWidth(character: string) {
+  return character.codePointAt(0)! > 255 ? 2 : 1;
 }
 
-export function toReactFlowElements(flow: FeatureFlow, scenarios: ScenarioRow[]) {
-  const scenariosByReference = new Map(scenarios.map((scenario) => [scenario.reference, scenario]));
-  const flowNodesById = new Map(flow.nodes.map((node) => [node.id, node]));
-  const nodes: FeatureFlowReactNode[] = flow.nodes.map((node) => ({
-    id: node.id,
-    type: "feature",
-    position: { x: node.x, y: node.y },
-    data: {
-      title: node.title,
-      reference: node.reference,
-      outcome: node.outcome,
-      kind: node.kind,
-      category: node.category,
-      scenarios: node.reference ? [scenariosByReference.get(node.reference)].filter((scenario) => scenario !== undefined) : [],
-    },
-    style: flowNodeSize(node),
-  }));
-  const edges: Edge[] = flow.edges.map((edge) => ({
-    id: edge.id,
-    source: edge.from,
-    target: edge.to,
-    type: flow.presentation === "fanout" ? "fanout" : "smoothstep",
-    label: edge.label,
-    className: flowNodesById.get(edge.to)?.kind === "branch" ? "flow-react-edge branch" : "flow-react-edge",
-    markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
-    ariaLabel: `${flowNodesById.get(edge.from)?.title ?? edge.from} → ${flowNodesById.get(edge.to)?.title ?? edge.to}`,
-  }));
-  return { nodes, edges };
+function displayWidth(value: string) {
+  return [...value].reduce((width, character) => width + characterWidth(character), 0);
 }
 
-function packSteplessFanout(flow: FeatureFlow): FeatureFlow | null {
-  const scenarios = flow.nodes.filter((node) => node.kind !== "start");
-  if (scenarios.length < 8 || flow.edges.length !== scenarios.length || flow.edges.some((edge) => edge.from !== "start")) return null;
-
-  const columns = 4;
-  const columnStride = 280;
-  const rowStride = 152;
-  const firstRowY = LAYOUT_PADDING + FLOW_NODE_SIZE.start.height + 96;
-  const width = LAYOUT_PADDING * 2 + columns * FLOW_NODE_SIZE.scenario.width + (columns - 1) * 40;
-  const rows = Math.ceil(scenarios.length / columns);
-  const start = flow.nodes.find((node) => node.kind === "start")!;
-  return {
-    ...flow,
-    presentation: "fanout",
-    nodes: [
-      { ...start, x: (width - FLOW_NODE_SIZE.start.width) / 2, y: LAYOUT_PADDING },
-      ...scenarios.map((node, index) => ({
-        ...node,
-        x: LAYOUT_PADDING + (index % columns) * columnStride,
-        y: firstRowY + Math.floor(index / columns) * rowStride,
-      })),
-    ],
-    width,
-    height: firstRowY + rows * rowStride - 64 + LAYOUT_PADDING,
-  };
+function lineCount(value: string, maxUnits = 36, cap = 3) {
+  if (!value) return 1;
+  let lines = 1;
+  let width = 0;
+  for (const character of value) {
+    const next = characterWidth(character);
+    if (width + next > maxUnits) {
+      lines += 1;
+      width = 0;
+    }
+    width += next;
+  }
+  return Math.min(cap, lines);
 }
 
-export async function layoutFeatureFlow(flow: FeatureFlow): Promise<FeatureFlow> {
-  if (flow.nodes.length === 0) return flow;
-  const fanout = packSteplessFanout(flow);
-  if (fanout) return fanout;
+export function semanticNodeSize(node: SemanticFlowNode) {
+  if (node.kind === "start") return { width: 144, height: 56 };
+  return { width: 260, height: 44 + lineCount(node.title) * 20 };
+}
 
+function edgeLabelSize(label: string) {
+  const lines = lineCount(label, 32, 2);
+  return { width: Math.min(240, Math.max(70, displayWidth(label) * 5.5 + 16)), height: lines * 16 + 8 };
+}
+
+function center(node: PositionedSemanticFlowNode): ElkPoint {
+  return { x: node.x + node.width / 2, y: node.y + node.height / 2 };
+}
+
+function fallbackLabelPosition(points: ElkPoint[], size: { width: number; height: number }): PositionedLabel {
+  const [start, end] = [points[0], points[points.length - 1]];
+  return { ...size, x: (start.x + end.x) / 2 - size.width / 2, y: (start.y + end.y) / 2 - size.height / 2 };
+}
+
+function routedEdge(edge: FeatureFlowGraph["edges"][number], layout: ElkExtendedEdge | undefined, nodes: Map<string, PositionedSemanticFlowNode>): RoutedSemanticFlowEdge {
+  const section = layout?.sections?.[0];
+  const source = nodes.get(edge.from)!;
+  const target = nodes.get(edge.to)!;
+  const points = section
+    ? [section.startPoint, ...(section.bendPoints ?? []), section.endPoint].map((point) => ({ x: point.x + LAYOUT_PADDING, y: point.y + LAYOUT_PADDING }))
+    : [center(source), center(target)];
+  let labelPosition: PositionedLabel | undefined;
+  if (edge.label) {
+    const size = edgeLabelSize(edge.label);
+    const label = layout?.labels?.[0];
+    labelPosition = label
+      ? { x: (label.x ?? 0) + LAYOUT_PADDING, y: (label.y ?? 0) + LAYOUT_PADDING, width: label.width ?? size.width, height: label.height ?? size.height }
+      : fallbackLabelPosition(points, size);
+  }
+  return { ...edge, points, labelPosition };
+}
+
+export async function layoutSemanticFeatureFlow(graph: FeatureFlowGraph): Promise<LayoutedFeatureFlow> {
   const elk = new ELK();
   const layout = await elk.layout({
-    id: "feature-flow",
+    id: "semantic-feature-flow",
     width: 0,
     height: 0,
     layoutOptions: {
       "elk.algorithm": "layered",
       "elk.direction": "DOWN",
       "elk.edgeRouting": "ORTHOGONAL",
-      "elk.spacing.nodeNode": "40",
-      "elk.layered.spacing.nodeNodeBetweenLayers": "64",
+      "elk.edgeLabels.placement": "CENTER",
+      "elk.spacing.nodeNode": "48",
+      "elk.spacing.edgeLabel": "18",
+      "elk.layered.spacing.nodeNodeBetweenLayers": "72",
       "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
       "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
+      "elk.layered.cycleBreaking.strategy": "MODEL_ORDER",
     },
-    children: flow.nodes.map((node) => ({ id: node.id, ...flowNodeSize(node) })),
-    edges: flow.edges.map((edge) => ({ id: edge.id, sources: [edge.from], targets: [edge.to] })),
+    children: graph.nodes.map((node) => ({ id: node.id, ...semanticNodeSize(node) })),
+    edges: graph.edges.map((edge) => ({
+      id: edge.id,
+      sources: [edge.from],
+      targets: [edge.to],
+      labels: edge.label ? [{ text: edge.label, ...edgeLabelSize(edge.label) }] : [],
+    })),
   });
-
   const positions = new Map((layout.children ?? []).map((node) => [node.id, node]));
-  return {
-    ...flow,
-    nodes: flow.nodes.map((node) => {
-      const position = positions.get(node.id);
-      return {
-        ...node,
-        x: (position?.x ?? 0) + LAYOUT_PADDING,
-        y: (position?.y ?? 0) + LAYOUT_PADDING,
-      };
-    }),
-    width: (layout.width ?? 0) + LAYOUT_PADDING * 2,
-    height: (layout.height ?? 0) + LAYOUT_PADDING * 2,
-  };
+  const nodes: PositionedSemanticFlowNode[] = graph.nodes.map((node) => {
+    const position = positions.get(node.id);
+    const size = semanticNodeSize(node);
+    return { ...node, x: (position?.x ?? 0) + LAYOUT_PADDING, y: (position?.y ?? 0) + LAYOUT_PADDING, ...size };
+  });
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
+  const layoutEdges = new Map((layout.edges ?? []).map((edge) => [edge.id, edge]));
+  const edges = graph.edges.map((edge) => routedEdge(edge, layoutEdges.get(edge.id), nodesById));
+  const width = Math.max(640, ...nodes.map((node) => node.x + node.width + LAYOUT_PADDING));
+  const height = Math.max(320, ...nodes.map((node) => node.y + node.height + LAYOUT_PADDING));
+  return { nodes, edges, width, height };
+}
+
+export function toReactFlowElements(layout: LayoutedFeatureFlow, scenarios: ScenarioRow[]) {
+  const scenariosByReference = new Map(scenarios.map((scenario) => [scenario.reference, scenario]));
+  const nodes: FeatureFlowReactNode[] = layout.nodes.map((node) => ({
+    id: node.id,
+    type: "feature",
+    position: { x: node.x, y: node.y },
+    data: {
+      title: node.title,
+      kind: node.kind,
+      scenarios: node.scenarioRefs.map((reference) => scenariosByReference.get(reference)).filter((scenario) => scenario !== undefined),
+    },
+    style: { width: node.width, height: node.height },
+  }));
+  const edges: Edge<FeatureFlowEdgeData>[] = layout.edges.map((edge) => ({
+    id: edge.id,
+    source: edge.from,
+    target: edge.to,
+    type: "routed",
+    label: edge.label,
+    data: { points: edge.points, labelPosition: edge.labelPosition },
+    className: `flow-react-edge ${edge.kind}`,
+    markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
+    ariaLabel: edge.label ? `${edge.from} → ${edge.to}: ${edge.label}` : `${edge.from} → ${edge.to}`,
+  }));
+  return { nodes, edges };
 }

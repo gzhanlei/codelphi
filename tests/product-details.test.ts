@@ -3,11 +3,16 @@ import { getProductDetails } from "../lib/product-details";
 
 const { execute } = vi.hoisted(() => ({ execute: vi.fn() }));
 vi.mock("../lib/db", () => ({ getDb: () => ({ execute }), defaultExecute: execute }));
+const { loadFeatureFlowGraphs } = vi.hoisted(() => ({ loadFeatureFlowGraphs: vi.fn() }));
+vi.mock("../lib/feature-flow-store", () => ({ loadFeatureFlowGraphs }));
 
 const product = { id: 4, slug: "radar", name: "Radar", description: "Product knowledge", descriptionSource: "generated", descriptionEvidence: JSON.stringify([{ path: "lib/analysis.ts", startLine: 185 }]) };
 
 describe("product details", () => {
-  beforeEach(() => execute.mockReset());
+  beforeEach(() => {
+    execute.mockReset();
+    loadFeatureFlowGraphs.mockReset().mockResolvedValue(new Map());
+  });
 
   it("returns null for an unknown product", async () => {
     execute.mockResolvedValue([[]]);
@@ -51,8 +56,12 @@ describe("product details", () => {
       if (sql.includes("FROM release_notes WHERE product_id")) return [[{ id: 1, releaseId: 10, status: "published", headline: null }]];
       throw new Error(`Unexpected query: ${sql}`);
     });
+    const featureGraph = { entryNodeIds: [], nodes: [], edges: [], excludedScenarios: [] };
+    loadFeatureFlowGraphs.mockResolvedValue(new Map([["Login", featureGraph]]));
     const details = await getProductDetails("radar");
     expect(details?.scenarios).toHaveLength(1);
+    expect(details?.featureFlows.get("Login")).toEqual(featureGraph);
+    expect(loadFeatureFlowGraphs).toHaveBeenCalledWith(expect.anything(), 3, [expect.objectContaining({ name: "Login" })]);
     expect(details?.changes).toHaveLength(1);
     expect(details?.behaviorChanges[0]).toMatchObject({ before: { old: true }, after: { new: true } });
     expect(details?.foldedChanges).toEqual([]);
