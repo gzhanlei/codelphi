@@ -75,6 +75,35 @@ describe("feature flow generation", () => {
     expect(receipts[0].callKind).toBe("feature_flow");
   });
 
+  it("normalizes empty sequence labels before validation", async () => {
+    const { generateFeatureFlowGraph } = await import("../lib/feature-flow-generation");
+    const withEmptyLabels = structuredClone(candidate);
+    withEmptyLabels.edges[0].label = "";
+    withEmptyLabels.edges[1].label = "  ";
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(withEmptyLabels)));
+
+    const graph = await generateFeatureFlowGraph(feature);
+    expect(graph.edges[0].label).toBeUndefined();
+    expect(graph.edges[1].label).toBeUndefined();
+  });
+
+  it("retries once with validation feedback instead of accepting a partial graph", async () => {
+    const { generateFeatureFlowGraph } = await import("../lib/feature-flow-generation");
+    const invalid = structuredClone(candidate);
+    invalid.nodes[4].scenarioRefs = ["HP-15"];
+    const responses = [jsonResponse(invalid), jsonResponse(candidate)];
+    const bodies: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      bodies.push(String(init.body));
+      return responses.shift()!;
+    }));
+
+    const graph = await generateFeatureFlowGraph(feature);
+    expect(graph).toEqual(candidate);
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]).toContain("EXCLUDED_SCENARIO_IN_GRAPH");
+  });
+
   it("rejects unknown references returned by the gateway", async () => {
     const { generateFeatureFlowGraph } = await import("../lib/feature-flow-generation");
     const invalid = structuredClone(candidate);
