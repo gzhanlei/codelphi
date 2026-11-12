@@ -50,6 +50,7 @@ export interface FeatureFlow {
   height: number;
   /** 是否存在可画的结构：任一 step 主链（顺序结构）或多于一个情境组（条件分支结构）。 */
   structured: boolean;
+  presentation?: "layered" | "fanout";
 }
 
 function scenarioRank(scenario: SpecScenario) {
@@ -134,7 +135,7 @@ export function buildFeatureFlow(scenarios: SpecScenario[]): FeatureFlow {
 
   const nodes: FlowNode[] = [];
   const edges: FlowEdge[] = [];
-  // 入口置顶：一条竖直干线沿节点列左侧下行，各场景用短支线接入（见组件 EntryEdgeBundle）。
+  // 入口语义保持单一；最终坐标与入口边布线由 feature-flow-layout 决定。
   const entry: FlowNode = { id: ENTRY_ID, kind: "start", title: "开始工作", x: 20, y: TOP_MARGIN };
   nodes.push(entry);
 
@@ -153,10 +154,9 @@ export function buildFeatureFlow(scenarios: SpecScenario[]): FeatureFlow {
     const branches = group.filter((scenario) => scenario.category !== "happy");
 
     // W-DECISION 最小序列版（docs/w-decision-scenario-sequence-plan.md §4）：
-    // 有 step 的 happy 场景按 step 升序连成主链 开始工作→1→2→…；分支可标注归属步骤（弧线下垂）。
-    // 呈现层升级（2026-11-12）：情境从每行独立「开始」节点改为入口边上的条件标注，全图单一「开始工作」入口；
-    // 横排只保留给有 step 证据的顺序链，其余场景（无 step 的 happy 与未归属分支）一律在左列竖直堆叠，
-    // 位置并列不表示先后，入口干线直达每层、互不穿越节点框。
+    // 有 step 的 happy 场景按 step 升序连成主链 开始工作→1→2→…；分支可标注归属步骤。
+    // 情境从每行独立「开始」节点改为入口边上的条件标注，全图单一「开始工作」入口；
+    // 无 step 的 happy 与未归属分支保持入口扇出，位置不表示先后；最终采用纵向分层还是多行扇出由自动布局决定。
     const stepped = happy.filter((scenario) => validStep(scenario) !== null).sort((a, b) => validStep(a)! - validStep(b)! || a.reference.localeCompare(b.reference));
     const unstepped = happy.filter((scenario) => validStep(scenario) === null);
     const chain: Array<{ node: FlowNode; step: number }> = stepped.map((scenario, index) => ({

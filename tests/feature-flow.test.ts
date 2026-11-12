@@ -109,21 +109,24 @@ describe("feature flow generation", () => {
 });
 
 describe("FeatureFlow component", () => {
-  it("keeps the full (unclipped) title and outcome in the node hover tooltip", async () => {
+  it("renders complete scenario text and code evidence in the details panel", async () => {
     const { createElement } = await import("react");
     const { renderToStaticMarkup } = await import("react-dom/server");
-    const { FeatureFlow } = await import("../components/feature-flow");
-    const longOutcome = "这是一个特别长的结果描述，用来验证截断之后完整文本仍然出现在悬浮提示里不丢失";
-    const base = {
+    const { FeatureFlowDetails: Details } = await import("../components/feature-flow");
+    expect(Details).toBeTypeOf("function");
+
+    const longOutcome = "这是一个特别长的结果描述，用来验证详情面板完整展示结果和代码证据";
+    const scenario = {
       id: 1, featureId: 1, reference: "HP-1", context: "情境", action: "操作", outcome: longOutcome,
-      category: "happy", source: "generated", active: 1, evidence: "[]", staleSince: null, staleChangeId: null,
+      category: "happy" as const, source: "generated" as const, active: 1,
+      evidence: JSON.stringify([{ path: "lib/example.ts", startLine: 12, url: "https://example.com/evidence" }]),
+      staleSince: null, staleChangeId: null,
     };
-    const html = renderToStaticMarkup(createElement(FeatureFlow, {
-      featureName: "测试功能",
-      scenarios: [base as never, { ...base, id: 2, reference: "HP-2", context: "另一情境" } as never],
-    }));
-    expect(html).toContain(clipFlowLabel(longOutcome));
+    const html = renderToStaticMarkup(createElement(Details, { title: "连接代码库", scenarios: [scenario], onClose: () => undefined }));
     expect(html).toContain(longOutcome);
+    expect(html).toContain("lib/example.ts:12");
+    expect(html).toContain("https://example.com/evidence");
+    expect(html).toContain("关闭详情");
   });
   it("renders the structure fallback instead of an SVG when no control structure exists", async () => {
     const { createElement } = await import("react");
@@ -153,7 +156,7 @@ describe("scenario step chain (W-DECISION 最小序列版)", () => {
     expect(flow.edges).toContainEqual(expect.objectContaining({ from: "start", to: "HP-1", label: "Visitor" }));
     expect(flow.edges).toContainEqual(expect.objectContaining({ from: "HP-1", to: "HP-2" }));
     expect(flow.edges).toContainEqual(expect.objectContaining({ from: "HP-1", to: "EC-1" }));
-    // 无 step 的错误场景并入左列堆叠，从入口干线接入
+    // 无 step 的错误场景保持入口扇出，不虚构顺序
     expect(flow.edges).toContainEqual(expect.objectContaining({ from: "start", to: "ER-1" }));
     const hp1 = flow.nodes.find((node) => node.id === "HP-1")!;
     const hp2 = flow.nodes.find((node) => node.id === "HP-2")!;

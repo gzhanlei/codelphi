@@ -1,102 +1,201 @@
-import { buildFeatureFlow, clipFlowLabel, findEdgeNodes, type FlowEdge, type FlowNode } from "@/lib/feature-flow";
-import { evidenceItems } from "@/lib/evidence";
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import {
+  Background,
+  BackgroundVariant,
+  BaseEdge,
+  Controls,
+  EdgeLabelRenderer,
+  Handle,
+  Panel,
+  Position,
+  ReactFlow,
+  useReactFlow,
+  type EdgeProps,
+  type NodeProps,
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
+import { buildFeatureFlow } from "@/lib/feature-flow";
+import {
+  layoutFeatureFlow,
+  toReactFlowElements,
+  type FeatureFlowReactNode,
+} from "@/lib/feature-flow-layout";
+import { evidenceItems, evidenceLabel } from "@/lib/evidence";
 import type { ScenarioRow } from "@/lib/types";
 
-function BranchEdge({ source, target }: { source: FlowNode; target: FlowNode }) {
-  return <path className="flow-edge branch" d={`M ${source.x + 80} ${source.y + 70} C ${source.x + 80} ${source.y + 100}, ${target.x + 80} ${target.y - 35}, ${target.x + 80} ${target.y}`} markerEnd="url(#flow-arrow)" />;
-}
+const nodeTypes = {
+  feature: FeatureNode,
+};
 
-function RequiredEdge({ source, target }: { source: FlowNode; target: FlowNode }) {
-  if (target.kind === "branch" && source.kind === "scenario") return <BranchEdge source={source} target={target} />;
-  return <line className="flow-edge" x1={source.x + 160} y1={source.y + 35} x2={target.x} y2={target.y + 35} markerEnd="url(#flow-arrow)" />;
-}
+const edgeTypes = {
+  fanout: FanoutEdge,
+};
 
-const ENTRY_WIDTH = 120;
-const TRUNK_X = 20 + ENTRY_WIDTH + 30;
-
-/** 入口干线：一条竖线从「开始工作」下行，各场景用带箭头的短支线接入——29 条边不会挤成一股缆绳。 */
-function EntryEdgeBundle({ source, edges, nodes }: { source: FlowNode; edges: FlowEdge[]; nodes: FlowNode[] }) {
-  const stubs = edges.flatMap((edge) => {
-    const endpoints = findEdgeNodes(edge, nodes);
-    if (!endpoints || endpoints.source.id !== source.id) return [];
-    return [{ edge, target: endpoints.target }];
-  });
-  if (stubs.length === 0) return null;
-  const x0 = source.x + ENTRY_WIDTH;
-  const y0 = source.y + 35;
-  const bottom = Math.max(y0, ...stubs.map(({ target }) => target.y + 35));
+function FanoutEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, label }: EdgeProps) {
+  const trunkX = 16;
+  const sourceBusY = sourceY + 24;
+  const targetBusY = targetY - 32;
+  const path = `M ${sourceX} ${sourceY} L ${sourceX} ${sourceBusY} L ${trunkX} ${sourceBusY} L ${trunkX} ${targetBusY} L ${targetX} ${targetBusY} L ${targetX} ${targetY}`;
   return (
-    <g>
-      <path className="flow-edge" d={`M ${x0} ${y0} L ${TRUNK_X} ${y0} L ${TRUNK_X} ${bottom}`} />
-      {stubs.map(({ edge, target }) => (
-        <path key={edge.id} className={`flow-edge${target.kind === "branch" ? " branch" : ""}`} d={`M ${TRUNK_X} ${target.y + 35} L ${target.x} ${target.y + 35}`} markerEnd="url(#flow-arrow)" />
-      ))}
-    </g>
+    <>
+      <BaseEdge id={id} path={path} markerEnd={markerEnd} />
+      {label ? (
+        <EdgeLabelRenderer>
+          <div className="flow-fanout-label" style={{ transform: `translate(-50%, -50%) translate(${targetX}px, ${targetBusY}px)` }}>{label}</div>
+        </EdgeLabelRenderer>
+      ) : null}
+    </>
   );
 }
 
-function EdgeLabel({ edge, nodes }: { edge: FlowEdge; nodes: FlowNode[] }) {
-  const endpoints = findEdgeNodes(edge, nodes);
-  if (!endpoints || !edge.label) return null;
-  return <text className="flow-edge-label" x={endpoints.target.x + 2} y={endpoints.target.y - 7}>{clipFlowLabel(edge.label, 24)}</text>;
+function FitViewOnDetailsChange({ detailsOpen }: { detailsOpen: boolean }) {
+  const { fitView } = useReactFlow();
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      void fitView({ padding: 0.16, maxZoom: 1 });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [detailsOpen, fitView]);
+  return null;
 }
 
-function Edge({ edge, nodes }: { edge: FlowEdge; nodes: FlowNode[] }) {
-  const endpoints = findEdgeNodes(edge, nodes);
-  if (!endpoints) return null;
-  return <RequiredEdge source={endpoints.source} target={endpoints.target} />;
+function categoryLabel(category: ScenarioRow["category"]) {
+  return { happy: "Happy path", edge: "边界情况", error: "错误处理" }[category];
 }
 
-function ReferenceText({ node }: { node: FlowNode }) {
-  if (!node.reference) return null;
-  return <text className="flow-reference" x={node.x + 10} y={node.y + 17}>{node.reference}</text>;
-}
-
-function OutcomeText({ node }: { node: FlowNode }) {
-  if (!node.outcome) return null;
-  return <text className="flow-outcome" x={node.x + 10} y={node.y + 56}>{clipFlowLabel(node.outcome)}</text>;
-}
-
-function NodeText({ node }: { node: FlowNode }) {
-  return <>
-    <ReferenceText node={node} />
-    <text className="flow-title" x={node.x + 10} y={node.y + (node.reference ? 36 : 30)}>{clipFlowLabel(node.title)}</text>
-    <OutcomeText node={node} />
-  </>;
-}
-
-function Node({ node }: { node: FlowNode }) {
-  const tooltip = `${node.title}${node.outcome ? ` → ${node.outcome}` : ""}`;
+function FeatureNode({ data }: NodeProps<FeatureFlowReactNode>) {
+  const content = (
+    <>
+      {data.kind === "start" ? <span className="flow-node-kind">START</span> : null}
+      <strong className="flow-title">{data.title}</strong>
+      {data.kind !== "start" && data.outcome ? <span className="flow-outcome">{data.outcome}</span> : null}
+    </>
+  );
   return (
-    <g className={`flow-node ${node.kind} cat-${node.category ?? "happy"}`}>
-      <rect x={node.x} y={node.y} width={node.kind === "start" ? ENTRY_WIDTH : 160} height={70} rx={8} />
-      {/* React 19 会把 <title> 当文档元数据提升到 head，SVG 内的悬浮提示必须用原始 HTML 注入。 */}
-      <title dangerouslySetInnerHTML={{ __html: tooltip }} />
-      <NodeText node={node} />
-    </g>
+    <div className={`flow-react-node ${data.kind} cat-${data.category ?? "happy"}`}>
+      {data.kind !== "start" ? <Handle type="target" position={Position.Top} /> : null}
+      {data.kind === "start" ? <div className="flow-node-content">{content}</div> : (
+        <button type="button" className="flow-node-content" aria-label={`查看 ${data.title} 的场景详情`}>
+          {content}
+        </button>
+      )}
+      <Handle type="source" position={Position.Bottom} />
+    </div>
+  );
+}
+
+export function FeatureFlowDetails({ title, scenarios, onClose }: { title: string; scenarios: ScenarioRow[]; onClose: () => void }) {
+  return (
+    <aside className="flow-details" aria-labelledby="flow-details-title">
+      <div className="flow-details-header">
+        <div>
+          <span className="flow-details-eyebrow">节点详情</span>
+          <h3 id="flow-details-title">{title}</h3>
+        </div>
+        <button type="button" className="flow-details-close" onClick={onClose} aria-label="关闭详情">×</button>
+      </div>
+      <p className="flow-details-count">关联场景 {scenarios.length}</p>
+      <div className="flow-scenario-list">
+        {scenarios.map((scenario) => {
+          const evidence = evidenceItems(scenario.evidence);
+          return (
+            <article className={`flow-scenario-card cat-${scenario.category}`} key={scenario.id}>
+              <div className="flow-scenario-meta">
+                <span className={`scenario-kind ${scenario.category}`}>{categoryLabel(scenario.category)}</span>
+                <code>{scenario.reference}</code>
+                {scenario.step ? <span>步骤 {scenario.step}</span> : null}
+              </div>
+              <dl>
+                <div><dt>Context</dt><dd>{scenario.context}</dd></div>
+                <div><dt>Action</dt><dd>{scenario.action}</dd></div>
+                <div><dt>Outcome</dt><dd>{scenario.outcome}</dd></div>
+              </dl>
+              {evidence.length > 0 ? (
+                <div className="flow-scenario-evidence">
+                  <strong>代码证据</strong>
+                  <div className="evidence-list">
+                    {evidence.map((item) => item.url ? (
+                      <a href={item.url} target="_blank" rel="noreferrer" key={`${item.path}-${item.startLine ?? 0}`}>{evidenceLabel(item)} ↗</a>
+                    ) : <code key={`${item.path}-${item.startLine ?? 0}`}>{evidenceLabel(item)}</code>)}
+                  </div>
+                </div>
+              ) : null}
+            </article>
+          );
+        })}
+      </div>
+    </aside>
   );
 }
 
 export function FeatureFlow({ featureName, scenarios }: { featureName: string; scenarios: ScenarioRow[] }) {
-  const flow = buildFeatureFlow(scenarios.map((scenario) => ({ ...scenario, evidence: evidenceItems(scenario.evidence) })));
-  const entry = flow.nodes.find((node) => node.kind === "start");
-  const chainEdges = flow.edges.filter((edge) => {
-    const endpoints = findEdgeNodes(edge, flow.nodes);
-    return endpoints && endpoints.source.kind !== "start";
-  });
+  const flow = useMemo(() => buildFeatureFlow(scenarios.map((scenario) => ({
+    ...scenario,
+    evidence: evidenceItems(scenario.evidence),
+  }))), [scenarios]);
+  const [elements, setElements] = useState<ReturnType<typeof toReactFlowElements> | null>(null);
+  const [layoutError, setLayoutError] = useState(false);
+  const [selected, setSelected] = useState<FeatureFlowReactNode | null>(null);
+
+  useEffect(() => {
+    if (!flow.structured) return;
+    let active = true;
+    setElements(null);
+    setLayoutError(false);
+    setSelected(null);
+    void layoutFeatureFlow(flow).then((positioned) => {
+      if (active) setElements(toReactFlowElements(positioned, scenarios));
+    }).catch(() => {
+      if (active) setLayoutError(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, [flow, scenarios]);
+
   return (
-    <section className="feature-flow">
-      <div className="flow-note">图从「开始工作」单一入口展开：入口引出一条干线，各场景经短支线接入，支线上方小字是进入该分支的情境（前置条件，即条件判断）；同一情境下标注了步骤顺序（step 1..N）的场景连成绿色实线主链（顺序结构）；虚线分支表示该情境下的出错/边界结果，不是顺序；没有步骤标注的场景并列排布，不代表先后。循环结构目前没有标注协议，图中不表达。</div>
-      {!flow.structured ? <div className="empty-state">该功能没有步骤顺序或多情境分支的结构证据，暂不渲染流程图（避免画出没有控制结构支撑的假流程）；完整场景清单见「场景」标签。</div> : (
-      <div className="flow-canvas">
-        <svg role="img" aria-label={`${featureName} 流程图`} viewBox={`0 0 ${flow.width} ${flow.height}`}>
-          <defs><marker id="flow-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" /></marker></defs>
-          {entry ? <EntryEdgeBundle source={entry} edges={flow.edges} nodes={flow.nodes} /> : null}
-          {chainEdges.map((edge) => <Edge edge={edge} nodes={flow.nodes} key={edge.id} />)}
-          {flow.edges.map((edge) => <EdgeLabel edge={edge} nodes={flow.nodes} key={`label-${edge.id}`} />)}
-          {flow.nodes.map((node) => <Node node={node} key={node.id} />)}
-        </svg>
-      </div>
+    <section className="feature-flow" aria-label={`${featureName} 流程图`}>
+      <div className="flow-note">根据场景步骤与情境自动生成。拖拽平移、滚轮缩放；点击节点查看完整场景和代码证据。</div>
+      {!flow.structured ? (
+        <div className="empty-state">该功能没有步骤顺序或多情境分支的结构证据，暂不渲染流程图；完整场景清单见「场景」标签。</div>
+      ) : layoutError ? (
+        <div className="empty-state" role="alert">自动布局暂时不可用，请刷新重试；完整场景清单见「场景」标签。</div>
+      ) : (
+        <div className={`flow-workspace${selected ? " has-details" : ""}`}>
+          <div className="flow-canvas" aria-busy={!elements}>
+            {elements ? (
+              <ReactFlow
+                key={`${featureName}-${elements.nodes.length}-${elements.edges.length}`}
+                defaultNodes={elements.nodes}
+                defaultEdges={elements.edges}
+                nodeTypes={nodeTypes}
+                edgeTypes={edgeTypes}
+                fitView
+                fitViewOptions={{ padding: 0.16, maxZoom: 1 }}
+                minZoom={0.15}
+                maxZoom={1.75}
+                nodesDraggable={false}
+                nodesConnectable={false}
+                nodesFocusable
+                edgesFocusable
+                elementsSelectable
+                onNodeClick={(_, node) => {
+                  if (node.data.scenarios.length > 0) setSelected(node as FeatureFlowReactNode);
+                }}
+                onPaneClick={() => setSelected(null)}
+                proOptions={{ hideAttribution: false }}
+              >
+                <Background variant={BackgroundVariant.Dots} gap={22} size={1.25} color="#cbd8d1" />
+                <Controls position="top-right" showInteractive={false} aria-label="流程图视图控制" />
+                <FitViewOnDetailsChange detailsOpen={selected !== null} />
+                <Panel position="bottom-left" className="flow-legend">实线：顺序　虚线：边界 / 错误</Panel>
+              </ReactFlow>
+            ) : <div className="flow-loading">正在计算流程布局…</div>}
+          </div>
+          {selected ? <FeatureFlowDetails title={selected.data.title} scenarios={selected.data.scenarios} onClose={() => setSelected(null)} /> : null}
+        </div>
       )}
     </section>
   );
