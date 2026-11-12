@@ -525,12 +525,17 @@ async function runAnalysisBody(run: RunContext) {
   }
   } // else：提取分支结束（BM-10 零行为变更窗口不进入）
   const { specVersionId, releaseId, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped } = await saveResult(run, result, change, affectedKeys, coverage);
-  await syncFeatureFlowsForVersion({
-    specVersionId,
-    repositoryId: run.repositoryId,
-    affectedKeys,
-    billing: { runId: run.id, accountId: run.accountId ?? null, chargeComponent: "main", callKind: "feature_flow" },
-  });
+  try {
+    const flowStats = await syncFeatureFlowsForVersion({
+      specVersionId,
+      repositoryId: run.repositoryId,
+      affectedKeys,
+      billing: { runId: run.id, accountId: run.accountId ?? null, chargeComponent: "main", callKind: "feature_flow" },
+    });
+    console.log("[feature-flow] sync complete", { specVersionId, ...flowStats });
+  } catch (error) {
+    console.error("[feature-flow] sync failed", { specVersionId, message: error instanceof Error ? error.message : String(error) });
+  }
   // W0-9 一致性核验：同功能内互斥结果并存（枚举多通道产物的语义矛盾）→ 告警供人工核实（append-only 已落库，不改写）
   const conflicts = detectOutcomeConflicts(mergedFeatures);
   if (conflicts.length > 0) {

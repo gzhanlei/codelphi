@@ -176,6 +176,20 @@ describe("analysis orchestration", () => {
     expect(execute).not.toHaveBeenCalledWith(expect.stringContaining("status = 'failed'"), expect.anything());
   });
 
+  it("keeps the committed run successful when semantic flow synchronization fails", async () => {
+    syncFeatureFlowsForVersion.mockRejectedValueOnce(new Error("spec_feature_flows is missing"));
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      await runAnalysis(8);
+      expect(connection.commit).toHaveBeenCalledOnce();
+      expect(vi.mocked(capture)).toHaveBeenCalled();
+      expect(error).toHaveBeenCalledWith("[feature-flow] sync failed", expect.objectContaining({ specVersionId: 44 }));
+      expect(execute).not.toHaveBeenCalledWith(expect.stringContaining("status = 'failed'"), expect.anything());
+    } finally {
+      error.mockRestore();
+    }
+  });
+
   it("re-reserves on entry when no active reservation exists (failed-run retry, contract §6.6)", async () => {
     runRows = [{ ...run, accountId: 7 }];
     vi.mocked(hasActiveReservation).mockResolvedValueOnce(false);

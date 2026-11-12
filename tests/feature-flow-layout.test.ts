@@ -32,6 +32,16 @@ function overlaps(a: { x: number; y: number; width: number; height: number }, b:
   return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
 }
 
+function segmentIntersectsRect(a: { x: number; y: number }, b: { x: number; y: number }, rect: { x: number; y: number; width: number; height: number }) {
+  if (a.x === b.x) {
+    return a.x > rect.x && a.x < rect.x + rect.width && Math.max(a.y, b.y) > rect.y && Math.min(a.y, b.y) < rect.y + rect.height;
+  }
+  if (a.y === b.y) {
+    return a.y > rect.y && a.y < rect.y + rect.height && Math.max(a.x, b.x) > rect.x && Math.min(a.x, b.x) < rect.x + rect.width;
+  }
+  return true;
+}
+
 describe("semantic feature flow layout", () => {
   it("uses routed vertical paths and reserves node and label space", async () => {
     const { layoutSemanticFeatureFlow } = await import("../lib/feature-flow-layout").catch(() => ({ layoutSemanticFeatureFlow: undefined }));
@@ -48,7 +58,7 @@ describe("semantic feature flow layout", () => {
       expect(node.width).toBeGreaterThan(100);
       expect(node.height).toBeGreaterThanOrEqual(56);
     }
-    for (const edge of result.edges) {
+    for (const [index, edge] of result.edges.entries()) {
       expect(edge.points.length).toBeGreaterThanOrEqual(2);
       for (const point of edge.points) {
         expect(point.x).toBeGreaterThanOrEqual(40);
@@ -59,6 +69,20 @@ describe("semantic feature flow layout", () => {
         expect(edge.labelPosition!.x).toBeGreaterThanOrEqual(40);
         expect(edge.labelPosition!.y).toBeGreaterThanOrEqual(40);
         for (const node of result.nodes) expect(overlaps(edge.labelPosition!, node)).toBe(false);
+        for (const other of result.edges.slice(index + 1)) {
+          if (other.labelPosition) expect(overlaps(edge.labelPosition!, other.labelPosition)).toBe(false);
+        }
+      }
+      for (const other of result.edges) {
+        if (other.id === edge.id || !other.labelPosition) continue;
+        for (let pointIndex = 0; pointIndex < edge.points.length - 1; pointIndex += 1) {
+          expect(segmentIntersectsRect(edge.points[pointIndex], edge.points[pointIndex + 1], other.labelPosition), `${edge.id} crosses label ${other.id}`).toBe(false);
+        }
+      }
+      for (const node of result.nodes) {
+        for (let pointIndex = 0; pointIndex < edge.points.length - 1; pointIndex += 1) {
+          expect(segmentIntersectsRect(edge.points[pointIndex], edge.points[pointIndex + 1], node), `${edge.id} crosses node ${node.id}`).toBe(false);
+        }
       }
     }
   });
