@@ -32,6 +32,13 @@ export type SemanticFlowEdge = z.infer<typeof edgeSchema>;
 export type ExcludedScenario = z.infer<typeof graphSchema>["excludedScenarios"][number];
 export type FeatureFlowGraph = z.infer<typeof graphSchema>;
 
+/**
+ * 入口上限：入口=独立子流程的起点（如 MFA 的启用/验证/恢复），不是逐场景一个。
+ * 超过上限通常说明模型在退化扇出，或功能本身内聚性不足（应拆分功能）。
+ * 与 feature-flow-generation 的提示词共享同一常量。
+ */
+export const FEATURE_FLOW_MAX_ENTRIES = 8;
+
 export class FlowValidationError extends Error {
   constructor(public readonly code: string, public readonly subjectId?: string) {
     super(subjectId ? `${code}: ${subjectId}` : code);
@@ -100,7 +107,7 @@ export function validateFeatureFlowGraph(graph: unknown, scenarios: SpecScenario
   const value = parsed.data;
   if (value.nodes.length > 24) throw new FlowValidationError("TOO_MANY_NODES");
   if (value.edges.length > 48) throw new FlowValidationError("TOO_MANY_EDGES");
-  if (value.entryNodeIds.length > 3) throw new FlowValidationError("TOO_MANY_ENTRIES");
+  if (value.entryNodeIds.length > FEATURE_FLOW_MAX_ENTRIES) throw new FlowValidationError("TOO_MANY_ENTRIES");
 
   const duplicateNode = duplicateIds(value.nodes.map((node) => node.id))[0];
   if (duplicateNode) throw new FlowValidationError("DUPLICATE_NODE_ID", duplicateNode);
@@ -134,7 +141,7 @@ export function validateFeatureFlowGraph(graph: unknown, scenarios: SpecScenario
     if (nodesById.get(entryId)?.kind !== "start") throw new FlowValidationError("INVALID_ENTRY_NODE", entryId);
   }
   const outgoingEntries = value.edges.filter((edge) => nodesById.get(edge.from)?.kind === "start");
-  if (outgoingEntries.length > 3) throw new FlowValidationError("TOO_MANY_ENTRIES");
+  if (outgoingEntries.length > FEATURE_FLOW_MAX_ENTRIES) throw new FlowValidationError("TOO_MANY_ENTRIES");
 
   const excluded = new Set(value.excludedScenarios.map((scenario) => scenario.reference));
   for (const node of value.nodes) {

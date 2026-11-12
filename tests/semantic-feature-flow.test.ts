@@ -71,9 +71,19 @@ describe("semantic feature flow validation", () => {
     expect(validationCode(graph)).toBe("UNREACHABLE_NODE");
   });
 
-  it("rejects more than three independent entries", () => {
+  it("accepts eight genuine independent entries (relaxed cap for multi-subflow features)", () => {
     const graph = validGraph();
-    graph.entryNodeIds = ["start", "start", "start", "start"];
+    graph.entryNodeIds = ["start"];
+    for (let index = 1; index <= 7; index += 1) {
+      graph.nodes.push({ id: `entry-${index}`, kind: "action", title: `入口 ${index}`, scenarioRefs: ["HP-1"] });
+      graph.edges.push({ id: `entry-edge-${index}`, from: "start", to: `entry-${index}`, kind: "sequence", scenarioRefs: ["HP-1"] });
+    }
+    expect(validationCode(graph)).toBeNull();
+  });
+
+  it("rejects more than eight independent entries", () => {
+    const graph = validGraph();
+    graph.entryNodeIds = ["start", "start", "start", "start", "start", "start", "start", "start", "start"];
     expect(validationCode(graph)).toBe("TOO_MANY_ENTRIES");
   });
 
@@ -123,9 +133,9 @@ describe("semantic feature flow validation", () => {
     expect(validationCode(graph)).toBe("MAIN_CHAIN_MISSING");
   });
 
-  it("rejects more than three outgoing start branches", () => {
+  it("rejects more than eight outgoing start branches", () => {
     const graph = validGraph();
-    for (let index = 0; index < 3; index += 1) {
+    for (let index = 0; index < 8; index += 1) {
       graph.nodes.push({ id: `entry-${index}`, kind: "action", title: `入口 ${index}`, scenarioRefs: ["HP-1"] });
       graph.edges.push({ id: `entry-edge-${index}`, from: "start", to: `entry-${index}`, kind: "sequence", scenarioRefs: ["HP-1"] });
     }
