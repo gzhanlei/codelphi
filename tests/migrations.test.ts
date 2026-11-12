@@ -63,4 +63,14 @@ describe("database migrations", () => {
     expect(sql).toContain("REFERENCES products(id) ON DELETE CASCADE");
     expect(sql).toContain("SELECT id, '代码仓库连接管理', '代码仓库连接' FROM products WHERE slug = 'codelphi'");
   });
+
+  it("stores semantic feature flows as derived version data", () => {
+    const sql = readFileSync(new URL("../migrations/068_feature_flows.sql", import.meta.url), "utf8");
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS spec_feature_flows");
+    expect(sql).toContain("spec_feature_id BIGINT UNSIGNED NOT NULL PRIMARY KEY");
+    expect(sql).toContain("graph_json JSON NOT NULL");
+    expect(sql).toContain("scenario_fingerprint CHAR(64) NOT NULL");
+    expect(sql).toContain("REFERENCES spec_features(id) ON DELETE CASCADE");
+    expect(sql).not.toContain("ALTER TABLE spec_scenarios");
+  });
 });

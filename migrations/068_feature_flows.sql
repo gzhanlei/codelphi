@@ -1,0 +1,8 @@
+CREATE TABLE IF NOT EXISTS spec_feature_flows (
+  spec_feature_id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  graph_json JSON NOT NULL,
+  scenario_fingerprint CHAR(64) NOT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  CONSTRAINT spec_feature_flows_feature_fk FOREIGN KEY (spec_feature_id) REFERENCES spec_features(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
