@@ -57,6 +57,8 @@ const { partitionedSourcesMock } = vi.hoisted(() => ({ partitionedSourcesMock: v
 vi.mock("../lib/remote-analysis", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/remote-analysis")>(), getRemoteAnalysisSources: vi.fn(), getPartitionedAnalysisSources: partitionedSourcesMock }));
 vi.mock("../lib/spec-versions", () => ({ insertSpecVersion: vi.fn(async () => ({ specVersionId: 44, features: [{ name: "统一登录", summary: "s", scenarios: [] }], collapse: null, featureCollapses: [], misplacedScenarios: [], identityHijacksDropped: 0 })), loadLatestSpecFeatures: vi.fn(async () => ({ specVersionId: 44, features: [{ name: "统一登录", summary: "s", scenarios: [] }] })), loadPreviousFeatureNames: vi.fn(async () => ["统一登录", "支付", "规格导出"]), loadPreviousSpecText: vi.fn(async () => [{ name: "统一登录", summary: "s", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy" }] }]) }));
 vi.mock("../lib/architecture-version", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/architecture-version")>(), generateRepositoryArchitectureVersion: vi.fn(async () => ({ status: "accepted", errorMessage: null })) }));
+const { syncFeatureFlowsForVersion } = vi.hoisted(() => ({ syncFeatureFlowsForVersion: vi.fn(async () => ({ generated: 0, copied: 0, failed: 0 })) }));
+vi.mock("../lib/feature-flow-service", () => ({ syncFeatureFlowsForVersion, regenerateFeatureFlowForWorkbenchFeature: vi.fn() }));
 
 const run = {
   id: 8,
@@ -163,6 +165,13 @@ describe("analysis orchestration", () => {
       billing: { runId: 8, accountId: null, chargeComponent: "main" },
     });
     expect(connection.commit).toHaveBeenCalledOnce();
+    expect(syncFeatureFlowsForVersion).toHaveBeenCalledWith({
+      specVersionId: 44,
+      repositoryId: 3,
+      affectedKeys: null,
+      billing: { runId: 8, accountId: null, chargeComponent: "main", callKind: "feature_flow" },
+    });
+    expect(connection.commit.mock.invocationCallOrder[0]).toBeLessThan(syncFeatureFlowsForVersion.mock.invocationCallOrder[0]);
     expect(connection.release).toHaveBeenCalledOnce();
     expect(execute).not.toHaveBeenCalledWith(expect.stringContaining("status = 'failed'"), expect.anything());
   });
