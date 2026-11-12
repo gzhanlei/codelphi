@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { PoolConnection } from "mysql2/promise";
 import { getDb } from "./db";
 import { analyzeWithAI, type AnalysisResult } from "./ai";
+import { reportRunFailureToGithub } from "./run-failure-report";
 import { BillingError, capture, enqueueRunWithReservation, hasActiveReservation, heartbeat, release, reserveForNewRun } from "./billing/core";
 import { FIRST_RUN_UNITS, HEARTBEAT_INTERVAL_MS } from "./billing/constants";
 import { enqueueBillingNotification } from "./billing/notifications";
@@ -717,5 +718,8 @@ export async function runAnalysis(runId: number) {
     } catch (billingError) {
       console.error("[billing] release failed; sweep will recover the reservation", billingError);
     }
+    // 技术失败自动上报 GitHub issue（2026-11-12 用户裁决）：页面给人话，技术现场去
+    // GitHub。上报器自吞噬（内部 catch），await 只为日志顺序确定性。
+    await reportRunFailureToGithub({ runId, errorMessage: message });
   });
 }

@@ -5,6 +5,7 @@ import { ProductMapView } from "./product-map-view";
 import { ProductOverview } from "./product-overview";
 import { ReleaseNotesView } from "./release-notes-view";
 import { buildProductOverview, type ProductOverviewData } from "@/lib/product-overview";
+import { explainRunFailure } from "@/lib/run-failure-explain";
 import { SpecWorkspace } from "./spec-workspace";
 import { buildFeatureTree, selectFeature } from "@/lib/feature-tree";
 import { selectedClass } from "@/lib/spec-editor-ui";
@@ -30,7 +31,8 @@ export function RepositoryLink({ repository }: { repository?: Repository }) {
 
 function RunError({ message }: { message?: string }) {
   if (!message) return null;
-  return <p>{message}</p>;
+  // 页面只给人类友好的解释（2026-11-12 用户裁决）；技术原文在 DB 与 GitHub issue。
+  return <p>{explainRunFailure(message).userMessage}</p>;
 }
 
 export function RunStatus({ run }: { run?: { status: string; errorMessage?: string } }) {
