@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { errorMessage } from "@/lib/error-message";
 import { useDemoGuard } from "./demo-mode";
+import type { WriteAccess } from "./analyze-button";
 
 export interface PublishFeatureOption {
   featureName: string;
@@ -15,12 +16,14 @@ export interface PublishFeatureOption {
 /**
  * 「发布产品」入口（用户主动流）：总览页按钮 → 勾选功能（默认全选）→ 生成发布稿草稿
  * → 跳到发布卡校对并发布。生成是用户主动行为，不自动预生成。
+ * 只读状态（设计 §11.2）：匿名给登录引导链接，登录只读成员给禁用按钮+权限说明。
  */
-export function OverviewPublishButton({ slug, releaseId, releaseTitle, features }: {
+export function OverviewPublishButton({ slug, releaseId, releaseTitle, features, writeAccess = "edit" }: {
   slug: string;
   releaseId: number;
   releaseTitle: string;
   features: PublishFeatureOption[];
+  writeAccess?: WriteAccess;
 }) {
   const guard = useDemoGuard();
   const [open, setOpen] = useState(false);
@@ -28,6 +31,14 @@ export function OverviewPublishButton({ slug, releaseId, releaseTitle, features 
   const [pending, setPending] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState("");
+
+  if (writeAccess === "demo") {
+    return <Link className="secondary-button" href="/login">登录后可发布</Link>;
+  }
+  if (writeAccess === "readonly") {
+    return <button className="secondary-button" type="button" disabled aria-disabled="true" title="当前账号对该产品为只读权限">发布产品 · 需编辑权限</button>;
+  }
+
 
   const toggle = (name: string) => {
     setSelected((current) => {

@@ -31,7 +31,7 @@ export const dynamic = "force-dynamic";
 type ProductDetails = NonNullable<Awaited<ReturnType<typeof getProductDetails>>>;
 
 /** 产品页主体：标题区、运行状态、视图 Tab 与视图内容；demo 与登录分支共用。 */
-function ProductPageBody({ productBase, view, mode, featureId, details, overview, actions, canEdit, showFeedback, showSettings, settings }: {
+function ProductPageBody({ productBase, view, mode, featureId, details, overview, actions, canEdit, writeAccess = "edit", showFeedback, showSettings, settings }: {
   productBase: string;
   view: string;
   mode: string;
@@ -39,7 +39,9 @@ function ProductPageBody({ productBase, view, mode, featureId, details, overview
   details: ProductDetails;
   overview: ProductOverviewData;
   actions: ReactNode;
+  /** 是否展示工作台编辑控件（描述编辑等）；与写操作可用性（writeAccess）拆开（设计 §11.1）。 */
   canEdit: boolean;
+  writeAccess?: "edit" | "demo" | "readonly";
   showFeedback: boolean;
   showSettings: boolean;
   settings?: ReactNode;
@@ -58,7 +60,7 @@ function ProductPageBody({ productBase, view, mode, featureId, details, overview
         </div>
         <div className="page-actions">
           {actions}
-          {details.releases[0] ? <OverviewPublishButton slug={details.product.slug} releaseId={details.releases[0].id} releaseTitle={details.releases[0].title} features={overview.changeGroups.map((group) => ({ featureName: group.featureName, added: group.added, changed: group.changed, removed: group.removed }))} /> : null}
+          {details.releases[0] ? <OverviewPublishButton slug={details.product.slug} releaseId={details.releases[0].id} releaseTitle={details.releases[0].title} writeAccess={writeAccess} features={overview.changeGroups.map((group) => ({ featureName: group.featureName, added: group.added, changed: group.changed, removed: group.removed }))} /> : null}
           <details className="export-details"><summary>导出 ▾</summary><div className="export-details-menu"><a href={`/api/products/${details.product.slug}/spec.json`} target="_blank" rel="noreferrer">spec.json ↗</a><a href={`/api/products/${details.product.slug}/export/tests?format=gherkin`}>Gherkin ↓</a><a href={`/api/products/${details.product.slug}/export/tests?format=markdown`}>用例 Markdown ↓</a><a href={`/api/products/${details.product.slug}/explainer`} target="_blank" rel="noreferrer">Explainer ↗</a></div></details>
         </div>
       </div>
@@ -101,7 +103,8 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
     const demoView = view === "settings" ? "overview" : view;
     return (
       <DemoShell>
-        <ProductPageBody productBase={productBase} view={demoView} mode={mode} featureId={featureId} details={demoDetails} overview={demoOverview} canEdit={true} showFeedback={false} showSettings={false} actions={<AnalyzeButton slug={demoDetails.product.slug} />} />
+        {/* 设计 §11.1：demo 不再为展示控件传 canEdit=true——编辑控件隐藏，写操作降为登录引导（writeAccess="demo"）。 */}
+        <ProductPageBody productBase={productBase} view={demoView} mode={mode} featureId={featureId} details={demoDetails} overview={demoOverview} canEdit={false} writeAccess="demo" showFeedback={false} showSettings={false} actions={<AnalyzeButton slug={demoDetails.product.slug} writeAccess="demo" />} />
       </DemoShell>
     );
   }
@@ -145,12 +148,13 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
         details={details}
         overview={overview}
         canEdit={access.role !== "viewer"}
+        writeAccess={access.role !== "viewer" ? "edit" : "readonly"}
         showFeedback={true}
         showSettings={true}
         settings={settings}
         actions={
           <>
-            <AnalyzeButton slug={details.product.slug} />
+            <AnalyzeButton slug={details.product.slug} writeAccess={access.role !== "viewer" ? "edit" : "readonly"} />
             {isOrganizationMember && access.role !== "viewer" ? <RemoveProductButton slug={details.product.slug} name={details.product.name} /> : null}
           </>
         }
