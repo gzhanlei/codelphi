@@ -2,6 +2,7 @@ import { z } from "zod";
 import { getDb } from "./db";
 import { resolveGitHubToken } from "./github-access";
 import { getProductDetails } from "./product-details";
+import { explainRunFailure } from "./run-failure-explain";
 import type { SessionUser } from "./types";
 import type { Organization } from "./organizations";
 
@@ -18,6 +19,7 @@ export interface FeedbackReport {
   status: string;
   githubIssueUrl: string | null;
   submissionError: string | null;
+  reporterName: string | null;
   createdAt: Date;
 }
 
@@ -84,10 +86,12 @@ export async function listFeedbackReports(): Promise<FeedbackReport[]> {
     `SELECT f.id, f.organization_id AS organizationId, o.name AS organizationName,
             f.product_id AS productId, p.name AS productName, f.repository_full_name AS repositoryFullName,
             f.revision, f.error_message AS errorMessage, f.architecture_error AS architectureError,
-            f.status, f.github_issue_url AS githubIssueUrl, f.submission_error AS submissionError, f.created_at AS createdAt
+            f.status, f.github_issue_url AS githubIssueUrl, f.submission_error AS submissionError,
+            u.name AS reporterName, f.created_at AS createdAt
      FROM feedback_reports f
      JOIN organizations o ON o.id = f.organization_id
      JOIN products p ON p.id = f.product_id
+     LEFT JOIN users u ON u.id = f.reporter_user_id
      ORDER BY f.created_at DESC LIMIT 100`,
   );
   return (rows as FeedbackReport[]).map(mapReport);
@@ -98,13 +102,57 @@ export async function getFeedbackReport(id: number): Promise<FeedbackReport | nu
     `SELECT f.id, f.organization_id AS organizationId, o.name AS organizationName,
             f.product_id AS productId, p.name AS productName, f.repository_full_name AS repositoryFullName,
             f.revision, f.error_message AS errorMessage, f.architecture_error AS architectureError,
-            f.status, f.github_issue_url AS githubIssueUrl, f.submission_error AS submissionError, f.created_at AS createdAt
+            f.status, f.github_issue_url AS githubIssueUrl, f.submission_error AS submissionError,
+            u.name AS reporterName, f.created_at AS createdAt
      FROM feedback_reports f JOIN organizations o ON o.id = f.organization_id
-     JOIN products p ON p.id = f.product_id WHERE f.id = ? LIMIT 1`,
+     JOIN products p ON p.id = f.product_id
+     LEFT JOIN users u ON u.id = f.reporter_user_id
+     WHERE f.id = ? LIMIT 1`,
     [id],
   );
   const row = (rows as FeedbackReport[])[0];
   return row ? mapReport(row) : null;
+}
+
+/**
+ * 系统自动记录失败反馈（2026-11-12 用户裁决）：技术失败不自动建 GitHub issue，落
+ * 超管后台 /admin/feedback（feedback_reports），issue 转换仍由管理员手动按钮完成。
+ * 与用户提交共用去重键（product+revision+error_message）与 status 生命周期；
+ * reporter_user_id 为 NULL = 系统来源（后台「来源」列显示「系统自动记录」）。
+ * 自吞噬：记录失败只 warn，不进入业务失败路径。
+ */
+export async function recordRunFailureFeedback(runId: number, errorMessage: string): Promise<void> {
+  try {
+    if (!explainRunFailure(errorMessage).reportable) return;
+    const [rows] = await getDb().execute(
+      `SELECT r.after_sha AS revision, p.id AS productId, p.organization_id AS organizationId,
+              CONCAT(repo.owner, '/', repo.name) AS repositoryFullName
+       FROM analysis_runs r
+       JOIN repositories repo ON repo.id = r.repository_id
+       JOIN products p ON p.id = repo.product_id
+       WHERE r.id = ? LIMIT 1`,
+      [runId],
+    );
+    const row = (rows as Array<{ revision: string; productId: number; organizationId: number; repositoryFullName: string }>)[0];
+    if (!row) {
+      console.warn("[feedback] run failure auto-record skipped: run facts not found", { runId });
+      return;
+    }
+    const existing = await existingFeedbackId(row.productId, row.revision, errorMessage);
+    if (existing) return;
+    await getDb().execute(
+      `INSERT INTO feedback_reports
+        (organization_id, product_id, analysis_run_id, repository_full_name, revision, error_message, status)
+       VALUES (?, ?, ?, ?, ?, ?, 'new')`,
+      [row.organizationId, row.productId, runId, row.repositoryFullName, row.revision, errorMessage],
+    );
+    console.log("[feedback] run failure auto-recorded", { runId });
+  } catch (error) {
+    console.warn("[feedback] run failure auto-record failed", {
+      runId,
+      error: error instanceof Error ? error.message.slice(0, 300) : String(error),
+    });
+  }
 }
 
 export function feedbackIssueBody(report: FeedbackReport) {

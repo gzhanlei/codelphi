@@ -170,6 +170,7 @@ describe("analysis failure feedback", () => {
       status: "new",
       githubIssueUrl: null,
       submissionError: null,
+      reporterName: "测试用户",
       createdAt: new Date("2026-11-03T00:00:00Z"),
     };
     expect(feedbackIssueBody(report)).toContain("No architecture components detected");
@@ -188,7 +189,7 @@ describe("analysis failure feedback", () => {
   it("explains missing issue write permission", async () => {
     const report = {
       id: 42, organizationId: 1, organizationName: "Default Workspace", productId: 3, productName: "Chandler", repositoryFullName: "gzhanlei/workmembership",
-      revision: "abcdef1234567890", errorMessage: "failed", architectureError: null, status: "new", githubIssueUrl: null, submissionError: null, createdAt: new Date(),
+      revision: "abcdef1234567890", errorMessage: "failed", architectureError: null, status: "new", githubIssueUrl: null, submissionError: null, reporterName: null, createdAt: new Date(),
     };
     execute.mockImplementation(async (sql = "") => sql.includes("FROM feedback_reports f") ? [[report]] : [{ affectedRows: 1 }]);
     const fetcher = vi.fn(async () => new Response("forbidden", { status: 403 }));
