@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildProductOverview } from "../lib/product-overview";
-import type { FeatureRow, ReleaseRow, ScenarioRow } from "../lib/types";
+import type { ChangeRow, FeatureRow, ReleaseRow, ScenarioRow } from "../lib/types";
 
 const features: FeatureRow[] = [
   { id: 3, name: "发布", summary: "Releases", parentId: null, source: "generated" },
@@ -83,5 +83,95 @@ describe("product overview", () => {
     expect(overview.headline).toBe("代码驱动的产品知识中心");
     expect(overview.headlineSource).toBe("generated");
     expect(overview.headlineEvidence).toEqual([{ path: "lib/analysis.ts", startLine: 185 }]);
+  });
+});
+
+describe("product overview user impact projection", () => {
+  const release = (id: number, days: number): ReleaseRow => ({ id, title: `发布${id}`, summary: "Summary", sha: `sha${id}abcdef`, url: "", committedAt: new Date(`2026-11-${String(days).padStart(2, "0")}`), specVersionId: id });
+  const impact = (id: number, releaseId: number, featureName: string, userImpact: string): ChangeRow => ({ id, releaseId, featureName, kind: "changed", description: "", userImpact, evidence: [] });
+
+  it("uses only the latest release impacts, filters blanks, caps at 3 and keeps original order", () => {
+    const overview = buildProductOverview({
+      productBase: "/products/default/radar",
+      product: { id: 1, slug: "radar", name: "Radar", description: "" },
+      features: [], scenarios: [],
+      releases: [release(12, 10), release(8, 1)],
+      behaviorChanges: [],
+      changes: [
+        impact(1, 8, "旧功能", "更早发布的影响不应入选"),
+        impact(2, 12, "甲", "影响一"),
+        impact(3, 12, "乙", "  "),
+        impact(4, 12, "丙", "影响二"),
+        impact(5, 12, "丁", "影响三"),
+        impact(6, 12, "戊", "影响四"),
+      ],
+      latestRun: { status: "succeeded" },
+    });
+    expect(overview.userImpact.state).toBe("impacts");
+    expect(overview.userImpact.items).toEqual([
+      { releaseId: 12, featureName: "甲", userImpact: "影响一" },
+      { releaseId: 12, featureName: "丙", userImpact: "影响二" },
+      { releaseId: 12, featureName: "丁", userImpact: "影响三" },
+    ]);
+  });
+
+  it("falls back to deterministic change stats when the latest release has no user impacts", () => {
+    const overview = buildProductOverview({
+      productBase: "/products/default/radar",
+      product: { id: 1, slug: "radar", name: "Radar", description: "" },
+      features: [], scenarios: [],
+      releases: [release(12, 10)],
+      behaviorChanges: [
+        { id: 1, releaseId: 12, kind: "added", entityType: "feature", featureName: "甲", scenarioReference: "", summary: "", before: null, after: {} },
+        { id: 2, releaseId: 12, kind: "changed", entityType: "scenario", featureName: "乙", scenarioReference: "HP-1", summary: "", before: {}, after: {} },
+      ],
+      changes: [impact(9, 12, "甲", "   ")],
+      latestRun: { status: "succeeded" },
+    });
+    expect(overview.userImpact.state).toBe("changes");
+    expect(overview.userImpact.items).toEqual([]);
+    expect(overview.userImpact.changeStats).toEqual({ added: 1, removed: 0, changed: 1 });
+    expect(overview.userImpact.releaseId).toBe(12);
+  });
+
+  it("reports a quiet release and never borrows impacts from earlier releases", () => {
+    const overview = buildProductOverview({
+      productBase: "/products/default/radar",
+      product: { id: 1, slug: "radar", name: "Radar", description: "" },
+      features: [], scenarios: [],
+      releases: [release(12, 10), release(8, 1)],
+      behaviorChanges: [{ id: 1, releaseId: 8, kind: "added", entityType: "feature", featureName: "旧功能", scenarioReference: "", summary: "", before: null, after: {} }],
+      changes: [impact(1, 8, "旧功能", "更早发布的影响")],
+      latestRun: { status: "succeeded" },
+    });
+    expect(overview.userImpact.state).toBe("quiet");
+    expect(overview.userImpact.items).toEqual([]);
+    expect(overview.userImpact.releaseId).toBe(12);
+  });
+
+  it("points at the most recent earlier release with behavior changes, labeled explicitly", () => {
+    const overview = buildProductOverview({
+      productBase: "/products/default/radar",
+      product: { id: 1, slug: "radar", name: "Radar", description: "" },
+      features: [], scenarios: [],
+      releases: [release(12, 10), release(9, 5), release(8, 1)],
+      behaviorChanges: [
+        { id: 1, releaseId: 8, kind: "added", entityType: "feature", featureName: "旧一", scenarioReference: "", summary: "", before: null, after: {} },
+        { id: 2, releaseId: 9, kind: "changed", entityType: "scenario", featureName: "旧二", scenarioReference: "HP-1", summary: "", before: {}, after: {} },
+      ],
+      latestRun: { status: "succeeded" },
+    });
+    expect(overview.userImpact.state).toBe("quiet");
+    expect(overview.userImpact.priorBehavioralRelease).toMatchObject({ id: 9, title: "发布9" });
+    expect(overview.userImpact.priorBehavioralRelease?.dateLabel).toContain("11月5日");
+  });
+
+  it("handles no release and missing change rows without crashing", () => {
+    const empty = buildProductOverview({ productBase: "/products/default/radar", product: { id: 1, slug: "radar", name: "Radar", description: "" }, features: [], scenarios: [], releases: [], behaviorChanges: [], latestRun: { status: "succeeded" } });
+    expect(empty.userImpact.state).toBe("none");
+    expect(empty.userImpact.items).toEqual([]);
+    expect(empty.userImpact.priorBehavioralRelease).toBeNull();
+    const legacy = buildProductOverview({ productBase: "/products/default/radar", product: { id: 1, slug: "radar", name: "Radar", description: "" }, features: [], scenarios: [], releases: [release(8, 1)], behaviorChanges: [], latestRun: { status: "succeeded" } });
+    expect(legacy.userImpact.state).toBe("quiet");
   });
 });

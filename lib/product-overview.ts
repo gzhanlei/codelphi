@@ -1,6 +1,6 @@
 import { evidenceItems } from "./evidence";
 import { featureHref } from "./spec-editor-ui";
-import type { BehaviorChangeRow, FeatureRow, ReleaseRow, ScenarioRow } from "./types";
+import type { BehaviorChangeRow, ChangeRow, FeatureRow, ReleaseRow, ScenarioRow } from "./types";
 
 interface ProductOverviewInput {
   product: { id: number; slug: string; name: string; description: string; descriptionSource?: string; descriptionEvidence?: unknown };
@@ -10,6 +10,8 @@ interface ProductOverviewInput {
   scenarios: ScenarioRow[];
   releases: ReleaseRow[];
   behaviorChanges: BehaviorChangeRow[];
+  /** 发布变更说明（含 userImpact，取自 changes 表；只消费已落库文本，不在展示层生成事实）。 */
+  changes?: ChangeRow[];
   latestRun?: { status: string; errorMessage?: string };
   latestReleaseNote?: { status: string; releaseId: number; publishedAt: Date | string | null; blocks: number } | null;
   /** 发布稿映射（总览时间线的状态徽章用）。 */
@@ -64,6 +66,43 @@ export function changeGroupLabel(group: { added: number; removed: number; change
   return parts.join(" · ") || "无行为变化";
 }
 
+/**
+ * 最新发布的用户影响投影（设计 §6）：只复用已落库的 changes.user_impact 文本，
+ * 不在展示层生成事实。最新发布没有非空用户影响时按确定性数据回退，
+ * 不用更早发布冒充最新发布。
+ */
+function buildUserImpact(
+  input: ProductOverviewInput,
+  latestRelease: ReleaseRow | undefined,
+  latestChanges: BehaviorChangeRow[],
+  changeStats: { added: number; removed: number; changed: number },
+) {
+  const items = latestRelease
+    ? (input.changes ?? [])
+        .filter((change) => change.releaseId === latestRelease.id && change.userImpact.trim().length > 0)
+        .slice(0, 3)
+        .map((change) => ({ releaseId: latestRelease.id, featureName: change.featureName, userImpact: change.userImpact }))
+    : [];
+  const state = items.length > 0 ? "impacts" : latestRelease ? (latestChanges.length > 0 ? "changes" : "quiet") : "none";
+  // 供「查看最近一次有行为变化的发布」导航：显式带日期与发布身份，不与「本次发布」混称。
+  const priorBehavioralRelease = latestRelease
+    ? input.releases.slice(1).map((release) => ({ release, changes: input.behaviorChanges.some((change) => change.releaseId === release.id) })).find((candidate) => candidate.changes)?.release ?? null
+    : null;
+  return {
+    state: state as "impacts" | "changes" | "quiet" | "none",
+    items,
+    changeStats,
+    releaseId: latestRelease?.id ?? null,
+    priorBehavioralRelease: priorBehavioralRelease
+      ? {
+          id: priorBehavioralRelease.id,
+          title: priorBehavioralRelease.title,
+          dateLabel: new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" }).format(new Date(priorBehavioralRelease.committedAt)),
+        }
+      : null,
+  };
+}
+
 export function buildProductOverview(input: ProductOverviewInput) {
   const latestRelease = input.releases[0];
   const specVersionId = latestRelease ? latestRelease.specVersionId : null;
@@ -94,6 +133,7 @@ export function buildProductOverview(input: ProductOverviewInput) {
     };
   });
   const coverageLine = input.coverage ? `覆盖率 ${Math.round(input.coverage.coverageRatio * 1000) / 10}%（${input.coverage.implFilesAssembled}/${input.coverage.implFilesTotal} 个实现文件）` : null;
+  const userImpact = buildUserImpact(input, latestRelease, latestChanges, changeStats);
 
   return {
     slug: input.product.slug,
@@ -117,6 +157,7 @@ export function buildProductOverview(input: ProductOverviewInput) {
       .slice(0, 3),
     changeStats,
     changeGroups,
+    userImpact,
     latestRelease,
     latestReleaseNote: input.latestReleaseNote ?? null,
     noteByRelease: Object.fromEntries((input.releaseNotes ?? []).map((note) => [String(note.releaseId), { status: note.status, headline: note.headline }])),
