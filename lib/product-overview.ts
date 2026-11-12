@@ -1,4 +1,5 @@
 import { evidenceItems } from "./evidence";
+import { coverageByteLabel, coverageFilesLabel } from "./coverage-display";
 import type { RegressionTaskView } from "./regression-task-view";
 import { featureHref } from "./spec-editor-ui";
 import type { BehaviorChangeRow, ChangeRow, FeatureRow, ReleaseRow, ScenarioRow } from "./types";
@@ -191,7 +192,8 @@ export function buildProductOverview(input: ProductOverviewInput) {
     const group = timelineGroups[index];
     if (group.kind === "quiet-run" && group.count === 1) timelineGroups[index] = { kind: "single", release: group.releases[0] };
   }
-  const coverageLine = input.coverage ? `覆盖率 ${Math.round(input.coverage.coverageRatio * 1000) / 10}%（${input.coverage.implFilesAssembled}/${input.coverage.implFilesTotal} 个实现文件）` : null;
+  const coverageByte = input.coverage ? coverageByteLabel(input.coverage) : null;
+  const coverageFiles = input.coverage ? coverageFilesLabel(input.coverage) : null;
   const userImpact = buildUserImpact(input, latestRelease, latestChanges, changeStats);
 
   return {
@@ -222,7 +224,8 @@ export function buildProductOverview(input: ProductOverviewInput) {
     latestReleaseNote: input.latestReleaseNote ?? null,
     noteByRelease: Object.fromEntries((input.releaseNotes ?? []).map((note) => [String(note.releaseId), { status: note.status, headline: note.headline }])),
     timelineGroups,
-    coverageLine,
+    coverageByte,
+    coverageFiles,
     trust: {
       featureCount: input.features.length,
       scenarioCount: input.scenarios.length,
@@ -230,7 +233,6 @@ export function buildProductOverview(input: ProductOverviewInput) {
       manualScenarioCount: input.scenarios.filter((scenario) => scenario.source === "manual").length,
       evidencePathCount: evidencePaths.size,
       specVersionId,
-      coverageRatio: input.coverage ? `${Math.round(input.coverage.coverageRatio * 1000) / 10}%` : null as string | null,
     },
   };
 }

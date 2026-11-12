@@ -66,9 +66,9 @@ function ReleaseTimeline({ data }: { data: ProductOverviewData }) {
 }
 
 function TrustLine({ data }: { data: ProductOverviewData }) {
-  const { trust, coverageLine } = data;
+  const { trust, coverageByte, coverageFiles } = data;
   return (
-    <p className="overview-trust-line">证据覆盖率 {trust.coverageRatio ?? "—"} · 证据文件 {trust.evidencePathCount} 个 · 人工条目 {trust.manualFeatureCount + trust.manualScenarioCount} 条{trust.specVersionId !== null ? ` · Spec v${trust.specVersionId}` : ""}{coverageLine ? ` · ${coverageLine}` : ""}。证据覆盖描述证据范围，不等于结论正确，采纳前应经人工核实。</p>
+    <p className="overview-trust-line">{coverageByte ?? "源码装配覆盖率 —（无覆盖率回执）"}{coverageFiles ? ` · ${coverageFiles}` : ""} · 证据文件 {trust.evidencePathCount} 个 · 人工条目 {trust.manualFeatureCount + trust.manualScenarioCount} 条{trust.specVersionId !== null ? ` · Spec v${trust.specVersionId}` : ""}。覆盖率描述本次分析实际读取的源码范围，不代表结论正确率；规格未覆盖不等于产品不支持，采纳前应经人工核实。</p>
   );
 }
 

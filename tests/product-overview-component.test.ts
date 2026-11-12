@@ -34,7 +34,10 @@ describe("product overview rendering (Specsight 原则版式)", () => {
     expect(html).toContain("首个公开版本");
     expect(html).not.toContain(">首版</a>");
     expect(html).toContain("overview-trust-line");
-    expect(html).toContain("42.1%");
+    // 覆盖率统一字节口径（设计 §9.1）：字节比例与文件数量是两个并排事实，不合成第二个百分比
+    expect(html).toContain("源码装配覆盖率（按文件字节）42.1%");
+    expect(html).toContain("已装配实现文件 12/28 个");
+    expect(html).toContain("证据文件");
     expect(html).not.toContain("架构");
     expect(html).not.toContain("/architecture/");
   });
@@ -69,7 +72,7 @@ describe("product overview rendering (Specsight 原则版式)", () => {
     const html = renderToStaticMarkup(createElement(ProductOverview, { data }));
     expect(html).toContain("尚无功能规格");
     expect(html).not.toContain("尚未生成架构文档");
-    expect(html).toContain("证据覆盖率 —");
+    expect(html).toContain("源码装配覆盖率 —");
   });
 
   it("renders quiet releases in the timeline (release happened, nothing changed)", () => {

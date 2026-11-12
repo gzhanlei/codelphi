@@ -5,6 +5,7 @@
  */
 import { z } from "zod";
 import { evidenceItems } from "./evidence";
+import { coverageByteLabel, coverageFilesLabel } from "./coverage-display";
 import { publishOrder, type ReleaseNoteChange } from "./release-notes";
 
 /**
@@ -121,7 +122,7 @@ export function buildIntroFactPack(input: {
       evidencePathCount,
     },
     coverageNote: input.coverage
-      ? `证据覆盖率 ${(input.coverage.coverageRatio * 100).toFixed(1)}%（装配 ${input.coverage.implFilesAssembled}/${input.coverage.implFilesTotal} 个实现文件，${input.coverage.partitionsUsed} 趟提取）`
+      ? `${coverageByteLabel(input.coverage)}（${coverageFilesLabel(input.coverage)}，${input.coverage.partitionsUsed} 趟提取）`
       : null,
     positioning: input.product.positioning ?? null,
   };
