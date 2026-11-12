@@ -77,9 +77,43 @@ export async function saveFeatureFlowGraph(execute: Execute, specFeatureId: numb
   await execute(
     `INSERT INTO spec_feature_flows (spec_feature_id, graph_json, scenario_fingerprint)
      VALUES (?, ?, ?)
-     ON DUPLICATE KEY UPDATE graph_json = VALUES(graph_json), scenario_fingerprint = VALUES(scenario_fingerprint), updated_at = CURRENT_TIMESTAMP(3)`,
+     ON DUPLICATE KEY UPDATE graph_json = VALUES(graph_json), scenario_fingerprint = VALUES(scenario_fingerprint), last_error_code = NULL, last_error_at = NULL, updated_at = CURRENT_TIMESTAMP(3)`,
     [specFeatureId, JSON.stringify(graph), fingerprint],
   );
+}
+
+/**
+ * 护栏拒绝生成时落库失败码（供流程图 tab 空态解释原因）。
+ * 场景集未变且已有有效图时保留旧图（失败码只在 graph_json 为空时被读侧采纳）；
+ * 场景集已变则作废旧图、记录新指纹下的失败码。
+ */
+export async function saveFeatureFlowError(execute: Execute, specFeatureId: number, errorCode: string, fingerprint: string) {
+  await execute(
+    `INSERT INTO spec_feature_flows (spec_feature_id, graph_json, scenario_fingerprint, last_error_code, last_error_at)
+     VALUES (?, NULL, ?, ?, CURRENT_TIMESTAMP(3))
+     ON DUPLICATE KEY UPDATE
+       graph_json = IF(scenario_fingerprint = VALUES(scenario_fingerprint), graph_json, NULL),
+       scenario_fingerprint = IF(scenario_fingerprint = VALUES(scenario_fingerprint), scenario_fingerprint, VALUES(scenario_fingerprint)),
+       last_error_code = VALUES(last_error_code),
+       last_error_at = CURRENT_TIMESTAMP(3)`,
+    [specFeatureId, fingerprint, errorCode],
+  );
+}
+
+/** 读侧空态原因：指纹与当前场景集一致且 graph 为空的失败码。图不存在/场景已变化返回空。 */
+export async function loadFeatureFlowErrors(execute: Execute, versionId: number, features: SpecFeature[]) {
+  const result = new Map<string, string>();
+  if (features.length === 0) return result;
+  const rows = await loadErrorRows(execute, versionId);
+  const rowsByKey = new Map(rows.map((row) => [row.stableKey, row]));
+  for (const feature of features) {
+    const key = specFeatureKey(feature.name);
+    const row = rowsByKey.get(key);
+    if (!row) continue;
+    if (row.fingerprint !== scenarioFingerprint(feature.scenarios)) continue;
+    result.set(key, row.lastErrorCode);
+  }
+  return result;
 }
 
 async function loadFlowRows(execute: Execute, versionId: number) {
@@ -87,6 +121,15 @@ async function loadFlowRows(execute: Execute, versionId: number) {
     `SELECT sf.stable_key AS stableKey, ff.graph_json AS graphJson, ff.scenario_fingerprint AS fingerprint
      FROM spec_feature_flows ff JOIN spec_features sf ON sf.id = ff.spec_feature_id
      WHERE sf.spec_version_id = ?`,
+    [versionId],
+  ));
+}
+
+async function loadErrorRows(execute: Execute, versionId: number) {
+  return payloadRows<{ stableKey: string; fingerprint: string; lastErrorCode: string }>(await execute(
+    `SELECT sf.stable_key AS stableKey, ff.scenario_fingerprint AS fingerprint, ff.last_error_code AS lastErrorCode
+     FROM spec_feature_flows ff JOIN spec_features sf ON sf.id = ff.spec_feature_id
+     WHERE sf.spec_version_id = ? AND ff.graph_json IS NULL AND ff.last_error_code IS NOT NULL`,
     [versionId],
   ));
 }

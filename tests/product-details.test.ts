@@ -3,8 +3,8 @@ import { getProductDetails } from "../lib/product-details";
 
 const { execute } = vi.hoisted(() => ({ execute: vi.fn() }));
 vi.mock("../lib/db", () => ({ getDb: () => ({ execute }), defaultExecute: execute }));
-const { loadFeatureFlowGraphs } = vi.hoisted(() => ({ loadFeatureFlowGraphs: vi.fn() }));
-vi.mock("../lib/feature-flow-store", () => ({ loadFeatureFlowGraphs }));
+const { loadFeatureFlowErrors, loadFeatureFlowGraphs } = vi.hoisted(() => ({ loadFeatureFlowErrors: vi.fn(), loadFeatureFlowGraphs: vi.fn() }));
+vi.mock("../lib/feature-flow-store", () => ({ loadFeatureFlowErrors, loadFeatureFlowGraphs }));
 
 const product = { id: 4, slug: "radar", name: "Radar", description: "Product knowledge", descriptionSource: "generated", descriptionEvidence: JSON.stringify([{ path: "lib/analysis.ts", startLine: 185 }]) };
 
@@ -12,6 +12,7 @@ describe("product details", () => {
   beforeEach(() => {
     execute.mockReset();
     loadFeatureFlowGraphs.mockReset().mockResolvedValue(new Map());
+    loadFeatureFlowErrors.mockReset().mockResolvedValue(new Map());
   });
 
   it("returns null for an unknown product", async () => {

@@ -46,7 +46,7 @@ function ChildFeatureAction({ feature, onCreateChild }: { feature: FeatureRow; o
   return <div className="feature-actions secondary-actions"><button className="text-button" type="button" onClick={onCreateChild}>＋ 子功能</button></div>;
 }
 
-export function FeatureDetail({ slug, productBase, feature, scenarios, implementationScenarios, mode, flowGraph, onEdit, onDelete, onCreateChild, error }: { slug: string; productBase: string; feature: FeatureRow; scenarios: ScenarioRow[]; implementationScenarios?: ScenarioRow[]; mode: string; flowGraph?: FeatureFlowGraph; onEdit: () => void; onDelete: () => void; onCreateChild: () => void; error: string }) {
+export function FeatureDetail({ slug, productBase, feature, scenarios, implementationScenarios, mode, flowGraph, flowErrorCode, onEdit, onDelete, onCreateChild, error }: { slug: string; productBase: string; feature: FeatureRow; scenarios: ScenarioRow[]; implementationScenarios?: ScenarioRow[]; mode: string; flowGraph?: FeatureFlowGraph; flowErrorCode?: string; onEdit: () => void; onDelete: () => void; onCreateChild: () => void; error: string }) {
   return (
     <>
       <FeatureDetailHeader slug={slug} productBase={productBase} feature={feature} onEdit={onEdit} onDelete={onDelete} />
@@ -56,7 +56,7 @@ export function FeatureDetail({ slug, productBase, feature, scenarios, implement
       <FeatureConnectionsPanel slug={slug} featureId={feature.id} />
       <nav className="feature-view-tabs" aria-label="功能视图"><Link scroll={false} className={featureTabClass(mode, "spec")} href={featureHref(feature.id)}>场景 <span>{scenarios.length}</span></Link><Link scroll={false} className={featureTabClass(mode, "flow")} href={featureHref(feature.id, "flow")}>流程图</Link></nav>
       <FormError message={error} />
-      {mode === "flow" ? <FeatureFlow featureName={feature.name} scenarios={scenarios} graph={flowGraph} /> : <ScenarioWorkspace key={feature.id} slug={slug} featureId={feature.id} scenarios={scenarios} />}
+      {mode === "flow" ? <FeatureFlow featureName={feature.name} scenarios={scenarios} graph={flowGraph} errorCode={flowErrorCode} /> : <ScenarioWorkspace key={feature.id} slug={slug} featureId={feature.id} scenarios={scenarios} />}
     </>
   );
 }

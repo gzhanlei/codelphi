@@ -2,8 +2,8 @@ import type { LlmBillingContext } from "./ai";
 import { defaultExecute, type Execute } from "./db";
 import { evidenceItems } from "./evidence";
 import { generateFeatureFlowGraph } from "./feature-flow-generation";
-import { copyInheritedFeatureFlowGraphs, loadVersionFeatureRecords, saveFeatureFlowGraph } from "./feature-flow-store";
-import { scenarioFingerprint, type FeatureFlowGraph } from "./semantic-feature-flow";
+import { copyInheritedFeatureFlowGraphs, loadVersionFeatureRecords, saveFeatureFlowError, saveFeatureFlowGraph } from "./feature-flow-store";
+import { FlowValidationError, scenarioFingerprint, type FeatureFlowGraph } from "./semantic-feature-flow";
 import { specFeatureKey, type SpecFeature, type SpecScenario } from "./spec-diff";
 
 function payloadRows<T>(payload: unknown): T[] {
@@ -50,6 +50,10 @@ export async function syncFeatureFlowsForVersion(options: { specVersionId: numbe
         generated += 1;
       } catch (error) {
         failed += 1;
+        // 护栏拒绝（确定性校验失败）落库失败码，供流程图 tab 空态向用户解释原因；瞬时 AI 故障不落
+        if (error instanceof FlowValidationError) {
+          await saveFeatureFlowError(execute, target.id, error.code, scenarioFingerprint(target.feature.scenarios)).catch(() => undefined);
+        }
         console.error("[feature-flow] generation failed", {
           specVersionId,
           specFeatureId: target.id,
@@ -94,7 +98,14 @@ export async function regenerateFeatureFlowForWorkbenchFeature(featureId: number
   const records = await loadVersionFeatureRecords(execute, row.specVersionId);
   const record = records.find((candidate) => candidate.stableKey === specFeatureKey(row.name));
   if (!record) throw new Error(`SPEC_FEATURE_NOT_FOUND: ${featureId}@${row.specVersionId}`);
-  const graph = await generateFeatureFlowGraph(feature, billing);
-  await saveFeatureFlowGraph(execute, record.id, graph, scenarioFingerprint(scenarios));
-  return graph;
+  try {
+    const graph = await generateFeatureFlowGraph(feature, billing);
+    await saveFeatureFlowGraph(execute, record.id, graph, scenarioFingerprint(scenarios));
+    return graph;
+  } catch (error) {
+    if (error instanceof FlowValidationError) {
+      await saveFeatureFlowError(execute, record.id, error.code, scenarioFingerprint(scenarios)).catch(() => undefined);
+    }
+    throw error;
+  }
 }

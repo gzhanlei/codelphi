@@ -21,7 +21,7 @@ import { specFeatureKey } from "@/lib/spec-diff";
 import type { FeatureFlowGraph } from "@/lib/semantic-feature-flow";
 
 
-export function SpecWorkspace({ slug, productBase, tree, feature, scenarios, mode, coverage, completeness, featureFlows }: { slug: string; productBase: string; tree: FeatureTreeItem[]; feature?: FeatureRow; scenarios: ScenarioRow[]; mode: string; coverage?: CoverageReceiptRow | null; completeness?: CompletenessLedgerRow | null; featureFlows?: Map<string, FeatureFlowGraph> }) {
+export function SpecWorkspace({ slug, productBase, tree, feature, scenarios, mode, coverage, completeness, featureFlows, featureFlowErrors }: { slug: string; productBase: string; tree: FeatureTreeItem[]; feature?: FeatureRow; scenarios: ScenarioRow[]; mode: string; coverage?: CoverageReceiptRow | null; completeness?: CompletenessLedgerRow | null; featureFlows?: Map<string, FeatureFlowGraph>; featureFlowErrors?: Map<string, string> }) {
   const router = useRouter();
   const guard = useDemoGuard();
   const [editor, setEditor] = useState<FeatureEditorMode>(null);
@@ -29,6 +29,7 @@ export function SpecWorkspace({ slug, productBase, tree, feature, scenarios, mod
   const featureScenarios = scenariosForFeature(scenarios, feature);
   const implementationScenarios = scenariosForFeatureTree(scenarios, feature, tree);
   const featureFlow = feature ? featureFlows?.get(specFeatureKey(feature.name)) : undefined;
+  const featureFlowErrorCode = feature ? featureFlowErrors?.get(specFeatureKey(feature.name)) : undefined;
 
   async function removeFeature() {
     if (guard()) return;
@@ -79,7 +80,7 @@ export function SpecWorkspace({ slug, productBase, tree, feature, scenarios, mod
       <FeatureTree slug={slug} items={tree} selectedId={entityId(feature)} onCreateRoot={() => openEditor("root")} />
       <div className="spec-detail">
         <FeatureEditor slug={slug} editor={editor} feature={feature} onSaved={(id) => { setEditor(null); router.push(featureHref(id)); }} onClose={() => setEditor(null)} />
-        <SpecDetail slug={slug} productBase={productBase} feature={feature} scenarios={featureScenarios} implementationScenarios={implementationScenarios} mode={mode} error={error} featureFlow={featureFlow} onEdit={() => openEditor("edit")} onDelete={removeFeature} onCreateChild={() => openEditor("child")} onCreateRoot={() => openEditor("root")} />
+        <SpecDetail slug={slug} productBase={productBase} feature={feature} scenarios={featureScenarios} implementationScenarios={implementationScenarios} mode={mode} error={error} featureFlow={featureFlow} featureFlowErrorCode={featureFlowErrorCode} onEdit={() => openEditor("edit")} onDelete={removeFeature} onCreateChild={() => openEditor("child")} onCreateRoot={() => openEditor("root")} />
       </div>
     </div>
   );

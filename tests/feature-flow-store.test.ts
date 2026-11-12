@@ -40,15 +40,30 @@ function memoryExecute(state: { features: MemoryRow[]; scenarios: MemoryRow[]; f
     if (sql.includes("FROM spec_scenarios WHERE spec_feature_id IN")) {
       return [state.scenarios.filter((row) => parameters.includes(Number(row.featureId)))];
     }
+    if (sql.includes("FROM spec_feature_flows ff JOIN spec_features sf") && sql.includes("graph_json IS NULL")) {
+      const stableKeys = new Map(state.features.map((row) => [row.id, row.stableKey]));
+      return [state.flows
+        .filter((row) => row.graphJson === null && row.lastErrorCode && stableKeys.has(row.specFeatureId) && state.features.some((feature) => feature.id === row.specFeatureId && feature.versionId === parameters[0]))
+        .map((row) => ({ stableKey: stableKeys.get(row.specFeatureId), fingerprint: row.fingerprint, lastErrorCode: row.lastErrorCode }))];
+    }
     if (sql.includes("FROM spec_feature_flows ff JOIN spec_features sf") && sql.includes("sf.spec_version_id = ?")) {
       const stableKeys = new Map(state.features.map((row) => [row.id, row.stableKey]));
       return [state.flows.filter((row) => stableKeys.has(row.specFeatureId) && state.features.some((feature) => feature.id === row.specFeatureId && feature.versionId === parameters[0])).map((row) => ({ ...row, stableKey: stableKeys.get(row.specFeatureId) }))];
     }
-    if (sql.startsWith("INSERT INTO spec_feature_flows")) {
+    if (sql.startsWith("INSERT INTO spec_feature_flows") && sql.includes("scenario_fingerprint, last_error_code, last_error_at")) {
+      const [specFeatureId, fingerprint, errorCode] = parameters;
+      const existing = state.flows.find((row) => row.specFeatureId === specFeatureId);
+      if (existing) {
+        const sameScenarios = existing.fingerprint === fingerprint;
+        Object.assign(existing, { graphJson: sameScenarios ? existing.graphJson : null, fingerprint: sameScenarios ? existing.fingerprint : fingerprint, lastErrorCode: errorCode });
+      } else state.flows.push({ specFeatureId, graphJson: null, fingerprint, lastErrorCode: errorCode });
+      return [{ affectedRows: 1 }];
+    }
+    if (sql.startsWith("INSERT INTO spec_feature_flows") && !sql.includes("scenario_fingerprint, last_error_code, last_error_at")) {
       const [specFeatureId, graphJson, fingerprint] = parameters;
       const existing = state.flows.find((row) => row.specFeatureId === specFeatureId);
-      if (existing) Object.assign(existing, { graphJson, fingerprint });
-      else state.flows.push({ specFeatureId, graphJson, fingerprint });
+      if (existing) Object.assign(existing, { graphJson, fingerprint, lastErrorCode: null });
+      else state.flows.push({ specFeatureId, graphJson, fingerprint, lastErrorCode: null });
       return [{ affectedRows: 1 }];
     }
     throw new Error(`Unexpected SQL: ${sql}`);
@@ -110,6 +125,51 @@ describe("feature flow store", () => {
 
     expect(await api!.copyInheritedFeatureFlowGraphs(execute, 1, 2)).toBe(0);
     expect(previous.flows.some((row) => row.specFeatureId === 200)).toBe(false);
+  });
+
+  it("records a guardrail rejection and surfaces it as the empty-state reason", async () => {
+    const state = versionRows(1);
+    const execute = memoryExecute(state);
+    const fingerprint = scenarioFingerprint(feature.scenarios);
+    await api!.saveFeatureFlowError(execute, 100, "MAIN_CHAIN_MISSING", fingerprint);
+
+    const errors = await api!.loadFeatureFlowErrors(execute, 1, [feature]);
+    expect(errors.get("固定性能门槛")).toBe("MAIN_CHAIN_MISSING");
+  });
+
+  it("keeps a valid graph when a re-attempt fails on the same scenario set", async () => {
+    const state = versionRows(1);
+    const execute = memoryExecute(state);
+    const fingerprint = scenarioFingerprint(feature.scenarios);
+    await api!.saveFeatureFlowGraph(execute, 100, graph, fingerprint);
+    await api!.saveFeatureFlowError(execute, 100, "RETRY_EVIDENCE_MISSING", fingerprint);
+
+    expect((await api!.loadFeatureFlowGraphs(execute, 1, [feature])).get("固定性能门槛")).toEqual(graph);
+    expect((await api!.loadFeatureFlowErrors(execute, 1, [feature])).size).toBe(0);
+  });
+
+  it("replaces a stale graph with the rejection when scenarios changed", async () => {
+    const state = versionRows(1);
+    const execute = memoryExecute(state);
+    const oldFingerprint = scenarioFingerprint(scenarios);
+    await api!.saveFeatureFlowGraph(execute, 100, graph, oldFingerprint);
+    const changed = { ...feature, scenarios: [{ ...scenarios[0], action: "不同操作" }, scenarios[1]] };
+    await api!.saveFeatureFlowError(execute, 100, "MAIN_CHAIN_MISSING", scenarioFingerprint(changed.scenarios));
+
+    expect((await api!.loadFeatureFlowGraphs(execute, 1, [changed])).size).toBe(0);
+    expect((await api!.loadFeatureFlowErrors(execute, 1, [changed])).get("固定性能门槛")).toBe("MAIN_CHAIN_MISSING");
+    expect((await api!.loadFeatureFlowErrors(execute, 1, [feature])).size).toBe(0);
+  });
+
+  it("clears the recorded error when a later generation succeeds", async () => {
+    const state = versionRows(1);
+    const execute = memoryExecute(state);
+    const fingerprint = scenarioFingerprint(feature.scenarios);
+    await api!.saveFeatureFlowError(execute, 100, "MAIN_CHAIN_MISSING", fingerprint);
+    await api!.saveFeatureFlowGraph(execute, 100, graph, fingerprint);
+
+    expect((await api!.loadFeatureFlowErrors(execute, 1, [feature])).size).toBe(0);
+    expect((await api!.loadFeatureFlowGraphs(execute, 1, [feature])).get("固定性能门槛")).toEqual(graph);
   });
 
   it("loads version feature ids, stable keys and scenarios for generation", async () => {

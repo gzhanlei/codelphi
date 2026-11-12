@@ -18,6 +18,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { layoutSemanticFeatureFlow, toReactFlowElements, type FeatureFlowEdgeData, type FeatureFlowReactNode } from "@/lib/feature-flow-layout";
+import { describeFeatureFlowEmptyState } from "@/lib/feature-flow-view";
 import { evidenceItems, evidenceLabel } from "@/lib/evidence";
 import type { FeatureFlowGraph } from "@/lib/semantic-feature-flow";
 import type { ScenarioRow } from "@/lib/types";
@@ -129,7 +130,7 @@ function FitViewOnDetailsChange({ detailsOpen }: { detailsOpen: boolean }) {
   return null;
 }
 
-export function FeatureFlow({ featureName, scenarios, graph }: { featureName: string; scenarios: ScenarioRow[]; graph?: FeatureFlowGraph }) {
+export function FeatureFlow({ featureName, scenarios, graph, errorCode }: { featureName: string; scenarios: ScenarioRow[]; graph?: FeatureFlowGraph; errorCode?: string }) {
   const [elements, setElements] = useState<ReturnType<typeof toReactFlowElements> | null>(null);
   const [layoutError, setLayoutError] = useState(false);
   const [selected, setSelected] = useState<FeatureFlowReactNode | null>(null);
@@ -151,7 +152,7 @@ export function FeatureFlow({ featureName, scenarios, graph }: { featureName: st
   }, [graph, scenarios]);
 
   if (!graph) {
-    return <section className="feature-flow" aria-label={`${featureName} 流程图`}><div className="empty-state">暂无通过校验的语义流程图，或场景已变化；完整场景清单见「场景」标签。</div></section>;
+    return <section className="feature-flow" aria-label={`${featureName} 流程图`}><div className="empty-state">{describeFeatureFlowEmptyState(errorCode)}</div></section>;
   }
 
   return (

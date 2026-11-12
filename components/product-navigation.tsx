@@ -70,6 +70,7 @@ interface ProductViewProps {
   coverage?: CoverageReceiptRow | null;
   completeness?: CompletenessLedgerRow | null;
   featureFlows?: Map<string, FeatureFlowGraph>;
+  featureFlowErrors?: Map<string, string>;
   mode?: string;
   featureId?: number;
   overview: ProductOverviewData;
@@ -80,10 +81,10 @@ interface ProductViewProps {
   latestReleaseId?: number;
 }
 
-function ProductWorkspace({ view, productSlug, productBase, features, scenarios, releases, changes, behaviorChanges, foldedChanges, regressionTasks, releaseTotal, coverage, completeness, featureFlows, mode = "spec", featureId, canEdit, changelogHref }: Omit<ProductViewProps, "overview">) {
+function ProductWorkspace({ view, productSlug, productBase, features, scenarios, releases, changes, behaviorChanges, foldedChanges, regressionTasks, releaseTotal, coverage, completeness, featureFlows, featureFlowErrors, mode = "spec", featureId, canEdit, changelogHref }: Omit<ProductViewProps, "overview">) {
   const selectedFeature = selectFeature(features, featureId);
   return view === "spec"
-    ? <SpecWorkspace slug={productSlug} productBase={productBase} tree={buildFeatureTree(features)} feature={selectedFeature} scenarios={scenarios} mode={mode} coverage={coverage} completeness={completeness} featureFlows={featureFlows} />
+    ? <SpecWorkspace slug={productSlug} productBase={productBase} tree={buildFeatureTree(features)} feature={selectedFeature} scenarios={scenarios} mode={mode} coverage={coverage} completeness={completeness} featureFlows={featureFlows} featureFlowErrors={featureFlowErrors} />
     : <ProductChanges slug={productSlug} releases={releases} changes={changes} behaviorChanges={behaviorChanges} foldedChanges={foldedChanges} regressionTasks={regressionTasks} releaseTotal={releaseTotal} canEdit={canEdit} changelogHref={changelogHref} />;
 }
 

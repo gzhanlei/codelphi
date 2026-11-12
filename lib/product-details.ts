@@ -1,6 +1,6 @@
 import { defaultExecute, getDb } from "./db";
 import { evidenceItems } from "./evidence";
-import { loadFeatureFlowGraphs } from "./feature-flow-store";
+import { loadFeatureFlowErrors, loadFeatureFlowGraphs } from "./feature-flow-store";
 import { evidenceUrl } from "./evidence-url";
 import { parseJsonValue } from "./json";
 import { RELEASE_PAGE_SIZE, type ReleasePagePayload } from "./release-client";
@@ -205,6 +205,7 @@ export async function getProductDetails(slug: string, organizationId?: number) {
     })),
   }));
   const featureFlows = latestSpecVersionId === null ? new Map() : await loadFeatureFlowGraphs(defaultExecute, latestSpecVersionId, finalSpecFeatures);
+  const featureFlowErrors = latestSpecVersionId === null ? new Map() : await loadFeatureFlowErrors(defaultExecute, latestSpecVersionId, finalSpecFeatures);
 
   const repository = (repositories as Array<{ provider?: string; owner: string; name: string; defaultBranch: string }>)[0];
   const afterSha = (runs as Array<{ status: string; errorMessage?: string; afterSha?: string | null }>)[0]?.afterSha;
@@ -234,6 +235,7 @@ export async function getProductDetails(slug: string, organizationId?: number) {
     latestRun: (runs as Array<{ status: string; errorMessage?: string }>)[0],
     features,
     featureFlows,
+    featureFlowErrors,
     scenarios: scenarios.map((scenario) => ({ ...scenario, evidence: decorateEvidence(scenario.evidence, source) })),
     releases,
     releaseTotal,

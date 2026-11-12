@@ -28,8 +28,18 @@ describe("FeatureFlow component", () => {
     const { renderToStaticMarkup } = await import("react-dom/server");
     const { FeatureFlow } = await import("../components/feature-flow");
     const html = renderToStaticMarkup(createElement(FeatureFlow, { featureName: "测试功能", scenarios }));
-    expect(html).toContain("暂无通过校验的语义流程图，或场景已变化");
+    expect(html).toContain("流程图尚未生成");
     expect(html).not.toContain("开始工作");
+    expect(html).not.toContain("<svg");
+  });
+
+  it("explains the guardrail rejection reason in plain language when present", async () => {
+    const { createElement } = await import("react");
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const { FeatureFlow } = await import("../components/feature-flow");
+    const html = renderToStaticMarkup(createElement(FeatureFlow, { featureName: "测试功能", scenarios, errorCode: "MAIN_CHAIN_MISSING" }));
+    expect(html).toContain("没有形成可表达的先后主链");
+    expect(html).not.toContain("MAIN_CHAIN_MISSING");
     expect(html).not.toContain("<svg");
   });
 
