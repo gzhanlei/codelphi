@@ -1,4 +1,5 @@
 import { evidenceItems } from "./evidence";
+import type { RegressionTaskView } from "./regression-task-view";
 import { featureHref } from "./spec-editor-ui";
 import type { BehaviorChangeRow, ChangeRow, FeatureRow, ReleaseRow, ScenarioRow } from "./types";
 
@@ -12,6 +13,8 @@ interface ProductOverviewInput {
   behaviorChanges: BehaviorChangeRow[];
   /** 发布变更说明（含 userImpact，取自 changes 表；只消费已落库文本，不在展示层生成事实）。 */
   changes?: ChangeRow[];
+  /** 回归任务（任务入口判断最新发布是否有回归建议）。 */
+  regressionTasks?: RegressionTaskView[];
   latestRun?: { status: string; errorMessage?: string };
   latestReleaseNote?: { status: string; releaseId: number; publishedAt: Date | string | null; blocks: number } | null;
   /** 发布稿映射（总览时间线的状态徽章用）。 */
@@ -123,6 +126,23 @@ export interface TimelineEntry {
  */
 export type TimelineGroup = { kind: "single"; release: TimelineEntry } | { kind: "quiet-run"; count: number; releases: TimelineEntry[] };
 
+/**
+ * 任务入口投影（设计 §7）：现有视图的导航，不是新的角色数据系统。
+ * 数据缺失时给出真实禁用原因，不产生指向不存在数据的链接；
+ * 任务文案优先于角色标签。
+ */
+function buildTaskEntries(input: ProductOverviewInput, latestRelease: ReleaseRow | undefined) {
+  const hasFeatures = input.features.length > 0;
+  const latestRegressionTasks = latestRelease ? (input.regressionTasks ?? []).some((task) => task.releaseId === latestRelease.id) : false;
+  const changesHref = latestRelease ? `${input.productBase}?view=changes#release-${latestRelease.id}` : null;
+  return [
+    { key: "capability", question: "这个产品现在能做什么？", href: hasFeatures ? `${input.productBase}?view=spec` : null, disabledReason: hasFeatures ? null : "尚无功能规格" },
+    { key: "release-impact", question: "这次发布改变了什么？", href: changesHref, disabledReason: latestRelease ? null : "尚无发布" },
+    { key: "regression", question: "这次建议重新验证什么？", href: latestRegressionTasks ? changesHref : null, disabledReason: latestRelease ? (latestRegressionTasks ? null : "最新发布暂无回归建议") : "尚无发布" },
+    { key: "traceable-changes", question: "最近有哪些可追溯的变化？", href: input.releases.length > 0 ? `${input.productBase}?view=changes` : null, disabledReason: input.releases.length > 0 ? null : "尚无发布" },
+  ];
+}
+
 export function buildProductOverview(input: ProductOverviewInput) {
   const latestRelease = input.releases[0];
   const specVersionId = latestRelease ? latestRelease.specVersionId : null;
@@ -197,6 +217,7 @@ export function buildProductOverview(input: ProductOverviewInput) {
     changeStats,
     changeGroups,
     userImpact,
+    taskEntries: buildTaskEntries(input, latestRelease),
     latestRelease,
     latestReleaseNote: input.latestReleaseNote ?? null,
     noteByRelease: Object.fromEntries((input.releaseNotes ?? []).map((note) => [String(note.releaseId), { status: note.status, headline: note.headline }])),

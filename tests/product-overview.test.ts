@@ -239,3 +239,58 @@ describe("product overview quiet-release grouping", () => {
     expect(overview.timelineGroups).toEqual([]);
   });
 });
+
+describe("product overview task entries", () => {
+  const release = (id: number, days: number): ReleaseRow => ({ id, title: `发布${id}`, summary: `发布${id}摘要`, sha: `sha${id}abcdef`, url: "", committedAt: new Date(`2026-11-${String(days).padStart(2, "0")}`), specVersionId: id });
+
+  it("links all four tasks with real data and deep links", () => {
+    const overview = buildProductOverview({
+      productBase: "/products/default/radar",
+      product: { id: 1, slug: "radar", name: "Radar", description: "" },
+      features: [{ id: 1, name: "登录", summary: "OAuth", parentId: null, source: "generated" }],
+      scenarios: [],
+      releases: [release(12, 10)],
+      behaviorChanges: [],
+      regressionTasks: [{ taskId: 1, releaseId: 12, subject: { kind: "change", changeId: 1 }, status: "pending", checkedBy: null, checkedAt: null, skipReason: null, failureNote: null, featureName: "登录", reference: "HP-1", primaryChangeId: null, scenarioContext: null, scenarioAction: null, sources: [], reasons: [] }],
+      latestRun: { status: "succeeded" },
+    });
+    expect(overview.taskEntries).toEqual([
+      { key: "capability", question: "这个产品现在能做什么？", href: "/products/default/radar?view=spec", disabledReason: null },
+      { key: "release-impact", question: "这次发布改变了什么？", href: "/products/default/radar?view=changes#release-12", disabledReason: null },
+      { key: "regression", question: "这次建议重新验证什么？", href: "/products/default/radar?view=changes#release-12", disabledReason: null },
+      { key: "traceable-changes", question: "最近有哪些可追溯的变化？", href: "/products/default/radar?view=changes", disabledReason: null },
+    ]);
+  });
+
+  it("disables entries with honest reasons instead of dead links", () => {
+    const overview = buildProductOverview({
+      productBase: "/products/default/radar",
+      product: { id: 1, slug: "radar", name: "Radar", description: "" },
+      features: [], scenarios: [],
+      releases: [release(12, 10)],
+      behaviorChanges: [],
+      latestRun: { status: "succeeded" },
+    });
+    expect(overview.taskEntries.map((entry) => [entry.key, entry.href, entry.disabledReason])).toEqual([
+      ["capability", null, "尚无功能规格"],
+      ["release-impact", "/products/default/radar?view=changes#release-12", null],
+      ["regression", null, "最新发布暂无回归建议"],
+      ["traceable-changes", "/products/default/radar?view=changes", null],
+    ]);
+  });
+
+  it("disables everything honestly when no release exists", () => {
+    const overview = buildProductOverview({
+      productBase: "/products/default/radar",
+      product: { id: 1, slug: "radar", name: "Radar", description: "" },
+      features: [], scenarios: [], releases: [], behaviorChanges: [],
+      latestRun: { status: "succeeded" },
+    });
+    expect(overview.taskEntries.map((entry) => [entry.key, entry.href, entry.disabledReason])).toEqual([
+      ["capability", null, "尚无功能规格"],
+      ["release-impact", null, "尚无发布"],
+      ["regression", null, "尚无发布"],
+      ["traceable-changes", null, "尚无发布"],
+    ]);
+  });
+});
