@@ -118,3 +118,9 @@ CMD ["npm", "start"]
 - **容器间回滚**：`cd /data/www/codelphi-docker && sudo ./rollback.sh`（回 PREV_GOOD_IMAGE；首次部署 prev 为空）
 - **退回 systemd**：`docker compose down` 释放 3008 → `systemctl start codelphi.service`（旧 checkout + 旧 .env 仍在 `/data/www/codelphi`）
 
+
+## 10. 语义流程图批次（待部署）
+
+- 目标镜像将包含 migration `068_feature_flows.sql`、语义图生成/校验、版本同步、单功能回填和 ELK edge sections 渲染。
+- 本地已完成：203 个测试文件 0 真实失败、typecheck、生产构建，以及 RepoMap 真实 AI 生成与布局验证。
+- 待用户明确确认后执行：镜像构建与部署、单工作台 feature `9176` 回填、RepoMap 线上路径验收。WD-4 与生产回填尚未执行，当前无部署结果可记录。
