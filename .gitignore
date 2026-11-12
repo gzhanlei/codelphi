@@ -16,6 +16,7 @@ artifacts/legacy-v2.16/
 artifacts/products/
 .DS_Store
 .zcode/
+.worktrees/
 
 # Proprietary pricing and billing material
 /docs/codelphi-pricing-and-billing.md
