@@ -128,6 +128,18 @@ describe("FeatureFlow component", () => {
     expect(html).toContain("https://example.com/evidence");
     expect(html).toContain("关闭详情");
   });
+  it("uses a flow-specific node class instead of the scenario list class", async () => {
+    const { createElement } = await import("react");
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const { FeatureNode: NodeComponent } = await import("../components/feature-flow");
+    const { ReactFlowProvider } = await import("@xyflow/react");
+
+    const html = renderToStaticMarkup(createElement(ReactFlowProvider, null, createElement(NodeComponent, {
+      data: { title: "填写邮箱、SAU 数量与原因后点击「发放」", outcome: "发放成功", kind: "scenario", category: "happy", scenarios: [] },
+    } as never)));
+    expect(html).toContain("flow-react-node scenario-node");
+    expect(html).not.toContain("flow-react-node scenario ");
+  });
   it("renders the structure fallback instead of an SVG when no control structure exists", async () => {
     const { createElement } = await import("react");
     const { renderToStaticMarkup } = await import("react-dom/server");

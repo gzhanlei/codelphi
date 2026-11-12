@@ -65,7 +65,7 @@ function categoryLabel(category: ScenarioRow["category"]) {
   return { happy: "Happy path", edge: "边界情况", error: "错误处理" }[category];
 }
 
-function FeatureNode({ data }: NodeProps<FeatureFlowReactNode>) {
+export function FeatureNode({ data }: NodeProps<FeatureFlowReactNode>) {
   const content = (
     <>
       {data.kind === "start" ? <span className="flow-node-kind">START</span> : null}
@@ -74,7 +74,7 @@ function FeatureNode({ data }: NodeProps<FeatureFlowReactNode>) {
     </>
   );
   return (
-    <div className={`flow-react-node ${data.kind} cat-${data.category ?? "happy"}`}>
+    <div className={`flow-react-node ${data.kind === "scenario" ? "scenario-node" : data.kind} cat-${data.category ?? "happy"}`}>
       {data.kind !== "start" ? <Handle type="target" position={Position.Top} /> : null}
       {data.kind === "start" ? <div className="flow-node-content">{content}</div> : (
         <button type="button" className="flow-node-content" aria-label={`查看 ${data.title} 的场景详情`}>
