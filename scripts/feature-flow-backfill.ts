@@ -18,5 +18,10 @@ export async function runFeatureFlowBackfill(argv: string[], regenerate: (featur
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  process.exitCode = await runFeatureFlowBackfill(process.argv.slice(2), regenerateFeatureFlowForWorkbenchFeature);
+  void runFeatureFlowBackfill(process.argv.slice(2), regenerateFeatureFlowForWorkbenchFeature).then((code) => {
+    process.exitCode = code;
+  }).catch((error: unknown) => {
+    console.error("[feature-flow-backfill] unhandled error", error);
+    process.exitCode = 1;
+  });
 }

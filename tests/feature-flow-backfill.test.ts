@@ -50,6 +50,18 @@ describe("feature flow backfill CLI", () => {
     expect(regenerate).not.toHaveBeenCalled();
   });
 
+  it("runs the CLI entry in the container's CJS mode without top-level await", async () => {
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const result: { code?: number; stderr: string } = await promisify(execFile)(process.execPath, ["node_modules/tsx/dist/cli.mjs", "scripts/feature-flow-backfill.ts", "--feature-id", "0"], { cwd: process.cwd(), env: { ...process.env, TMPDIR: "/tmp" } }).then(
+      ({ stderr }) => ({ stderr }),
+      (error: { code?: number; stderr: string }) => ({ code: error.code, stderr: error.stderr }),
+    );
+
+    expect(result.code).toBe(2);
+    expect(result.stderr).not.toContain("Top-level await");
+  });
+
   it("returns 1 and identifies the feature when generation fails", async () => {
     const { runFeatureFlowBackfill } = await import("../scripts/feature-flow-backfill");
     const regenerate = vi.fn(async () => { throw new Error("gateway failed"); });
