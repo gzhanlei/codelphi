@@ -143,3 +143,66 @@ describe("product overview rendering (Specsight 原则版式)", () => {
     });
   });
 });
+
+describe("product overview task-oriented panels (设计 §4-§7)", () => {
+  const quiet = buildProductOverview({
+    productBase: "/products/default/radar",
+    product: { id: 1, slug: "radar", name: "Radar", description: "" },
+    features: [], scenarios: [],
+    releases: [
+      { id: 12, title: "文档与依赖整理", summary: "本次发布只包含文档与依赖整理。", sha: "sha12abcde", url: "", committedAt: new Date("2026-11-10"), specVersionId: 8 },
+      { id: 9, title: "导出功能增强", summary: "导出格式支持自定义字段。", sha: "sha9abcde1", url: "", committedAt: new Date("2026-11-05"), specVersionId: 8 },
+    ],
+    behaviorChanges: [{ id: 4, releaseId: 9, kind: "changed", entityType: "scenario", featureName: "导出", scenarioReference: "HP-1", summary: "导出字段扩展", before: {}, after: {} }],
+    changes: [{ id: 20, releaseId: 9, featureName: "导出", kind: "changed", description: "", userImpact: "导出文件新增可选字段，旧脚本不受影响。", evidence: [] }],
+    latestRun: { status: "succeeded" },
+  });
+
+  it("renders latest-release user impacts with the release identity and deep links", () => {
+    const impacts = buildProductOverview({
+      productBase: "/products/default/radar",
+      product: { id: 1, slug: "radar", name: "Radar", description: "" },
+      features: [], scenarios: [],
+      releases: [{ id: 12, title: "导出功能增强", summary: "导出格式支持自定义字段。", sha: "sha12abcde", url: "", committedAt: new Date("2026-11-10"), specVersionId: 8 }],
+      behaviorChanges: [],
+      changes: [{ id: 30, releaseId: 12, featureName: "导出", kind: "changed", description: "", userImpact: "导出文件新增可选字段，旧脚本不受影响。", evidence: [] }],
+      latestRun: { status: "succeeded" },
+    });
+    const html = renderToStaticMarkup(createElement(ProductOverview, { data: impacts }));
+    expect(html).toContain("本次发布对用户的影响");
+    expect(html).toContain("导出功能增强");
+    expect(html).toContain("导出文件新增可选字段，旧脚本不受影响。");
+    expect(html).toContain('href="?view=changes#release-12"');
+  });
+
+  it("renders the deterministic fallback for a quiet release and never borrows earlier impacts", () => {
+    const html = renderToStaticMarkup(createElement(ProductOverview, { data: quiet }));
+    expect(html).toContain("本次未发现规格行为变化");
+    expect(html).not.toContain("导出文件新增可选字段");
+    // 历史发布导航必须显式带日期与发布身份，不与「本次发布」混称
+    expect(html).toContain("最近一次有行为变化的发布");
+    expect(html).toContain("导出功能增强");
+    expect(html).toContain("11月5日");
+    expect(html).toContain('href="?view=changes#release-9"');
+  });
+
+  it("renders task entries with real links and honest disabled states", () => {
+    const html = renderToStaticMarkup(createElement(ProductOverview, { data: quiet }));
+    expect(html).toContain("这个产品现在能做什么？");
+    expect(html).toContain("这次发布改变了什么？");
+    expect(html).toContain('href="/products/default/radar?view=changes#release-12"');
+    // 无回归任务 → 真实禁用原因，不是死链
+    expect(html).toContain("最新发布暂无回归建议");
+    expect(html).not.toContain("这次建议重新验证什么？</a>");
+  });
+
+  it("orders user impact before ask and timeline (设计 §4 信息顺序)", () => {
+    const html = renderToStaticMarkup(createElement(ProductOverview, { data: quiet }));
+    const impactAt = html.indexOf("本次发布");
+    const askAt = html.indexOf("规格问答");
+    const timelineAt = html.indexOf("发布时间线");
+    expect(impactAt).toBeGreaterThan(-1);
+    expect(askAt).toBeGreaterThan(impactAt);
+    expect(timelineAt).toBeGreaterThan(askAt);
+  });
+});

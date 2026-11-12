@@ -64,6 +64,13 @@ describe("public demo product page (canonical org-qualified route)", () => {
     expect(html).toContain('data-base="/products/default/reporadar"');
   });
 
+  it("shows the generic product-source note in the page heading (设计 §5，非 RepoMap 专用)", async () => {
+    vi.mocked(resolvePublicDemoProduct).mockResolvedValue(demo);
+    const html = await renderPage("default", "reporadar");
+    expect(html).toContain("CoDelphi 根据此仓库的持续分析形成功能规格、行为变化与回归建议");
+    expect(html).toContain("结论附源码证据，采纳前经人工核实");
+  });
+
   it("hides the settings tab from anonymous demo visitors", async () => {
     vi.mocked(resolvePublicDemoProduct).mockResolvedValue(demo);
     const html = await renderPage("default", "reporadar");

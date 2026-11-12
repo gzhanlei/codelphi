@@ -53,6 +53,8 @@ function ProductPageBody({ productBase, view, mode, featureId, details, overview
           <span className="eyebrow">PRODUCT SPACE</span>
           <h1>{details.product.name} <RepositoryLink repository={details.repository} /></h1>
           <ProductDescriptionLine slug={details.product.slug} text={details.product.description} canEdit={canEdit} />
+          {/* 通用来源说明（设计 §5）：建立产品空间与 CoDelphi 的关系；所有产品同一文案，不含仓库常量。 */}
+          <p className="product-source-note">CoDelphi 根据此仓库的持续分析形成功能规格、行为变化与回归建议；结论附源码证据，采纳前经人工核实。</p>
         </div>
         <div className="page-actions">
           {actions}

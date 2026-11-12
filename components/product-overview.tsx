@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { KnowledgeHealthPanel } from "./knowledge-health-panel";
 import { SpecAsk } from "./spec-ask";
-import type { ProductOverviewData, TimelineEntry } from "@/lib/product-overview";
+import { changeGroupLabel, type ProductOverviewData, type TimelineEntry } from "@/lib/product-overview";
 
 function CapabilityList({ capabilities }: { capabilities: ProductOverviewData["capabilities"] }) {
   if (capabilities.length === 0) return <p className="overview-note">尚无功能规格。</p>;
@@ -18,18 +18,67 @@ function CapabilitiesPanel({ data }: { data: ProductOverviewData }) {
   );
 }
 
+/**
+ * 本次发布的用户影响（设计 §6）：只复用已落库 changes.user_impact，
+ * 回退态按确定性数据展示，不用更早发布冒充最新发布；历史导航显式带日期与发布身份。
+ */
+function UserImpactPanel({ data }: { data: ProductOverviewData }) {
+  const { userImpact, latestRelease } = data;
+  if (userImpact.state === "none" || !latestRelease) return null;
+  const deepLink = `?view=changes#release-${latestRelease.id}`;
+  return (
+    <section className="overview-panel">
+      <div className="overview-panel-heading"><h2>本次发布对用户的影响</h2><span className="overview-meta-inline">{latestRelease.title} · {dayLabel(latestRelease.committedAt)}</span><Link className="overview-text-link" href={deepLink}>全部前后差异 →</Link></div>
+      {userImpact.state === "impacts" ? (
+        <div className="impact-list">
+          {userImpact.items.map((item) => (
+            <div className="impact-item" key={`${item.releaseId}-${item.featureName}-${item.userImpact.slice(0, 8)}`}>
+              <strong>{item.featureName}</strong>
+              <p>{item.userImpact}</p>
+              <Link className="overview-text-link" href={deepLink}>查看前后差异 →</Link>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {userImpact.state === "changes" ? (
+        <div className="impact-list">
+          <p className="overview-note">本次发布未附用户影响说明，检测到 {userImpact.changeStats.added + userImpact.changeStats.removed + userImpact.changeStats.changed} 处规格行为变化：</p>
+          {data.changeGroups.slice(0, 3).map((group) => (
+            <div className="impact-item" key={group.featureName}>
+              <strong>{group.featureName}</strong>
+              <p>{changeGroupLabel(group)}</p>
+            </div>
+          ))}
+          <Link className="overview-text-link" href={deepLink}>查看前后差异 →</Link>
+        </div>
+      ) : null}
+      {userImpact.state === "quiet" ? <p className="overview-note">本次未发现规格行为变化。</p> : null}
+      {userImpact.priorBehavioralRelease ? (
+        <p className="impact-prior"><Link className="overview-text-link" href={`?view=changes#release-${userImpact.priorBehavioralRelease.id}`}>最近一次有行为变化的发布：{userImpact.priorBehavioralRelease.title}（{userImpact.priorBehavioralRelease.dateLabel}）→</Link></p>
+      ) : null}
+    </section>
+  );
+}
+
+/** 任务入口（设计 §7）：任务文案优先于角色标签；数据缺失时给真实禁用原因，不产出死链。 */
+function TaskEntriesPanel({ data }: { data: ProductOverviewData }) {
+  return (
+    <section className="overview-panel">
+      <div className="overview-panel-heading"><h2>快速导航</h2><p>按你想回答的问题进入对应视图。</p></div>
+      <div className="task-entries">
+        {data.taskEntries.map((entry) => entry.href
+          ? <Link className="task-entry" href={entry.href} key={entry.key}><strong>{entry.question}</strong><span>查看 →</span></Link>
+          : <div className="task-entry task-entry-disabled" key={entry.key}><strong>{entry.question}</strong><span>{entry.disabledReason}</span></div>)}
+      </div>
+    </section>
+  );
+}
+
 const STATUS_CHIP: Record<string, { label: string; className: string }> = {
   draft: { label: "发布稿待校对", className: "tl-chip-draft" },
   published: { label: "已发布", className: "tl-chip-published" },
   unpublished: { label: "已下线", className: "tl-chip-unpublished" },
 };
-
-function firstLine(text: string, max = 70) {
-  const flat = text.replace(/\s*\n\s*/g, " ").trim();
-  const cut = flat.search(/[。；！？]/);
-  const line = cut > 0 ? flat.slice(0, cut + 1) : flat;
-  return line.length > max ? `${line.slice(0, max)}…` : line;
-}
 
 function dayLabel(date: Date | string) {
   return new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" }).format(new Date(date));
@@ -75,14 +124,19 @@ function TrustLine({ data }: { data: ProductOverviewData }) {
 export function ProductOverview({ data, canEdit = false }: { data: ProductOverviewData; canEdit?: boolean }) {
   return (
     <div className="product-overview">
+      <UserImpactPanel data={data} />
       <div className="overview-ask">
-        <SpecAsk
-          slug={data.slug}
-          productBase={data.productBase}
-          // 建议问法从产品自己的能力名生成：检索必命中自己，避免推荐了却答「未覆盖」
-          suggestions={data.capabilities.slice(0, 3).map((capability) => `${capability.name} 是怎么工作的？`)}
-        />
+        <section className="overview-panel">
+          <div className="overview-panel-heading"><h2>规格问答</h2><p>用一句话问产品行为，答案附源码证据。</p></div>
+          <SpecAsk
+            slug={data.slug}
+            productBase={data.productBase}
+            // 建议问法从产品自己的能力名生成：检索必命中自己，避免推荐了却答「未覆盖」
+            suggestions={data.capabilities.slice(0, 3).map((capability) => `${capability.name} 是怎么工作的？`)}
+          />
+        </section>
       </div>
+      <TaskEntriesPanel data={data} />
       <ReleaseTimeline data={data} />
       <CapabilitiesPanel data={data} />
       <TrustLine data={data} />
