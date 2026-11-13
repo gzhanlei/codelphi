@@ -10,6 +10,7 @@ export const MAIN_NAV_ITEMS = [
   { href: "/admin/pay", icon: "¥", label: "支付管理" },
   { href: "/admin/costs", icon: "≈", label: "成本观测" },
   { href: "/integrations", icon: "⌘", label: "代码仓库" },
+  { href: "/mcp", icon: "⌗", label: "MCP" },
   { href: "/settings", icon: "⚙", label: "设置" },
   { href: "/pricing", icon: "◇", label: "套餐与定价" },
 ];

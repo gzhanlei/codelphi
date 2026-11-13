@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyApiKey } from "@/lib/mcp/api-keys";
 import { verifyAccessToken } from "@/lib/mcp/oauth";
+import { appUrl } from "@/lib/env";
 import { handleMcpRpc } from "@/lib/mcp/server";
 import { getDb } from "@/lib/db";
 import { consumeRateLimit } from "@/lib/rate-limit";
@@ -20,7 +21,9 @@ export async function POST(request: NextRequest) {
   const oauthIdentity = keyIdentity ? null : token ? await verifyAccessToken(executor, token) : null;
   const identity = keyIdentity ?? oauthIdentity;
   if (!identity) {
-    return NextResponse.json({ jsonrpc: "2.0", id: null, error: { code: -32001, message: "Unauthorized" } }, { status: 401, headers: { "WWW-Authenticate": "Bearer" } });
+    // RFC 6750 + RFC 9728：指向受保护资源元数据，连接器据此自动发现授权服务器
+    const wwwAuthenticate = `Bearer resource_metadata="${appUrl()}/.well-known/oauth-protected-resource/api/mcp"`;
+    return NextResponse.json({ jsonrpc: "2.0", id: null, error: { code: -32001, message: "Unauthorized" } }, { status: 401, headers: { "WWW-Authenticate": wwwAuthenticate } });
   }
   const limit = await consumeRateLimit({ kind: "user", identity: `mcp:${keyIdentity ? `key:${keyIdentity.keyId}` : `grant:${oauthIdentity!.grantId}`}`, limit: 100, windowSeconds: 60 });
   if (!limit.allowed) {

@@ -475,6 +475,15 @@ p { line-height: 1.7; }
 .mcp-keys-endpoint { display: grid; gap: 3px; margin: 6px 0 10px; }
 .mcp-keys-endpoint code { font-size: 12px; word-break: break-all; color: #4a6659; }
 
+/* MCP 连接向导（设置页 06 + /mcp 公开页共用） */
+.mcp-guide { display: grid; gap: 8px; margin: 10px 0; }
+.mcp-guide-config { border: 1px solid var(--line); border-radius: 8px; background: #fbfcfb; overflow: hidden; }
+.mcp-guide-config-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: 12px; color: #3d4b44; }
+.mcp-guide-code { margin: 0; padding: 10px 12px; overflow-x: auto; }
+.mcp-guide-code code { font-size: 12px; line-height: 1.6; white-space: pre; }
+.mcp-guide-notes { margin: 0; padding-left: 18px; font-size: 12px; color: #3d4b44; display: grid; gap: 4px; }
+.mcp-guide-notes code { font-size: 12px; background: #f0f4f1; border-radius: 4px; padding: 1px 5px; color: #4a6659; word-break: break-all; }
+
 /* 可信 changelog 聚合页（/share/changelog，匿名只读） */
 .changelog-page { min-height: 100vh; max-width: 760px; margin: 0 auto; padding: 48px 20px; }
 .changelog-page h1 { font-family: Georgia, "Songti SC", serif; font-size: 32px; font-weight: 500; margin: 8px 0 6px; }

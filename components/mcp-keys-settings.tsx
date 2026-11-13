@@ -1,7 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { errorMessage } from "@/lib/error-message";
+import { mcpServersJson } from "@/lib/mcp/connect-configs";
 
 interface McpKeyView {
   id: number;
@@ -17,15 +19,20 @@ function formatDate(value: string | Date | null) {
   return new Date(value).toLocaleString("zh-CN", { dateStyle: "medium", timeStyle: "short" });
 }
 
-/** MCP 集成面板（设置页）：组织级只读 key 的签发与撤销；明文仅创建时出现一次。 */
+/** MCP 集成面板（设置页）：组织级只读 key 的签发与撤销；明文仅创建时出现一次。
+ *  连接向导：通用 mcpServers JSON 模板，签发后自动烤入真实 key（HP-3 展示端点与连接配置）。 */
 export function McpKeysSettings({ initialKeys, canManage }: { initialKeys: McpKeyView[]; canManage: boolean }) {
   const [keys, setKeys] = useState(initialKeys);
   const [name, setName] = useState("");
   const [plaintext, setPlaintext] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copiedConfig, setCopiedConfig] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+
+  const endpoint = typeof window !== "undefined" ? `${window.location.origin}/api/mcp` : "/api/mcp";
+  const configJson = mcpServersJson(endpoint, plaintext);
 
   const load = async () => {
     const response = await fetch("/api/mcp-keys", { cache: "no-store" });
@@ -48,6 +55,7 @@ export function McpKeysSettings({ initialKeys, canManage }: { initialKeys: McpKe
       if (!response.ok) throw new Error(data.error ?? "签发失败");
       setPlaintext(data.plaintext ?? null);
       setCopied(false);
+      setCopiedConfig(false);
       setNotice("key 已签发，明文只显示这一次，请立即保存");
       setName("");
       await load();
@@ -81,13 +89,31 @@ export function McpKeysSettings({ initialKeys, canManage }: { initialKeys: McpKe
     setCopied(true);
   };
 
+  const copyConfig = async () => {
+    await navigator.clipboard.writeText(configJson);
+    setCopiedConfig(true);
+  };
+
   return (
     <section className="overview-panel mcp-keys-panel">
       <div className="overview-panel-heading"><span>06</span><h2>MCP 集成</h2></div>
       <p>组织级只读 API key，供 Claude / ChatGPT 等 AI 客户端经 MCP 读取产品规格与行为变化（每条结论附证据链接）。撤销后立即失效。</p>
-      <div className="mcp-keys-endpoint">
-        <span className="mcp-key-meta">MCP 端点（Streamable HTTP，Authorization: Bearer &lt;key&gt;）：<code>{typeof window !== "undefined" ? `${window.location.origin}/api/mcp` : "/api/mcp"}</code></span>
-        <span className="mcp-key-meta">Claude Code 连接示例：<code>claude mcp add --transport http codelphi &lt;端点&gt; --header "Authorization: Bearer &lt;key&gt;"</code></span>
+      <div className="mcp-guide">
+        <span className="mcp-key-meta">MCP 端点（Streamable HTTP，Authorization: Bearer &lt;key&gt;）：<code>{endpoint}</code></span>
+        <div className="mcp-guide-config">
+          <div className="mcp-guide-config-head">
+            <span>{plaintext ? "连接配置（已写入刚签发的 key，复制即用）" : "连接配置（签发 key 后自动写入真实值）"}</span>
+            <button className="secondary-button" type="button" onClick={copyConfig}>{copiedConfig ? "已复制" : "复制配置"}</button>
+          </div>
+          <pre className="mcp-guide-code"><code>{configJson}</code></pre>
+        </div>
+        <ul className="mcp-guide-notes">
+          <li>Claude Code：存为项目根目录 <code>.mcp.json</code>，或执行 <code>claude mcp add --transport http codelphi {endpoint} --header "Authorization: Bearer &lt;key&gt;"</code></li>
+          <li>ZCode：<code>~/.zcode/cli/config.json</code> 的 <code>mcp.servers</code>（服务器对象同形状；团队共享可放仓库 <code>.zcode/config.json</code>）</li>
+          <li>Cursor：<code>~/.cursor/mcp.json</code>（同样的 mcpServers 形状）</li>
+          <li>ChatGPT / Claude 网页版连接器：选择 OAuth 连接，会自动发现本站授权页；详见 <Link href="/mcp">MCP 连接指南</Link></li>
+          <li>接入验证：在 agent 里问「列出我的 CoDelphi 产品」，应触发 list_projects 返回本工作区产品</li>
+        </ul>
       </div>
       {canManage ? (
         <div className="mcp-keys-create">

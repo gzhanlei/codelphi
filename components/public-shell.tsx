@@ -4,6 +4,7 @@ import { Brand, ShellFrame } from "./shell-frame";
 const PUBLIC_NAV_ITEMS = [
   { href: "/", icon: "⌁", label: "产品总览" },
   { href: "/pricing", icon: "◇", label: "套餐与定价" },
+  { href: "/mcp", icon: "⌗", label: "MCP" },
   { href: "/terms", icon: "§", label: "服务条款" },
   { href: "/data-notice", icon: "◌", label: "数据说明" },
 ];
