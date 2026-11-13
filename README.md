@@ -245,7 +245,7 @@ CoDelphi 提供 13 个 MCP 工具（只读 + 1 个反馈通道），供 Claude C
 
 1. 在 codelphi.com 的设置页「MCP key 管理」创建组织级只读 key——连接向导会直接生成你所用客户端的 `mcpServers` 配置；公开页 <https://codelphi.com/mcp> 有完整连接指引（支持 MCP 自动发现与 OAuth 动态注册）。
 2. 把该配置写入你的 AI 编程助手（Claude Code、Codex CLI、ChatGPT 连接器等均可识别标准 `mcpServers` JSON）。
-3. 把下面的策略段贴进仓库根目录的 `AGENTS.md`（或 `CLAUDE.md`），agent 在该仓库的每次会话都会自觉执行：
+3. 把下面的策略段贴进仓库根目录的 `AGENTS.md`（或 `CLAUDE.md`）；也可以用 /mcp 页提供的用户级常驻指令段一次覆盖你所有仓库。agent 在该仓库的每次会话都会自觉执行：
 
 ```markdown
 ## 行为账本（CoDelphi）
