@@ -111,6 +111,44 @@ describe("mcp server (A1)", () => {
     expect(result.files[0].features[0].scenarios[0].evidence[0].url).toBe("https://github.com/gzhanlei/radar/blob/abc123/lib/auth.ts#L10");
   });
 
+  it("narrows connections to the neighborhood of one evidence file", async () => {
+    execute.mockImplementation(async (sql: string, params?: unknown[]) => {
+      if (String(sql).includes("FROM products WHERE organization_id")) return [[{ id: 9, slug: "radar", name: "Radar", description: "d" }]];
+      if (String(sql).includes("s.evidence LIKE ?")) {
+        // SQL LIKE 预过滤会误中 lib/auth.tsx（子串），精确性靠读侧复核：auth.tsx 行必须被剔除
+        return [[
+          { id: 1, featureId: 1, featureName: "统一登录", reference: "HP-1", evidence: [{ path: "lib/auth.ts" }] },
+          { id: 2, featureId: 2, featureName: "规格导出", reference: "HP-1", evidence: [{ path: "lib/auth.ts" }] },
+          { id: 3, featureId: 3, featureName: "类型文档", reference: "HP-1", evidence: [{ path: "lib/auth.tsx" }] },
+          { id: 4, featureId: 4, featureName: "独立功能", reference: "HP-1", evidence: [{ path: "lib/solo.ts" }] },
+        ]];
+      }
+      expect(params).toBeDefined();
+      return [[]];
+    });
+    const response = await handleMcpRpc(runtime, rpc("tools/call", { name: "get_feature_connections", arguments: { slug: "radar", path: "lib/auth.ts" } }));
+    const result = (response?.result as { structuredContent: { connections: Array<{ featureName: string; connections: unknown[] }> } }).structuredContent;
+    expect(result.connections.map((entry) => entry.featureName)).toEqual(["统一登录", "规格导出"]); // auth.tsx 与独立文件不参与该邻域；按 featureId 确定性排序
+    const call = execute.mock.calls.find(([sql]) => String(sql).includes("s.evidence LIKE ?"))!;
+    expect(call[1]).toEqual([9, "%lib/auth.ts%"]);
+  });
+
+  it("narrows connections to a single feature by stable key", async () => {
+    execute.mockImplementation(async (sql: string) => {
+      if (String(sql).includes("FROM products WHERE organization_id")) return [[{ id: 9, slug: "radar", name: "Radar", description: "d" }]];
+      if (String(sql).includes("FROM scenarios s JOIN features f")) {
+        return [[
+          { id: 1, featureId: 1, featureName: "统一登录", reference: "HP-1", evidence: [{ path: "lib/auth.ts" }] },
+          { id: 2, featureId: 2, featureName: "规格导出", reference: "HP-1", evidence: [{ path: "lib/auth.ts" }] },
+        ]];
+      }
+      return [[]];
+    });
+    const response = await handleMcpRpc(runtime, rpc("tools/call", { name: "get_feature_connections", arguments: { slug: "radar", feature: "统一登录" } }));
+    const result = (response?.result as { structuredContent: { connections: Array<{ featureName: string }> } }).structuredContent;
+    expect(result.connections.map((entry) => entry.featureName)).toEqual(["统一登录"]);
+  });
+
   it("rejects lookup_by_files calls without usable paths (INVALID_PARAMS)", async () => {
     execute.mockImplementation(async (sql: string) => {
       if (String(sql).includes("FROM products WHERE organization_id")) return [[{ id: 9, slug: "radar", name: "Radar", description: "d" }]];

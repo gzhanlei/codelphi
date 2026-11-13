@@ -81,7 +81,7 @@ export const MCP_TOOLS: McpToolDef[] = [
   { name: "list_releases", description: "列产品的发布（时间倒序，默认 10 条）", inputSchema: { type: "object", properties: { slug: { type: "string" }, limit: { type: "number" } }, required: ["slug"] } },
   { name: "get_release", description: "单条发布的行为变化清单（含前后差异摘要与证据链接）", inputSchema: { type: "object", properties: { slug: { type: "string" }, releaseId: { type: "number" } }, required: ["slug", "releaseId"] } },
   { name: "get_knowledge_health", description: "知识健康事实统计（漂移清单/核实覆盖/回归四态/维护分布；无综合分、无 Bus Factor）", inputSchema: { type: "object", properties: { slug: { type: "string" } }, required: ["slug"] } },
-  { name: "get_feature_connections", description: "功能间的确定性连接（共享证据文件面；每条带依据文件清单，无 LLM 推断）", inputSchema: { type: "object", properties: { slug: { type: "string" } }, required: ["slug"] } },
+  { name: "get_feature_connections", description: "功能间的确定性连接（共享证据文件面；每条带依据文件清单，无 LLM 推断）。可选 path=只看以该文件为证据的功能邻域；可选 feature=稳定键，只返回该功能的连接", inputSchema: { type: "object", properties: { slug: { type: "string" }, path: { type: "string" }, feature: { type: "string" } }, required: ["slug"] } },
   { name: "get_release_notes", description: "单条发布的人工发布稿（块级、含 override 后文案与证据路径；未生成返回空）", inputSchema: { type: "object", properties: { slug: { type: "string" }, releaseId: { type: "number" } }, required: ["slug", "releaseId"] } },
   { name: "get_digest", description: "最近一期周期行为摘要（滚动 7 天分桶：support/sales/marketing；无则返回空）", inputSchema: { type: "object", properties: { slug: { type: "string" } }, required: ["slug"] } },
   { name: "send_feedback", description: "向产品方发送使用反馈（只写反馈表，无其他写权限）", inputSchema: { type: "object", properties: { slug: { type: "string" }, kind: { type: "string", enum: ["bug", "question", "suggestion"] }, message: { type: "string" } }, required: ["slug", "kind", "message"] } },
@@ -290,7 +290,9 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
   }
 
   if (name === "get_feature_connections") {
-    return { connections: await loadFeatureConnections(execute, product.id) };
+    const path = typeof args.path === "string" && args.path.trim() ? args.path.trim() : undefined;
+    const feature = typeof args.feature === "string" && args.feature.trim() ? args.feature.trim() : undefined;
+    return { connections: await loadFeatureConnections(execute, product.id, { path, featureStableKey: feature }) };
   }
 
   if (name === "get_release_notes") {
