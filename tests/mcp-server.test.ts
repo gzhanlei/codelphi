@@ -69,11 +69,24 @@ describe("mcp server (A1)", () => {
       return [[]];
     });
     const response = await handleMcpRpc(runtime, rpc("tools/call", { name: "get_project_summary", arguments: { slug: "radar" } }));
-    const summary = (response?.result as { structuredContent: { evidenceCoverage: { coverageRatio: number }; completeness: { overall: string; sourceCoverage: string } | null; featureCount: number } }).structuredContent;
+    const summary = (response?.result as { structuredContent: { evidenceCoverage: { coverageRatio: number }; completeness: { overall: string; sourceCoverage: string } | null; featureCount: number; specSnapshot: { specVersionId: number; sha: string; committedAt: unknown } | null } }).structuredContent;
     expect(summary.featureCount).toBe(14);
     expect(summary.evidenceCoverage.coverageRatio).toBe(0.4);
     // R1 账本随 summary 暴露（整体状态 + 六维度），诚实披露不合并成单一百分比
     expect(summary.completeness).toMatchObject({ overall: "partial", sourceCoverage: "partial" });
+    // 账本是快照：调用方需要知道规格对应哪个 commit，才能把账本状态与工作区状态分开
+    expect(summary.specSnapshot).toMatchObject({ specVersionId: 44, sha: "abc" });
+  });
+
+  it("reports a null spec snapshot when the product has no releases", async () => {
+    execute.mockImplementation(async (sql: string) => {
+      if (String(sql).includes("FROM products WHERE organization_id")) return [[{ id: 9, slug: "radar", name: "Radar", description: "d" }]];
+      if (String(sql).includes("COUNT(*) AS count FROM features")) return [[{ count: 3 }]];
+      return [[]];
+    });
+    const response = await handleMcpRpc(runtime, rpc("tools/call", { name: "get_project_summary", arguments: { slug: "radar" } }));
+    const summary = (response?.result as { structuredContent: { specSnapshot: unknown } }).structuredContent;
+    expect(summary.specSnapshot).toBeNull();
   });
 
   it("reverse-looks up affected features and scenarios by evidence file paths", async () => {

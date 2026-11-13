@@ -172,6 +172,8 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
       description: product.description,
       featureCount: Number(featureCounts[0]?.count ?? 0),
       latestRelease: latestRelease ? { id: latestRelease.id, title: latestRelease.title, sha: latestRelease.sha, committedAt: latestRelease.committedAt } : null,
+      // 账本是快照：告诉调用方这份规格对应哪个 commit，才能区分「账本状态」与「工作区状态」
+      specSnapshot: latestRelease ? { specVersionId: latestRelease.specVersionId, sha: latestRelease.sha, committedAt: latestRelease.committedAt } : null,
       evidenceCoverage: coverage,
       completeness: completeness ? {
         overall: completeness.overall,
