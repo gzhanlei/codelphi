@@ -114,9 +114,9 @@ async function resolveOrgProduct(execute: Execute, organizationId: number, slug:
 async function resolveEvidenceSource(execute: Execute, productId: number) {
   const repos = await queryRows<{ provider: string; owner: string; name: string; defaultBranch: string; sha: string | null }>(
     execute(
-      `SELECT r.provider, r.owner, r.name, r.default_branch AS defaultBranch, latest.after_sha AS sha
+      `SELECT r.provider, r.owner, r.name, r.default_branch AS defaultBranch,
+            (SELECT ar.after_sha FROM analysis_runs ar WHERE ar.repository_id = r.id AND ar.status = 'succeeded' ORDER BY ar.id DESC LIMIT 1) AS sha
      FROM repositories r
-     LEFT JOIN (SELECT repository_id, after_sha FROM analysis_runs WHERE status = 'succeeded' ORDER BY id DESC) latest ON latest.repository_id = r.id
      WHERE r.product_id = ? LIMIT 1`,
       [productId],
     ),
@@ -361,10 +361,10 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
     const insertResult = await insertResultOf(
       execute(
         `INSERT INTO feedback_reports (organization_id, product_id, repository_full_name, revision, error_message)
-       SELECT ?, ?, COALESCE(CONCAT(r.provider, ':', r.owner, '/', r.name), 'unknown'), COALESCE(latest.after_sha, ''), ?
+       SELECT ?, ?, COALESCE(CONCAT(r.provider, ':', r.owner, '/', r.name), 'unknown'),
+              COALESCE((SELECT ar.after_sha FROM analysis_runs ar WHERE ar.repository_id = r.id AND ar.status = 'succeeded' ORDER BY ar.id DESC LIMIT 1), ''), ?
        FROM products p
        LEFT JOIN repositories r ON r.product_id = p.id
-       LEFT JOIN (SELECT repository_id, after_sha FROM analysis_runs WHERE status = 'succeeded' ORDER BY id DESC) latest ON latest.repository_id = r.id
        WHERE p.id = ? LIMIT 1`,
         [runtime.identity.organizationId, product.id, `[mcp:${kind}] ${message}`, product.id],
       ),

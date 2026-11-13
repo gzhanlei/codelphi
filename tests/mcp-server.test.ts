@@ -238,6 +238,36 @@ describe("mcp server (A1)", () => {
     expect(report.regression.total).toBe(1);
   });
 
+  it("resolves the evidence sha with a per-repository latest-run subquery (无界 join 会取到旧 run)", async () => {
+    execute.mockImplementation(async (sql: string) => {
+      if (String(sql).includes("FROM products WHERE organization_id")) return [[{ id: 9, slug: "radar", name: "Radar", description: "d" }]];
+      if (String(sql).includes("FROM repositories")) return [[{ provider: "github", owner: "gzhanlei", name: "radar", defaultBranch: "main", sha: "abc123" }]];
+      if (String(sql).includes("FROM features WHERE id = ?")) return [[{ id: 12, name: "统一登录", summary: "s", source: "generated" }]];
+      if (String(sql).includes("FROM scenarios WHERE feature_id")) return [[{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy", source: "generated", evidence: [] }]];
+      return [[]];
+    });
+    await handleMcpRpc(runtime, rpc("tools/call", { name: "get_feature", arguments: { slug: "radar", stableKey: "统一登录" } }));
+    const reposQuery = execute.mock.calls.find(([sql]) => String(sql).includes("FROM repositories"))!;
+    expect(String(reposQuery[0])).toContain("ar.repository_id = r.id");
+    expect(String(reposQuery[0])).toContain("ORDER BY ar.id DESC LIMIT 1");
+  });
+
+  it("records send_feedback with the per-repository latest-run revision subquery", async () => {
+    execute.mockImplementation(async (sql: string) => {
+      if (String(sql).includes("FROM products WHERE organization_id")) return [[{ id: 9, slug: "radar", name: "Radar", description: "d" }]];
+      if (String(sql).includes("INSERT INTO feedback_reports")) return [{ insertId: 77 }];
+      return [[]];
+    });
+    const response = await handleMcpRpc(runtime, rpc("tools/call", { name: "send_feedback", arguments: { slug: "radar", kind: "bug", message: "对账发现变化清单不完整" } }));
+    const result = (response?.result as { structuredContent: { feedbackId: number } }).structuredContent;
+    expect(result.feedbackId).toBe(77);
+    const insertQuery = execute.mock.calls.find(([sql]) => String(sql).includes("INSERT INTO feedback_reports"))!;
+    const sql = String(insertQuery[0]);
+    expect(sql).toContain("ar.repository_id = r.id");
+    expect(sql).toContain("ORDER BY ar.id DESC LIMIT 1");
+    expect(sql).not.toContain("LEFT JOIN (SELECT repository_id, after_sha FROM analysis_runs");
+  });
+
   it("never exposes write tools", () => {
     const names = MCP_TOOLS.map((tool) => tool.name);
     for (const forbidden of ["create_project", "edit_scenario", "invite_member", "update_billing", "publish_release_notes"]) {
