@@ -7,7 +7,7 @@ export interface SpecSearchResult {
   scenarios: Array<{ id: number; featureId: number; featureName: string; reference: string; context: string; action: string; outcome: string; evidence: Evidence[] }>;
 }
 
-function likePattern(query: string) {
+export function likePattern(query: string) {
   return `%${query.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
 }
 

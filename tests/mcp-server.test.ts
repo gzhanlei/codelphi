@@ -22,7 +22,7 @@ describe("mcp server (A1)", () => {
   it("lists the read-only tool surface with JSON schemas", async () => {
     const response = await handleMcpRpc(runtime, rpc("tools/list"));
     const tools = (response?.result as { tools: Array<{ name: string }> }).tools;
-    expect(tools.map((tool) => tool.name)).toEqual(["list_projects", "get_project_summary", "get_feature", "get_scenario", "search_scenarios", "list_releases", "get_release", "get_knowledge_health", "get_feature_connections", "get_release_notes", "get_digest", "send_feedback"]);
+    expect(tools.map((tool) => tool.name)).toEqual(["list_projects", "get_project_summary", "get_feature", "get_scenario", "search_scenarios", "lookup_by_files", "list_releases", "get_release", "get_knowledge_health", "get_feature_connections", "get_release_notes", "get_digest", "send_feedback"]);
   });
 
   it("returns no response for notifications (no id)", async () => {
@@ -74,6 +74,39 @@ describe("mcp server (A1)", () => {
     expect(summary.evidenceCoverage.coverageRatio).toBe(0.4);
     // R1 账本随 summary 暴露（整体状态 + 六维度），诚实披露不合并成单一百分比
     expect(summary.completeness).toMatchObject({ overall: "partial", sourceCoverage: "partial" });
+  });
+
+  it("reverse-looks up affected features and scenarios by evidence file paths", async () => {
+    execute.mockImplementation(async (sql: string) => {
+      if (String(sql).includes("FROM products WHERE organization_id")) return [[{ id: 9, slug: "radar", name: "Radar", description: "d" }]];
+      if (String(sql).includes("FROM repositories")) return [[{ provider: "github", owner: "gzhanlei", name: "radar", defaultBranch: "main", sha: "abc123" }]];
+      if (String(sql).includes("s.evidence LIKE ?")) {
+        return [[
+          { id: 1, featureId: 1, featureName: "统一登录", reference: "HP-1", context: "已登录", action: "访问设置页", outcome: "跳转", source: "manual", evidence: [{ path: "lib/auth.ts", startLine: 10 }] },
+          { id: 2, featureId: 2, featureName: "规格导出", reference: "EC-1", context: "导出中", action: "点击导出", outcome: "下载", source: "generated", evidence: [{ path: "lib/auth.ts" }] },
+        ]];
+      }
+      return [[]];
+    });
+    const response = await handleMcpRpc(runtime, rpc("tools/call", { name: "lookup_by_files", arguments: { slug: "radar", paths: ["lib/auth.ts", "lib/auth.ts", "uncovered.ts"] } }));
+    const result = (response?.result as { structuredContent: { files: Array<{ path: string; features: Array<{ featureName: string; stableKey: string; scenarioCount: number; scenarios: Array<{ reference: string; source: string; evidence: Array<{ url: string | null }> }> }> }> } }).structuredContent;
+    expect(result.files).toHaveLength(1); // 未覆盖的 uncovered.ts 不返回，lib/auth.ts 去重
+    expect(result.files[0].path).toBe("lib/auth.ts");
+    expect(result.files[0].features.map((feature) => feature.featureName)).toEqual(["统一登录", "规格导出"]);
+    expect(result.files[0].features[0].stableKey).toBe("统一登录");
+    expect(result.files[0].features[0].scenarios[0].source).toBe("manual");
+    expect(result.files[0].features[0].scenarios[0].evidence[0].url).toBe("https://github.com/gzhanlei/radar/blob/abc123/lib/auth.ts#L10");
+  });
+
+  it("rejects lookup_by_files calls without usable paths (INVALID_PARAMS)", async () => {
+    execute.mockImplementation(async (sql: string) => {
+      if (String(sql).includes("FROM products WHERE organization_id")) return [[{ id: 9, slug: "radar", name: "Radar", description: "d" }]];
+      return [[]];
+    });
+    const empty = await handleMcpRpc(runtime, rpc("tools/call", { name: "lookup_by_files", arguments: { slug: "radar", paths: [] } }));
+    expect(empty?.error?.code).toBe(-32602);
+    const overflow = await handleMcpRpc(runtime, rpc("tools/call", { name: "lookup_by_files", arguments: { slug: "radar", paths: Array.from({ length: 21 }, (_, index) => `f${index}.ts`) } }));
+    expect(overflow?.error?.code).toBe(-32602);
   });
 
   it("rejects unknown tools and methods with JSON-RPC errors", async () => {

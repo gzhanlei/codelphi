@@ -1,5 +1,5 @@
 import { searchSpec } from "../spec-search";
-import { loadFeatureConnections } from "../feature-connections";
+import { loadFeatureConnections, lookupFilesImpact } from "../feature-connections";
 import { buildKnowledgeHealth } from "../knowledge-health";
 import { loadRegressionTasks } from "../regression-tasks";
 import { loadCoverageReceipt } from "../analysis-coverage";
@@ -77,6 +77,7 @@ export const MCP_TOOLS: McpToolDef[] = [
   { name: "get_feature", description: "按稳定键取功能及其场景（含证据链接）", inputSchema: { type: "object", properties: { slug: { type: "string" }, stableKey: { type: "string" } }, required: ["slug", "stableKey"] } },
   { name: "get_scenario", description: "按功能稳定键 + 场景引用取单个场景（含证据链接）", inputSchema: { type: "object", properties: { slug: { type: "string" }, stableKey: { type: "string" }, reference: { type: "string" } }, required: ["slug", "stableKey", "reference"] } },
   { name: "search_scenarios", description: "按关键词检索规格原文（命中条目 = 已过证据校验的原文，未覆盖时明确返回空）", inputSchema: { type: "object", properties: { slug: { type: "string" }, query: { type: "string" } }, required: ["slug", "query"] } },
+  { name: "lookup_by_files", description: "按文件路径反查以该文件为证据的功能与场景（确定性反查，编码前影响面检查；paths 最多 20 个，每功能场景截前 10 条并附真实总数；账本未覆盖的文件返回空）", inputSchema: { type: "object", properties: { slug: { type: "string" }, paths: { type: "array", items: { type: "string" } } }, required: ["slug", "paths"] } },
   { name: "list_releases", description: "列产品的发布（时间倒序，默认 10 条）", inputSchema: { type: "object", properties: { slug: { type: "string" }, limit: { type: "number" } }, required: ["slug"] } },
   { name: "get_release", description: "单条发布的行为变化清单（含前后差异摘要与证据链接）", inputSchema: { type: "object", properties: { slug: { type: "string" }, releaseId: { type: "number" } }, required: ["slug", "releaseId"] } },
   { name: "get_knowledge_health", description: "知识健康事实统计（漂移清单/核实覆盖/回归四态/维护分布；无综合分、无 Bus Factor）", inputSchema: { type: "object", properties: { slug: { type: "string" } }, required: ["slug"] } },
@@ -220,6 +221,22 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
 
   if (name === "search_scenarios") {
     return searchSpec(product.id, String(args.query ?? ""), execute);
+  }
+
+  if (name === "lookup_by_files") {
+    const paths = (Array.isArray(args.paths) ? args.paths : []).map((path) => String(path).trim()).filter(Boolean);
+    if (paths.length === 0) throw new Error("paths must be a non-empty array of file paths");
+    if (paths.length > 20) throw new Error("paths must contain at most 20 file paths");
+    const files = await lookupFilesImpact(execute, product.id, paths);
+    return {
+      files: files.map((entry) => ({
+        path: entry.path,
+        features: entry.features.map((feature) => ({
+          ...feature,
+          scenarios: feature.scenarios.map((scenario) => ({ ...scenario, evidence: decorateEvidence(scenario.evidence, source) })),
+        })),
+      })),
+    };
   }
 
   if (name === "list_releases") {
