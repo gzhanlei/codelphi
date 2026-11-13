@@ -9,9 +9,9 @@
 - 未经用户明确要求，不执行生产部署、DNS 修改、Webhook 配置或 Docker 镜像构建推送。
 - 提交前运行 `npm run typecheck`、`npm test` 和 `npm run build`。
 
-## Dogfood：本仓库的 coding agent 用 CoDelphi MCP
+## 行为账本（CoDelphi MCP）：本仓库 coding agent 的工作方式
 
-本仓库的产品账本在 MCP slug `codelphi` 上（dogfood）。编码周期内按以下习惯使用（完整配方见 `docs/coding-agent-mcp.md`）：
+本仓库的产品行为账本通过 MCP 服务 `codelphi` 提供（slug 同名）。这是 coding agent 在本仓库的标准工作方式，不是可选试验——编码周期内自觉执行（完整配方见 `docs/coding-agent-mcp.md`）：
 
 - 做计划时（早于任何文件改动）：`lookup_by_files` 反查**计划要改的文件**是哪些功能/场景的证据（爆炸半径），把回归红线场景与 push 后对账锚点写进计划；必要时 `get_feature_connections(path)` 看共享该文件的功能邻域。方案已定但未反查 = 计划未完成，不得动手。
 - 需要理解既有行为时：`search_scenarios` 检索规格原文，用返回的 `stableKey` 深入 `get_feature`。
