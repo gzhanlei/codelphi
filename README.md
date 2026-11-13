@@ -18,7 +18,7 @@
 ## 与本仓库实时同步的Demo
 https://codelphi.com/products/u-a8811be775/codelphi  无需注册登录也可只读查看。产品页地址带工作区前缀：`/products/{工作区slug}/{产品slug}`；旧的一段式地址 `/products/{slug}` 会自动重定向。Demo 由产品的「设置」页里的公开演示开关控制（数据库 `products.is_public_demo`；`PUBLIC_DEMO_SLUGS` 环境变量仍作过渡兜底）。
 
-## 懒得自托管，用我搭好的免费云服务
+## 懒得自托管，用我搭好的云服务
 https://codelphi.com
 
 ## 技术栈
@@ -45,7 +45,7 @@ Next.js（App Router）· TypeScript · React · MySQL 8 · Vitest · OpenAI 兼
 - 功能行为变迁史与关联功能：功能页内按发布分组的行为变化时间线（复盘"这个行为最后改于哪个版本"），以及基于共享证据文件的确定性功能连接（每条带依据，不宣称语义依赖）。
 - 知识健康视图：漂移条目、核实覆盖、回归四态、编辑者维护分布——只做事实统计，无综合健康分。
 - 公开变更日志：`/share/changelog/{org}/{product}` 聚合全部已发布发布稿（公开演示产品；逐发布 share 页之上的一站式对外页）。
-- MCP 只读工具面：list_projects / get_feature / get_scenario / search_scenarios / list_releases / get_release / get_feature_connections / get_release_notes / get_digest / send_feedback，供 Claude、ChatGPT 等 AI 客户端读取规格与变化；组织级 API key 管理在设置页。
+- MCP 工具面：list_projects / get_project_summary / get_feature / get_scenario / search_scenarios / lookup_by_files / get_feature_connections / get_knowledge_health / get_digest / list_releases / get_release / get_release_notes 只读工具，外加 send_feedback 反馈通道，供 Claude、Codex、ChatGPT 等 AI 编程助手读取规格、反查影响面与 push 后对账；组织级 MCP key 管理与连接向导在设置页。
 - LLM 结构化输出校验、代码证据路径校验。
 - MySQL 版本化迁移、CoDelphi 自产品注册脚本。
 - 自动分析仅更新 generated 内容，不覆盖 manual 功能或场景；生成功能名作为稳定关联键不可直接修改。
@@ -236,3 +236,26 @@ curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3008/login
 分析管线全貌（分区装配、行为面枚举、韧性层、一致性核验、成本特征与运维旋钮）详见 [docs/analysis-pipeline.md](docs/analysis-pipeline.md)。
 
 仓库接入后默认「每次 push 都立即分析」。高频仓库可在产品设置页切换为「每天低峰期一次」或「每 N 次推送 + 当天兜底」，以控制每月分析单元（SAU）消耗；所有模式都会把自上次成功分析以来的全部提交合并进同一次分析。
+
+## 让 AI 编程助手接入（MCP）
+
+CoDelphi 提供 13 个 MCP 工具（只读 + 1 个反馈通道），供 Claude Code、Codex、ChatGPT 等 AI 编程助手在整个开发周期使用：改文件前 `lookup_by_files` 反查改动会碰哪些功能与场景，理解既有行为用 `search_scenarios` 检索带源码证据的行为约定，push 后用 `list_releases` / `get_release` 核对「这次实际改变了什么」，发现账本与代码不符用 `send_feedback` 上报、由人裁决。
+
+接入三步：
+
+1. 在 codelphi.com 的设置页「MCP key 管理」创建组织级只读 key——连接向导会直接生成你所用客户端的 `mcpServers` 配置；公开页 <https://codelphi.com/mcp> 有完整连接指引（支持 MCP 自动发现与 OAuth 动态注册）。
+2. 把该配置写入你的 AI 编程助手（Claude Code、Codex CLI、ChatGPT 连接器等均可识别标准 `mcpServers` JSON）。
+3. 把下面的策略段贴进仓库根目录的 `AGENTS.md`（或 `CLAUDE.md`），agent 在该仓库的每次会话都会自觉执行：
+
+```markdown
+## 行为账本（CoDelphi）
+
+本仓库已接入 CoDelphi 行为账本（MCP 服务名通常为 codelphi；产品 slug 用 list_projects 按 git remote 匹配，拿不准问用户）。编码周期内自觉执行：
+
+- 动手改文件前：lookup_by_files 反查这些文件是哪些功能/场景的证据；结果为空且覆盖率低时，明说「账本未覆盖，影响面未知」。
+- 需要理解既有行为时：search_scenarios 检索规格原文（带 stableKey 与证据行号），不要只靠读代码猜约定。
+- push 后：list_releases 找到本次 sha 对应的发布，get_release 核对变化清单与本次意图一致；计划外变化回查并向用户报告。
+- 账本与代码不符：send_feedback 上报由人裁决。账本只读；「没搜到 ≠ 不存在」。
+```
+
+工具语义、红线与完整工作流配方见 [docs/coding-agent-mcp.md](docs/coding-agent-mcp.md)。
