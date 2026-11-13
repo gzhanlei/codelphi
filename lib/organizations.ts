@@ -39,6 +39,16 @@ function randomPersonalSlug(): string {
   return `${PERSONAL_SLUG_PREFIX}${randomBytes(5).toString("hex")}`;
 }
 
+/**
+ * 账务账户行幂等兜底（2026-11-13 P0）：migration 031 只回填了存量组织，此后新建组织缺
+ * billing_accounts 行 → trial 钱包外键失败（发放整事务回滚、每次登录重试都失败），
+ * 首次分析在 reserve 抛 billing_state_conflict。登录引导每次进入都会走到这里，
+ * INSERT IGNORE 幂等，重复执行无害。
+ */
+async function ensureBillingAccountRow(organizationId: number, execute: Execute) {
+  await execute("INSERT IGNORE INTO billing_accounts (account_id) VALUES (?)", [organizationId]);
+}
+
 export async function ensureUserWorkspace(profile: SessionUser, execute: Execute = defaultExecute) {
   const query = dbQuery(execute);
   await upsertCodelphiUser(profile, execute);
@@ -51,7 +61,9 @@ export async function ensureUserWorkspace(profile: SessionUser, execute: Execute
     [profile.sub, `${PERSONAL_SLUG_PREFIX}%`],
   );
   if (existing[0]) {
-    // Trial 授权幂等重试：发放失败（如瞬时故障）的用户在下次登录自动补齐（契约 M1-T4）
+    // Trial 授权幂等重试：发放失败（如瞬时故障）的用户在下次登录自动补齐（契约 M1-T4）；
+    // 账务账户行先行兜底（发放依赖该行存在）
+    await ensureBillingAccountRow(existing[0].id, execute);
     await grantTrialToWorkspace(profile, existing[0].id, execute);
     return existing[0];
   }
@@ -64,6 +76,7 @@ export async function ensureUserWorkspace(profile: SessionUser, execute: Execute
   );
   const userId = await findUserIdBySub(profile.sub, execute);
   if (!orgRow?.id || userId === null) throw new Error("Workspace bootstrap failed");
+  await ensureBillingAccountRow(orgRow.id, execute);
   await execute(
     `INSERT INTO organization_members (organization_id, user_id, role) VALUES (?, ?, 'owner')
      ON DUPLICATE KEY UPDATE role = 'owner', updated_at = CURRENT_TIMESTAMP(3)`,
