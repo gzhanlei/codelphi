@@ -38,9 +38,9 @@ export function AnalyzeButton({ slug, writeAccess = "edit" }: { slug: string; wr
 
   if (writeAccess === "demo") {
     return (
-      <div className="analyze-control">
-        <Link className="secondary-button" href="/login">登录后可分析</Link>
+      <div className="analyze-control demo-gate">
         <span className="readonly-hint">只读演示：分析、编辑与发布需登录自己的工作区。</span>
+        <Link className="secondary-button" href="/login">登录后可分析</Link>
       </div>
     );
   }

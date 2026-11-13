@@ -86,7 +86,9 @@ p { line-height: 1.7; }
 .back-link { display: inline-block; color: var(--muted); font-size: 12px; margin-bottom: 24px; }
 .repository-link { display: inline-block; margin-top: 14px; font-family: monospace; color: var(--green); font-size: 12px; }
 .primary-button, .secondary-button, .danger-button, .login-button { display: inline-flex; align-items: center; justify-content: center; gap: 12px; border: 0; border-radius: 8px; padding: 11px 18px; background: var(--green); color: #fff; cursor: pointer; font-size: 13px; font-weight: 650; }
-.primary-button:disabled { opacity: .55; cursor: wait; }.secondary-button { background: var(--ink); }.analyze-control { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }.inline-message { color: var(--muted); font-size: 12px; }
+.primary-button:disabled { opacity: .55; cursor: wait; }.secondary-button { background: var(--ink); }.analyze-control { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.analyze-control.demo-gate { flex-direction: row; align-items: center; flex-wrap: wrap; }
+.readonly-hint { color: var(--muted); font-size: 12px; }.inline-message { color: var(--muted); font-size: 12px; }
 .danger-button { color: #9b4237; background: #fff0ed; border: 1px solid #ecc9c2; }.danger-button:disabled, .remove-product-actions .secondary-button:disabled { opacity: .55; cursor: wait; }
 .remove-product-control { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; min-width: 0; }.remove-product-confirmation { width: 300px; max-width: 100%; padding: 16px; border: 1px solid #ecc9c2; border-radius: 10px; background: var(--surface); }.remove-product-confirmation > strong { font-size: 14px; }.remove-product-confirmation > p { margin: 8px 0 14px; color: var(--muted); font-size: 12px; }.remove-product-actions { display: flex; flex-wrap: wrap; gap: 8px; }.remove-product-error { max-width: 300px; margin: 8px 0 0; color: #9b4237; font-size: 12px; overflow-wrap: anywhere; }
 .run-status { padding: 11px 14px; margin-bottom: 18px; background: #eef3f0; border-radius: 7px; color: var(--muted); font-size: 12px; }.run-status p { margin: 5px 0 0; }.run-status.failed { background: #fff0eb; color: #9b4230; }.run-status.succeeded { background: var(--green-light); color: var(--green); }.drift-banner { padding: 11px 14px; margin-bottom: 18px; background: #faf3e2; border: 1px solid #e5d3a1; border-radius: 7px; color: #7a6226; font-size: 12px; }.drift-banner-link { margin-left: 8px; color: inherit; font-weight: 600; }.drift-banner-link:hover { color: #54430f; }.drift-badge { display: inline-block; margin-left: 8px; padding: 2px 7px; border-radius: 4px; background: #faf3e2; color: #7a6226; font-size: 12px; font-weight: 600; vertical-align: middle; }.icp-footer { padding: 20px 0; margin-top: 30px; text-align: center; font-size: 12px; color: var(--muted); }.icp-footer a { color: inherit; text-decoration: none; }.icp-footer a:hover { color: var(--green); }
@@ -258,7 +260,6 @@ p { line-height: 1.7; }
 .capability-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }.capability-item { padding: 12px; background: #fbfcfb; border: 1px solid var(--line); border-radius: 8px; }.capability-item strong { font-size: 13px; }.capability-item span { display: block; margin-top: 5px; color: var(--green); font-size: 12px; }.capability-item p { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .overview-change-list { display: grid; gap: 12px; margin-bottom: 14px; }.overview-release-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }.overview-release-head strong { font-size: 14px; }.overview-release-meta { display: inline-flex; gap: 8px; align-items: baseline; color: var(--muted); font-size: 12px; }.overview-release-meta a { color: var(--muted); }.overview-release-summary { margin: 0; color: var(--text); font-size: 12px; }.overview-change { padding-bottom: 10px; border-bottom: 1px solid #edf1ee; }.overview-change:last-child { border: 0; }.overview-change-stats { margin: 0; color: var(--muted); font-size: 12px; }.overview-change strong { display: block; margin-top: 6px; font-size: 13px; }.overview-change p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
 .overview-text-link { color: var(--green); font-size: 12px; }
-.product-source-note { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
 .impact-list { display: grid; gap: 12px; }.impact-item { padding: 12px 14px; background: #fbfcfb; border: 1px solid var(--line); border-radius: 8px; }.impact-item strong { font-size: 13px; }.impact-item p { margin: 5px 0; color: var(--ink); font-size: 13px; line-height: 1.6; }.impact-prior { margin: 12px 0 0; }
 .task-entries { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }.task-entry { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; background: #fbfcfb; border: 1px solid var(--line); border-radius: 8px; }.task-entry strong { font-size: 13px; font-weight: 600; }.task-entry > span { color: var(--green); font-size: 12px; white-space: nowrap; }.task-entry-disabled > span { color: var(--muted); }
 .tl-quiet-run { color: var(--muted); font-size: 13px; }.tl-quiet-run summary { cursor: pointer; color: var(--muted); }.tl-quiet-run summary:hover { color: var(--green); }.tl-quiet-run .tl-item { margin-top: 12px; }
@@ -539,11 +540,10 @@ dialog.publish-dialog h3 { margin: 0 0 8px; font-size: 16px; }
 .tl-summary { margin: 3px 0 0; font-size: 13px; color: #66716b; }
 .overview-trust-line { font-size: 12px; color: var(--muted); margin: 14px 0 0; }
 
-/* 产品页头部整合（单头部：简介两行截断可展开；发布产品/导出收进行内） */
+/* 产品页头部整合（单头部：简介全文展示；发布产品/导出收进行内） */
 .product-desc-row { display: flex; gap: 10px; align-items: baseline; max-width: 680px; }
 .product-desc { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.55; }
 .product-desc.empty { color: #a7b3ac; }
-.product-desc.clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .product-desc-tools { display: inline-flex; gap: 8px; align-items: center; white-space: nowrap; }
 .overview-meta-inline { font-size: 12px; color: #94a19c; margin-right: 10px; }
 
