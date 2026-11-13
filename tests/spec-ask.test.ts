@@ -7,15 +7,15 @@ import type { SpecSearchResult } from "../lib/spec-search";
 const UPLOAD_EVIDENCE = [{ path: "src/upload.ts", startLine: 42 }];
 const FIXTURE: SpecSearchResult = {
   features: [
-    { id: 1, name: "文件上传", summary: "上传附件，限制数量与大小" },
-    { id: 2, name: "统一登录", summary: "OAuth 登录与会话" },
-    { id: 3, name: "通知分发", summary: "Slack 与邮件通知" },
+    { id: 1, name: "文件上传", summary: "上传附件，限制数量与大小", stableKey: "文件上传" },
+    { id: 2, name: "统一登录", summary: "OAuth 登录与会话", stableKey: "统一登录" },
+    { id: 3, name: "通知分发", summary: "Slack 与邮件通知", stableKey: "通知分发" },
   ],
   scenarios: [
-    { id: 11, featureId: 1, featureName: "文件上传", reference: "HP-1", context: "用户在上传框选择附件", action: "一次选择不超过 10 个文件", outcome: "系统接受并进入上传队列", evidence: UPLOAD_EVIDENCE },
-    { id: 12, featureId: 1, featureName: "文件上传", reference: "EC-1", context: "单个文件超过 20MB", action: "继续上传", outcome: "系统拒绝并提示文件过大", evidence: UPLOAD_EVIDENCE },
-    { id: 21, featureId: 2, featureName: "统一登录", reference: "ER-1", context: "OAuth 回调失败", action: "重试登录", outcome: "显示错误信息并停留登录页", evidence: [{ path: "lib/auth.ts", startLine: 5 }] },
-    { id: 31, featureId: 3, featureName: "通知分发", reference: "HP-1", context: "分析完成且存在行为变化", action: "触发通知", outcome: "Slack 与邮件各发送一次", evidence: [{ path: "lib/notifications.ts", startLine: 88 }] },
+    { id: 11, featureId: 1, featureName: "文件上传", featureStableKey: "文件上传", reference: "HP-1", context: "用户在上传框选择附件", action: "一次选择不超过 10 个文件", outcome: "系统接受并进入上传队列", evidence: UPLOAD_EVIDENCE },
+    { id: 12, featureId: 1, featureName: "文件上传", featureStableKey: "文件上传", reference: "EC-1", context: "单个文件超过 20MB", action: "继续上传", outcome: "系统拒绝并提示文件过大", evidence: UPLOAD_EVIDENCE },
+    { id: 21, featureId: 2, featureName: "统一登录", featureStableKey: "统一登录", reference: "ER-1", context: "OAuth 回调失败", action: "重试登录", outcome: "显示错误信息并停留登录页", evidence: [{ path: "lib/auth.ts", startLine: 5 }] },
+    { id: 31, featureId: 3, featureName: "通知分发", featureStableKey: "通知分发", reference: "HP-1", context: "分析完成且存在行为变化", action: "触发通知", outcome: "Slack 与邮件各发送一次", evidence: [{ path: "lib/notifications.ts", startLine: 88 }] },
   ],
 };
 

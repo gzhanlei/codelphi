@@ -8,9 +8,9 @@ const matched: DecoratedSpecAnswer = {
   status: "matched",
   question: "上传文件最多几个？",
   terms: ["上传"],
-  features: [{ id: 1, name: "文件上传", summary: "上传附件，限制数量与大小" }],
+  features: [{ id: 1, name: "文件上传", summary: "上传附件，限制数量与大小", stableKey: "文件上传" }],
   scenarios: [{
-    id: 11, featureId: 1, featureName: "文件上传", reference: "HP-1",
+    id: 11, featureId: 1, featureName: "文件上传", featureStableKey: "文件上传", reference: "HP-1",
     context: "用户在上传框选择附件", action: "一次选择不超过 10 个文件", outcome: "系统接受并进入上传队列",
     evidence: [{ path: "src/upload.ts", startLine: 42, url: "https://github.com/acme/radar/blob/abc1234/src/upload.ts#L42" }],
   }],

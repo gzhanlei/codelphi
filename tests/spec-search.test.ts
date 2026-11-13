@@ -34,4 +34,15 @@ describe("spec search", () => {
     await expect(searchSpec(3, "   ", execute)).resolves.toEqual({ features: [], scenarios: [] });
     expect(execute).not.toHaveBeenCalled();
   });
+
+  it("returns stable keys so callers can address get_feature/get_scenario directly", async () => {
+    execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("FROM features f")) return [[{ id: 12, name: "MCP 只读工具面", summary: "s" }]];
+      if (sql.includes("FROM scenarios s")) return [[{ id: 3, featureId: 12, featureName: "统一登录", reference: "HP-1", context: "c", action: "a", outcome: "o", evidence: [] }]];
+      return [[]];
+    });
+    const result = await searchSpec(3, "登录", execute);
+    expect(result.features[0].stableKey).toBe("mcp 只读工具面");
+    expect(result.scenarios[0].featureStableKey).toBe("统一登录");
+  });
 });

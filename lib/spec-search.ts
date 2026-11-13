@@ -1,10 +1,11 @@
 import { defaultExecute, type Execute } from "./db";
 import { evidenceItems } from "./evidence";
+import { specFeatureKey } from "./spec-diff";
 import type { Evidence } from "./types";
 
 export interface SpecSearchResult {
-  features: Array<{ id: number; name: string; summary: string }>;
-  scenarios: Array<{ id: number; featureId: number; featureName: string; reference: string; context: string; action: string; outcome: string; evidence: Evidence[] }>;
+  features: Array<{ id: number; name: string; summary: string; stableKey: string }>;
+  scenarios: Array<{ id: number; featureId: number; featureName: string; featureStableKey: string; reference: string; context: string; action: string; outcome: string; evidence: Evidence[] }>;
 }
 
 export function likePattern(query: string) {
@@ -32,5 +33,9 @@ export async function searchSpec(productId: number, query: string, execute: Exec
     [productId, pattern, pattern, pattern, pattern, pattern],
   ) as [ScenarioSource[], unknown];
   // evidence 在 DB 是 JSON 列：在这里一次性解析，调用方（搜索 / 检索式问答 / 未来的 MCP）拿到的都是结构化证据。
-  return { features: featureRows, scenarios: scenarioRows.map((row) => ({ ...row, evidence: evidenceItems(row.evidence) })) };
+  // stableKey 让 MCP 调用方可以拿搜索结果直接寻址 get_feature / get_scenario，不必自行拼归一化约定。
+  return {
+    features: featureRows.map((feature) => ({ ...feature, stableKey: specFeatureKey(feature.name) })),
+    scenarios: scenarioRows.map((row) => ({ ...row, featureStableKey: specFeatureKey(row.featureName), evidence: evidenceItems(row.evidence) })),
+  };
 }
