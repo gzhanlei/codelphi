@@ -12,8 +12,8 @@ import { InlineMessage, analysisButtonLabel } from "./form-feedback";
 export type WriteAccess = "edit" | "demo" | "readonly";
 
 /**
- * 立即分析入口（设计 §11.2）：只读状态降为次要操作并明示原因——匿名给登录引导
- * （登录链接本身不产生写请求），只读成员给权限说明；实际写能力仍以服务端校验为准。
+ * 立即分析入口（设计 §11.2）：只读状态降为次要操作并明示原因——登录只读成员给权限说明；
+ * 匿名 demo 不渲染任何写入口，登录引导集中在顶栏「使用 Chandler 登录」；实际写能力仍以服务端校验为准。
  */
 export function AnalyzeButton({ slug, writeAccess = "edit" }: { slug: string; writeAccess?: WriteAccess }) {
   const router = useRouter();
@@ -36,14 +36,8 @@ export function AnalyzeButton({ slug, writeAccess = "edit" }: { slug: string; wr
     }
   }
 
-  if (writeAccess === "demo") {
-    return (
-      <div className="analyze-control demo-gate">
-        <span className="readonly-hint">只读演示：分析、编辑与发布需登录自己的工作区。</span>
-        <Link className="secondary-button" href="/login">登录后可分析</Link>
-      </div>
-    );
-  }
+  // 匿名 demo：不渲染分析入口与只读提示，登录引导集中在顶栏。
+  if (writeAccess === "demo") return null;
   if (writeAccess === "readonly") {
     return (
       <div className="analyze-control">

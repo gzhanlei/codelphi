@@ -21,9 +21,7 @@ vi.mock("@/components/app-shell", () => ({ AppShell: ({ children }: { children: 
 vi.mock("@/components/demo-shell", () => ({ DemoShell: ({ children }: { children: ReactNode }) => createElement("main", null, children) }));
 vi.mock("@/components/analyze-button", () => ({
   AnalyzeButton: ({ slug, writeAccess }: { slug: string; writeAccess?: string }) =>
-    writeAccess === "demo"
-      ? createElement("a", { "data-analyze": slug, href: "/login" }, "登录后可分析")
-      : createElement("button", { "data-analyze": slug }, "立即分析"),
+    writeAccess === "demo" ? null : createElement("button", { "data-analyze": slug }, "立即分析"),
 }));
 vi.mock("@/components/analysis-feedback-button", () => ({ AnalysisFeedbackButton: () => null }));
 vi.mock("@/components/remove-product-button", () => ({ RemoveProductButton: () => null }));
@@ -57,9 +55,9 @@ describe("public demo product page (canonical org-qualified route)", () => {
     const html = await renderPage("default", "reporadar");
     expect(html).toContain(">Radar ");
     // 设计 §11.1：demo 匿名只读，编辑控件不再为展示而伪装成可编辑（canEdit=false），
-    // 写操作降为登录引导；demo guard + 服务端校验仍是最终边界。
+    // 匿名 demo 不渲染写入口；demo guard + 服务端校验仍是最终边界。
     expect(html).toContain('data-can-edit="false"');
-    expect(html).toContain("登录后可分析");
+    expect(html).not.toContain("登录后可分析");
     expect(html).not.toContain("data-remove-product");
     expect(resolvePublicDemoProduct).toHaveBeenCalledWith("default", "reporadar");
     // demo 详情按 (org, slug) 精确解析，不再有全局 slug 兜底
@@ -96,7 +94,7 @@ describe("public demo product page (canonical org-qualified route)", () => {
     vi.mocked(resolvePublicDemoProduct).mockResolvedValue(demo);
     const html = await renderPage("default", "reporadar");
     expect(html).toContain('data-can-edit="false"');
-    expect(html).toContain("登录后可分析");
+    expect(html).not.toContain("登录后可分析");
   });
 
   it("keeps 404 for signed-in users without access to a non-demo slug", async () => {

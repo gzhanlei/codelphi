@@ -16,7 +16,7 @@ export interface PublishFeatureOption {
 /**
  * 「发布产品」入口（用户主动流）：总览页按钮 → 勾选功能（默认全选）→ 生成发布稿草稿
  * → 跳到发布卡校对并发布。生成是用户主动行为，不自动预生成。
- * 只读状态（设计 §11.2）：匿名给登录引导链接，登录只读成员给禁用按钮+权限说明。
+ * 只读状态（设计 §11.2）：登录只读成员给禁用按钮+权限说明；匿名 demo 不渲染发布入口，登录引导集中在顶栏。
  */
 export function OverviewPublishButton({ slug, releaseId, releaseTitle, features, writeAccess = "edit" }: {
   slug: string;
@@ -32,9 +32,8 @@ export function OverviewPublishButton({ slug, releaseId, releaseTitle, features,
   const [done, setDone] = useState(false);
   const [error, setError] = useState("");
 
-  if (writeAccess === "demo") {
-    return <Link className="secondary-button" href="/login">登录后可发布</Link>;
-  }
+  // 匿名 demo：不渲染发布入口，登录引导集中在顶栏。
+  if (writeAccess === "demo") return null;
   if (writeAccess === "readonly") {
     return <button className="secondary-button" type="button" disabled aria-disabled="true" title="当前账号对该产品为只读权限">发布产品 · 需编辑权限</button>;
   }
