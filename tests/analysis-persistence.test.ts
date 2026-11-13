@@ -161,4 +161,22 @@ describe("loadPreviousSpecText (P0 anchoring loader)", () => {
     expect(await loadPreviousSpecText(3, executeWith([], [], []))).toEqual([]);
     expect(await loadPreviousSpecText(3, executeWith([{ id: 77 }], [], []))).toEqual([]);
   });
+
+  it("prioritizes affected features ahead of position order (BM-6 A1 锚定向)", async () => {
+    const execute = executeWith(
+      [{ id: 77 }],
+      [{ id: 1, name: "统一登录", summary: "OAuth" }, { id: 2, name: "规格导出", summary: "JSON" }, { id: 3, name: "产品简介编辑", summary: "描述" }],
+      [
+        { featureId: 1, reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy" },
+        { featureId: 2, reference: "ER-1", context: "x", action: "y", outcome: "z", category: "error" },
+        { featureId: 3, reference: "EC-1", context: "p", action: "q", outcome: "r", category: "edge" },
+      ],
+    );
+    const spec = await loadPreviousSpecText(3, execute, ["产品简介编辑"]);
+    // 受影响功能排最前（24k 截断时先保受影响功能的锚），其余保持 position 序。
+    expect(spec.map((feature) => feature.name)).toEqual(["产品简介编辑", "统一登录", "规格导出"]);
+    // 无命中时顺序不变
+    const unchanged = await loadPreviousSpecText(3, execute, ["不存在功能"]);
+    expect(unchanged.map((feature) => feature.name)).toEqual(["统一登录", "规格导出", "产品简介编辑"]);
+  });
 });

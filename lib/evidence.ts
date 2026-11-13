@@ -41,3 +41,23 @@ export function evidenceKind(path: string): EvidenceKind {
   if (DOCUMENT_EVIDENCE.test(path)) return "document";
   return "implementation";
 }
+
+/**
+ * BM-6/B2 口径：证据全部来自测试/文档（无任何实现代码）时，该场景描述的是
+ * 「测试这样断言」而非「运行时如此执行」——展示层打「测试佐证」标、发布影响投影降权，
+ * 但不落库删除（无法证伪的主张保留可见、交人工核实，与 spec-diff 证伪门禁同一哲学）。
+ * 基础设施文件（CI/锁文件）在 evidenceKind 里仍算 implementation，保持可见不冒进。
+ * 入参兼容三种形状：证据数组、JSON 字符串、以及带 .evidence 字段的场景对象
+ * （behavior_changes 的 before/after JSON 即场景对象）。
+ */
+export function isTestOnlyEvidence(value: unknown): boolean {
+  const items = evidenceArrayOf(value);
+  return items.length > 0 && items.every((item) => evidenceKind(String((item as { path?: unknown }).path ?? "")) !== "implementation");
+}
+
+function evidenceArrayOf(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  if (typeof value === "string") return evidenceItems(value);
+  if (value && typeof value === "object" && "evidence" in value) return evidenceArrayOf((value as { evidence: unknown }).evidence);
+  return [];
+}

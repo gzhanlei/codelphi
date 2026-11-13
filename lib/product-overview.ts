@@ -1,4 +1,4 @@
-import { evidenceItems } from "./evidence";
+import { evidenceItems, isTestOnlyEvidence } from "./evidence";
 import { coverageByteLabel, coverageFilesLabel } from "./coverage-display";
 import type { RegressionTaskView } from "./regression-task-view";
 import { featureHref } from "./spec-editor-ui";
@@ -48,6 +48,17 @@ function compareCapabilities(a: { scenarioCount: number; name: string }, b: { sc
 
 const changeKindPriority: Record<string, number> = { added: 0, removed: 1, changed: 2 };
 
+/**
+ * BM-6/B2 口径：场景级变化的对侧证据全部为测试/文档（无实现代码）时，只在
+ * 「全部前后差异」（发布变化视图）展示，不进总览影响投影与发布稿功能勾选计数；
+ * 发布时间线的 changeStats 保持全量口径（两处数字差由「测试佐证」徽标解释）。
+ */
+function changeIsTestOnly(change: BehaviorChangeRow): boolean {
+  if (change.entityType !== "scenario") return false;
+  const side = change.kind === "removed" ? change.before : change.after;
+  return isTestOnlyEvidence(side);
+}
+
 /** 总览 02 面板的按功能聚合视图：大发布逐条列出会淹没在场景编号里，先给功能级摘要。 */
 function groupChangesByFeature(changes: Array<{ kind: string; featureName: string }>) {
   const groups = new Map<string, { featureName: string; added: number; removed: number; changed: number }>();
@@ -87,8 +98,11 @@ function buildUserImpact(
 ) {
   const groups = new Map<string, { releaseId: number; featureName: string; userImpacts: string[]; moreCount: number }>();
   if (latestRelease) {
-    for (const change of input.changes ?? []) {
-      if (change.releaseId !== latestRelease.id || change.userImpact.trim().length === 0) continue;
+    // BM-6/B2：实现证据的变化文本优先占位，测试/文档佐证的文本只在有余位时补充——
+    // 影响卡不再让「测试这样断言」冒充排在最前的用户影响（全量仍在发布变化视图）。
+    const pending = (input.changes ?? []).filter((change) => change.releaseId === latestRelease.id && change.userImpact.trim().length > 0);
+    const ordered = [...pending.filter((change) => !isTestOnlyEvidence(change.evidence)), ...pending.filter((change) => isTestOnlyEvidence(change.evidence))];
+    for (const change of ordered) {
       const group = groups.get(change.featureName) ?? { releaseId: latestRelease.id, featureName: change.featureName, userImpacts: [], moreCount: 0 };
       if (group.userImpacts.length < IMPACT_TEXTS_PER_FEATURE) group.userImpacts.push(change.userImpact);
       else group.moreCount += 1;
@@ -164,7 +178,9 @@ export function buildProductOverview(input: ProductOverviewInput) {
     removed: latestChanges.filter((change) => change.kind === "removed").length,
     changed: latestChanges.filter((change) => change.kind !== "added" && change.kind !== "removed").length,
   };
-  const changeGroups = groupChangesByFeature(latestChanges);
+  // BM-6/B2：发布稿勾选与影响投影用实现证据口径；changeStats/发布变化视图保持全量。
+  const userVisibleChanges = latestChanges.filter((change) => !changeIsTestOnly(change));
+  const changeGroups = groupChangesByFeature(userVisibleChanges);
   const changedReleaseIds = new Set(input.behaviorChanges.map((change) => change.releaseId));
   const entries: TimelineEntry[] = input.releases.map((release) => {
     const note = input.releaseNotes?.find((candidate) => candidate.releaseId === release.id);

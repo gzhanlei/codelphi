@@ -1,5 +1,5 @@
 import type { AnalysisResult } from "./ai";
-import { normalizeSpecText, scenarioBehaviorEqual, specFeatureKey } from "./spec-diff";
+import { normalizeSpecText, scenarioBehaviorEqual, scenarioVariantSimilar, specFeatureKey } from "./spec-diff";
 
 /**
  * 多趟提取的确定性合并层：把 N 个分区窗口各自的 AnalysisResult 合并为一个完整规格。
@@ -53,10 +53,12 @@ export function mergeChunkResults(chunks: ExtractionChunk[], onStats?: (stats: {
       }
       for (const scenario of feature.scenarios) {
         // 行为等价去重（BM-5）：情境/操作/结果同义即同一行为（category 只是呈现标签）。
-        // 骨架词判定实证不可用（fixture 实证误合真差异："跳转 dashboard" vs "锁定账户"
-        // 骨架共享但行为不同）——变体合并职责在发布稿成文层（AI prompt 显式合并变体，
-        // 人工可校），不在账本去重层。
-        if (group.scenarios.some((existing) => scenarioBehaviorEqual(existing, scenario))) {
+        // 守护教训：骨架词判定实证不可用（fixture 实证误合真差异："跳转 dashboard" vs
+        // "锁定账户"骨架共享但行为不同），近似通道必须走严格阈值（见 spec-diff 变体三重守护）。
+        // BM-6 变体通道：单分区输出的措辞变体（run 211/212 实证：同行为从不同角色
+        // 重复建条，EC-5/EC-6 同义并存）不经过跨趟合并也会落库——近似折叠在此收口，
+        // 与跨版本 spec-diff 的 variant 折叠共用同一判定（宁漏勿错合）。
+        if (group.scenarios.some((existing) => scenarioBehaviorEqual(existing, scenario) || scenarioVariantSimilar(existing, scenario))) {
           scenariosDeduped += 1;
           continue;
         }

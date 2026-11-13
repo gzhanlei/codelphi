@@ -35,7 +35,7 @@ export interface SpecChange {
 
 /** 被等价判定折叠的差异：wording=行为等价但原文不同；renumber=同功能内场景换编号；tests-only=新增功能的证据全部来自测试/文档（行为性证据不足）。仅供审计展示，不落库。 */
 export interface FoldedSpecChange {
-  reason: "wording" | "renumber" | "tests-only";
+  reason: "wording" | "renumber" | "tests-only" | "variant";
   entityType: "feature" | "scenario";
   featureName: string;
   scenarioReference: string | null;
@@ -182,6 +182,61 @@ export function scenarioBehaviorEqual(previous: SpecScenario, current: SpecScena
     && specTextEquivalent(previous.outcome, current.outcome);
 }
 
+/**
+ * BM-6 变体通道（确定性、零模型调用）：同功能内措辞改写但语义相同的场景对。
+ * 与 specTextEquivalent（编辑距离，抓字符级漂移）互补——同义替换（检测→检查、
+ * 演示访客→demo 访客）编辑距离失效但内容词 2-gram 几乎不变。判定（宁漏勿错合）：
+ * 1. category 一致（happy/error 语义冲突直接拒绝）；
+ * 2. 操作/结果：数字 token 一致（404≠400）、双方英文词有交集、否定词计数一致、
+ *    长字段（≥8 内容字符）单字段 Jaccard ≥ 0.34——结果被大段改写即拒绝；
+ * 3. 情境：只过第 2 条的前三项轻守护，不做 Jaccard 下限——真变体的情境常被同义
+ *    改写（「编辑者打开产品总览页」→「工作区编辑者在总览页且存在可发布功能」
+ *    实测 0.190），下限会把它们全部误拒；
+ * 4. 操作与结果都行为等价（specTextEquivalent）→ 直接判同：同一触发语义+同一操作
+ *    +同一结果即同一行为（BM-5 口径的变体延伸），情境措辞漂移不构成新行为；
+ * 5. 其余对走合并文本（情境+操作+结果）contentJaccard ≥ 0.5 兜底（骨架词教训：
+ *    any-overlap 实证误合真差异；真差异对实测 ≈0.33，余量一倍以上）。
+ * 已知残余风险：同操作同结果、仅情境主体语义互换的对（只读↔编辑）会被折——此类
+ * 折叠进审计面（folded 可见）不删数据，宁漏勿错合口径下可接受。
+ */
+const VARIANT_JACCARD_THRESHOLD = 0.5;
+const VARIANT_FIELD_JACCARD_FLOOR = 0.34;
+const VARIANT_FIELD_MIN_CHARS = 8;
+
+function latinTokens(text: string): Set<string> {
+  // 显式 spread：迭代器 helpers（iterator.map）要 Node 22+，生产容器更旧
+  return new Set([...text.toLowerCase().matchAll(/[a-z]+/g)].map((match) => match[0]));
+}
+
+function digitSignature(text: string): string {
+  return [...text.matchAll(/[0-9]+/g)].map((match) => match[0]).sort().join(",");
+}
+
+function variantFieldGate(left: string, right: string, strictJaccard: boolean): boolean {
+  const l = specContent(left);
+  const r = specContent(right);
+  if (l === r) return true;
+  if (digitSignature(l) !== digitSignature(r)) return false;
+  const lLatin = latinTokens(l);
+  const rLatin = latinTokens(r);
+  if (lLatin.size > 0 && rLatin.size > 0 && ![...lLatin].some((token) => rLatin.has(token))) return false;
+  if (negationCount(l) !== negationCount(r)) return false;
+  if (strictJaccard && l.length >= VARIANT_FIELD_MIN_CHARS && r.length >= VARIANT_FIELD_MIN_CHARS && contentJaccard(left, right) < VARIANT_FIELD_JACCARD_FLOOR) return false;
+  return true;
+}
+
+/** 变体判定（合并去重与跨版本折叠共用）：情境轻守护、操作/结果严守护、操作+结果等价即同行为、其余合并文本兜底。 */
+export function scenarioVariantSimilar(previous: SpecScenario, current: SpecScenario): boolean {
+  if (previous.category !== current.category) return false;
+  if (!variantFieldGate(previous.context, current.context, false)) return false;
+  if (!variantFieldGate(previous.action, current.action, true)) return false;
+  if (!variantFieldGate(previous.outcome, current.outcome, true)) return false;
+  if (specTextEquivalent(previous.action, current.action) && specTextEquivalent(previous.outcome, current.outcome)) return true;
+  const previousCombined = `${previous.context}${previous.action}${previous.outcome}`;
+  const currentCombined = `${current.context}${current.action}${current.outcome}`;
+  return contentJaccard(previousCombined, currentCombined) >= VARIANT_JACCARD_THRESHOLD;
+}
+
 function isScenarioShape(value: unknown): value is SpecScenario {
   return typeof value === "object" && value !== null
     && typeof (value as SpecScenario).context === "string"
@@ -250,6 +305,7 @@ function scenarioChanges(before: SpecFeature, after: SpecFeature, outcome: DiffO
   }
 
   // 边界抖动折叠：同功能内 removed↔added 且行为字段逐项等价 → 同一行为换了编号，不产生变化行。
+  // BM-6 变体通道：措辞近似（同义替换）的 removed↔added 对同样折叠，reason=variant 供审计。
   const droppedIndexes = new Set<number>();
   for (const [removedIndex, removed] of changes.entries()) {
     if (removed.kind !== "removed") continue;
@@ -257,11 +313,18 @@ function scenarioChanges(before: SpecFeature, after: SpecFeature, outcome: DiffO
       if (added.kind !== "added" || droppedIndexes.has(addedIndex)) continue;
       const previous = removed.before as SpecScenario;
       const current = added.after as SpecScenario;
-      if (!scenarioBehaviorEqual(previous, current)) continue;
-      droppedIndexes.add(removedIndex);
-      droppedIndexes.add(addedIndex);
-      outcome.folded.push({ reason: "renumber", entityType: "scenario", featureName: after.name, scenarioReference: current.reference, before: previous, after: current });
-      break;
+      if (scenarioBehaviorEqual(previous, current)) {
+        droppedIndexes.add(removedIndex);
+        droppedIndexes.add(addedIndex);
+        outcome.folded.push({ reason: "renumber", entityType: "scenario", featureName: after.name, scenarioReference: current.reference, before: previous, after: current });
+        break;
+      }
+      if (scenarioVariantSimilar(previous, current)) {
+        droppedIndexes.add(removedIndex);
+        droppedIndexes.add(addedIndex);
+        outcome.folded.push({ reason: "variant", entityType: "scenario", featureName: after.name, scenarioReference: current.reference, before: previous, after: current });
+        break;
+      }
     }
   }
   for (const [index, change] of changes.entries()) if (!droppedIndexes.has(index)) outcome.changes.push(change);

@@ -355,14 +355,6 @@ async function runAnalysisBody(run: RunContext) {
   // W0-8 行为面枚举：patch-scan 行为文件清单（跨模式共享，RC2 与定向枚举共用）
   const behavioralPaths = [...behavioralChangePaths(change.files)].sort();
   const previousFeatureNames = await loadPreviousFeatureNames(run.repositoryId, executeWrapper);
-  // P0 措辞锚定：把上一版场景全文喂给 prompt，未变行为逐字沿用；加载失败降级为仅命名约束，不阻塞分析。
-  let previousSpecText: SpecAnchorFeature[];
-  try {
-    previousSpecText = await loadPreviousSpecText(run.repositoryId, executeWrapper);
-  } catch (error) {
-    console.error("[analysis] load previous spec text failed; anchoring disabled for this run", error);
-    previousSpecText = [];
-  }
   // BM-10（生产 run 213 实证）：窗口无实现级行为变更（纯文档/注释/格式提交）时跳过全部
   // AI 提取——上一版规格原样沿用、零变化。docs-only diff 命中功能证据面会激活增量重提取，
   // 文档内容被写成假场景（run 213：发布说明「无行为变化」vs 变化清单 54 条，自相矛盾）。
@@ -398,6 +390,15 @@ async function runAnalysisBody(run: RunContext) {
         unassignedBehavioralPaths = behavioralPaths.filter((path) => !behavioral.matchedPaths.has(path));
       }
     }
+  }
+  // P0 措辞锚定：把上一版场景全文喂给 prompt，未变行为逐字沿用；加载失败降级为仅命名约束，不阻塞分析。
+  // 变体治理 A1：受影响功能优先装入锚（24k 截断时先保受影响功能的旧场景，避免无锚重推导导致键分裂）。
+  let previousSpecText: SpecAnchorFeature[];
+  try {
+    previousSpecText = await loadPreviousSpecText(run.repositoryId, executeWrapper, affectedFeatureNames ?? []);
+  } catch (error) {
+    console.error("[analysis] load previous spec text failed; anchoring disabled for this run", error);
+    previousSpecText = [];
   }
   // 多趟提取：实现面超出单窗口时按分区逐趟提取后确定性合并，全量与增量 / RC2-carry
   // 同一提取层（W0-6：按实现面而非运行模式决定是否分片；单窗仓库仍返回 1 个分区，

@@ -330,4 +330,32 @@ describe("product overview task entries", () => {
       ["traceable-changes", null, "尚无发布"],
     ]);
   });
+
+  // BM-6/B2 口径：场景证据全为测试/文档时，发布稿勾选计数与影响投影不再计入；
+  // changeStats（时间线）保持全量；实现证据的影响文本优先于测试佐证文本。
+  it("excludes test-only scenario changes from publish counts and deprioritizes their impact texts", () => {
+    const overview = buildProductOverview({
+      productBase: "/products/default/radar",
+      product: { id: 1, slug: "radar", name: "Radar", description: "" },
+      features, scenarios,
+      releases: [release(12, 10)],
+      behaviorChanges: [
+        { id: 1, releaseId: 12, kind: "added", entityType: "scenario", featureName: "登录", scenarioReference: "EC-5", summary: "测试佐证变化", before: null, after: { reference: "EC-5", evidence: [{ path: "tests/auth.test.ts", startLine: 3 }] } },
+        { id: 2, releaseId: 12, kind: "changed", entityType: "scenario", featureName: "规格", scenarioReference: "HP-1", summary: "实现证据变化", before: {}, after: { reference: "HP-1", evidence: [{ path: "app/spec.ts", startLine: 9 }] } },
+      ],
+      changes: [
+        { id: 1, releaseId: 12, featureName: "登录", kind: "added", description: "d", userImpact: "测试佐证的影响说明", evidence: [{ path: "tests/auth.test.ts" }] },
+        { id: 2, releaseId: 12, featureName: "规格", kind: "changed", description: "d", userImpact: "实现证据的影响说明", evidence: [{ path: "app/spec.ts" }] },
+        { id: 3, releaseId: 12, featureName: "登录", kind: "added", description: "d", userImpact: "另一条测试佐证说明", evidence: [{ path: "docs/spec.md" }] },
+      ],
+      latestRun: { status: "succeeded" },
+    });
+    // 发布稿勾选计数只含实现证据变化（登录的 test-only 场景变化被排除）
+    expect(overview.changeGroups).toEqual([{ featureName: "规格", added: 0, removed: 0, changed: 1 }]);
+    // 时间线 stats 保持全量口径
+    expect(overview.changeStats).toEqual({ added: 1, removed: 0, changed: 1 });
+    // 影响文本实现证据优先：规格组（实现证据）排前，登录组（纯测试佐证）靠后仍在
+    expect(overview.userImpact.items[0]?.featureName).toBe("规格");
+    expect(overview.userImpact.items[0]?.userImpacts).toEqual(["实现证据的影响说明"]);
+  });
 });

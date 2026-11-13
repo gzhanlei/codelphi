@@ -406,8 +406,10 @@ export async function loadPreviousFeatureNames(repositoryId: number, execute: Ex
 
 export type { SpecAnchorFeature };
 
-/** P0 措辞锚定：读取最新 spec 版本的场景级全文（分析前调用，未变行为要求 AI 逐字沿用）。加载失败由调用方降级处理。 */
-export async function loadPreviousSpecText(repositoryId: number, execute: Execute = defaultExecute): Promise<SpecAnchorFeature[]> {
+/** P0 措辞锚定：读取最新 spec 版本的场景级全文（分析前调用，未变行为要求 AI 逐字沿用）。加载失败由调用方降级处理。
+ * 变体治理 A1：锚有 24k 字符上限，按 position 装入时受影响功能可能被截断在窗外（无锚可沿用 → 模型重推导、重编号）。
+ * 传入 prioritize（受影响功能名）时把这些功能稳定排到最前，保证 24k 预算先覆盖它们。 */
+export async function loadPreviousSpecText(repositoryId: number, execute: Execute = defaultExecute, prioritize: readonly string[] = []): Promise<SpecAnchorFeature[]> {
   const versionResult = await execute(
     "SELECT id FROM spec_versions WHERE repository_id = ? ORDER BY id DESC LIMIT 1",
     [repositoryId],
@@ -434,13 +436,18 @@ export async function loadPreviousSpecText(repositoryId: number, execute: Execut
   const scenarioPayload = Array.isArray(scenarioResult) ? scenarioResult[0] : [];
   const scenarioRows = (Array.isArray(scenarioPayload) ? scenarioPayload : []) as Array<{ featureId: number; reference: string; context: string; action: string; outcome: string; category: string; step: number | null }>;
 
-  return featureRows.map((feature) => ({
+  const load = (feature: { id: number; name: string; summary: string }) => ({
     name: feature.name,
     summary: feature.summary,
     scenarios: scenarioRows
       .filter((scenario) => scenario.featureId === feature.id)
       .map((scenario) => ({ reference: scenario.reference, context: scenario.context, action: scenario.action, outcome: scenario.outcome, category: scenario.category, step: scenario.step })),
-  }));
+  });
+  // 稳定定向：受影响功能（按 prioritize 顺序）排最前，其余保持 position 序。
+  const prioritizedKeys = new Set(prioritize.map((name) => name.trim().toLowerCase()));
+  const head = featureRows.filter((feature) => prioritizedKeys.has(feature.name.trim().toLowerCase()));
+  const tail = featureRows.filter((feature) => !prioritizedKeys.has(feature.name.trim().toLowerCase()));
+  return [...head, ...tail].map(load);
 }
 
 /** BM-10：读取最新 spec 版本的完整功能集（含场景与证据），供零行为变更窗口整体沿用。无版本返回 null。 */

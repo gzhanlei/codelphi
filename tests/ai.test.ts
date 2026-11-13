@@ -161,9 +161,11 @@ describe("feature naming continuity", () => {
     expect(incrementalScopeSection([])).toBeNull();
   });
 
-  it("requires affected features to keep full scenario coverage in incremental mode", () => {
+  it("requires affected features to revise against the anchor instead of re-enumerating", () => {
     const section = incrementalScopeSection(["登录"]);
-    expect(section).toContain("与全量分析相当");
+    expect(section).toContain("以上一版规格锚为基准做增量修订");
+    expect(section).toContain("逐字沿用原编号与文字");
+    expect(section).toContain("不得超过锚中该功能条数 +3");
     expect(section).toContain("3-8 个场景");
     expect(section).toContain("happy/edge/error 全部类别逐一检查");
   });
@@ -232,6 +234,8 @@ describe("spec wording anchoring (P0 noise control)", () => {
     expect(section.length).toBeLessThan(30_000);
     expect(section).toContain("已截断");
     expect(section).toContain("逐字沿用规则");
+    // BM-6 变体治理：锚段禁止同一行为多建条
+    expect(section).toContain("同一行为只允许一条场景");
   });
 
   it("sends the anchoring section instead of the names-only continuity section", async () => {
