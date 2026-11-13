@@ -245,7 +245,11 @@ export async function insertSpecVersion(connection: PoolConnection, run: RunCont
     }
   }
   const features = mergeSpecSources(generated, manual, tombstones, carried);
-  const changes = diffSpec(previous === null ? null : previous.features, features, options.behavioralChangePaths ? { behavioralChangePaths: options.behavioralChangePaths } : undefined);
+  // 行为窗口只在增量/RC2-carry 模式下有语义：提取确实被窗口框定时，「证据全在窗口外」
+  // 才能证伪一个新增功能（superset 盲评 #1009）。全量重建时整库重提取、窗口只覆盖本发布
+  // 的几个文件——门禁会把所有新功能吞掉（生产 v201 实证：70 个新功能 0 条 added，
+  // 118 个旧名记为移除）。
+  const changes = diffSpec(previous === null ? null : previous.features, features, affectedKeys ? { behavioralChangePaths: options.behavioralChangePaths } : undefined);
   const collapse = detectSpecCollapse(previous, features);
   const featureCollapses = detectFeatureCollapses(previous, features);
   const misplacedScenarios = detectMisplacedScenarios(previous, features);

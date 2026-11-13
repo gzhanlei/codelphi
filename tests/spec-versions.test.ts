@@ -101,6 +101,38 @@ describe("spec version persistence", () => {
     expect(db.execute).not.toHaveBeenCalledWith(expect.stringContaining("INSERT INTO spec_features"), expect.arrayContaining(["Legacy"]));
   });
 
+  it("records feature additions in full mode even when their evidence is outside the behavioral window (生产 v201 事故形态)", async () => {
+    // 全量重建时窗口行为集只覆盖本发布几个文件；tests-only 门禁若在全量模式生效，
+    // 整库重提取的新功能会被整体吞掉（v201 实证：70 个新功能 0 条 added 行）。
+    const db = connection([{ id: 11 }]);
+    const rebuilt = {
+      ...result,
+      features: [
+        result.features[0],
+        { name: "New feature", summary: "Added", scenarios: [{ ...scenario, evidence: [{ path: "lib/brand-new.ts", startLine: 1 }] }] },
+      ],
+    };
+    await insertSpecVersion(db, run, rebuilt, { behavioralChangePaths: new Set(["lib/mcp/server.ts"]) });
+    const added = db.changes.find((change) => change[3] === "added" && change[2] === "feature");
+    expect(added?.[5]).toBe("New feature");
+  });
+
+  it("keeps the tests-only fold in incremental mode (superset 盲评 #1009 契约)", async () => {
+    const db = connection([{ id: 11 }]);
+    const rebuilt = {
+      ...result,
+      features: [
+        result.features[0],
+        { name: "New feature", summary: "Added", scenarios: [{ ...scenario, evidence: [{ path: "lib/brand-new.ts", startLine: 1 }] }] },
+      ],
+    };
+    const { features } = await insertSpecVersion(db, run, rebuilt, { affectedKeys: new Set(["authentication"]), behavioralChangePaths: new Set(["lib/other.ts"]) });
+    expect(db.changes.some((change) => change[5] === "New feature")).toBe(false);
+    // 折叠只是不落变化行，功能本体仍进不可变快照（append-only，不静默丢内容）
+    expect(db.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO spec_features"), expect.arrayContaining(["New feature"]));
+    expect(features.map((feature) => feature.name)).toContain("New feature");
+  });
+
   it("drops AI features that rewrite carried keys and keeps the carried content (BM-4 身份门禁)", async () => {
     const db = connection([{ id: 11 }]);
     const hijack = { name: "Legacy", summary: "SQL Lab 对无 schema 表应用 RLS", scenarios: [{ ...scenario, outcome: "RLS 谓词注入" }] };
