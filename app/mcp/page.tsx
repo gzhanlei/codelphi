@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
+import { CopyBlock } from "@/components/copy-block";
 import { PublicShell } from "@/components/public-shell";
 import { getSessionUser } from "@/lib/session";
 import { appUrl } from "@/lib/env";
@@ -8,6 +9,20 @@ import { mcpServersJson } from "@/lib/mcp/connect-configs";
 export const dynamic = "force-dynamic";
 
 export const metadata = { title: "MCP 连接指南" };
+
+/**
+ * 用户级常驻指令段（门控生效）：贴一次 ~/.zcode/AGENTS.md（ZCode）或 ~/.claude/CLAUDE.md（Claude Code），
+ * 所有仓库生效——门控条件不满足（未连接 codelphi MCP / remote 匹配不到）时自动跳过。
+ * 与 lib/mcp/server.ts 的 initialize.instructions 内容保持一致口径。
+ */
+const WORKFLOW_AGENTS_SNIPPET = `## 行为账本（CoDelphi MCP）——门控生效
+
+凡会话中可见 mcp__codelphi__ 前缀工具，且当前仓库 git remote 能在 list_projects 结果中按 owner/name 匹配到产品（slug 取匹配值），即本仓库已接入 CoDelphi 行为账本，自觉执行下述约定；工具不可用或匹配不到时本段不适用，直接跳过：
+
+- 做计划时（早于任何文件改动）：lookup_by_files 反查计划要改的文件的爆炸半径，把回归红线场景与 push 后对账锚点写进计划；必要时 get_feature_connections(path) 看共享邻域。方案已定但未反查 = 计划未完成，不得动手。
+- 需要理解既有行为时：search_scenarios 检索规格原文，用返回的 stableKey 深入 get_feature，不要只靠读代码猜约定。
+- push 后：list_releases 找到本次 sha 对应的发布，get_release 核对行为变化清单 ⊆ 本次意图；计划外的变化回查并向用户报告。
+- 发现账本与代码不符：send_feedback 上报由人裁决；账本是只读面，「没搜到 ≠ 不存在」。`;
 
 const TOOL_GROUPS: Array<{ heading: string; tools: Array<{ name: string; desc: string }> }> = [
   {
@@ -60,10 +75,7 @@ export default async function McpGuidePage() {
       <section className="overview-panel">
         <h2>二、写入你的 coding agent</h2>
         <p>端点：<code>{endpoint}</code>（Streamable HTTP，Authorization: Bearer 认证）。通用 mcpServers 配置（把占位符换成你的 key，或直接在设置页签发后复制烤好的版本）：</p>
-        <div className="mcp-guide-config">
-          <div className="mcp-guide-config-head"><span>通用 mcpServers JSON</span></div>
-          <pre className="mcp-guide-code"><code>{configJson}</code></pre>
-        </div>
+        <CopyBlock label="通用 mcpServers JSON" text={configJson} />
         <ul className="mcp-guide-notes">
           <li>Claude Code：存为项目根目录 <code>.mcp.json</code>，或执行 <code>claude mcp add --transport http codelphi {endpoint} --header "Authorization: Bearer &lt;key&gt;"</code></li>
           <li>ZCode：<code>~/.zcode/cli/config.json</code> 的 <code>mcp.servers</code>（服务器对象同形状；团队共享可放仓库 <code>.zcode/config.json</code>）</li>
@@ -99,7 +111,9 @@ export default async function McpGuidePage() {
           <li>push 后：用 list_releases 找到本次提交对应的发布，get_release 核对行为变化清单与意图一致</li>
           <li>发现账本与代码不符：用 send_feedback 上报由人裁决；账本是只读面</li>
         </ul>
-        <p>建议把这段约定写进仓库的 AGENTS.md，agent 每次会话都会自觉执行。</p>
+        <p>让 agent 自觉执行以上约定，推荐贴进<strong>用户级</strong>指令文件——每人一次，所有仓库生效（段内自带门控：未连接 codelphi MCP 或仓库匹配不到时自动跳过，不影响未接入的项目）：</p>
+        <CopyBlock label="用户级常驻指令段（贴进 ~/.zcode/AGENTS.md 或 ~/.claude/CLAUDE.md）" text={WORKFLOW_AGENTS_SNIPPET} />
+        <p>团队想把规范共享给所有成员时，可再把同段贴进仓库根目录 <code>AGENTS.md</code>（可选加强，非必需）。已连接本服务的 agent 还会随连接收到一份相同的约定（MCP instructions），即使用户级文件未配置也有基本触发。</p>
       </section>
 
       <p><Link href="/settings" className="text-button">去设置页签发 key →</Link></p>

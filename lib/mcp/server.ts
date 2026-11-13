@@ -71,20 +71,32 @@ export interface McpToolDef {
   inputSchema: Record<string, unknown>;
 }
 
+/**
+ * 工作流约定（随 initialize.instructions 下发，客户端注入 agent 上下文）。
+ * 定位：零配置连接的兜底触发源；用户级/仓库级常驻指令仍是更强的载体，两者内容保持一致。
+ */
+export const MCP_WORKFLOW_INSTRUCTIONS = [
+  "本服务是所在组织的产品行为账本（只读查询 + send_feedback 上报）。接入仓库的 coding agent 按以下约定工作：",
+  "1. 做 plan 或改任何文件前：先用 list_projects 按 git remote 的 owner/name 匹配产品取 slug，再 lookup_by_files 反查计划要改文件的爆炸半径，把回归红线场景与 push 后对账锚点写进计划；必要时 get_feature_connections(path) 看共享邻域。",
+  "2. 需要理解既有行为：search_scenarios 检索规格原文，用 stableKey 深入 get_feature，不要只靠读代码猜约定。",
+  "3. push 后：list_releases 找到本次 sha 对应的发布（per-push 一条，docs-only 也有零变化条目），get_release 核对行为变化清单与本次意图一致；计划外变化回查并向用户报告。",
+  "4. 发现账本与代码不符：send_feedback(kind:bug) 带三要素（哪个场景、哪份证据、代码实际行为）上报由人裁决；账本是只读面，「没搜到 ≠ 不存在」，用 get_project_summary 的 specSnapshot/evidenceCoverage 判断覆盖。",
+].join("\n");
+
 export const MCP_TOOLS: McpToolDef[] = [
-  { name: "list_projects", description: "列出当前工作区（API key 所属组织）的全部产品", inputSchema: { type: "object", properties: {} } },
+  { name: "list_projects", description: "列出当前工作区（API key 所属组织）的全部产品。接入仓库的 agent 先用 git remote 的 owner/name 匹配产品取 slug", inputSchema: { type: "object", properties: {} } },
   { name: "get_project_summary", description: "产品概要：描述、功能/场景计数、最新证据覆盖率、最新发布", inputSchema: { type: "object", properties: { slug: { type: "string" } }, required: ["slug"] } },
   { name: "get_feature", description: "按稳定键取功能及其场景（含证据链接）", inputSchema: { type: "object", properties: { slug: { type: "string" }, stableKey: { type: "string" } }, required: ["slug", "stableKey"] } },
   { name: "get_scenario", description: "按功能稳定键 + 场景引用取单个场景（含证据链接）", inputSchema: { type: "object", properties: { slug: { type: "string" }, stableKey: { type: "string" }, reference: { type: "string" } }, required: ["slug", "stableKey", "reference"] } },
-  { name: "search_scenarios", description: "按关键词检索规格原文（命中条目 = 已过证据校验的原文，未覆盖时明确返回空）", inputSchema: { type: "object", properties: { slug: { type: "string" }, query: { type: "string" } }, required: ["slug", "query"] } },
-  { name: "lookup_by_files", description: "按文件路径反查以该文件为证据的功能与场景（确定性反查，编码前影响面检查；paths 最多 20 个，每功能场景截前 10 条并附真实总数；账本未覆盖的文件返回空）", inputSchema: { type: "object", properties: { slug: { type: "string" }, paths: { type: "array", items: { type: "string" } } }, required: ["slug", "paths"] } },
-  { name: "list_releases", description: "列产品的发布（时间倒序，默认 10 条）", inputSchema: { type: "object", properties: { slug: { type: "string" }, limit: { type: "number" } }, required: ["slug"] } },
-  { name: "get_release", description: "单条发布的行为变化清单（含前后差异摘要与证据链接）", inputSchema: { type: "object", properties: { slug: { type: "string" }, releaseId: { type: "number" } }, required: ["slug", "releaseId"] } },
+  { name: "search_scenarios", description: "按关键词检索规格原文（命中条目 = 已过证据校验的原文，未覆盖时明确返回空）。理解既有行为优先用它，不要只靠读代码猜", inputSchema: { type: "object", properties: { slug: { type: "string" }, query: { type: "string" } }, required: ["slug", "query"] } },
+  { name: "lookup_by_files", description: "做计划或改文件前必查：按文件路径反查以该文件为证据的功能与场景（爆炸半径；paths 最多 20 个，每功能场景截前 10 条并附真实总数；账本未覆盖的文件返回空）", inputSchema: { type: "object", properties: { slug: { type: "string" }, paths: { type: "array", items: { type: "string" } } }, required: ["slug", "paths"] } },
+  { name: "list_releases", description: "列产品的发布（per-push 一条，docs-only 也有零变化条目；时间倒序，默认 10 条）。push 后用本次 sha 找对应发布", inputSchema: { type: "object", properties: { slug: { type: "string" }, limit: { type: "number" } }, required: ["slug"] } },
+  { name: "get_release", description: "单条发布的行为变化清单（含前后差异摘要与证据链接）。push 后对账：与本次提交意图核对，计划外变化要回查报告", inputSchema: { type: "object", properties: { slug: { type: "string" }, releaseId: { type: "number" } }, required: ["slug", "releaseId"] } },
   { name: "get_knowledge_health", description: "知识健康事实统计（漂移清单/核实覆盖/回归四态/维护分布；无综合分、无 Bus Factor）", inputSchema: { type: "object", properties: { slug: { type: "string" } }, required: ["slug"] } },
   { name: "get_feature_connections", description: "功能间的确定性连接（共享证据文件面；每条带依据文件清单，无 LLM 推断）。可选 path=只看以该文件为证据的功能邻域；可选 feature=稳定键，只返回该功能的连接", inputSchema: { type: "object", properties: { slug: { type: "string" }, path: { type: "string" }, feature: { type: "string" } }, required: ["slug"] } },
   { name: "get_release_notes", description: "单条发布的人工发布稿（块级、含 override 后文案与证据路径；未生成返回空）", inputSchema: { type: "object", properties: { slug: { type: "string" }, releaseId: { type: "number" } }, required: ["slug", "releaseId"] } },
   { name: "get_digest", description: "最近一期周期行为摘要（滚动 7 天分桶：support/sales/marketing；无则返回空）", inputSchema: { type: "object", properties: { slug: { type: "string" } }, required: ["slug"] } },
-  { name: "send_feedback", description: "向产品方发送使用反馈（只写反馈表，无其他写权限）", inputSchema: { type: "object", properties: { slug: { type: "string" }, kind: { type: "string", enum: ["bug", "question", "suggestion"] }, message: { type: "string" } }, required: ["slug", "kind", "message"] } },
+  { name: "send_feedback", description: "发现账本与代码不符时上报（只写反馈表，无其他写权限）：带三要素——哪个场景、哪份证据、代码实际行为，由人裁决", inputSchema: { type: "object", properties: { slug: { type: "string" }, kind: { type: "string", enum: ["bug", "question", "suggestion"] }, message: { type: "string" } }, required: ["slug", "kind", "message"] } },
 ];
 
 interface RpcRequest { jsonrpc: string; id?: string | number | null; method: string; params?: Record<string, unknown> }
@@ -416,6 +428,8 @@ export async function handleMcpRpc(runtime: McpRuntime, request: RpcRequest): Pr
       protocolVersion: MCP_PROTOCOL_VERSION,
       capabilities: { tools: {} },
       serverInfo: { name: "codelphi-mcp", version: "0.1.0" },
+      // 随连接注入 agent 上下文的工作流约定：让「零配置」的连接也自带触发时机（用户级/仓库级常驻指令仍是更强载体）
+      instructions: MCP_WORKFLOW_INSTRUCTIONS,
     });
   }
   if (request.method === "tools/list") {

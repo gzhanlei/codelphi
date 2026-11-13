@@ -13,10 +13,15 @@ beforeEach(() => {
 const rpc = (method: string, params?: Record<string, unknown>, id: string | number = 1) => ({ jsonrpc: "2.0", id, method, params });
 
 describe("mcp server (A1)", () => {
-  it("answers initialize with protocol version and tool capability", async () => {
+  it("answers initialize with protocol version, tool capability and workflow instructions", async () => {
     const response = await handleMcpRpc(runtime, rpc("initialize"));
     expect(response?.result).toMatchObject({ protocolVersion: MCP_PROTOCOL_VERSION, serverInfo: { name: "codelphi-mcp" } });
     expect(response?.result).toHaveProperty("capabilities.tools");
+    // instructions 随连接下发（零配置连接的工作流触发源）：覆盖计划期反查与 push 后对账两个关键时机
+    const instructions = String((response?.result as { instructions?: string }).instructions ?? "");
+    expect(instructions).toContain("lookup_by_files");
+    expect(instructions).toContain("get_release");
+    expect(instructions).toContain("send_feedback");
   });
 
   it("lists the read-only tool surface with JSON schemas", async () => {
