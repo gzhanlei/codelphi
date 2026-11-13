@@ -137,6 +137,25 @@ describe("fulfillPaidOrder", () => {
     expect(walletInsert[2]).toBe(200);
     expect(walletInsert[5]).toBe(`pack:${PLATFORM_NO}`);
     expect(walletInsert[6]).toBe(200);
+    // 超额包买的就是额度，不叠加履约赠礼
+    expect(h.paramsOf("INSERT INTO billing_quota_wallets")).toHaveLength(1);
+  });
+
+  it("also grants a 1-SAU gift wallet on subscription fulfillment (post-payment first analysis free)", async () => {
+    const h = harness(PAID_SUBSCRIPTION);
+    vi.mocked(getDb).mockReturnValue(h.db as never);
+    vi.stubEnv("BILLING_PLAN_PRICES", JSON.stringify({ pro: { amount: 14900, includedSau: 300, durationMonths: 1 } }));
+    h.on("FROM payment_orders WHERE order_no = ? FOR UPDATE", () => [PAID_SUBSCRIPTION]);
+    h.on("FROM billing_accounts WHERE account_id = ? FOR UPDATE", () => [[ACCOUNT_ACTIVE]]);
+    const result = await fulfillPaidOrder(PAID_SUBSCRIPTION);
+    expect(result).toEqual({ fulfilled: true });
+    const walletInserts = h.paramsOf("INSERT INTO billing_quota_wallets");
+    expect(walletInserts).toHaveLength(2);
+    // 第一笔 plan（既有语义不动）；第二笔 gift 1 SAU，source_key 含平台单号 = 订单幂等的库级兜底
+    expect(walletInserts[0][1]).toBe("plan");
+    expect(walletInserts[1]).toMatchObject({ 0: 7, 1: "gift", 2: 1, 5: `gift:${PLATFORM_NO}`, 6: 1 });
+    // gift 走 insertGrantedWallet 同款 granted 流水（幂等键 = grt:{sourceKey}）
+    expect(h.paramsOf("INSERT INTO billing_ledger").some((p) => p[2] === `grt:gift:${PLATFORM_NO}`)).toBe(true);
   });
 });
 

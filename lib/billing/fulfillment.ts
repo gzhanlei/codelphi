@@ -112,6 +112,18 @@ export async function fulfillPaidOrder(order: PaidOrderRow): Promise<{ fulfilled
         expiresAt: null,
         periodId: `sub:${row.platform_order_no}`,
       });
+      // 履约赠 1 SAU（2026-11-13 用户拍板「付费后首次全量补分析免费」）：订阅履约即赠，
+      // 额度形态 = gift 钱包（分摊序 trial → plan → gift → pack），保证付费后第一次
+      // 补分析/首次分析不被额度卡住。幂等 = 订单行锁 + status='paid' 前置 + source_key
+      // 唯一（gift:{platform_order_no}）双保险；仅订阅履约赠，超额包不赠（买的就是额度）。
+      await insertGrantedWallet(conn, {
+        accountId: row.account_id,
+        quotaType: "gift",
+        units: 1,
+        sourceKey: `gift:${row.platform_order_no}`,
+        expiresAt: null,
+        periodId: null,
+      });
       await conn.execute(
         `UPDATE billing_accounts
          SET plan_id = ?, plan_status = 'active', current_period_start = ?, current_period_end = ?, grace_until = NULL, version = version + 1
