@@ -62,4 +62,31 @@ describe("product registration persistence", () => {
     expect(connection.commit).not.toHaveBeenCalled();
     expect(connection.release).toHaveBeenCalledOnce();
   });
+
+  it("stores the requested output language on the product row", async () => {
+    connection.execute.mockImplementation(async (sql: string) => [{ insertId: sql.includes("INSERT INTO products") ? 4 : 9 }]);
+    await registerProduct({ ...input, organizationId: 7, outputLanguage: "en" });
+    const insert = connection.execute.mock.calls.find((call) => String(call[0]).includes("INSERT INTO products"));
+    expect(insert?.[1]).toEqual(["radar", "CoDelphi", "", 7, "en"]);
+  });
+
+  it("inherits the workspace default output language when not requested", async () => {
+    connection.execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("FROM organizations")) return [[{ triggerMode: "push", triggerN: null, triggerHour: null, defaultOutputLanguage: "en" }]];
+      return [{ insertId: sql.includes("INSERT INTO products") ? 4 : 9 }];
+    });
+    await registerProduct({ ...input, organizationId: 7 });
+    const insert = connection.execute.mock.calls.find((call) => String(call[0]).includes("INSERT INTO products"));
+    expect(insert?.[1]).toEqual(["radar", "CoDelphi", "", 7, "en"]);
+  });
+
+  it("falls back to zh-CN when neither request nor workspace default exists", async () => {
+    connection.execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("FROM organizations")) return [[{ triggerMode: "push", triggerN: null, triggerHour: null }]];
+      return [{ insertId: sql.includes("INSERT INTO products") ? 4 : 9 }];
+    });
+    await registerProduct({ ...input, organizationId: 7 });
+    const insert = connection.execute.mock.calls.find((call) => String(call[0]).includes("INSERT INTO products"));
+    expect(insert?.[1]).toEqual(["radar", "CoDelphi", "", 7, "zh-CN"]);
+  });
 });

@@ -29,18 +29,21 @@ async function insertRegistration(input: ProductInput & { organizationId?: numbe
   try {
     await connection.beginTransaction();
     const organizationId = input.organizationId ?? 1;
-    const [productResult] = await connection.execute(
-      "INSERT INTO products (slug, name, description, organization_id) VALUES (?, ?, ?, ?)",
-      [input.slug, input.name, input.description, organizationId],
-    );
-    const productId = Number((productResult as { insertId: number }).insertId);
-    // 新仓库继承工作区默认触发模式（051）：push 为 schema 默认，非 push 时写入三列
+    // 工作区默认先读（051 触发模式 + 072 输出语言）：新仓库注册时继承
     const [defaultRows] = await connection.execute(
-      `SELECT default_analysis_trigger AS triggerMode, default_analysis_trigger_n AS triggerN, default_analysis_trigger_hour AS triggerHour
+      `SELECT default_analysis_trigger AS triggerMode, default_analysis_trigger_n AS triggerN, default_analysis_trigger_hour AS triggerHour,
+              default_output_language AS defaultOutputLanguage
        FROM organizations WHERE id = ? LIMIT 1`,
       [organizationId],
     );
-    const workspaceDefault = (defaultRows as Array<{ triggerMode: string; triggerN: number | null; triggerHour: number | null }>)[0];
+    const workspaceDefault = (defaultRows as Array<{ triggerMode: string; triggerN: number | null; triggerHour: number | null; defaultOutputLanguage?: string }>)[0];
+    const outputLanguage = input.outputLanguage ?? workspaceDefault?.defaultOutputLanguage ?? "zh-CN";
+    const [productResult] = await connection.execute(
+      "INSERT INTO products (slug, name, description, organization_id, output_language) VALUES (?, ?, ?, ?, ?)",
+      [input.slug, input.name, input.description, organizationId, outputLanguage],
+    );
+    const productId = Number((productResult as { insertId: number }).insertId);
+    // 新仓库继承工作区默认触发模式（051）：push 为 schema 默认，非 push 时写入三列
     const trigger = workspaceDefault?.triggerMode ?? "push";
     const triggerColumns = trigger === "push" ? "" : ", analysis_trigger, analysis_trigger_n, analysis_trigger_hour";
     const triggerValues = trigger === "push" ? [] : [trigger, workspaceDefault?.triggerN ?? null, workspaceDefault?.triggerHour ?? null];
