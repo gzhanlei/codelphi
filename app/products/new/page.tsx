@@ -4,6 +4,7 @@ import { NewProductContent } from "@/components/new-product-content";
 import { listConnectionStates } from "@/lib/github-integrations";
 import { requireSessionUser } from "@/lib/session";
 import { requireOrganization } from "@/lib/organizations";
+import { getWorkspaceOutputLanguageDefault } from "@/lib/analysis-trigger";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,7 @@ export default async function NewProductPage() {
   const organization = await requireOrganization(user, "editor");
   const connections = (await listConnectionStates(organization.id)).filter((connection) => connection.status === "active");
   const hasServerToken = Boolean(process.env.GITHUB_TOKEN?.trim());
+  const defaultOutputLanguage = await getWorkspaceOutputLanguageDefault(organization.id);
 
   return (
     <AppShell user={user} organizationName={organization.name}>
@@ -19,7 +21,7 @@ export default async function NewProductPage() {
       <div className="page-heading">
         <div><span className="eyebrow">NEW PRODUCT SPACE</span><h1>添加产品</h1><p>接入一个 GitHub 仓库，生成带代码证据的功能清单与变更翻译。</p></div>
       </div>
-      <NewProductContent connections={connections} hasServerToken={hasServerToken} />
+      <NewProductContent connections={connections} hasServerToken={hasServerToken} defaultOutputLanguage={defaultOutputLanguage} />
     </AppShell>
   );
 }

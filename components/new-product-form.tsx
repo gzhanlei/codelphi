@@ -5,6 +5,7 @@ import { useState } from "react";
 import { createProduct } from "@/lib/product-client";
 import { errorMessage } from "@/lib/error-message";
 import { defaultConnectionId, nextProductSlug } from "@/lib/product-input";
+import { DEFAULT_OUTPUT_LANGUAGE, type OutputLanguage } from "@/lib/analysis-language";
 import { ProductSubmissionSection } from "./product-submission-section";
 import { ProductInformationSection, RepositorySection } from "./product-form-sections";
 
@@ -28,7 +29,7 @@ export async function handleProductCreation(input: ProductInput, controls: Produ
   }
 }
 
-export function NewProductForm({ connections, hasServerToken }: { connections: Array<{ id: number; accountLogin: string }>; hasServerToken: boolean }) {
+export function NewProductForm({ connections, hasServerToken, defaultOutputLanguage }: { connections: Array<{ id: number; accountLogin: string }>; hasServerToken: boolean; defaultOutputLanguage?: OutputLanguage }) {
   const router = useRouter();
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
@@ -40,6 +41,7 @@ export function NewProductForm({ connections, hasServerToken }: { connections: A
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [connectionId, setConnectionId] = useState<number | null>(defaultConnectionId(connections));
+  const [outputLanguage, setOutputLanguage] = useState<OutputLanguage>(defaultOutputLanguage ?? DEFAULT_OUTPUT_LANGUAGE);
 
   function updateName(value: string) {
     setName(value);
@@ -53,7 +55,7 @@ export function NewProductForm({ connections, hasServerToken }: { connections: A
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await handleProductCreation({ name, slug, repository, provider: "github", defaultBranch, description, analyze, connectionId }, {
+    await handleProductCreation({ name, slug, repository, provider: "github", defaultBranch, description, analyze, connectionId, outputLanguage }, {
       setPending,
       setError,
       onCreated: () => {
@@ -65,7 +67,7 @@ export function NewProductForm({ connections, hasServerToken }: { connections: A
 
   return (
     <form className="product-form" onSubmit={submit}>
-      <ProductInformationSection name={name} slug={slug} description={description} onNameChange={updateName} onSlugChange={updateSlug} onDescriptionChange={setDescription} />
+      <ProductInformationSection name={name} slug={slug} description={description} outputLanguage={outputLanguage} onNameChange={updateName} onSlugChange={updateSlug} onDescriptionChange={setDescription} onOutputLanguageChange={setOutputLanguage} />
       <RepositorySection repository={repository} defaultBranch={defaultBranch} connectionId={connectionId} connections={connections} hasServerToken={hasServerToken} onRepositoryChange={setRepository} onBranchChange={setDefaultBranch} onConnectionChange={setConnectionId} />
       <ProductSubmissionSection analyze={analyze} error={error} pending={pending} onAnalyze={setAnalyze} />
     </form>

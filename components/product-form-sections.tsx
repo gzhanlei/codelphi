@@ -1,16 +1,19 @@
 import { ConnectionSelect } from "./connection-select";
 import { GitHubRepositoryPicker } from "./github-repository-picker";
+import { OUTPUT_LANGUAGE_HINTS, OUTPUT_LANGUAGE_LABELS, type OutputLanguage } from "@/lib/analysis-language";
 
 interface ProductInformationProps {
   name: string;
   slug: string;
   description: string;
+  outputLanguage: OutputLanguage;
   onNameChange: (value: string) => void;
   onSlugChange: (value: string) => void;
   onDescriptionChange: (value: string) => void;
+  onOutputLanguageChange: (value: OutputLanguage) => void;
 }
 
-export function ProductInformationSection({ name, slug, description, onNameChange, onSlugChange, onDescriptionChange }: ProductInformationProps) {
+export function ProductInformationSection({ name, slug, description, outputLanguage, onNameChange, onSlugChange, onDescriptionChange, onOutputLanguageChange }: ProductInformationProps) {
   return (
     <div className="form-section">
       <div className="form-section-heading"><span>01</span><div><h2>产品信息</h2><p>用于在产品总览和浏览器地址中展示。</p></div></div>
@@ -19,6 +22,15 @@ export function ProductInformationSection({ name, slug, description, onNameChang
         <label className="field"><span>产品 Slug <b>*</b></span><input value={slug} onChange={(event) => onSlugChange(event.target.value)} placeholder="salesbuddy" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" required /><small>小写字母、数字和连字符；中文名产品可填 tingfeng。</small></label>
       </div>
       <label className="field"><span>产品简介</span><textarea value={description} onChange={(event) => onDescriptionChange(event.target.value)} placeholder="一句话说明这个产品解决什么问题" rows={3} maxLength={1000} /></label>
+      <label className="field">
+        <span>分析输出语言</span>
+        <select aria-label="分析输出语言" value={outputLanguage} onChange={(event) => onOutputLanguageChange(event.target.value as OutputLanguage)}>
+          {(Object.keys(OUTPUT_LANGUAGE_LABELS) as OutputLanguage[]).map((language) => (
+            <option key={language} value={language}>{OUTPUT_LANGUAGE_LABELS[language]}</option>
+          ))}
+        </select>
+        <small>{OUTPUT_LANGUAGE_HINTS[outputLanguage]}；之后可在产品「设置」里切换（切换后下一次分析全量重建）。</small>
+      </label>
     </div>
   );
 }

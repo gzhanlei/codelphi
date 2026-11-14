@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { NewProductForm } from "./new-product-form";
 import { hasProductCredentials } from "@/lib/integration-ui";
+import type { OutputLanguage } from "@/lib/analysis-language";
 
-export function NewProductContent({ connections, hasServerToken }: { connections: Array<{ id: number; accountLogin: string }>; hasServerToken: boolean }) {
+export function NewProductContent({ connections, hasServerToken, defaultOutputLanguage }: { connections: Array<{ id: number; accountLogin: string }>; hasServerToken: boolean; defaultOutputLanguage?: OutputLanguage }) {
   if (!hasProductCredentials(connections, hasServerToken)) {
     return (
       <section className="integration-card credentials-required">
@@ -13,5 +14,5 @@ export function NewProductContent({ connections, hasServerToken }: { connections
       </section>
     );
   }
-  return <NewProductForm connections={connections} hasServerToken={hasServerToken} />;
+  return <NewProductForm connections={connections} hasServerToken={hasServerToken} defaultOutputLanguage={defaultOutputLanguage} />;
 }

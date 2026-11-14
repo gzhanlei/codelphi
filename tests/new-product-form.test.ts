@@ -1,3 +1,5 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { handleProductCreation, NewProductForm } from "../components/new-product-form";
 import { productInputSchema } from "../lib/product-input";
@@ -23,9 +25,10 @@ describe("new product submission", () => {
 
   it("redirects the real form submission to the product list", async () => {
     createProductMock.mockResolvedValue("new-product");
-    const form = NewProductForm({ connections: [], hasServerToken: false }) as React.ReactElement<{ onSubmit: (event: { preventDefault: () => void }) => Promise<void> }>;
+    const form = NewProductForm({ connections: [], hasServerToken: false, defaultOutputLanguage: "en" }) as React.ReactElement<{ onSubmit: (event: { preventDefault: () => void }) => Promise<void> }>;
     await form.props.onSubmit({ preventDefault: vi.fn() });
     expect(createProductMock).toHaveBeenCalledOnce();
+    expect(createProductMock.mock.calls[0][0]).toMatchObject({ outputLanguage: "en" });
     expect(push).toHaveBeenCalledWith("/");
     expect(push).not.toHaveBeenCalledWith(expect.stringContaining("/products/"));
     expect(refresh).toHaveBeenCalledOnce();
@@ -34,12 +37,22 @@ describe("new product submission", () => {
   it("initializes analysis and pending states and records manual slug edits", () => {
     useStateMock.mockClear();
     stateSetters.length = 0;
-    const form = NewProductForm({ connections: [], hasServerToken: false }) as React.ReactElement<{ onSubmit: (event: { preventDefault: () => void }) => Promise<void>; children: React.ReactElement[] }>;
-    expect(useStateMock.mock.calls.map(([value]) => value)).toEqual(["", "", false, "", "", "", true, false, "", null]);
-    const information = form.props.children[0] as React.ReactElement<{ onSlugChange: (value: string) => void }>;
+    const form = NewProductForm({ connections: [], hasServerToken: false, defaultOutputLanguage: "en" }) as React.ReactElement<{ onSubmit: (event: { preventDefault: () => void }) => Promise<void>; children: React.ReactElement[] }>;
+    expect(useStateMock.mock.calls.map(([value]) => value)).toEqual(["", "", false, "", "", "", true, false, "", null, "en"]);
+    const information = form.props.children[0] as React.ReactElement<{ onSlugChange: (value: string) => void; onOutputLanguageChange: (value: string) => void }>;
     information.props.onSlugChange("custom-slug");
     expect(stateSetters[1]).toHaveBeenCalledWith("custom-slug");
     expect(stateSetters[2]).toHaveBeenCalledWith(true);
+    information.props.onOutputLanguageChange("zh-CN");
+    expect(stateSetters[10]).toHaveBeenCalledWith("zh-CN");
+  });
+
+  it("renders the output language selector with both options and the workspace default preselected", () => {
+    const html = renderToStaticMarkup(createElement(NewProductForm, { connections: [], hasServerToken: false, defaultOutputLanguage: "en" }));
+    expect(html).toContain("输出语言");
+    expect(html).toContain('value="zh-CN"');
+    expect(html).toContain('value="en"');
+    expect(html).toContain("English");
   });
 
   it("stays on the form and restores submission after a registration failure", async () => {
