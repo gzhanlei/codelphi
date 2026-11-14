@@ -7,6 +7,7 @@ const loadPublicDemoProduct = vi.fn();
 vi.mock("../lib/session", () => ({ getSessionUser: () => getSessionUser() }));
 vi.mock("../lib/public-demo", () => ({ loadPublicDemoProduct: () => loadPublicDemoProduct() }));
 vi.mock("next/navigation", () => ({ redirect: vi.fn(() => { throw new Error("redirect"); }) }));
+vi.mock("../lib/ui-locale-server", () => ({ resolveUiLocale: async () => "zh-CN" }));
 
 describe("login page public demo entry", () => {
   it("renders the demo link and all five anonymous exports when a public demo exists", async () => {

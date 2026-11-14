@@ -6,6 +6,8 @@ import { createProduct } from "@/lib/product-client";
 import { errorMessage } from "@/lib/error-message";
 import { defaultConnectionId, nextProductSlug } from "@/lib/product-input";
 import { DEFAULT_OUTPUT_LANGUAGE, type OutputLanguage } from "@/lib/analysis-language";
+import { pick, type UiLocale } from "@/lib/ui-locale";
+import { FEEDBACK } from "@/lib/ui-strings/dashboard";
 import { ProductSubmissionSection } from "./product-submission-section";
 import { ProductInformationSection, RepositorySection } from "./product-form-sections";
 
@@ -29,7 +31,7 @@ export async function handleProductCreation(input: ProductInput, controls: Produ
   }
 }
 
-export function NewProductForm({ connections, hasServerToken, defaultOutputLanguage }: { connections: Array<{ id: number; accountLogin: string }>; hasServerToken: boolean; defaultOutputLanguage?: OutputLanguage }) {
+export function NewProductForm({ connections, hasServerToken, defaultOutputLanguage, locale = "zh-CN" }: { connections: Array<{ id: number; accountLogin: string }>; hasServerToken: boolean; defaultOutputLanguage?: OutputLanguage; locale?: UiLocale }) {
   const router = useRouter();
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
@@ -67,8 +69,8 @@ export function NewProductForm({ connections, hasServerToken, defaultOutputLangu
 
   return (
     <form className="product-form" onSubmit={submit}>
-      <ProductInformationSection name={name} slug={slug} description={description} outputLanguage={outputLanguage} onNameChange={updateName} onSlugChange={updateSlug} onDescriptionChange={setDescription} onOutputLanguageChange={setOutputLanguage} />
-      <RepositorySection repository={repository} defaultBranch={defaultBranch} connectionId={connectionId} connections={connections} hasServerToken={hasServerToken} onRepositoryChange={setRepository} onBranchChange={setDefaultBranch} onConnectionChange={setConnectionId} />
+      <ProductInformationSection name={name} slug={slug} description={description} outputLanguage={outputLanguage} locale={locale} onNameChange={updateName} onSlugChange={updateSlug} onDescriptionChange={setDescription} onOutputLanguageChange={setOutputLanguage} />
+      <RepositorySection repository={repository} defaultBranch={defaultBranch} connectionId={connectionId} connections={connections} hasServerToken={hasServerToken} locale={locale} onRepositoryChange={setRepository} onBranchChange={setDefaultBranch} onConnectionChange={setConnectionId} />
       <ProductSubmissionSection analyze={analyze} error={error} pending={pending} onAnalyze={setAnalyze} />
     </form>
   );

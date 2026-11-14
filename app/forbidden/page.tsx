@@ -1,12 +1,16 @@
 import Link from "next/link";
+import { pick } from "@/lib/ui-locale";
+import { resolveUiLocale } from "@/lib/ui-locale-server";
+import { FORBIDDEN } from "@/lib/ui-strings/dashboard";
 
-export default function ForbiddenPage() {
+export default async function ForbiddenPage() {
+  const locale = await resolveUiLocale();
   return (
     <main className="status-page">
       <span className="eyebrow">403 · ACCESS CONTROL</span>
-      <h1>这个账号还没有 CoDelphi 权限</h1>
-      <p>当前部署启用了专用登录限制。请使用已授权的 Chandler 账号，或联系工作区管理员处理访问授权。</p>
-      <Link className="secondary-button" href="/login">返回登录</Link>
+      <h1>{pick(locale, FORBIDDEN.heading)}</h1>
+      <p>{pick(locale, FORBIDDEN.body)}</p>
+      <Link className="secondary-button" href="/login">{pick(locale, FORBIDDEN.backToLogin)}</Link>
     </main>
   );
 }

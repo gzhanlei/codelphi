@@ -1,5 +1,8 @@
 import Link from "next/link";
 import { ProductListRefresh } from "./analysis-status-refresh";
+import { pick, type UiLocale } from "@/lib/ui-locale";
+import { DASHBOARD as L } from "@/lib/ui-strings/dashboard";
+import { formatDateIn } from "@/lib/format";
 
 export interface DashboardProduct {
   id: number;
@@ -33,25 +36,25 @@ export function hasDashboardProductContent(product: DashboardProduct) {
 }
 
 /** 时间线日期：当年发布只显示月日，跨年的发布补年份（否则「11月8日」有歧义）。 */
-export function timelineDate(committedAt: Date) {
+export function timelineDate(committedAt: Date, locale: UiLocale = "zh-CN") {
   const date = new Date(committedAt);
   const sameYear = date.getFullYear() === new Date().getFullYear();
-  return new Intl.DateTimeFormat("zh-CN", sameYear ? { month: "short", day: "numeric" } : { year: "numeric", month: "short", day: "numeric" }).format(date);
+  return formatDateIn(locale, date, sameYear ? { month: "short", day: "numeric" } : { year: "numeric", month: "short", day: "numeric" });
 }
 
-function ProductCardContent({ product, pending }: { product: DashboardProduct; pending: boolean }) {
+function ProductCardContent({ product, pending, locale = "zh-CN" }: { product: DashboardProduct; pending: boolean; locale?: UiLocale }) {
   const hasContent = hasDashboardProductContent(product);
   return <>
     <div className="product-icon">{product.name.slice(0, 1)}</div>
     <div className="product-card-title"><h3>{product.name}</h3><span>{pending ? "…" : "↗"}</span></div>
-    <p aria-live={pending ? "polite" : undefined}>{pending ? (hasContent ? "分析中，历史规格可查看" : "分析中，请稍候") : product.description}</p>
-    <div className="product-meta"><span>{Number(product.featureCount)} 个功能</span><span>{Number(product.releaseCount)} 次发布</span></div>
+    <p aria-live={pending ? "polite" : undefined}>{pending ? (hasContent ? pick(locale, L.analyzingWithHistory) : pick(locale, L.analyzing)) : product.description}</p>
+    <div className="product-meta"><span>{Number(product.featureCount)}{pick(locale, L.featureUnit)}</span><span>{Number(product.releaseCount)}{pick(locale, L.releaseUnit)}</span></div>
   </>;
 }
 
-export function ProductGrid({ products }: { products: DashboardProduct[] }) {
+export function ProductGrid({ products, locale = "zh-CN" }: { products: DashboardProduct[]; locale?: UiLocale }) {
   if (products.length === 0) {
-    return <div className="empty-state"><strong>还没有接入产品</strong><p>配置 MySQL 后运行 <code>npm run db:seed</code> 注册 CoDelphi 自身。</p></div>;
+    return <div className="empty-state"><strong>{pick(locale, L.emptyProductsTitle)}</strong><p>{pick(locale, L.emptyProductsBody)}<code>npm run db:seed</code>{pick(locale, L.emptyProductsTail)}</p></div>;
   }
   return (
     <>
@@ -59,7 +62,7 @@ export function ProductGrid({ products }: { products: DashboardProduct[] }) {
       <div className="product-grid">
         {products.map((product) => {
           const pending = isDashboardProductPending(product);
-          const card = <ProductCardContent product={product} pending={pending} />;
+          const card = <ProductCardContent product={product} pending={pending} locale={locale} />;
           if (!pending || hasDashboardProductContent(product)) {
             return <Link href={`/products/${product.organizationSlug}/${product.slug}`} className="product-card" key={product.id}>{card}</Link>;
           }
@@ -71,9 +74,9 @@ export function ProductGrid({ products }: { products: DashboardProduct[] }) {
   );
 }
 
-export function ReleaseTimeline({ releases }: { releases: DashboardRelease[] }) {
+export function ReleaseTimeline({ releases, locale = "zh-CN" }: { releases: DashboardRelease[]; locale?: UiLocale }) {
   if (releases.length === 0) {
-    return <div className="empty-state compact"><p>完成第一次代码分析后，发布变化会出现在这里。</p></div>;
+    return <div className="empty-state compact"><p>{pick(locale, L.emptyTimeline)}</p></div>;
   }
   return (
     <div className="timeline-list">
@@ -81,7 +84,7 @@ export function ReleaseTimeline({ releases }: { releases: DashboardRelease[] }) 
         <Link href={`/products/${release.organizationSlug}/${release.productSlug}?view=changes`} className="timeline-item" key={release.id}>
           <span className="timeline-dot" />
           <div><div className="timeline-title"><span className="product-tag">{release.productName}</span><h3>{release.title}</h3></div><p>{release.summary}</p></div>
-          <time>{timelineDate(release.committedAt)}</time>
+          <time>{timelineDate(release.committedAt, locale)}</time>
         </Link>
       ))}
     </div>

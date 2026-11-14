@@ -6,6 +6,8 @@ import { requireSessionUser } from "@/lib/session";
 import { requireOrganization } from "@/lib/organizations";
 import { resolveUiLocale } from "@/lib/ui-locale-server";
 import { formatDateIn } from "@/lib/format";
+import { pick } from "@/lib/ui-locale";
+import { DASHBOARD } from "@/lib/ui-strings/dashboard";
 
 export const dynamic = "force-dynamic";
 
@@ -48,21 +50,21 @@ export default async function DashboardPage() {
   return (
     <AppShell user={user} organizationName={organization.name}>
       <div className="page-heading">
-        <div><span className="eyebrow">YOUR PRODUCT PULSE</span><h1>产品总览</h1><p>所有产品的当前规格与最新变化，集中在这里。</p></div>
-        <div className="page-actions"><span className="date-chip">{formatDateIn(locale, new Date(), { month: "long", day: "numeric", weekday: "short" })}</span><Link href="/products/new" className="primary-button">＋ 添加产品</Link></div>
+        <div><span className="eyebrow">YOUR PRODUCT PULSE</span><h1>{pick(locale, DASHBOARD.heading)}</h1><p>{pick(locale, DASHBOARD.subheading)}</p></div>
+        <div className="page-actions"><span className="date-chip">{formatDateIn(locale, new Date(), { month: "long", day: "numeric", weekday: "short" })}</span><Link href="/products/new" className="primary-button">{pick(locale, DASHBOARD.addProduct)}</Link></div>
       </div>
-      <section className="stats-grid" aria-label="产品统计">
-        <div className="stat-card"><span>已接入产品</span><strong>{products.length}</strong><small>个独立产品空间</small></div>
-        <div className="stat-card"><span>活跃功能</span><strong>{featureTotal}</strong><small>个可追溯功能</small></div>
-        <div className="stat-card"><span>已分析发布</span><strong>{releaseTotal}</strong><small>次代码发布</small></div>
+      <section className="stats-grid" aria-label={pick(locale, DASHBOARD.statsAria)}>
+        <div className="stat-card"><span>{pick(locale, DASHBOARD.statProducts)}</span><strong>{products.length}</strong><small>{pick(locale, DASHBOARD.statProductsUnit)}</small></div>
+        <div className="stat-card"><span>{pick(locale, DASHBOARD.statFeatures)}</span><strong>{featureTotal}</strong><small>{pick(locale, DASHBOARD.statFeaturesUnit)}</small></div>
+        <div className="stat-card"><span>{pick(locale, DASHBOARD.statReleases)}</span><strong>{releaseTotal}</strong><small>{pick(locale, DASHBOARD.statReleasesUnit)}</small></div>
       </section>
       <section className="section-block">
-        <div className="section-heading"><h2>产品空间</h2><span>{products.length} 个产品</span></div>
-        <ProductGrid products={products} />
+        <div className="section-heading"><h2>{pick(locale, DASHBOARD.sectionProducts)}</h2><span>{products.length}{pick(locale, DASHBOARD.sectionProductsCount)}</span></div>
+        <ProductGrid products={products} locale={locale} />
       </section>
       <section className="section-block">
-        <div className="section-heading"><h2>最近变化</h2><span>按发布时间排序</span></div>
-        <ReleaseTimeline releases={releases} />
+        <div className="section-heading"><h2>{pick(locale, DASHBOARD.sectionChanges)}</h2><span>{pick(locale, DASHBOARD.sectionChangesNote)}</span></div>
+        <ReleaseTimeline releases={releases} locale={locale} />
       </section>
     </AppShell>
   );

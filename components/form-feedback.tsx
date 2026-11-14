@@ -11,15 +11,18 @@ export function InlineMessage({ message }: { message: string }) {
   return <TextMessage message={message} className="inline-message" />;
 }
 
-export function analysisButtonLabel(pending: boolean) {
-  return pending ? "正在提交…" : "立即分析";
+import { pick, type UiLocale } from "@/lib/ui-locale";
+import { FEEDBACK } from "@/lib/ui-strings/dashboard";
+
+export function analysisButtonLabel(pending: boolean, locale: UiLocale = "zh-CN") {
+  return pending ? pick(locale, FEEDBACK.analyzing) : pick(locale, FEEDBACK.analyzeNow);
 }
 
-export function submitLabel(pending: boolean, analyze: boolean) {
-  if (pending) return "正在验证并添加…";
-  return analyze ? "添加并开始分析" : "添加产品";
+export function submitLabel(pending: boolean, analyze: boolean, locale: UiLocale = "zh-CN") {
+  if (pending) return pick(locale, FEEDBACK.submittingAdd);
+  return analyze ? pick(locale, FEEDBACK.addAndAnalyze) : pick(locale, FEEDBACK.addProduct);
 }
 
-export function ProductSubmitButton({ pending, analyze }: { pending: boolean; analyze: boolean }) {
-  return <button className="primary-button" type="submit" disabled={pending}>{submitLabel(pending, analyze)}</button>;
+export function ProductSubmitButton({ pending, analyze, locale = "zh-CN" }: { pending: boolean; analyze: boolean; locale?: UiLocale }) {
+  return <button className="primary-button" type="submit" disabled={pending}>{submitLabel(pending, analyze, locale)}</button>;
 }
