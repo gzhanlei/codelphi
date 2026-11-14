@@ -1,4 +1,5 @@
 import { evidenceKind } from "./evidence";
+import { crossLanguageText, hasCjk, negationCountOf } from "./text-script";
 import type { Evidence } from "./types";
 
 export interface SpecScenario {
@@ -52,9 +53,9 @@ export function normalizeSpecText(text: string) {
   return text.normalize("NFKC").replace(/\s+/g, " ").trim();
 }
 
-/** 比较用内容串：去掉空白与标点，只留承载语义的字符（比较用途，不影响落库）。 */
+/** 比较用内容串：去掉空白与标点、英文折叠大小写，只留承载语义的字符（比较用途，不影响落库）。 */
 function specContent(text: string) {
-  return normalizeSpecText(text).replace(/[\p{P}\p{S}\s]/gu, "");
+  return normalizeSpecText(text).toLowerCase().replace(/[\p{P}\p{S}\s]/gu, "");
 }
 
 function tokenSignature(text: string) {
@@ -62,7 +63,7 @@ function tokenSignature(text: string) {
 }
 
 function negationCount(text: string) {
-  return (text.match(/[不无没未非莫勿]/g) ?? []).length;
+  return negationCountOf(text);
 }
 
 function editDistance(left: string, right: string) {
@@ -99,6 +100,11 @@ const CONTENT_STOP_GRAMS = new Set(["一项", "用户", "该功", "功能", "对
 function contentGrams(text: string): Set<string> {
   const grams = new Set<string>();
   for (const chunk of normalizeSpecText(text).split(/[^\u4e00-\u9fa5A-Za-z0-9]+/)) {
+    // 纯英文段按词取 token（字符 2-gram 对英文近似文本区分度不足）；中文与混合段保持 2-gram。
+    if (/^[A-Za-z]+$/.test(chunk)) {
+      grams.add(chunk.toLowerCase());
+      continue;
+    }
     for (let index = 0; index + 2 <= chunk.length; index += 1) {
       const gram = chunk.slice(index, index + 2);
       if (CONTENT_STOP_GRAMS.has(gram)) continue;
@@ -119,12 +125,15 @@ export function contentJaccard(left: string, right: string): number {
 }
 
 export function specTextEquivalent(before: string, after: string) {
+  // 跨语种（单侧含 CJK）一律判不等：语言切换 run 的旧语种文本不得被英文新文本折叠。
+  if (crossLanguageText(before, after)) return false;
   const left = specContent(before);
   const right = specContent(after);
   if (left === right) return true;
   if (left === "" || right === "") return false;
-  if (tokenSignature(left) !== tokenSignature(right)) return false;
-  if (negationCount(left) !== negationCount(right)) return false;
+  // token 签名在保留空格的归一文本上取词：英文去空格后整段成 blob，词级比较失效。
+  if (tokenSignature(normalizeSpecText(before).toLowerCase()) !== tokenSignature(normalizeSpecText(after).toLowerCase())) return false;
+  if (negationCountOf(before) !== negationCountOf(after)) return false;
   const distance = editDistance(left, right);
   const longest = Math.max(left.length, right.length);
   const similarity = 1 - distance / longest;
@@ -154,13 +163,17 @@ function mergedSortedKeys(left: Map<string, unknown>, right: Map<string, unknown
   return [...new Set([...left.keys(), ...right.keys()])].sort();
 }
 
-function changeSummary(kind: SpecChange["kind"], entityType: SpecChange["entityType"], featureName: string, reference: string | null) {
+function changeSummary(kind: SpecChange["kind"], entityType: SpecChange["entityType"], featureName: string, reference: string | null, language: "zh-CN" | "en" = "zh-CN") {
+  if (language === "en") {
+    const action = { added: "Added", changed: "Updated", removed: "Removed" }[kind];
+    return entityType === "feature" ? `${action} feature "${featureName}"` : `"${featureName}" ${action.toLowerCase()} scenario ${reference}`;
+  }
   const action = { added: "新增", changed: "更新", removed: "移除" }[kind];
   return entityType === "feature" ? `${action}功能「${featureName}」` : `「${featureName}」${action}场景 ${reference}`;
 }
 
-function featureChange(kind: "added" | "removed" | "changed", feature: SpecFeature, before: SpecFeature | null, after: SpecFeature | null): SpecChange {
-  return { kind, entityType: "feature", featureName: feature.name, scenarioReference: null, summary: changeSummary(kind, "feature", feature.name, null), before, after };
+function featureChange(kind: "added" | "removed" | "changed", feature: SpecFeature, before: SpecFeature | null, after: SpecFeature | null, language?: "zh-CN" | "en"): SpecChange {
+  return { kind, entityType: "feature", featureName: feature.name, scenarioReference: null, summary: changeSummary(kind, "feature", feature.name, null, language), before, after };
 }
 
 
@@ -213,14 +226,17 @@ function digitSignature(text: string): string {
 }
 
 function variantFieldGate(left: string, right: string, strictJaccard: boolean): boolean {
+  // 跨语种直接拒绝：不同语种的字段不可能描述同一变体（语言切换 run 的旧↔新对）。
+  if (crossLanguageText(left, right)) return false;
   const l = specContent(left);
   const r = specContent(right);
   if (l === r) return true;
   if (digitSignature(l) !== digitSignature(r)) return false;
-  const lLatin = latinTokens(l);
-  const rLatin = latinTokens(r);
+  // 英文词交集在保留空格的归一文本上取词（去空格 blob 会吞掉词边界）。
+  const lLatin = latinTokens(normalizeSpecText(left));
+  const rLatin = latinTokens(normalizeSpecText(right));
   if (lLatin.size > 0 && rLatin.size > 0 && ![...lLatin].some((token) => rLatin.has(token))) return false;
-  if (negationCount(l) !== negationCount(r)) return false;
+  if (negationCountOf(left) !== negationCountOf(right)) return false;
   if (strictJaccard && l.length >= VARIANT_FIELD_MIN_CHARS && r.length >= VARIANT_FIELD_MIN_CHARS && contentJaccard(left, right) < VARIANT_FIELD_JACCARD_FLOOR) return false;
   return true;
 }
@@ -232,8 +248,11 @@ export function scenarioVariantSimilar(previous: SpecScenario, current: SpecScen
   if (!variantFieldGate(previous.action, current.action, true)) return false;
   if (!variantFieldGate(previous.outcome, current.outcome, true)) return false;
   if (specTextEquivalent(previous.action, current.action) && specTextEquivalent(previous.outcome, current.outcome)) return true;
-  const previousCombined = `${previous.context}${previous.action}${previous.outcome}`;
-  const currentCombined = `${current.context}${current.action}${current.outcome}`;
+  // 合并兜底串：纯英文对用空格拼接（无分隔会把 "Editor"+"Publishes" 粘成跨词 blob）；
+  // 中文与混合文本保持原拼接（字节路径不变，跨字段 2-gram 既有口径不动）。
+  const separator = hasCjk(`${previous.context}${previous.action}${previous.outcome}`) ? "" : " ";
+  const previousCombined = `${previous.context}${separator}${previous.action}${separator}${previous.outcome}`;
+  const currentCombined = `${current.context}${separator}${current.action}${separator}${current.outcome}`;
   return contentJaccard(previousCombined, currentCombined) >= VARIANT_JACCARD_THRESHOLD;
 }
 
@@ -272,12 +291,14 @@ interface DiffOutcome {
   folded: FoldedSpecChange[];
 }
 
-/** 折叠判定的可选上下文：本发布中确有行为性行变更的文件路径集（lib/patch-scan 产出）。 */
+/** 折叠判定的可选上下文：本发布中确有行为性行变更的文件路径集（lib/patch-scan 产出）；
+ *  language 决定确定性变化摘要（changeSummary）的语种，取新版本的分析输出语言。 */
 export interface DiffSpecOptions {
   behavioralChangePaths?: ReadonlySet<string>;
+  language?: "zh-CN" | "en";
 }
 
-function scenarioChanges(before: SpecFeature, after: SpecFeature, outcome: DiffOutcome) {
+function scenarioChanges(before: SpecFeature, after: SpecFeature, outcome: DiffOutcome, language?: "zh-CN" | "en") {
   const beforeScenarios = scenarioMap(before);
   const afterScenarios = scenarioMap(after);
   const changes: SpecChange[] = [];
@@ -298,7 +319,7 @@ function scenarioChanges(before: SpecFeature, after: SpecFeature, outcome: DiffO
       entityType: "scenario",
       featureName: after.name,
       scenarioReference: reference,
-      summary: changeSummary(kind, "scenario", after.name, reference),
+      summary: changeSummary(kind, "scenario", after.name, reference, language),
       before: previous === undefined ? null : previous,
       after: current === undefined ? null : current,
     });
@@ -361,22 +382,23 @@ function featureScenarioSetChanges(before: SpecFeature, after: SpecFeature): Spe
 }
 
 function diffFeature(previous: SpecFeature | undefined, current: SpecFeature | undefined, outcome: DiffOutcome, options?: DiffSpecOptions) {
+  const language = options?.language;
   if (!previous && current) {
     if (featureEvidenceNonBehavioral(current, options?.behavioralChangePaths)) {
       outcome.folded.push({ reason: "tests-only", entityType: "feature", featureName: current.name, scenarioReference: null, before: null, after: current });
     } else {
-      outcome.changes.push(featureChange("added", current, null, current));
+      outcome.changes.push(featureChange("added", current, null, current, language));
     }
     return;
   }
   if (previous && !current) {
-    outcome.changes.push(featureChange("removed", previous, previous, null));
+    outcome.changes.push(featureChange("removed", previous, previous, null, language));
     return;
   }
   if (!previous || !current) return;
 
   const scenarioOutcome: DiffOutcome = { changes: [], folded: [] };
-  scenarioChanges(previous, current, scenarioOutcome);
+  scenarioChanges(previous, current, scenarioOutcome, language);
 
   if (featureBehaviorChanged(previous, current)) {
     const identityChanged = previous.name !== current.name || (previous.parentKey ?? null) !== (current.parentKey ?? null);
@@ -386,7 +408,7 @@ function diffFeature(previous: SpecFeature | undefined, current: SpecFeature | u
       // 但场景一个没动）。折叠供审计，落库文本仍采用新版。
       outcome.folded.push({ reason: "wording", entityType: "feature", featureName: current.name, scenarioReference: null, before: previous, after: current });
     } else {
-      outcome.changes.push({ kind: "changed", entityType: "feature", featureName: current.name, scenarioReference: null, summary: changeSummary("changed", "feature", current.name, null), before: previous, after: current });
+      outcome.changes.push({ kind: "changed", entityType: "feature", featureName: current.name, scenarioReference: null, summary: changeSummary("changed", "feature", current.name, null, language), before: previous, after: current });
     }
   } else if (previous.summary !== current.summary) {
     outcome.folded.push({ reason: "wording", entityType: "feature", featureName: current.name, scenarioReference: null, before: previous, after: current });

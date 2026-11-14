@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diffSpec, diffSpecWithFolded, mergeSpecSources, normalizeSpecText, specChangeWordingOnly, specFeatureKey, specScenarioKey, specTextEquivalent, type SpecFeature } from "../lib/spec-diff";
+import { diffSpec, diffSpecWithFolded, mergeSpecSources, normalizeSpecText, scenarioVariantSimilar, scenarioBehaviorEqual, specChangeWordingOnly, specFeatureKey, specScenarioKey, specTextEquivalent, type SpecFeature, type SpecScenario } from "../lib/spec-diff";
 
 const authentication: SpecFeature = {
   name: "Authentication",
@@ -437,5 +437,46 @@ describe("scenario step (W-DECISION 判定面裁决)", () => {
     // 账本如实记录 step：before/after 序列化包含 step 字段
     const scenarioChange = result.find((change) => change.entityType === "scenario");
     expect((scenarioChange?.after as { step?: number }).step).toBe(1);
+  });
+});
+
+describe("bilingual equivalence gates (EN output mode)", () => {
+  it("treats English case/punctuation drift as equivalent and digit/negation drift as change", () => {
+    expect(specTextEquivalent("Opens the product overview", "opens the product  overview")).toBe(true);
+    expect(specTextEquivalent("Returns the created order", "Returns the created orders")).toBe(false);
+    expect(specTextEquivalent("User can retry", "User cannot retry")).toBe(false);
+    expect(specTextEquivalent("不可以重试", "cannot retry")).toBe(false);
+    expect(scenarioBehaviorEqual(
+      { reference: "HP-1", category: "happy", context: "Editor", action: "Publishes the product", outcome: "Product becomes visible", evidence: [] },
+      { reference: "HP-1", category: "happy", context: "Editor", action: "Publishes the product", outcome: "Product becomes visible to visitors", evidence: [] },
+    )).toBe(false);
+  });
+
+  it("keeps the variant channel working on English scenarios", () => {
+    expect(scenarioVariantSimilar(
+      { category: "happy", context: "Editor", action: "Publishes the product", outcome: "Product becomes visible", evidence: [] } as SpecScenario,
+      { category: "happy", context: "Workspace editor", action: "Publishes a product", outcome: "The product is visible", evidence: [] } as SpecScenario,
+    )).toBe(true);
+    expect(scenarioVariantSimilar(
+      { category: "error", context: "Visitor", action: "Requests a missing product", outcome: "Responds with 404", evidence: [] } as SpecScenario,
+      { category: "error", context: "Visitor", action: "Requests a missing product", outcome: "Responds with 400", evidence: [] } as SpecScenario,
+    )).toBe(false);
+    expect(scenarioVariantSimilar(
+      { category: "happy", context: "编辑者", action: "发布产品", outcome: "产品对访客可见", evidence: [] } as SpecScenario,
+      { category: "happy", context: "Editor", action: "Publishes the product", outcome: "Product becomes visible", evidence: [] } as SpecScenario,
+    )).toBe(false);
+  });
+
+  it("writes English change summaries when diffSpec runs in English mode", () => {
+    const english = diffSpec([], [{ name: "Login", summary: "s", scenarios: [] }], { language: "en" });
+    expect(english[0].summary).toBe('Added feature "Login"');
+    const chinese = diffSpec([], [{ name: "Login", summary: "s", scenarios: [] }]);
+    expect(chinese[0].summary).toBe("新增功能「Login」");
+    const englishScenario = diffSpec(
+      [{ name: "Login", summary: "s", scenarios: [{ reference: "HP-1", context: "a", action: "b", outcome: "c", category: "happy", evidence: [] }] }],
+      [{ name: "Login", summary: "s", scenarios: [] }],
+      { language: "en" },
+    );
+    expect(englishScenario[0].summary).toBe('"Login" removed scenario HP-1');
   });
 });
