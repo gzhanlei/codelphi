@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { WorkspaceTriggerDefaultSettings } from "@/components/workspace-trigger-default-settings";
+import { WorkspaceOutputLanguageSettings } from "@/components/workspace-output-language-settings";
 import { McpKeysSettings } from "@/components/mcp-keys-settings";
 import { listApiKeys } from "@/lib/mcp/api-keys";
-import { getWorkspaceTriggerDefault } from "@/lib/analysis-trigger";
+import { getWorkspaceTriggerDefault, getWorkspaceOutputLanguageDefault } from "@/lib/analysis-trigger";
 import { getDb } from "@/lib/db";
 import { requireSessionUser } from "@/lib/session";
 import { currentOrganization } from "@/lib/organizations";
@@ -122,6 +123,8 @@ export default async function SettingsPage() {
       </section>
 
       <WorkspaceTriggerDefaultSettings canEdit={canEdit} current={workspaceDefault} />
+
+      <WorkspaceOutputLanguageSettings canEdit={canEdit} current={await getWorkspaceOutputLanguageDefault(accountId)} />
 
       <McpKeysSettings canManage={canEdit} initialKeys={await listApiKeys(db, organization.id)} />
 

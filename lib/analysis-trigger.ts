@@ -142,3 +142,16 @@ export async function updateWorkspaceTriggerDefault(organizationId: number, inpu
     [input.trigger, input.trigger === "push_count" ? input.n : null, input.trigger === "push" ? null : input.hour, organizationId],
   );
 }
+
+/** 工作区默认输出语言（migration 072）：新接入的产品注册时继承，已有产品不受影响。 */
+export async function getWorkspaceOutputLanguageDefault(organizationId: number, execute: Execute = defaultExecute): Promise<"zh-CN" | "en"> {
+  const [rows] = await execute(
+    `SELECT default_output_language AS defaultOutputLanguage FROM organizations WHERE id = ? LIMIT 1`,
+    [organizationId],
+  ) as [Array<{ defaultOutputLanguage: string }>, unknown];
+  return rows[0]?.defaultOutputLanguage === "en" ? "en" : "zh-CN";
+}
+
+export async function updateWorkspaceOutputLanguageDefault(organizationId: number, language: "zh-CN" | "en", execute: Execute = defaultExecute) {
+  await execute(`UPDATE organizations SET default_output_language = ? WHERE id = ?`, [language, organizationId]);
+}
