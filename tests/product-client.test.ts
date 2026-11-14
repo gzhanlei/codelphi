@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createProduct, renameProduct, requestAnalysis, updateDescription } from "../lib/product-client";
+import { createProduct, renameProduct, requestAnalysis, setOutputLanguage, updateDescription } from "../lib/product-client";
 import { productInputSchema } from "../lib/product-input";
 
 const input = productInputSchema.parse({ name: "SalesBuddy", slug: "salesbuddy", description: "", repository: "gzhanlei/salesbuddy", defaultBranch: "", analyze: false });
@@ -38,6 +38,18 @@ describe("rename client", () => {
     }));
     await expect(renameProduct("radar", { name: "CoDelphi" }, async () => new Response(JSON.stringify({ error: "该 Slug 已被同工作区其他产品使用" }), { status: 409 }))).rejects.toThrow("该 Slug 已被同工作区其他产品使用");
     await expect(renameProduct("radar", { name: "CoDelphi" }, async () => new Response(JSON.stringify({ status: "updated", slug: "codelphi" }), { status: 200 }))).rejects.toThrow("保存产品信息失败");
+  });
+});
+
+describe("output language client", () => {
+  it("patches the product output language and surfaces failures", async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ status: "updated" }), { status: 200 }));
+    await expect(setOutputLanguage("radar", "en", fetcher)).resolves.toBe("updated");
+    expect(fetcher).toHaveBeenCalledWith("/api/products/radar", expect.objectContaining({
+      method: "PATCH",
+      body: JSON.stringify({ outputLanguage: "en" }),
+    }));
+    await expect(setOutputLanguage("radar", "en", async () => new Response(JSON.stringify({ error: "只有工作区成员可以修改公开演示设置" }), { status: 403 }))).rejects.toThrow("只有工作区成员可以修改公开演示设置");
   });
 });
 

@@ -62,6 +62,18 @@ export async function setPublicDemo(slug: string, isPublicDemo: boolean, fetcher
   return "updated" as const;
 }
 
+/** 切换分析输出语言；下一次分析将全量重建为新语言版本。 */
+export async function setOutputLanguage(slug: string, outputLanguage: "zh-CN" | "en", fetcher: Fetcher = fetch) {
+  const response = await fetcher(`/api/products/${slug}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ outputLanguage }),
+  });
+  const data = await productResponse<{ status?: string; error?: string }>(response, "保存输出语言设置失败");
+  if (data.status !== "updated") throw new Error(data.error ?? "保存输出语言设置失败");
+  return "updated" as const;
+}
+
 export interface MemberEntry { userId: number; displayName: string; email: string; role: string }
 export interface InvitationEntry { id: number; email: string; role: string; expiresAt: string | Date | null }
 export interface MemberRoster { organizationMembers: MemberEntry[]; productMembers: MemberEntry[]; invitations: InvitationEntry[] }

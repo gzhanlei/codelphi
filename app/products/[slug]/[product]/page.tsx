@@ -9,6 +9,7 @@ import { AppShell } from "@/components/app-shell";
 import { DemoShell } from "@/components/demo-shell";
 import { NotificationSettings } from "@/components/notification-settings";
 import { ProductIdentitySettings } from "@/components/product-identity-settings";
+import { ProductOutputLanguageSettings } from "@/components/product-output-language-settings";
 import { ProductMembersSettings } from "@/components/product-members-settings";
 import { ProductTabs, ProductView, RepositoryLink, RunStatus } from "@/components/product-navigation";
 import { PublicDemoSettings } from "@/components/public-demo-settings";
@@ -130,6 +131,12 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
       <RepositoryTriggerSettings
         slug={details.product.slug}
         repos={await listProductRepositoryTriggers(details.product.id, defaultExecute)}
+        canEdit={access.role !== "viewer"}
+      />
+
+      <ProductOutputLanguageSettings
+        slug={details.product.slug}
+        current={details.product.outputLanguage === "en" ? "en" : "zh-CN"}
         canEdit={access.role !== "viewer"}
       />
     </>

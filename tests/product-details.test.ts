@@ -6,7 +6,7 @@ vi.mock("../lib/db", () => ({ getDb: () => ({ execute }), defaultExecute: execut
 const { loadFeatureFlowErrors, loadFeatureFlowGraphs } = vi.hoisted(() => ({ loadFeatureFlowErrors: vi.fn(), loadFeatureFlowGraphs: vi.fn() }));
 vi.mock("../lib/feature-flow-store", () => ({ loadFeatureFlowErrors, loadFeatureFlowGraphs }));
 
-const product = { id: 4, slug: "radar", name: "Radar", description: "Product knowledge", descriptionSource: "generated", descriptionEvidence: JSON.stringify([{ path: "lib/analysis.ts", startLine: 185 }]) };
+const product = { id: 4, slug: "radar", name: "Radar", description: "Product knowledge", descriptionSource: "generated", descriptionEvidence: JSON.stringify([{ path: "lib/analysis.ts", startLine: 185 }]), outputLanguage: "en" };
 
 describe("product details", () => {
   beforeEach(() => {
@@ -71,6 +71,8 @@ describe("product details", () => {
     // R1 账本随详情返回（六维度 + overall），供规格页完整性行渲染
     expect(details?.completeness).toMatchObject({ overall: "partial", sourceCoverage: "partial", mergeIntegrity: "partial" });
     expect(details?.product.descriptionEvidence).toEqual([{ path: "lib/analysis.ts", startLine: 185 }]);
+    expect(details?.product.outputLanguage).toBe("en");
+    expect(execute.mock.calls[0][0]).toContain("output_language AS outputLanguage");
     expect(execute.mock.calls[0][1]).toEqual(["radar"]);
     expect(execute.mock.calls[0][0]).not.toContain("organization_id = ?");
   });
@@ -150,5 +152,7 @@ describe("product details", () => {
     });
     const details = await getProductDetails("radar");
     expect(details?.product.descriptionEvidence).toEqual([{ path: "lib/analysis.ts", startLine: 185 }]);
+    expect(details?.product.outputLanguage).toBe("en");
+    expect(execute.mock.calls[0][0]).toContain("output_language AS outputLanguage");
   });
 });
