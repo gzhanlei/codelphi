@@ -5,6 +5,8 @@ import { WorkspaceOutputLanguageSettings } from "@/components/workspace-output-l
 import { McpKeysSettings } from "@/components/mcp-keys-settings";
 import { listApiKeys } from "@/lib/mcp/api-keys";
 import { getWorkspaceTriggerDefault, getWorkspaceOutputLanguageDefault } from "@/lib/analysis-trigger";
+import { resolveUiLocale } from "@/lib/ui-locale-server";
+import { formatDateTimeIn } from "@/lib/format";
 import { getDb } from "@/lib/db";
 import { requireSessionUser } from "@/lib/session";
 import { currentOrganization } from "@/lib/organizations";
@@ -20,14 +22,14 @@ const STATUS_LABEL: Record<string, string> = {
 
 const WALLET_LABEL: Record<string, string> = { trial: "试用额度", plan: "套餐额度", gift: "活动赠送", pack: "超额包" };
 
-function formatDate(value: unknown) {
-  if (!value) return "—";
-  return new Date(value as string).toLocaleString("zh-CN", { dateStyle: "medium", timeStyle: "short" });
+function formatDate(locale: "zh-CN" | "en", value: unknown) {
+  return formatDateTimeIn(locale, value);
 }
 
 /** 账户设置页：套餐额度状态 + 工作区级设置 + 各产品分析入口 + 订单记录。 */
 export default async function SettingsPage() {
   const user = await requireSessionUser();
+  const uiLocale = await resolveUiLocale();
   const organization = await currentOrganization(user);
   const db = getDb();
   const accountId = organization.id;
@@ -115,9 +117,9 @@ export default async function SettingsPage() {
         {isTrial ? (
           <p className="overview-note">试用额度累计发放、不按周期重置；升级付费后剩余试用额度保留并优先消耗。</p>
         ) : (
-          <p className="overview-note">当前计费周期：{formatDate(account?.current_period_start)} → {formatDate(account?.current_period_end)}；下次额度重置：{formatDate(account?.current_period_end)}</p>
+          <p className="overview-note">当前计费周期：{formatDate(uiLocale, account?.current_period_start)} → {formatDate(uiLocale, account?.current_period_end)}；下次额度重置：{formatDate(uiLocale, account?.current_period_end)}</p>
         )}
-        {account?.grace_until && account.plan_status === "grace" ? <p className="overview-error">宽限期至 {formatDate(account.grace_until)}：期间无法发起新分析，续费立即恢复。</p> : null}
+        {account?.grace_until && account.plan_status === "grace" ? <p className="overview-error">宽限期至 {formatDate(uiLocale, account.grace_until)}：期间无法发起新分析，续费立即恢复。</p> : null}
         {openExceptions > 0 ? <p className="overview-error">结算异常待人工确认：{openExceptions} 条。</p> : null}
         <p className="overview-note">失败的分析不扣额度（累计释放 {failedReleased} 次）。<Link href="/pricing" className="text-button">升级 / 续费 / 购买超额包 →</Link></p>
       </section>
@@ -140,7 +142,7 @@ export default async function SettingsPage() {
                 <span style={{ fontWeight: 400 }}> · 设置 →</span>
               </p>
               <p className="overview-note" style={{ margin: 0 }}>
-                {skipped ? `自动分析跳过 ${skipped.count} 次（最近 ${formatDate(skipped.lastAt)}）——恢复同步请到产品页「补分析最新提交」` : "无被跳过的自动分析"}
+                {skipped ? `自动分析跳过 ${skipped.count} 次（最近 ${formatDate(uiLocale, skipped.lastAt)}）——恢复同步请到产品页「补分析最新提交」` : "无被跳过的自动分析"}
               </p>
             </div>
           );
@@ -159,7 +161,7 @@ export default async function SettingsPage() {
                 <td>{wallet.status}</td>
                 <td>{wallet.remaining_sau}</td>
                 <td>{wallet.reserved_sau}</td>
-                <td>{wallet.expires_at ? formatDate(wallet.expires_at) : "—"}</td>
+                <td>{wallet.expires_at ? formatDate(uiLocale, wallet.expires_at) : "—"}</td>
               </tr>
             ))}
             {wallets.length === 0 ? <tr><td colSpan={5}>尚无额度钱包。</td></tr> : null}
@@ -179,7 +181,7 @@ export default async function SettingsPage() {
                 <td>{order.status}</td>
                 <td>{order.refund_status}</td>
                 <td>¥{(order.amount / 100).toFixed(2)}</td>
-                <td>{formatDate(order.created_at)}</td>
+                <td>{formatDate(uiLocale, order.created_at)}</td>
               </tr>
             ))}
             {orders.length === 0 ? <tr><td colSpan={6}>暂无订单。</td></tr> : null}

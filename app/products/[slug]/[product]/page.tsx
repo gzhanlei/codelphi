@@ -10,6 +10,7 @@ import { DemoShell } from "@/components/demo-shell";
 import { NotificationSettings } from "@/components/notification-settings";
 import { ProductIdentitySettings } from "@/components/product-identity-settings";
 import { ProductOutputLanguageSettings } from "@/components/product-output-language-settings";
+import { resolveUiLocale } from "@/lib/ui-locale-server";
 import { ProductMembersSettings } from "@/components/product-members-settings";
 import { ProductTabs, ProductView, RepositoryLink, RunStatus } from "@/components/product-navigation";
 import { PublicDemoSettings } from "@/components/public-demo-settings";
@@ -98,7 +99,7 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
     const productBase = productBasePath(demo.organizationSlug, demo.slug);
     const demoDetails = await getProductDetails(slug, demo.organizationId);
     if (!demoDetails) notFound();
-    const demoOverview = buildProductOverview({ ...demoDetails, productBase });
+    const demoOverview = buildProductOverview({ ...demoDetails, productBase }, await resolveUiLocale());
     const demoView = view === "settings" ? "overview" : view;
     return (
       <DemoShell>
@@ -111,7 +112,7 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
   const productBase = productBasePath(access.organization.slug, slug);
   const details = await getProductDetails(slug, access.product.organizationId);
   if (!details) notFound();
-  const overview = buildProductOverview({ ...details, productBase });
+  const overview = buildProductOverview({ ...details, productBase }, await resolveUiLocale());
   const isOrganizationMember = access.via === "organization";
   const isOwner = isOrganizationMember && access.role === "owner";
 

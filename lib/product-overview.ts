@@ -1,3 +1,4 @@
+import { formatDateIn } from "./format";
 import { evidenceItems, isTestOnlyEvidence } from "./evidence";
 import { coverageByteLabel, coverageFilesLabel } from "./coverage-display";
 import type { RegressionTaskView } from "./regression-task-view";
@@ -95,6 +96,7 @@ function buildUserImpact(
   latestRelease: ReleaseRow | undefined,
   latestChanges: BehaviorChangeRow[],
   changeStats: { added: number; removed: number; changed: number },
+  locale: "zh-CN" | "en" = "zh-CN",
 ) {
   const groups = new Map<string, { releaseId: number; featureName: string; userImpacts: string[]; moreCount: number }>();
   if (latestRelease) {
@@ -124,7 +126,7 @@ function buildUserImpact(
       ? {
           id: priorBehavioralRelease.id,
           title: priorBehavioralRelease.title,
-          dateLabel: new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" }).format(new Date(priorBehavioralRelease.committedAt)),
+          dateLabel: formatDateIn(locale, priorBehavioralRelease.committedAt, { month: "long", day: "numeric" }),
         }
       : null,
   };
@@ -167,7 +169,7 @@ function buildTaskEntries(input: ProductOverviewInput, latestRelease: ReleaseRow
   ];
 }
 
-export function buildProductOverview(input: ProductOverviewInput) {
+export function buildProductOverview(input: ProductOverviewInput, locale: "zh-CN" | "en" = "zh-CN") {
   const latestRelease = input.releases[0];
   const specVersionId = latestRelease ? latestRelease.specVersionId : null;
   const revision = latestRelease?.sha;
@@ -196,7 +198,7 @@ export function buildProductOverview(input: ProductOverviewInput) {
       firstLine: firstLine.length > 80 ? `${firstLine.slice(0, 80)}…` : firstLine,
       noteStatus: note?.status ?? null,
       headline: note?.headline ?? null,
-      dateLabel: new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" }).format(new Date(release.committedAt)),
+      dateLabel: formatDateIn(locale, release.committedAt, { month: "long", day: "numeric" }),
     };
   });
   const timelineGroups: TimelineGroup[] = [];
@@ -219,7 +221,7 @@ export function buildProductOverview(input: ProductOverviewInput) {
   }
   const coverageByte = input.coverage ? coverageByteLabel(input.coverage) : null;
   const coverageFiles = input.coverage ? coverageFilesLabel(input.coverage) : null;
-  const userImpact = buildUserImpact(input, latestRelease, latestChanges, changeStats);
+  const userImpact = buildUserImpact(input, latestRelease, latestChanges, changeStats, locale);
 
   return {
     slug: input.product.slug,

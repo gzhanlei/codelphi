@@ -4,6 +4,8 @@ import { requirePlatformAdmin } from "@/lib/platform-admin";
 import { requireSessionUser } from "@/lib/session";
 import { buildCostReport } from "@/lib/billing/cost-observability";
 import { getDb } from "@/lib/db";
+import { resolveUiLocale } from "@/lib/ui-locale-server";
+import { formatDateTimeIn } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +17,7 @@ function money(value: number) {
 
 /** R5 成本分布观测（超管后台）：每 run 实际成本、分位、影子/独立生成拆分——单 SAU 毛利复核的数据基础。 */
 export default async function CostAdminPage({ searchParams }: { searchParams: Promise<{ days?: string }> }) {
+  const locale = await resolveUiLocale();
   const user = await requireSessionUser();
   const organization = await currentOrganization(user);
   await requirePlatformAdmin(user, organization);
@@ -70,7 +73,7 @@ export default async function CostAdminPage({ searchParams }: { searchParams: Pr
               <tr key={run.runId}>
                 <td>{run.runId}</td>
                 <td>{run.productName}</td>
-                <td>{new Date(run.createdAt).toLocaleString("zh-CN", { dateStyle: "short", timeStyle: "short" })}</td>
+                <td>{formatDateTimeIn(locale, run.createdAt)}</td>
                 <td>{money(run.mainCost)}</td>
                 <td>{money(run.shadowCost)}</td>
                 <td>{run.inputTokens} / {run.outputTokens} / {run.cacheHitTokens}</td>

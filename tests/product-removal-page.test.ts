@@ -11,6 +11,7 @@ vi.mock("next/navigation", () => ({
   notFound: vi.fn(() => { throw new Error("NOT_FOUND"); }),
   redirect: vi.fn((url: string) => { throw new Error(`NEXT_REDIRECT:${url}`); }),
 }));
+vi.mock("@/lib/ui-locale-server", () => ({ resolveUiLocale: async () => "zh-CN" }));
 vi.mock("@/lib/session", () => ({ getSessionUser: vi.fn(async () => ({ sub: "user" })) }));
 vi.mock("@/lib/product-access", () => ({ requireProductAccess: vi.fn() }));
 vi.mock("@/lib/product-details", () => ({ getProductDetails: vi.fn() }));

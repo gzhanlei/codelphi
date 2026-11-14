@@ -4,10 +4,13 @@ import { ProductGrid, ReleaseTimeline, type DashboardProduct, type DashboardRele
 import { getDb } from "@/lib/db";
 import { requireSessionUser } from "@/lib/session";
 import { requireOrganization } from "@/lib/organizations";
+import { resolveUiLocale } from "@/lib/ui-locale-server";
+import { formatDateIn } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
+  const locale = await resolveUiLocale();
   const user = await requireSessionUser();
   const organization = await requireOrganization(user);
   const db = getDb();
@@ -46,7 +49,7 @@ export default async function DashboardPage() {
     <AppShell user={user} organizationName={organization.name}>
       <div className="page-heading">
         <div><span className="eyebrow">YOUR PRODUCT PULSE</span><h1>产品总览</h1><p>所有产品的当前规格与最新变化，集中在这里。</p></div>
-        <div className="page-actions"><span className="date-chip">{new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "short" }).format(new Date())}</span><Link href="/products/new" className="primary-button">＋ 添加产品</Link></div>
+        <div className="page-actions"><span className="date-chip">{formatDateIn(locale, new Date(), { month: "long", day: "numeric", weekday: "short" })}</span><Link href="/products/new" className="primary-button">＋ 添加产品</Link></div>
       </div>
       <section className="stats-grid" aria-label="产品统计">
         <div className="stat-card"><span>已接入产品</span><strong>{products.length}</strong><small>个独立产品空间</small></div>

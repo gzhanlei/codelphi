@@ -6,6 +6,7 @@ import { getDb } from "../lib/db";
 
 const execute = vi.fn();
 vi.mock("../lib/db", () => ({ getDb: () => ({ execute }) }));
+vi.mock("../lib/ui-locale-server", () => ({ resolveUiLocale: async () => "zh-CN" }));
 vi.mock("../lib/session", () => ({ requireSessionUser: vi.fn(async () => ({ sub: "user" })) }));
 vi.mock("../lib/organizations", () => ({ requireOrganization: vi.fn(async () => ({ id: 7, name: "Workspace" })) }));
 vi.mock("../components/app-shell", () => ({ AppShell: ({ children }: { children: ReactNode }) => createElement("main", null, children) }));
