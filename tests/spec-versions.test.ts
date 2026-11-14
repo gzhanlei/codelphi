@@ -295,10 +295,12 @@ describe("loadPreviousFeatureNames", () => {
 });
 
 describe("output language stamping (072)", () => {
+  const executeCalls = (conn: { execute: unknown }) => (conn.execute as unknown as { mock: { calls: Array<[string, unknown[]]> } }).mock.calls;
+
   it("stamps the run output language onto the version row and English diff summaries", async () => {
     const conn = connection([{ id: 7 }]);
     await insertSpecVersion(conn, { ...run, outputLanguage: "en" }, result);
-    const insert = conn.execute.mock.calls.find(([sql]) => String(sql).includes("INSERT INTO spec_versions"));
+    const insert = executeCalls(conn).find(([sql]) => String(sql).includes("INSERT INTO spec_versions"));
     expect(insert?.[0]).toContain("output_language");
     expect(insert?.[1]).toContain("en");
     const change = conn.changes.find((parameters) => String(parameters[7]).startsWith("Added feature"));
@@ -308,18 +310,18 @@ describe("output language stamping (072)", () => {
   it("defaults to zh-CN when the run carries no language", async () => {
     const conn = connection([{ id: 7 }]);
     await insertSpecVersion(conn, run, result);
-    const insert = conn.execute.mock.calls.find(([sql]) => String(sql).includes("INSERT INTO spec_versions"));
+    const insert = executeCalls(conn).find(([sql]) => String(sql).includes("INSERT INTO spec_versions"));
     expect(insert?.[1]).toContain("zh-CN");
     expect(conn.changes.find((parameters) => String(parameters[7]).startsWith("新增功能"))).toBeDefined();
   });
 
   it("loads the latest version language for switch detection", async () => {
-    const conn = connection([]);
-    conn.execute.mockImplementationOnce(async () => [[{ outputLanguage: "en" }]]);
-    await expect(loadLatestSpecVersionLanguage(4, conn.execute)).resolves.toBe("en");
-    conn.execute.mockImplementationOnce(async () => [[{ outputLanguage: "zh-CN" }]]);
-    await expect(loadLatestSpecVersionLanguage(4, conn.execute)).resolves.toBe("zh-CN");
-    conn.execute.mockImplementationOnce(async () => [[]]);
-    await expect(loadLatestSpecVersionLanguage(4, conn.execute)).resolves.toBeNull();
+    const execute = vi.fn();
+    execute.mockResolvedValueOnce([[{ outputLanguage: "en" }]]);
+    await expect(loadLatestSpecVersionLanguage(4, execute)).resolves.toBe("en");
+    execute.mockResolvedValueOnce([[{ outputLanguage: "zh-CN" }]]);
+    await expect(loadLatestSpecVersionLanguage(4, execute)).resolves.toBe("zh-CN");
+    execute.mockResolvedValueOnce([[]]);
+    await expect(loadLatestSpecVersionLanguage(4, execute)).resolves.toBeNull();
   });
 });

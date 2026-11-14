@@ -2,6 +2,7 @@ import { z } from "zod";
 import { requiredEnv } from "./env";
 import type { SourceFile } from "./github";
 import { recordLlmCallReceipt, type ChargeComponent } from "./billing/cost-receipt";
+import type { OutputLanguage } from "./analysis-language";
 
 const evidenceSchema = z.object({
   path: z.string().min(1).max(500),
@@ -225,9 +226,17 @@ async function requireSuccessfulAIResponse(response: Response) {
 }
 
 /** B：把上一版功能名清单注入 prompt，约束命名与粒度连续，消除逐次重提取的改名风暴。 */
-export function featureContinuitySection(previousFeatureNames?: string[]) {
+export function featureContinuitySection(previousFeatureNames?: string[], language: OutputLanguage = "zh-CN") {
   const names = (previousFeatureNames ?? []).map((name) => name.trim()).filter(Boolean).slice(0, 60);
   if (names.length === 0) return null;
+  if (language === "en") {
+    return [
+      "[Feature list from the previous spec — keep naming continuous]",
+      ...names.map((name) => `- ${name}`),
+      ...(names.length >= 60 ? ["- (list truncated)"] : []),
+      "Reuse the names and granularity of the existing features above; features whose behavior is unchanged must not be renamed or merged/reorganized; add a feature only when it is genuinely new.",
+    ].join("\n");
+  }
   return [
     "【上一版规格的功能清单——保持命名连续】",
     ...names.map((name) => `- ${name}`),
@@ -252,10 +261,36 @@ export interface SpecAnchorFeature {
   scenarios: SpecAnchorScenario[];
 }
 
-/** P0 措辞锚定：上一版规格的场景级文本，未变行为要求逐字沿用，消除全量重建的改写噪音。 */
-export function specAnchoringSection(previousSpec?: SpecAnchorFeature[], maxChars = 24_000) {
+/** P0 措辞锚定：上一版规格的场景级文本，未变行为要求逐字沿用，消除全量重建的改写噪音。
+ *  锚内容语言=上一版语言（语言切换 run 不注入锚，强制全量重建），框架文案随本次输出语言。 */
+export function specAnchoringSection(previousSpec?: SpecAnchorFeature[], maxChars = 24_000, language: OutputLanguage = "zh-CN") {
   const features = (previousSpec ?? []).filter((feature) => feature.name.trim() && feature.scenarios.length > 0);
   if (features.length === 0) return null;
+  if (language === "en") {
+    const lines: string[] = ["[Full text of the previous spec — entries for unchanged behavior must be reused verbatim]"];
+    let used = 0;
+    let truncated = false;
+    for (const feature of features) {
+      const head = `[Feature: ${feature.name} (summary: ${feature.summary})]`;
+      const scenarioLines = feature.scenarios.map((scenario) =>
+        `- ${scenario.reference}｜${scenario.category}${scenario.step ? `｜step ${scenario.step}` : ""}｜Context: ${scenario.context}｜Action: ${scenario.action}｜Outcome: ${scenario.outcome}`,
+      );
+      const block = [head, ...scenarioLines].join("\n");
+      if (used + block.length > maxChars) {
+        truncated = true;
+        break;
+      }
+      lines.push(block);
+      used += block.length + 1;
+    }
+    return [
+      ...lines,
+      ...(truncated ? ["(The previous spec is too long and has been truncated; features not listed follow the original naming constraints.)"] : []),
+      "Verbatim reuse rule: scenarios whose behavior is unchanged must reuse the previous reference and the exact context/action/outcome text — paraphrasing, reordering words and punctuation edits are all violations. Scenario text may change only because this commit actually changed that behavior; entries may be added/removed only because the behavior was genuinely added/removed.",
+      "One behavior, one scenario: never create multiple entries for the same behavior from different roles, viewpoints or wordings (e.g. \"Editors view\" and \"Users view\" with the same outcome); output identical in meaning to an existing anchor entry is treated as reuse.",
+      "Feature summaries are reused verbatim as well: as long as a feature's scenario set is unchanged, its summary must be identical to the previous version — no rewriting, expanding, adding or removing examples, or rewording; a summary changes only together with real scenario additions/removals/edits.",
+    ].join("\n");
+  }
   const lines: string[] = ["【上一版规格全文——行为未变的条目必须逐字沿用】"];
   let used = 0;
   let truncated = false;
@@ -290,8 +325,24 @@ export function specAnchoringSection(previousSpec?: SpecAnchorFeature[], maxChar
  *   ③ 未归属的行为变更文件：显式列出请模型特别核对（可能影响清单外功能或构成新功能）。
  * 其余既有功能由系统沿用上一版。零成本补救通道：宁可多写一条，不可漏写一条。
  */
-export function incrementalScopeSection(affectedFeatureNames?: string[], unassignedBehavioralPaths?: readonly string[]) {
+export function incrementalScopeSection(affectedFeatureNames?: string[], unassignedBehavioralPaths?: readonly string[], language: OutputLanguage = "zh-CN") {
   if (!affectedFeatureNames || affectedFeatureNames.length === 0) return null;
+  if (language === "en") {
+    const parts = [
+      "[Incremental analysis mode]",
+      "Only the following features are analyzed in depth in this run (their code was touched by this commit):",
+      ...affectedFeatureNames.map((name) => `- ${name}`),
+      "All of the above features must be output: revise incrementally against the previous-spec anchor — scenarios whose behavior is unchanged reuse the original reference and text verbatim; genuinely changed behavior rewrites the corresponding entries; only genuinely new behavior adds entries; vanished behavior is no longer output. Per-feature output must not exceed the anchor count for that feature +3. Only when the anchor contains no such feature may you enumerate anew (usually 3-8 scenarios per feature, checking happy/edge/error exhaustively; boundary and error paths must not be omitted).",
+      "[New discoveries outside the list — must be output] If you find user-perceivable behavior in the window code or diff that does not belong to any existing feature above — including new entry points, modules, endpoints, features introduced by new files, or splits of existing features — you must output it as an independent feature; do not omit it because it is not in the list.",
+    ];
+    if (unassignedBehavioralPaths && unassignedBehavioralPaths.length > 0) {
+      parts.push("The following files were modified by this commit but are not yet attributed to any existing feature. Check their behavior changes carefully — they may affect behavior outside the listed features or constitute new features:");
+      parts.push(...unassignedBehavioralPaths.map((path) => `- ${path}`));
+    }
+    parts.push("Except for the two categories above, the remaining existing features are carried over by the system from the previous spec; do not output them.");
+    parts.push("The product description and the release changes must still cover the entire commit.");
+    return parts.filter(Boolean).join("\n");
+  }
   const parts = [
     "【增量分析模式】",
     "本次只深入分析以下功能（这些功能的代码被本次提交触及）：",
@@ -316,39 +367,84 @@ export interface LlmBillingContext {
   callKind?: string | null;
 }
 
-export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext, context: { previousFeatureNames?: string[]; previousSpec?: SpecAnchorFeature[]; affectedFeatureNames?: string[]; unassignedBehavioralPaths?: string[]; partition?: { index: number; total: number }; outputLanguage?: "zh-CN" | "en"; billing?: LlmBillingContext } = {}): Promise<AnalysisResult> {
-  const anchor = specAnchoringSection(context.previousSpec);
-  const continuity = anchor ? null : featureContinuitySection(context.previousFeatureNames);
-  const scope = incrementalScopeSection(context.affectedFeatureNames, context.unassignedBehavioralPaths);
-  const partition = context.partition;
-  const partitionSection = partition
-    ? `\n【分区提取】\n本窗口是代码库的第 ${partition.index}/${partition.total} 个分区，只包含代码库的一部分。其他分区由独立提取负责，合并层会统一去重与归并：只需覆盖本窗口内的全部主要用户功能，不要猜测窗口外的模块，也不要输出「其他功能见其他分区」之类的占位条目。`
-    : null;
-  const coverageMandate = partition
-    ? "当前产品功能规格必须覆盖本窗口代码里的全部主要用户功能。逐个检查输入中的页面、API、组件和业务模块；输入包含多个独立模块时，只返回一个功能属于不完整结果。"
-    : "当前产品功能规格必须覆盖输入代码里的全部主要用户功能，不得只总结本次提交。逐个检查输入中的页面、API、组件和业务模块；输入包含多个独立模块时，只返回一个功能属于不完整结果。";
-  const prompt = [
+/** 主提取 JSON 契约模板（语言无关共享：键名/编号/枚举是英文结构约定）。 */
+const ANALYSIS_JSON_TEMPLATE = '{"product":{"description":"","evidence":[{"path":"","startLine":1}]},"release":{"title":"","summary":""},"changes":[{"featureName":"","kind":"added|changed|removed|fixed|reviewed","description":"","userImpact":"","evidence":[{"path":"","startLine":1}]}],"features":[{"name":"","summary":"","scenarios":[{"reference":"HP-1","context":"","action":"","outcome":"","category":"happy","step":1,"evidence":[{"path":"","startLine":1}]}]}]}';
+
+export function systemPrompt(language: OutputLanguage = "zh-CN") {
+  return language === "en"
+    ? "You are a rigorous code analyzer that outputs only verifiable structured facts."
+    : "你是严谨的代码分析器，只输出可验证的结构化事实。";
+}
+
+export function partitionNotice(index: number, total: number, language: OutputLanguage = "zh-CN") {
+  return language === "en"
+    ? `\n[Partitioned extraction]\nThis window is partition ${index}/${total} of the codebase and contains only part of it. Other partitions are extracted independently and the merge layer deduplicates and consolidates: cover every major user-facing capability inside this window, do not guess about modules outside the window, and never emit placeholder entries like "see other partitions".`
+    : `\n【分区提取】\n本窗口是代码库的第 ${index}/${total} 个分区，只包含代码库的一部分。其他分区由独立提取负责，合并层会统一去重与归并：只需覆盖本窗口内的全部主要用户功能，不要猜测窗口外的模块，也不要输出「其他功能见其他分区」之类的占位条目。`;
+}
+
+/** 主提取指令段（双语）：zh 分支逐字节保持既有生产 prompt；en 分支为完整英文模板，
+ *  显式禁止中文输出。coverageMandate 由调用方按分区/全量注入。 */
+export function extractionInstructionLines(language: OutputLanguage, options: { coverageMandate: string }): string[] {
+  if (language === "en") {
+    return [
+      "You are maintaining a product knowledge base. State only facts grounded in the given code and diff; do not add speculation.",
+      "Generate the following in English — all natural-language text MUST be written in English, never Chinese: 1) the product description; 2) the current product feature spec; 3) the user-perceivable changes of this release.",
+      "The product description is one or two sentences naming the audience and the core capability, at most 200 characters, summarizing the whole codebase rather than this commit, and carries evidence from the input files; do not write just the product name or marketing copy.",
+      "Organize the spec by features; every scenario contains a context, an action and an outcome, classified happy/edge/error, with references HP-n/EC-n/ER-n. JSON field names must match the template below verbatim (context/action/outcome); never use synonym keys such as result.",
+      "Scenarios may carry an optional step: happy scenarios are numbered step=1..N in delivery order (within one feature and one context); an edge/error scenario's step is the happy step it branches from; omit step when the order is unclear and never invent one.",
+      options.coverageMandate,
+      "Prioritize feature coverage: keep the 1-5 most important scenarios per feature; do not miss other features because a single feature has too many scenarios.",
+      "Every scenario, change and the product description must carry evidence; path must come from the input files and startLine must use the input line numbers. A release without user-facing changes only emits reviewed items.",
+      "Return JSON only, no Markdown. Structure:",
+    ];
+  }
+  return [
     "你在维护一个产品知识库。仅根据给定代码和 diff 输出事实，不要补充猜测。",
     "用简体中文生成：1) 产品简介；2) 当前产品功能规格；3) 本次发布的用户可感知变化。",
     "产品简介用一到两句话说明服务对象和核心能力，不超过 200 字，必须概括整个代码库而不是本次提交，并给出输入文件中的 evidence；不要只写产品名或营销词。",
     "规格按功能组织，每个场景包含情境、操作、结果，分类为 happy/edge/error，reference 使用 HP-n/EC-n/ER-n。JSON 字段名必须与下方模板逐字一致：情境=context、操作=action、结果=outcome，禁止用 result 等同义键名。",
     "场景可选标注 step：happy 场景按交付顺序标 step=1..N（同一功能同一情境内）；edge/error 场景的 step=其分支自的 happy 步骤号；不确定顺序时不写 step，不得编造。",
-    coverageMandate,
+    options.coverageMandate,
     "优先保证功能覆盖，每个功能保留最关键的 1-5 个场景；不要因单个功能场景过多而遗漏其他功能。",
     "每个场景、变化和产品简介必须给 evidence；path 必须来自输入文件，startLine 使用输入的行号。没有用户变化的发布只生成 reviewed 项。",
     "只返回 JSON，不要 Markdown。结构：",
-    '{"product":{"description":"","evidence":[{"path":"","startLine":1}]},"release":{"title":"","summary":""},"changes":[{"featureName":"","kind":"added|changed|removed|fixed|reviewed","description":"","userImpact":"","evidence":[{"path":"","startLine":1}]}],"features":[{"name":"","summary":"","scenarios":[{"reference":"HP-1","context":"","action":"","outcome":"","category":"happy","step":1,"evidence":[{"path":"","startLine":1}]}]}]}',
+  ];
+}
+
+export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext, context: { previousFeatureNames?: string[]; previousSpec?: SpecAnchorFeature[]; affectedFeatureNames?: string[]; unassignedBehavioralPaths?: string[]; partition?: { index: number; total: number }; outputLanguage?: "zh-CN" | "en"; billing?: LlmBillingContext } = {}): Promise<AnalysisResult> {
+  const language: OutputLanguage = context.outputLanguage ?? "zh-CN";
+  const anchor = specAnchoringSection(context.previousSpec, 24_000, language);
+  const continuity = anchor ? null : featureContinuitySection(context.previousFeatureNames, language);
+  const scope = incrementalScopeSection(context.affectedFeatureNames, context.unassignedBehavioralPaths, language);
+  const partition = context.partition;
+  const partitionSection = partition ? partitionNotice(partition.index, partition.total, language) : null;
+  const coverageMandate = language === "en"
+    ? (partition
+      ? "The current product feature spec must cover every major user-facing capability in this window of code. Check every page, API, component and business module in the input; when the input contains several independent modules, returning only one feature is an incomplete result."
+      : "The current product feature spec must cover every major user-facing capability in the input code, not merely summarize this commit. Check every page, API, component and business module in the input; when the input contains several independent modules, returning only one feature is an incomplete result.")
+    : (partition
+      ? "当前产品功能规格必须覆盖本窗口代码里的全部主要用户功能。逐个检查输入中的页面、API、组件和业务模块；输入包含多个独立模块时，只返回一个功能属于不完整结果。"
+      : "当前产品功能规格必须覆盖输入代码里的全部主要用户功能，不得只总结本次提交。逐个检查输入中的页面、API、组件和业务模块；输入包含多个独立模块时，只返回一个功能属于不完整结果。");
+  const commitSection = language === "en"
+    ? `\n[Commit]\n${change.message}\n\n[Changed files]\n${JSON.stringify(change.files)}`
+    : `\n【本次提交】\n${change.message}\n\n【文件变化】\n${JSON.stringify(change.files)}`;
+  const codeSection = language === "en"
+    ? `\n[Current code, with line numbers]\n${sources.map((file) => `\n--- ${file.path} ---\n${file.content}`).join("\n")}`
+    : `\n【当前代码，带行号】\n${sources.map((file) => `\n--- ${file.path} ---\n${file.content}`).join("\n")}`;
+  const prompt = [
+    ...extractionInstructionLines(language, { coverageMandate }),
+    ANALYSIS_JSON_TEMPLATE,
     ...(anchor ? [anchor] : []),
     ...(continuity ? [continuity] : []),
     ...(scope ? [scope] : []),
     ...(partitionSection ? [partitionSection] : []),
-    `\n【本次提交】\n${change.message}\n\n【文件变化】\n${JSON.stringify(change.files)}`,
-    `\n【当前代码，带行号】\n${sources.map((file) => `\n--- ${file.path} ---\n${file.content}`).join("\n")}`,
+    commitSection,
+    codeSection,
   ].join("\n");
 
   const content = await requestStructuredCompletion(
     [
-      { role: "system", content: "你是严谨的代码分析器，只输出可验证的结构化事实。" },
+      { role: "system", content: systemPrompt(language) },
       { role: "user", content: prompt },
     ],
     context.billing,
@@ -477,13 +573,26 @@ export interface BehavioralDescription {
   after: string;
 }
 
-export function behavioralDescribePrompt(targets: BehavioralTarget[], change: ChangeContext): string {
+export function behavioralDescribePrompt(targets: BehavioralTarget[], change: ChangeContext, language: OutputLanguage = "zh-CN"): string {
+  const contextHeader = (startLine: number, endLine: number) =>
+    language === "en" ? `[Changed-region context ${startLine}-${endLine} (with line numbers)]` : `【变更区上下文 ${startLine}-${endLine}（带行号）】`;
   const sections = targets.map((target) => {
     const blocks = target.contextBlocks
-      .map((block) => `【变更区上下文 ${block.startLine}-${block.endLine}（带行号）】\n${block.content}`)
+      .map((block) => `${contextHeader(block.startLine, block.endLine)}\n${block.content}`)
       .join("\n");
-    return `--- 文件：${target.path} ---\n【变更 diff】\n${target.patch || "（无 patch）"}\n${blocks}`;
+    const noPatch = language === "en" ? "(no patch)" : "（无 patch）";
+    return `--- File: ${language === "en" ? "" : "文件："}${target.path} ---\n${language === "en" ? "[Changed diff]" : "【变更 diff】"}\n${target.patch || noPatch}\n${blocks}`;
   });
+  if (language === "en") {
+    return [
+      "You are relaying a code change to an engineer who does not know it. Restate only the facts; do not judge whether it is worth recording or user-perceivable.",
+      "For every changed block (@@ range) of every file below, output one restatement: what the block did before and what it does after. Write in English.",
+      "Every changed block must have one restatement — no merging, no omission; a file without changed blocks outputs empty changes.",
+      'Return JSON only, no Markdown. Structure: {"files":[{"path":"","changes":[{"hunk":"","before":"","after":""}]}]}',
+      `\n[Commit]\n${change.message}`,
+      "\n[Changed files (per-file diff and changed-region context)]\n" + sections.join("\n"),
+    ].join("\n");
+  }
   return [
     "你在向一位不了解此变更的工程师转述代码变更。只复述事实，不要判断是否值得写、是否用户可感知。",
     "对下面每个文件的每个变更块（@@ 区间）输出一条复述：改前这段代码做什么、改后做什么。用简体中文。",
@@ -513,15 +622,35 @@ export function parseBehavioralDescriptions(content: string, targets: Behavioral
   return out;
 }
 
-export function behavioralJudgmentPrompt(descriptions: BehavioralDescription[], targets: BehavioralTarget[], knownFeatureNames: string[], change: ChangeContext): string {
+export function behavioralJudgmentPrompt(descriptions: BehavioralDescription[], targets: BehavioralTarget[], knownFeatureNames: string[], change: ChangeContext, language: OutputLanguage = "zh-CN"): string {
   const names = knownFeatureNames.map((name) => name.trim()).filter(Boolean).slice(0, 60);
+  const contextHeader = (startLine: number, endLine: number) =>
+    language === "en" ? `[Changed-region context ${startLine}-${endLine} (with line numbers)]` : `【变更区上下文 ${startLine}-${endLine}（带行号）】`;
   const sections = targets.map((target) => {
     const blocks = target.contextBlocks
-      .map((block) => `【变更区上下文 ${block.startLine}-${block.endLine}（带行号）】\n${block.content}`)
+      .map((block) => `${contextHeader(block.startLine, block.endLine)}\n${block.content}`)
       .join("\n");
-    const targetDescriptions = descriptions_filter(descriptions, target.path);
-    return `--- 文件：${target.path} ---\n【逐块改前/改后复述】\n${targetDescriptions}\n${blocks}`;
+    const targetDescriptions = descriptions_filter(descriptions, target.path, language);
+    const restatementHeader = language === "en" ? "[Per-block before/after restatements]" : "【逐块改前/改后复述】";
+    return `--- ${language === "en" ? "File" : "文件"}：${target.path} ---\n${restatementHeader}\n${targetDescriptions}\n${blocks}`;
   });
+  if (language === "en") {
+    return [
+      "You are maintaining a product knowledge base. Below are before/after restatements of every changed block in this batch of files, with the corresponding context code.",
+      "Judge every restatement explicitly and handle it; none may be skipped:",
+      "- The behavior change described is visible to an external observer (new/changed parameters, responses, permission boundaries, configuration options, error paths, retry/skip and other control-flow changes) → output the corresponding scenario; give evidence with precise path:startLine (line numbers taken from the context code).",
+      "- Skip a scenario only when you can clearly assert the change is completely invisible to any external observer; when unsure → output the scenario (one extra entry is better than one missed).",
+      "- Entries judged to be internal implementation → output a kind=reviewed change (with evidence) to keep the completeness trail.",
+      "Organize the spec by features; every scenario contains a context, an action and an outcome, classified happy/edge/error, with references HP-n/EC-n/ER-n. JSON field names must match the template below verbatim (context/action/outcome); never use synonym keys such as result.",
+      "Scenarios may carry an optional step: happy scenarios are numbered step=1..N in delivery order (within one feature and one context); an edge/error scenario's step is the happy step it branches from; omit step when the order is unclear and never invent one.",
+      "Mind control-flow semantics: an error swallowed by try/except(pass) no longer propagates — the behavior description must reflect the modified externally visible result (e.g. \"creation no longer fails because of…\"), not restate the caught error as output behavior.",
+      names.length > 0 ? `Prefer reusing these existing feature names (scenarios belonging to one product capability go into one feature): ${names.join(", ")}` : "Group scenarios belonging to one product capability under one feature name.",
+      "Return JSON only, no Markdown. Structure:",
+      ANALYSIS_JSON_TEMPLATE,
+      `\n[Commit]\n${change.message}`,
+      "\n[Changed files (restatements and context)]\n" + sections.join("\n"),
+    ].join("\n");
+  }
   return [
     "你在维护一个产品知识库。以下是对本批次文件每个变更块的改前/改后复述与对应上下文代码。",
     "对每条复述显式判定并处理，不得遗漏任何一条：",
@@ -533,35 +662,40 @@ export function behavioralJudgmentPrompt(descriptions: BehavioralDescription[], 
     "注意控制流语义：try/except(pass) 等被捕获的错误意味着该错误不再向上抛出——行为描述必须反映修改后的外部可见结果（如「创建不再因…而失败」），而不是把被捕获的错误写成输出行为。",
     names.length > 0 ? `功能名优先复用以下既有功能名（同属一个产品功能的场景归入同一功能）：${names.join("、")}` : "将同属一个产品功能的场景归入同一功能名。",
     "只返回 JSON，不要 Markdown。结构：",
-    '{"product":{"description":"","evidence":[{"path":"","startLine":1}]},"release":{"title":"","summary":""},"changes":[{"featureName":"","kind":"added|changed|removed|fixed|reviewed","description":"","userImpact":"","evidence":[{"path":"","startLine":1}]}],"features":[{"name":"","summary":"","scenarios":[{"reference":"HP-1","context":"","action":"","outcome":"","category":"happy","step":1,"evidence":[{"path":"","startLine":1}]}]}]}',
+    ANALYSIS_JSON_TEMPLATE,
     `\n【本次提交】\n${change.message}`,
     "\n【变更文件（复述与上下文）】\n" + sections.join("\n"),
   ].join("\n");
 }
 
 // 判定 prompt 内按文件取复述的辅助（避免闭包序列化问题）
-function descriptions_filter(descriptions: BehavioralDescription[], path: string): string {
+function descriptions_filter(descriptions: BehavioralDescription[], path: string, language: OutputLanguage = "zh-CN"): string {
   const lines = descriptions
     .filter((d) => d.path === path)
-    .map((d) => `- 块 ${d.hunk || "?"}：改前：${d.before}；改后：${d.after}`);
-  return lines.length > 0 ? lines.join("\n") : "（本文件无逐块复述，直接核对 diff 与上下文）";
+    .map((d) => language === "en"
+      ? `- Block ${d.hunk || "?"}: before: ${d.before}; after: ${d.after}`
+      : `- 块 ${d.hunk || "?"}：改前：${d.before}；改后：${d.after}`);
+  if (lines.length > 0) return lines.join("\n");
+  return language === "en"
+    ? "(No per-block restatements for this file; check the diff and context directly)"
+    : "（本文件无逐块复述，直接核对 diff 与上下文）";
 }
 
-export async function analyzeBehavioralGroup(targets: BehavioralTarget[], knownFeatureNames: string[], change: ChangeContext, billing?: LlmBillingContext): Promise<AnalysisResult> {
+export async function analyzeBehavioralGroup(targets: BehavioralTarget[], knownFeatureNames: string[], change: ChangeContext, billing?: LlmBillingContext, language: OutputLanguage = "zh-CN"): Promise<AnalysisResult> {
   // 第一步·复述：每个变更块的改前/改后（机械任务，不做显著性判断）
   const describeContent = await requestStructuredCompletion(
     [
-      { role: "system", content: "你是严谨的代码分析器，只输出可验证的结构化事实。" },
-      { role: "user", content: behavioralDescribePrompt(targets, change) },
+      { role: "system", content: systemPrompt(language) },
+      { role: "user", content: behavioralDescribePrompt(targets, change, language) },
     ],
     billing,
   );
   const descriptions = parseBehavioralDescriptions(describeContent, targets);
   // 第二步·判定：对每条复述显式分类（宁多勿漏；内部实现 → reviewed 留痕）
-  const judgePrompt = behavioralJudgmentPrompt(descriptions, targets, knownFeatureNames, change);
+  const judgePrompt = behavioralJudgmentPrompt(descriptions, targets, knownFeatureNames, change, language);
   const content = await requestStructuredCompletion(
     [
-      { role: "system", content: "你是严谨的代码分析器，只输出可验证的结构化事实。" },
+      { role: "system", content: systemPrompt(language) },
       { role: "user", content: judgePrompt },
     ],
     billing,

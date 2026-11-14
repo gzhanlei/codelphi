@@ -55,7 +55,7 @@ const { compareIncrementalShadow } = vi.hoisted(() => ({ compareIncrementalShado
 vi.mock("../lib/incremental-shadow", () => ({ compareIncrementalShadow }));
 const { partitionedSourcesMock } = vi.hoisted(() => ({ partitionedSourcesMock: vi.fn() }));
 vi.mock("../lib/remote-analysis", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/remote-analysis")>(), getRemoteAnalysisSources: vi.fn(), getPartitionedAnalysisSources: partitionedSourcesMock }));
-vi.mock("../lib/spec-versions", () => ({ insertSpecVersion: vi.fn(async () => ({ specVersionId: 44, features: [{ name: "统一登录", summary: "s", scenarios: [] }], collapse: null, featureCollapses: [], misplacedScenarios: [], identityHijacksDropped: 0 })), loadLatestSpecFeatures: vi.fn(async () => ({ specVersionId: 44, features: [{ name: "统一登录", summary: "s", scenarios: [] }] })), loadPreviousFeatureNames: vi.fn(async () => ["统一登录", "支付", "规格导出"]), loadPreviousSpecText: vi.fn(async () => [{ name: "统一登录", summary: "s", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy" }] }]) }));
+vi.mock("../lib/spec-versions", () => ({ loadLatestSpecVersionLanguage: vi.fn(async () => null), insertSpecVersion: vi.fn(async () => ({ specVersionId: 44, features: [{ name: "统一登录", summary: "s", scenarios: [] }], collapse: null, featureCollapses: [], misplacedScenarios: [], identityHijacksDropped: 0 })), loadLatestSpecFeatures: vi.fn(async () => ({ specVersionId: 44, features: [{ name: "统一登录", summary: "s", scenarios: [] }] })), loadPreviousFeatureNames: vi.fn(async () => ["统一登录", "支付", "规格导出"]), loadPreviousSpecText: vi.fn(async () => [{ name: "统一登录", summary: "s", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy" }] }]) }));
 vi.mock("../lib/architecture-version", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/architecture-version")>(), generateRepositoryArchitectureVersion: vi.fn(async () => ({ status: "accepted", errorMessage: null })) }));
 const { syncFeatureFlowsForVersion } = vi.hoisted(() => ({ syncFeatureFlowsForVersion: vi.fn(async () => ({ generated: 0, copied: 0, failed: 0 })) }));
 vi.mock("../lib/feature-flow-service", () => ({ syncFeatureFlowsForVersion, regenerateFeatureFlowForWorkbenchFeature: vi.fn() }));
@@ -239,6 +239,22 @@ describe("analysis orchestration", () => {
     expect(analyzeWithAI).toHaveBeenCalled();
     const context = vi.mocked(analyzeWithAI).mock.calls[0][2] as Record<string, unknown>;
     expect(context.outputLanguage).toBe("en");
+  });
+
+  it("forces a full rebuild and skips old-language anchoring when the output language switches", async () => {
+    const { loadLatestSpecVersionLanguage } = await import("../lib/spec-versions");
+    vi.mocked(loadLatestSpecVersionLanguage).mockResolvedValue("zh-CN");
+    runRows = [{ ...run, outputLanguage: "en", analyzeMode: "incremental" }];
+    await runAnalysis(8);
+    expect(analyzeWithAI).toHaveBeenCalled();
+    const context = vi.mocked(analyzeWithAI).mock.calls[0][2] as Record<string, unknown>;
+    expect(context.outputLanguage).toBe("en");
+    // 旧语种锚与命名连续段不得注入（语言切换强制全量重建）
+    expect(context.previousSpec).toEqual([]);
+    expect(context.previousFeatureNames).toEqual([]);
+    const { insertSpecVersion } = await import("../lib/spec-versions");
+    const options = vi.mocked(insertSpecVersion).mock.calls[0][3] as Record<string, unknown>;
+    expect(options.affectedKeys).toBeUndefined();
   });
 
   it("runs a shadow full extraction after a successful incremental analysis", async () => {

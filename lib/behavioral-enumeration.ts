@@ -91,6 +91,8 @@ export interface BehavioralEnumerationOptions {
   index: OpenedRemoteSourceRevision;
   change: ChangeContext;
   knownFeatureNames: string[];
+  /** 分析输出语言（072）：透传给两步提取的 prompt 语言段。 */
+  outputLanguage?: "zh-CN" | "en";
   billing: LlmBillingContext;
 }
 
@@ -176,11 +178,11 @@ export async function enumerateBehavioralChunks(options: BehavioralEnumerationOp
     if (targets.length === 0) continue;
     let chunk: AnalysisResult;
     try {
-      chunk = await analyzeBehavioralGroup(targets, options.knownFeatureNames, options.change, options.billing);
+      chunk = await analyzeBehavioralGroup(targets, options.knownFeatureNames, options.change, options.billing, options.outputLanguage);
     } catch (firstError) {
       console.warn("[analysis] behavioral enumeration group failed; retrying once", { label, error: firstError instanceof Error ? firstError.message.slice(0, 160) : String(firstError) });
       try {
-        chunk = await analyzeBehavioralGroup(targets, options.knownFeatureNames, options.change, options.billing);
+        chunk = await analyzeBehavioralGroup(targets, options.knownFeatureNames, options.change, options.billing, options.outputLanguage);
       } catch (secondError) {
         console.warn("[analysis] behavioral enumeration group skipped after retry", { label, error: secondError instanceof Error ? secondError.message.slice(0, 160) : String(secondError) });
         continue;

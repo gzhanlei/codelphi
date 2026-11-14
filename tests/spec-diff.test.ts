@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diffSpec, diffSpecWithFolded, mergeSpecSources, normalizeSpecText, scenarioVariantSimilar, scenarioBehaviorEqual, specChangeWordingOnly, specFeatureKey, specScenarioKey, specTextEquivalent, type SpecFeature, type SpecScenario } from "../lib/spec-diff";
+import { diffSpec, diffSpecWithFolded, mergeSpecSources, normalizeSpecText, scenarioVariantSimilar, scenarioBehaviorEqual, specChangeWordingOnly, specFeatureKey, specScenarioKey, specTextEquivalent, type SpecFeature } from "../lib/spec-diff";
 
 const authentication: SpecFeature = {
   name: "Authentication",
@@ -454,16 +454,16 @@ describe("bilingual equivalence gates (EN output mode)", () => {
 
   it("keeps the variant channel working on English scenarios", () => {
     expect(scenarioVariantSimilar(
-      { category: "happy", context: "Editor", action: "Publishes the product", outcome: "Product becomes visible", evidence: [] } as SpecScenario,
-      { category: "happy", context: "Workspace editor", action: "Publishes a product", outcome: "The product is visible", evidence: [] } as SpecScenario,
+      { reference: "HP-1", category: "happy", context: "Editor", action: "Publishes the product", outcome: "Product becomes visible", evidence: [] },
+      { reference: "HP-2", category: "happy", context: "Workspace editor", action: "Publishes a product", outcome: "The product is visible", evidence: [] },
     )).toBe(true);
     expect(scenarioVariantSimilar(
-      { category: "error", context: "Visitor", action: "Requests a missing product", outcome: "Responds with 404", evidence: [] } as SpecScenario,
-      { category: "error", context: "Visitor", action: "Requests a missing product", outcome: "Responds with 400", evidence: [] } as SpecScenario,
+      { reference: "ER-1", category: "error", context: "Visitor", action: "Requests a missing product", outcome: "Responds with 404", evidence: [] },
+      { reference: "ER-1", category: "error", context: "Visitor", action: "Requests a missing product", outcome: "Responds with 400", evidence: [] },
     )).toBe(false);
     expect(scenarioVariantSimilar(
-      { category: "happy", context: "编辑者", action: "发布产品", outcome: "产品对访客可见", evidence: [] } as SpecScenario,
-      { category: "happy", context: "Editor", action: "Publishes the product", outcome: "Product becomes visible", evidence: [] } as SpecScenario,
+      { reference: "HP-1", category: "happy", context: "编辑者", action: "发布产品", outcome: "产品对访客可见", evidence: [] },
+      { reference: "HP-1", category: "happy", context: "Editor", action: "Publishes the product", outcome: "Product becomes visible", evidence: [] },
     )).toBe(false);
   });
 

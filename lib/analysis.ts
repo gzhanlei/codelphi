@@ -9,7 +9,7 @@ import { enqueueBillingNotification } from "./billing/notifications";
 import { resolveAnalysisTarget, type ChangeContext, type CodeHostingProvider } from "./code-hosting";
 import { analysisSliceBudgets, getPartitionedAnalysisSources, getRemoteAnalysisSources, parseSourceRoots, type AnalysisPartition } from "./remote-analysis";
 import { createSlicePlanner } from "./slice-planner";
-import { insertSpecVersion, loadLatestSpecFeatures, loadPreviousFeatureNames, loadPreviousSpecText } from "./spec-versions";
+import { insertSpecVersion, loadLatestSpecFeatures, loadLatestSpecVersionLanguage, loadPreviousFeatureNames, loadPreviousSpecText } from "./spec-versions";
 import { loadAffectedFeatureKeys, rebuildSpecFileIndex } from "./spec-file-index";
 import { resolveAnalysisMode } from "./incremental";
 import { compareIncrementalShadow } from "./incremental-shadow";
@@ -356,7 +356,15 @@ async function runAnalysisBody(run: RunContext) {
   const executeWrapper = (statement: string, parameters: Array<string | number | null>) => getDb().execute(statement, parameters);
   // W0-8 行为面枚举：patch-scan 行为文件清单（跨模式共享，RC2 与定向枚举共用）
   const behavioralPaths = [...behavioralChangePaths(change.files)].sort();
-  const previousFeatureNames = await loadPreviousFeatureNames(run.repositoryId, executeWrapper);
+  // 072 语言切换检测：产品输出语言与上一版规格语言不一致 → 强制全量重建。旧语种锚/
+  // 命名连续段禁止逐字沿用（会把旧语言文本永久留在新语种规格里），spec_file_index 按
+  // 旧语种功能名建索引也会整体失配；零行为变更沿用通道同样必须绕开（沿用=保留旧语言）。
+  const previousLanguage = await loadLatestSpecVersionLanguage(run.repositoryId, executeWrapper);
+  const languageSwitched = previousLanguage !== null && run.outputLanguage !== undefined && previousLanguage !== run.outputLanguage;
+  if (languageSwitched) {
+    console.log("[analysis] output language switch detected; forcing full rebuild", { runId: run.id, from: previousLanguage, to: run.outputLanguage });
+  }
+  const previousFeatureNames = languageSwitched ? [] : await loadPreviousFeatureNames(run.repositoryId, executeWrapper);
   // BM-10（生产 run 213 实证）：窗口无实现级行为变更（纯文档/注释/格式提交）时跳过全部
   // AI 提取——上一版规格原样沿用、零变化。docs-only diff 命中功能证据面会激活增量重提取，
   // 文档内容被写成假场景（run 213：发布说明「无行为变化」vs 变化清单 54 条，自相矛盾）。
@@ -367,7 +375,7 @@ async function runAnalysisBody(run: RunContext) {
   let affectedFeatureNames: string[] | undefined;
   // W0-10：未归属的行为变更文件 = 行为 diff 文件中未命中索引者——显式交给增量 prompt 核对
   let unassignedBehavioralPaths: string[] | undefined;
-  if (!noBehavioralWindow && run.analyzeMode === "incremental") {
+  if (!noBehavioralWindow && !languageSwitched && run.analyzeMode === "incremental") {
     const affected = await loadAffectedFeatureKeys(run.repositoryId, change.files.map((file) => file.path), executeWrapper);
     const resolved = resolveAnalysisMode({
       mode: "incremental",
@@ -395,12 +403,17 @@ async function runAnalysisBody(run: RunContext) {
   }
   // P0 措辞锚定：把上一版场景全文喂给 prompt，未变行为逐字沿用；加载失败降级为仅命名约束，不阻塞分析。
   // 变体治理 A1：受影响功能优先装入锚（24k 截断时先保受影响功能的旧场景，避免无锚重推导导致键分裂）。
+  // 语言切换 run 不注入锚：旧语种文本不得逐字沿用。
   let previousSpecText: SpecAnchorFeature[];
-  try {
-    previousSpecText = await loadPreviousSpecText(run.repositoryId, executeWrapper, affectedFeatureNames ?? []);
-  } catch (error) {
-    console.error("[analysis] load previous spec text failed; anchoring disabled for this run", error);
+  if (languageSwitched) {
     previousSpecText = [];
+  } else {
+    try {
+      previousSpecText = await loadPreviousSpecText(run.repositoryId, executeWrapper, affectedFeatureNames ?? []);
+    } catch (error) {
+      console.error("[analysis] load previous spec text failed; anchoring disabled for this run", error);
+      previousSpecText = [];
+    }
   }
   // 多趟提取：实现面超出单窗口时按分区逐趟提取后确定性合并，全量与增量 / RC2-carry
   // 同一提取层（W0-6：按实现面而非运行模式决定是否分片；单窗仓库仍返回 1 个分区，
@@ -517,6 +530,7 @@ async function runAnalysisBody(run: RunContext) {
       index: sourceIndex,
       change,
       knownFeatureNames: [...knownFeatureNames],
+      outputLanguage: run.outputLanguage,
       billing: { runId: run.id, accountId: run.accountId ?? null, chargeComponent: "main" },
     });
     enumerationMetrics = metrics;
@@ -635,6 +649,7 @@ async function runAnalysisBody(run: RunContext) {
       }
       const shadow = await analyzeWithAI(shadowSources, change, {
         previousFeatureNames,
+        outputLanguage: run.outputLanguage,
         billing: { runId: run.id, accountId: run.accountId ?? null, chargeComponent: "platform_shadow" },
       });
       if (process.env.INCREMENTAL_SHADOW_DEBUG === "true") {
