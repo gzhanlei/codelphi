@@ -16,6 +16,7 @@ interface WorkbenchFeatureRow {
   name: string;
   summary: string;
   source: "generated" | "manual";
+  outputLanguage?: string;
   specVersionId: number;
 }
 
@@ -31,9 +32,10 @@ async function previousVersionId(execute: Execute, repositoryId: number, specVer
   return rows[0]?.id ?? null;
 }
 
-export async function syncFeatureFlowsForVersion(options: { specVersionId: number; repositoryId: number; affectedKeys?: ReadonlySet<string> | null; billing?: LlmBillingContext }) {
+export async function syncFeatureFlowsForVersion(options: { specVersionId: number; repositoryId: number; affectedKeys?: ReadonlySet<string> | null; outputLanguage?: "zh-CN" | "en"; billing?: LlmBillingContext }) {
   const execute = defaultExecute;
   const { specVersionId, repositoryId, affectedKeys, billing } = options;
+  const language = options.outputLanguage ?? "zh-CN";
   const previousId = await previousVersionId(execute, repositoryId, specVersionId);
   const copied = previousId === null ? 0 : await copyInheritedFeatureFlowGraphs(execute, previousId, specVersionId);
   const previousFailures = previousId === null ? new Map<string, string>() : await loadFeatureFlowFailures(execute, previousId);
@@ -49,7 +51,7 @@ export async function syncFeatureFlowsForVersion(options: { specVersionId: numbe
     while (cursor < targets.length) {
       const target = targets[cursor++];
       try {
-        const graph = await generateFeatureFlowGraph(target.feature, billing);
+        const graph = await generateFeatureFlowGraph(target.feature, billing, language);
         await saveFeatureFlowGraph(execute, target.id, graph, scenarioFingerprint(target.feature.scenarios));
         generated += 1;
       } catch (error) {
@@ -74,7 +76,7 @@ export async function syncFeatureFlowsForVersion(options: { specVersionId: numbe
 export async function regenerateFeatureFlowForWorkbenchFeature(featureId: number, billing?: LlmBillingContext): Promise<FeatureFlowGraph> {
   const execute = defaultExecute;
   const featureRows = payloadRows<WorkbenchFeatureRow>(await execute(
-    `SELECT f.id, f.name, f.summary, f.source, latest.spec_version_id AS specVersionId
+    `SELECT f.id, f.name, f.summary, f.source, p.output_language AS outputLanguage, latest.spec_version_id AS specVersionId
      FROM features f
      JOIN products p ON p.id = f.product_id
      JOIN releases latest ON latest.product_id = p.id AND latest.spec_version_id IS NOT NULL
@@ -84,6 +86,7 @@ export async function regenerateFeatureFlowForWorkbenchFeature(featureId: number
   ));
   const row = featureRows[0];
   if (!row) throw new Error(`WORKBENCH_FEATURE_NOT_FOUND: ${featureId}`);
+  const language = row.outputLanguage === "en" ? "en" : "zh-CN";
   const scenarioRows = payloadRows<WorkbenchScenarioRow>(await execute(
     "SELECT reference, context, action, outcome, category, step_order AS step, source, evidence FROM scenarios WHERE feature_id = ? AND active = 1 ORDER BY reference",
     [featureId],
@@ -103,7 +106,7 @@ export async function regenerateFeatureFlowForWorkbenchFeature(featureId: number
   const record = records.find((candidate) => candidate.stableKey === specFeatureKey(row.name));
   if (!record) throw new Error(`SPEC_FEATURE_NOT_FOUND: ${featureId}@${row.specVersionId}`);
   try {
-    const graph = await generateFeatureFlowGraph(feature, billing);
+    const graph = await generateFeatureFlowGraph(feature, billing, language);
     await saveFeatureFlowGraph(execute, record.id, graph, scenarioFingerprint(scenarios));
     return graph;
   } catch (error) {

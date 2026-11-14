@@ -7,6 +7,7 @@ import { buildDraftBlocks, canPublish, publishOrder, releaseNotePublicUrl, valid
 import { loadBlockViews, loadNoteByRelease, releaseChanges, releaseOwned } from "@/lib/release-notes-service";
 import { rewriteReleaseNoteCopy } from "@/lib/release-notes-enhance";
 import { requestStructuredCompletion } from "@/lib/ai";
+import { loadProductOutputLanguage } from "@/lib/analysis-language";
 import { appUrl } from "@/lib/env";
 
 /**
@@ -117,10 +118,12 @@ export async function POST(request: NextRequest) {
         const releaseResult = await db.execute("SELECT summary FROM releases WHERE id = ?", [releaseId]) as unknown;
         const releaseRows = (Array.isArray(releaseResult) ? releaseResult[0] : releaseResult) as Array<{ summary: string }>;
         const releaseSummary = releaseRows?.[0]?.summary ?? "";
+        const outputLanguage = await loadProductOutputLanguage(access.product.id, db.execute.bind(db));
         const outcome = await rewriteReleaseNoteCopy(
           { execute: (sql: string, params?: unknown[]) => db.execute(sql, params as never) },
           { completion: (messages, billing) => requestStructuredCompletion(messages, billing) },
           { noteId, releaseTitle: changes[0]?.featureName ?? "", emphasis: String(body.emphasis ?? ""), releaseSummary, groups },
+          outputLanguage,
         );
         console.log("[release-notes] manual draft copy rewritten", { releaseId, ...outcome });
       } catch (error) {

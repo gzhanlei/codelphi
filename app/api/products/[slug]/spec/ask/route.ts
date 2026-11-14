@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { answerSpecQuestion, buildAnswerSynthesisPrompt, decorateSpecAnswer, loadSpecAnswerContext, parseAnswerSynthesis, buildFeatureSelectPrompt, parseFeatureSelection, matchFeaturesByNameGrams, type SpecAnswer } from "@/lib/spec-ask";
+import { loadProductOutputLanguage } from "@/lib/analysis-language";
 import { getDb } from "@/lib/db";
 import { resolveSpecReadProductId } from "@/lib/spec-read-access";
 import { getSessionUser } from "@/lib/session";
@@ -25,6 +26,14 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
   const answer = await answerSpecQuestion(access.productId, question);
   const context_ = await loadSpecAnswerContext(access.productId);
   const decorated = decorateSpecAnswer(answer, context_);
+  // 规格问答输出语言随产品（072）：AI 综合回答与功能选择的 prompt 语言段与系统提示语双语（best-effort，查询失败回退中文）
+  let askLanguage: "zh-CN" | "en" = "zh-CN";
+  try {
+    askLanguage = await loadProductOutputLanguage(access.productId, getDb().execute.bind(getDb()));
+  } catch {
+    // 语言读取失败不阻塞问答：按缺省中文继续
+  }
+  const askEditor = askLanguage === "en" ? "You are a product spec Q&A editor: answer only from the given spec entries, never invent; decline honestly when they are insufficient." : "你是产品规格问答编辑：只基于给定规格条目回答，禁止编造；不足时如实拒答。";
 
   if (decorated.status !== "matched") {
     // B2.2b 词汇鸿沟兜底：词法检索未命中 ≠ 规格没答案（例：问『语言』，条目写的是 Next.js/Go）。
@@ -54,8 +63,8 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
       const lexicalIds = new Set(matchFeaturesByNameGrams(decorated.question, catalog).map((feature) => feature.id));
       const selectCall = () => requestStructuredCompletion(
         [
-          { role: "system", content: "你是检索助手，只输出合规 JSON。" },
-          { role: "user", content: buildFeatureSelectPrompt({ question: decorated.question, productName: productNameForAsk, catalog: catalog.map((item) => ({ id: item.id, name: item.name, summary: item.summary ?? "" })) }) },
+          { role: "system", content: askLanguage === "en" ? "You are a retrieval assistant; output only compliant JSON." : "你是检索助手，只输出合规 JSON。" },
+          { role: "user", content: buildFeatureSelectPrompt({ question: decorated.question, productName: productNameForAsk, catalog: catalog.map((item) => ({ id: item.id, name: item.name, summary: item.summary ?? "" })) }, askLanguage) },
         ],
         { runId: null, accountId: null, chargeComponent: "main", callKind: "spec_ask_answer" },
       );
@@ -107,13 +116,13 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
       const featureExcerpts = pickedFeatures.map((feature) => ({ id: feature.id, name: feature.name, summary: feature.summary }));
       const synthesisContent = await requestStructuredCompletion(
         [
-          { role: "system", content: "你是产品规格问答编辑：只基于给定规格条目回答，禁止编造；不足时如实拒答。" },
+          { role: "system", content: askEditor },
           { role: "user", content: buildAnswerSynthesisPrompt({
             question: decorated.question,
             specVersionId: context_.specVersionId,
             features: featureExcerpts,
             scenarios: scenarioExcerpts,
-          }) },
+          }, askLanguage) },
         ],
         { runId: null, accountId: null, chargeComponent: "main", callKind: "spec_ask_answer" },
       );
@@ -144,13 +153,13 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
   try {
     const content = await requestStructuredCompletion(
       [
-        { role: "system", content: "你是产品规格问答编辑：只基于给定规格条目回答，禁止编造；不足时如实拒答。" },
+        { role: "system", content: askEditor },
         { role: "user", content: buildAnswerSynthesisPrompt({
           question: decorated.question,
           specVersionId: context_.specVersionId,
           features: decorated.features.map((feature) => ({ id: feature.id, name: feature.name, summary: feature.summary })),
           scenarios: decorated.scenarios.map((scenario) => ({ id: scenario.id, featureName: scenario.featureName, reference: scenario.reference, context: scenario.context, action: scenario.action, outcome: scenario.outcome })),
-        }) },
+        }, askLanguage) },
       ],
       { runId: null, accountId: null, chargeComponent: "main", callKind: "spec_ask_answer" },
     );

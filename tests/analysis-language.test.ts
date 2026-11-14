@@ -1,6 +1,15 @@
-import { describe, expect, it } from "vitest";
-import { outputLanguageSchema, OUTPUT_LANGUAGE_LABELS } from "../lib/analysis-language";
+import { describe, expect, it, vi } from "vitest";
+import { loadProductOutputLanguage, outputLanguageSchema, OUTPUT_LANGUAGE_LABELS } from "../lib/analysis-language";
 import { productInputSchema, productUpdateSchema } from "../lib/product-input";
+
+describe("product output language loader", () => {
+  it("reads the product row and falls back to zh-CN", async () => {
+    const execute = vi.fn(async () => [[{ outputLanguage: "en" }]] as never);
+    await expect(loadProductOutputLanguage(4, execute as never)).resolves.toBe("en");
+    const fallback = vi.fn(async () => [[]] as never);
+    await expect(loadProductOutputLanguage(4, fallback as never)).resolves.toBe("zh-CN");
+  });
+});
 
 describe("output language schema", () => {
   it("accepts supported languages and rejects others", () => {

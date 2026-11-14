@@ -550,6 +550,7 @@ async function runAnalysisBody(run: RunContext) {
       specVersionId,
       repositoryId: run.repositoryId,
       affectedKeys,
+      outputLanguage: run.outputLanguage,
       billing: { runId: run.id, accountId: run.accountId ?? null, chargeComponent: "main", callKind: "feature_flow" },
     });
     console.log("[feature-flow] sync complete", { specVersionId, ...flowStats });
@@ -620,6 +621,7 @@ async function runAnalysisBody(run: RunContext) {
               { execute: (sql: string, params?: unknown[]) => getDb().execute(sql, params as never) },
               { completion: (messages, billing) => requestStructuredCompletion(messages, billing) },
               { noteId: note.id, releaseTitle: change.message.split("\n")[0].trim().slice(0, 120), emphasis: note.emphasis ?? "", releaseSummary: "", groups },
+              run.outputLanguage,
             );
             console.log("[release-notes] draft copy rewritten", { runId: run.id, releaseId, ...outcome, headline: outcome.headline });
           }

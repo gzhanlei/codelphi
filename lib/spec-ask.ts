@@ -4,6 +4,8 @@ import { evidenceUrl } from "./evidence-url";
 import { searchSpec, type SpecSearchResult } from "./spec-search";
 import { loadLatestVerificationSpec } from "./spec-verification";
 import { stripScenarioRefs } from "./release-notes-enhance";
+import type { OutputLanguage } from "./analysis-language";
+import { hasCjk } from "./text-script";
 import type { Evidence } from "./types";
 
 /** B2.1：答案就是规格原文。未覆盖状态在类型上不可能携带结果。 */
@@ -33,7 +35,27 @@ export function buildAnswerSynthesisPrompt(input: {
   specVersionId: number | null;
   features: Array<{ id: number; name: string; summary: string }>;
   scenarios: Array<{ id: number; featureName: string; reference: string; context: string; action: string; outcome: string }>;
-}): string {
+}, language: OutputLanguage = "zh-CN"): string {
+  if (language === "en") {
+    const featureLines = input.features.map((feature) => `- [Feature #${feature.id}] ${feature.name}: ${feature.summary}`);
+    const scenarioLines = input.scenarios.map((scenario) => `- [Scenario #${scenario.id}] ${scenario.featureName} · ${scenario.reference}: ${scenario.context} → ${scenario.action} → ${scenario.outcome}`);
+    return [
+      "Answer the user's question based on the product spec entries below. Write in English.",
+      "Hard rules:",
+      "1. Use only facts from the entries; when they are not enough to answer, return answerable:false and state in the reason field what the spec is missing (e.g. \"the spec records no capacity/scale limits\") — never guess.",
+      "2. Answer in 1-3 sentences, at most 100 words; answer the question directly (what the user gets / how it works / what the limits are).",
+      "3. Register every entry you used in used (kind=feature or scenario, id as labeled on the entry).",
+      "4. No EC-n/ER-n/HP-n scenario references or internal jargon; entry numbers (#n) go only into used, never into the body text.",
+      'Return JSON only: {"answerable":true,"answer":"...","used":[{"kind":"feature","id":0}]}',
+      "",
+      `[User question] ${input.question}`,
+      input.specVersionId !== null ? `[Spec version] v${input.specVersionId}` : "",
+      "",
+      "[Spec entries]",
+      ...featureLines,
+      ...scenarioLines,
+    ].join("\n");
+  }
   const featureLines = input.features.map((feature) => `- [功能 #${feature.id}] ${feature.name}：${feature.summary}`);
   const scenarioLines = input.scenarios.map((scenario) => `- [场景 #${scenario.id}] ${scenario.featureName} · ${scenario.reference}：${scenario.context} → ${scenario.action} → ${scenario.outcome}`);
   return [
@@ -88,7 +110,21 @@ export interface FeatureCatalogItem {
   scenarioHints?: string[];
 }
 
-export function buildFeatureSelectPrompt(input: { question: string; productName: string; catalog: FeatureCatalogItem[] }): string {
+export function buildFeatureSelectPrompt(input: { question: string; productName: string; catalog: FeatureCatalogItem[] }, language: OutputLanguage = "zh-CN"): string {
+  if (language === "en") {
+    return [
+      `The user is asking about the product "${input.productName}". Below is its feature catalog (name: summary, some with scenario hints). "this project/this product" in the question refers to it.`,
+      "Task: decide which features are relevant to the question and return their ids. Relevance reads the feature summary **and** the scenario hints (e.g. asking \"how large is supported\" should pick features whose hints mention size/count/limits). Judge only from the catalog; prefer omission over noise — return an empty array when nothing is relevant.",
+      'Return JSON only: {"relevant":[1,2]}',
+      "",
+      `[User question] ${input.question}`,
+      "[Feature catalog]",
+      ...input.catalog.map((item) => {
+        const hints = item.scenarioHints?.length ? `｜Scenario hints: ${item.scenarioHints.join("; ")}` : "";
+        return `- #${item.id} ${item.name}: ${item.summary}${hints}`;
+      }),
+    ].join("\n");
+  }
   return [
     `用户正在询问产品「${input.productName}」。下面是该产品的功能清单（名称：简介，部分附场景线索）。用户问题里的『本项目/这个产品』即指它。`,
     "任务：判断哪些功能与用户问题相关，返回它们的 id。相关判定看功能简介**和**场景线索（例如问『支持多大规模』应选中含大小/数量/限制线索的功能）。只基于清单判断，宁缺毋滥——没有任何相关功能时返回空数组。",
@@ -129,6 +165,8 @@ export function matchFeaturesByNameGrams(
       questionGrams.add(gram);
     }
   }
+  // 英文兜底：问句与功能名共享词 token（≥3 字符）即视为相关（中文 2-gram 对英文失效）。
+  const questionTokens = new Set([...normalized.toLowerCase().matchAll(/[a-z][a-z0-9_-]{2,}/g)].map((match) => match[0]));
   return features.filter((feature) => {
     for (const chunk of feature.name.split(/[^\u4e00-\u9fa5]+/)) {
       for (let index = 0; index + 2 <= chunk.length; index += 1) {
@@ -136,6 +174,10 @@ export function matchFeaturesByNameGrams(
         if ([...gram].some((character) => STOP_CHARACTERS.has(character))) continue;
         if (questionGrams.has(gram)) return true;
       }
+    }
+    if (questionTokens.size > 0 && hasCjk(feature.name) === false && hasCjk(normalized) === false) {
+      const nameTokens = [...feature.name.toLowerCase().matchAll(/[a-z][a-z0-9_-]{2,}/g)].map((match) => match[0]);
+      if (nameTokens.some((token) => questionTokens.has(token))) return true;
     }
     return false;
   });

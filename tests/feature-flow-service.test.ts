@@ -76,7 +76,7 @@ describe("feature flow service", () => {
     expect(result).toEqual({ generated: 1, copied: 1, failed: 0 });
     expect(mocks.copy).toHaveBeenCalledWith(expect.anything(), 41, 42);
     expect(mocks.generate).toHaveBeenCalledTimes(1);
-    expect(mocks.generate).toHaveBeenCalledWith(records[0].feature, undefined);
+    expect(mocks.generate).toHaveBeenCalledWith(records[0].feature, undefined, "zh-CN");
   });
 
   it("retries previously failed features whose scenario set is unchanged", async () => {
@@ -86,7 +86,7 @@ describe("feature flow service", () => {
 
     await syncFeatureFlowsForVersion({ specVersionId: 42, repositoryId: 3, affectedKeys: new Set(["a"]) });
     expect(mocks.generate).toHaveBeenCalledTimes(2);
-    expect(mocks.generate).toHaveBeenCalledWith(records[1].feature, undefined);
+    expect(mocks.generate).toHaveBeenCalledWith(records[1].feature, undefined, "zh-CN");
   });
 
   it("does not retry a previously failed feature whose scenarios changed without being affected", async () => {
@@ -96,7 +96,7 @@ describe("feature flow service", () => {
 
     await syncFeatureFlowsForVersion({ specVersionId: 42, repositoryId: 3, affectedKeys: new Set(["a"]) });
     expect(mocks.generate).toHaveBeenCalledTimes(1);
-    expect(mocks.generate).toHaveBeenCalledWith(records[0].feature, undefined);
+    expect(mocks.generate).toHaveBeenCalledWith(records[0].feature, undefined, "zh-CN");
   });
 
   it("isolates one feature generation failure without rolling back others", async () => {
@@ -123,7 +123,7 @@ describe("feature flow service", () => {
 
     const result = await regenerateFeatureFlowForWorkbenchFeature(9176, { runId: null, accountId: null, chargeComponent: "main", callKind: "feature_flow_backfill" });
     expect(result).toEqual(graph);
-    expect(mocks.generate).toHaveBeenCalledWith(expect.objectContaining({ name: "A", scenarios: expect.arrayContaining([expect.objectContaining({ source: "manual" })]) }), { runId: null, accountId: null, chargeComponent: "main", callKind: "feature_flow_backfill" });
+    expect(mocks.generate).toHaveBeenCalledWith(expect.objectContaining({ name: "A", scenarios: expect.arrayContaining([expect.objectContaining({ source: "manual" })]) }), { runId: null, accountId: null, chargeComponent: "main", callKind: "feature_flow_backfill" }, "zh-CN");
     expect(mocks.save).toHaveBeenCalledWith(expect.anything(), 101, graph, scenarioFingerprint(manualScenarios));
   });
 });

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { Execute } from "./db";
 
 /**
  * 分析输出语言（产品级设置）：AI 提取的功能/场景/摘要/发布稿文本按此语言生成。
@@ -22,3 +23,10 @@ export const OUTPUT_LANGUAGE_HINTS: Record<OutputLanguage, string> = {
   "zh-CN": "功能规格、场景与发布稿将以简体中文生成",
   en: "Feature specs, scenarios and release notes will be generated in English",
 };
+
+/** 读产品输出语言（发布稿改写等异步生成通道用）：非法/缺省一律回退 zh-CN。 */
+export async function loadProductOutputLanguage(productId: number, execute: Execute): Promise<OutputLanguage> {
+  const result = await execute("SELECT output_language AS outputLanguage FROM products WHERE id = ?", [productId]);
+  const rows = (Array.isArray(result) ? (result as unknown[])[0] : result) as Array<{ outputLanguage?: string }>;
+  return rows?.[0]?.outputLanguage === "en" ? "en" : "zh-CN";
+}

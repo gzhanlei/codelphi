@@ -5,6 +5,7 @@ import { getDb } from "@/lib/db";
 import { requestStructuredCompletion } from "@/lib/ai";
 import { buildEnhancePrompt, parseEnhancedSummary } from "@/lib/release-notes-enhance";
 import { loadNoteById } from "@/lib/release-notes-service";
+import { loadProductOutputLanguage } from "@/lib/analysis-language";
 import { enforceExportRateLimit } from "@/lib/rate-limit";
 
 /**
@@ -41,9 +42,10 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
   if (!block) return NextResponse.json({ error: "块不存在" }, { status: 404 });
 
   try {
+    const language = await loadProductOutputLanguage(access.product.id, db.execute.bind(db));
     const content = await requestStructuredCompletion(
       [
-        { role: "system", content: "你是严谨的发布说明编辑，只改写措辞不改变事实。" },
+        { role: "system", content: language === "en" ? "You are a rigorous release-notes editor; reword only, never change the facts." : "你是严谨的发布说明编辑，只改写措辞不改变事实。" },
         { role: "user", content: buildEnhancePrompt({
           kind: block.kind,
           featureName: block.featureName,
@@ -52,7 +54,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
           highlightType: block.highlightType,
           emphasis: note.emphasis ?? "",
           instruction: String(body.instruction ?? ""),
-        }) },
+        }, language) },
       ],
       { runId: null, accountId: null, chargeComponent: "main", callKind: "release_note_enhance" },
     );

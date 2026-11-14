@@ -1,8 +1,9 @@
 import { requestStructuredCompletion, type LlmBillingContext } from "./ai";
 import { FEATURE_FLOW_MAX_ENTRIES, FlowValidationError, validateFeatureFlowGraph, type FeatureFlowGraph } from "./semantic-feature-flow";
 import type { SpecFeature } from "./spec-diff";
+import type { OutputLanguage } from "./analysis-language";
 
-export function featureFlowPrompt(feature: SpecFeature) {
+export function featureFlowPrompt(feature: SpecFeature, language: OutputLanguage = "zh-CN") {
   const scenarios = feature.scenarios.map((scenario) => ({
     reference: scenario.reference,
     category: scenario.category,
@@ -12,6 +13,18 @@ export function featureFlowPrompt(feature: SpecFeature) {
     step: scenario.step ?? null,
     evidence: scenario.evidence.map((item) => item.path),
   }));
+  if (language === "en") {
+    return [
+      "Organize the product scenarios into a verifiable user execution graph. Use only relationships expressible from the input scenarios; never speculate.",
+      "The main path must express the real execution order; decisions, errors, external waits and terminal states attach to their corresponding steps. Put explanatory, historical-decision, duplicate or graph-unsupportable scenarios into excludedScenarios; never mix them into the main graph. A reference in excludedScenarios must not appear in any node or edge scenarioRefs.",
+      "One node may aggregate several scenarios. Except for the synthetic START, every node must reference scenarios of the current feature; every edge must reference scenarios of the current feature. END requires terminal-state evidence; retry requires retry or step-back evidence.",
+      `At most 24 nodes, 48 edges and ${FEATURE_FLOW_MAX_ENTRIES} genuinely independent entries. An entry = the start of an independent sub-flow (e.g. password sign-in / QR / SSO for auth, enable/verify/recover for MFA), not one per scenario; when entries exceed the cap, merge same-sub-flow chains into one entry first. Scenarios must not be silently attached to START by default, and never fabricate relationships just to connect the graph. Without a main chain of at least two action nodes, return empty nodes and edges and mark the scenarios unsupported.`,
+      'Return JSON only: {"entryNodeIds":["start"],"nodes":[{"id":"start","kind":"start|action|decision|error|external|waiting|end","title":"","scenarioRefs":["HP-1"]}],"edges":[{"id":"e1","from":"start","to":"step","kind":"sequence|branch|retry","label":"","scenarioRefs":["HP-1"]}],"excludedScenarios":[{"reference":"HP-2","reason":"documentary|duplicate|unsupported|out-of-scope"}]}',
+      `Feature: ${feature.name}`,
+      `Summary: ${feature.summary}`,
+      `Scenarios: ${JSON.stringify(scenarios)}`,
+    ].join("\n");
+  }
   return [
     "把产品场景整理成可验证的用户执行图。只能使用输入场景表达的关系，不得补充猜测。",
     "主路径应清楚表达真实执行顺序；判断、错误、外部等待和终态挂在对应步骤上。说明性、历史决策、重复或无法支持图关系的场景放入 excludedScenarios，不要混入主图。excludedScenarios 中的 reference 不得出现在任何节点或边的 scenarioRefs 中。",
@@ -44,10 +57,10 @@ function normalizeEmptyLabels(graph: unknown): unknown {
   };
 }
 
-export async function generateFeatureFlowGraph(feature: SpecFeature, billing?: LlmBillingContext): Promise<FeatureFlowGraph> {
+export async function generateFeatureFlowGraph(feature: SpecFeature, billing?: LlmBillingContext, language: OutputLanguage = "zh-CN"): Promise<FeatureFlowGraph> {
   const messages = [
-    { role: "system", content: "你是严谨的产品流程分析器，只输出可验证的结构化 JSON。" },
-    { role: "user", content: featureFlowPrompt(feature) },
+    { role: "system", content: language === "en" ? "You are a rigorous product flow analyzer that outputs only verifiable structured JSON." : "你是严谨的产品流程分析器，只输出可验证的结构化 JSON。" },
+    { role: "user", content: featureFlowPrompt(feature, language) },
   ];
   const receipt = billing ? { ...billing, callKind: "feature_flow" } : undefined;
   const content = await requestStructuredCompletion(messages, receipt);
@@ -58,7 +71,9 @@ export async function generateFeatureFlowGraph(feature: SpecFeature, billing?: L
     const correction = await requestStructuredCompletion([
       ...messages,
       { role: "assistant", content },
-      { role: "user", content: `上次输出未通过校验：${error.message}。请完整重新生成并修正，不得只返回局部修改。excludedScenarios 中的 reference 不得出现在任何节点或边的 scenarioRefs 中；其他证据与主链要求保持不变。` },
+      { role: "user", content: language === "en"
+        ? `The previous output failed validation: ${error.message}. Regenerate it completely with the fix — do not return a partial patch. A reference in excludedScenarios must not appear in any node or edge scenarioRefs; the evidence and main-chain requirements are unchanged.`
+        : `上次输出未通过校验：${error.message}。请完整重新生成并修正，不得只返回局部修改。excludedScenarios 中的 reference 不得出现在任何节点或边的 scenarioRefs 中；其他证据与主链要求保持不变。` },
     ], receipt);
     return validateFeatureFlowGraph(normalizeEmptyLabels(parseContent(correction)), feature.scenarios);
   }

@@ -4,6 +4,7 @@ import { requireProductAccess } from "@/lib/product-access";
 import { getDb } from "@/lib/db";
 import { renderReleaseNoteMarkdown, releaseNotePublicUrl } from "@/lib/release-notes";
 import { loadBlockViews, loadNoteByRelease, releaseOwned } from "@/lib/release-notes-service";
+import { loadProductOutputLanguage } from "@/lib/analysis-language";
 import { enforceExportRateLimit } from "@/lib/rate-limit";
 import { appUrl } from "@/lib/env";
 
@@ -30,6 +31,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
   );
   const release = (releaseRows as Array<{ title: string; sha: string; url: string | null }>)[0];
   const blocks = await loadBlockViews(db.execute.bind(db), note.id);
+  const language = await loadProductOutputLanguage(access.product.id, db.execute.bind(db));
   const markdown = renderReleaseNoteMarkdown({
     productName: access.product.name,
     releaseTitle: release?.title ?? `#${releaseId}`,
@@ -38,6 +40,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
     blocks,
     emphasis: note.emphasis,
     publicUrl: releaseNotePublicUrl(appUrl(), note.shareToken),
+    language,
   });
   return new NextResponse(markdown, {
     headers: {

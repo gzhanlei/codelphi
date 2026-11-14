@@ -105,3 +105,26 @@ describe("release notes (A2)", () => {
     expect(markdown).toContain("没有勾选任何要宣布的行为变化");
   });
 });
+
+describe("release note markdown language (072)", () => {
+  it("renders English chrome and labels in English mode", () => {
+    const markdown = renderReleaseNoteMarkdown({
+      productName: "Radar",
+      releaseTitle: "v1",
+      releaseSha: "abcdef1234",
+      blocks: [{ kind: "added", featureName: "Login", scenarioReference: null, summary: "Passkeys", highlightType: null, evidencePaths: ["lib/auth.ts"] } as never],
+      language: "en",
+    });
+    expect(markdown).toContain("# Release notes · v1");
+    expect(markdown).toContain("Added · Login");
+    expect(markdown).toContain("Evidence: lib/auth.ts");
+    expect(markdown).not.toContain("｜");
+    expect(markdown).not.toContain("发布说明");
+  });
+
+  it("keeps the zh chrome byte-identical by default", () => {
+    const markdown = renderReleaseNoteMarkdown({ productName: "p", releaseTitle: "t", releaseSha: "abcdef1234", blocks: [] });
+    expect(markdown).toContain("# 发布说明 · t");
+    expect(markdown).toContain("本次发布没有勾选任何要宣布的行为变化。");
+  });
+});

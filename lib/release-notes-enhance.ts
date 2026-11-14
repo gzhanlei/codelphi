@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { OutputLanguage } from "./analysis-language";
 
 /**
  * 发布稿文案 AI 通道（A2 §4.3-3 + 用户裁决 2026-11-12：改写单位 = 功能）。
@@ -39,10 +40,26 @@ export interface EnhanceBlockInput {
   instruction: string;
 }
 
-export function buildEnhancePrompt(input: EnhanceBlockInput): string {
-  const kindLabels: Record<string, string> = { added: "新增", changed: "更新", removed: "移除" };
+export function buildEnhancePrompt(input: EnhanceBlockInput, language: OutputLanguage = "zh-CN"): string {
+  const kindLabels: Record<string, string> = language === "en"
+    ? { added: "Added", changed: "Updated", removed: "Removed" }
+    : { added: "新增", changed: "更新", removed: "移除" };
   const kind = kindLabels[input.kind] ?? input.kind;
   const subject = input.scenarioReference ? `${input.featureName} · ${input.scenarioReference}` : input.featureName;
+  if (language === "en") {
+    return [
+      "You are rewriting copy for one customer-facing release-note entry. Write in English and output only the rewritten body — no title, no quotes, no explanations.",
+      "Hard rules:",
+      "1. Rewrite only the facts stated in [Original]; never add features, numbers, dates or promises that are not there.",
+      "2. Do not change the factual meaning; keep the original wording where unsure.",
+      "3. Output one paragraph (20-60 words), behavior-statement style — who can do what / what happens under which condition, with concrete action and result; include boundary conditions when present. Avoid internal jargon, code paths and EC-n/ER-n/HP-n scenario references (and the word \"scenario\").",
+      "4. Tone: factual, plain, no exclamation marks, no marketing voice.",
+      ...(input.emphasis.trim() ? [`5. The global emphasis is \"${input.emphasis.trim()}\"; align the rewrite with it.`] : []),
+      ...(input.instruction.trim() ? [`6. User instruction: ${input.instruction.trim().slice(0, 200)}`] : []),
+      "",
+      `[Original] ${kind} ${subject}${input.highlightType ? ` (${input.highlightType})` : ""}: ${input.summary}`,
+    ].join("\n");
+  }
   return [
     "你在为一条客户向发布说明改写文案。用简体中文，只输出改写后的正文，不要标题、引号或解释。",
     "硬规则：",
@@ -81,7 +98,18 @@ export interface HeadlineInput {
   bullets: string[];
 }
 
-export function buildHeadlinePrompt(input: HeadlineInput): string {
+export function buildHeadlinePrompt(input: HeadlineInput, language: OutputLanguage = "zh-CN"): string {
+  if (language === "en") {
+    return [
+      "Write one announcement headline for a product release. Write in English.",
+      "Requirements: one sentence, at most 15 words; a plain capability/change statement (e.g. \"One command to connect product specs with AI assistants\"); no marketing voice, no exclamation marks, no vague \"improved experience\"; summarize the one or two most important items below.",
+      'Return JSON only: {"headline":"..."}',
+      "",
+      "[Release entries]",
+      ...input.bullets.map((bullet, index) => `${index + 1}. ${bullet}`),
+      input.releaseTitle.trim() ? `[Commit title (reference only, do not copy)] ${input.releaseTitle}` : "",
+    ].join("\n");
+  }
   return [
     "为一次产品发布写一条公告标题。用简体中文。",
     "要求：一句话、不超过 40 字；平实的能力/变化陈述（如『一条命令连接产品规格与 AI 助手』），不要营销腔、不要感叹号、不要泛泛的『优化体验』；概括下面全部条目中最主要的一两件事。",
@@ -124,7 +152,25 @@ export interface FeatureCopyEntry {
 
 const SECTION_LIST = "新增 / 改进 / 修复 / 移除";
 
-export function buildFeatureCopyPrompt(input: { featureName: string; emphasis: string; summaries: string[] }): string {
+export function buildFeatureCopyPrompt(input: { featureName: string; emphasis: string; summaries: string[] }, language: OutputLanguage = "zh-CN"): string {
+  if (language === "en") {
+    const sections = "Added / Improved / Fixed / Removed";
+    return [
+      "You are writing the feature update note for a product release. Write in English.",
+      `Feature: ${input.featureName}.`,
+      "Hard rules:",
+      "1. Below are several internal change records for this feature in this release (before deduplication): merge duplicate/similar content into one user-readable note; never list them one by one.",
+      "2. Write only from these records: what users can perceive (new capability, changed behavior, fixed problem). Never invent features or numbers beyond the records.",
+      "3. No internal jargon, code paths or EC-n/ER-n/HP-n scenario references, and no words like \"scenario\", \"spec\" or \"change record\".",
+      "4. Length 1-3 sentences, at most 80 words; factual and plain.",
+      `5. The section field: pick the closest one from ${sections} (new capability=Added; behavior change=Improved; bug fix=Fixed; feature retirement=Removed).`,
+      'Return JSON only: {"section":"Added|Improved|Fixed|Removed","text":"..."}',
+      "",
+      "[Change records]",
+      ...input.summaries.map((summary, index) => `${index + 1}. ${summary}`),
+      input.emphasis.trim() ? `\n[Global emphasis] ${input.emphasis.trim()}` : "",
+    ].join("\n");
+  }
   return [
     "你在为一次产品发布撰写『功能更新说明』。用简体中文。",
     `对象功能：${input.featureName}。`,
@@ -142,20 +188,35 @@ export function buildFeatureCopyPrompt(input: { featureName: string; emphasis: s
   ].join("\n");
 }
 
+// 双语枚举：英文模式模型返回英文 section 名，规范化映射到中文规范值（存量 feature_copy_json 存储形态不变）。
+const SECTION_ALIASES: Record<string, CopySection | "省略"> = {
+  新增: "新增", 改进: "改进", 修复: "修复", 移除: "移除", 省略: "省略",
+  Added: "新增", Improved: "改进", Fixed: "修复", Removed: "移除", Skipped: "省略",
+};
+
 const featureCopySchema = z.object({
-  section: z.enum(["新增", "改进", "修复", "移除", "省略"]),
+  section: z.string().refine((value) => value in SECTION_ALIASES, "section 不在允许的分类内"),
   text: z.string().max(600).default(""),
 });
 
 export function parseFeatureCopy(content: string): { section: CopySection | "省略"; text: string } {
   const parsed = featureCopySchema.safeParse(JSON.parse(unwrapJson(content)));
-  if (parsed.success) return { section: parsed.data.section, text: stripScenarioRefs(parsed.data.text.trim()) };
+  if (parsed.success) return { section: SECTION_ALIASES[parsed.data.section] ?? "省略", text: stripScenarioRefs(parsed.data.text.trim()) };
   throw new Error(parsed.error.issues[0]?.message ?? "结构不合格");
 }
 
 // ── 4. 导语改写 ─────────────────────────────────────────────────
 
-export function buildLeadPrompt(input: { releaseSummary: string }): string {
+export function buildLeadPrompt(input: { releaseSummary: string }, language: OutputLanguage = "zh-CN"): string {
+  if (language === "en") {
+    return [
+      "Rewrite the release summary below into a user-readable lead paragraph. Write in English.",
+      "Requirements: merge duplicates; drop implementation details (internal component names, tables/fields, receipts, pipeline and other engineering vocabulary); keep only user-perceivable changes; 1-3 sentences, at most 80 words; plain, no marketing voice.",
+      'Return JSON only: {"text":"..."}',
+      "",
+      `[Original] ${input.releaseSummary}`,
+    ].join("\n");
+  }
   return [
     "把下面这段发布摘要改写成用户可读的导语。用简体中文。",
     "要求：合并重复；去掉实现细节（内部组件名、表/字段、回执、pipeline 等工程词汇）；只保留使用者能感知的变化；1-3 句、不超过 120 字；平实无营销腔。",
@@ -198,16 +259,30 @@ export async function rewriteReleaseNoteCopy(
     releaseSummary: string;
     groups: FeatureCopyGroup[];
   },
+  language: OutputLanguage = "zh-CN",
 ): Promise<ReleaseCopyOutcome> {
+  const en = language === "en";
+  const kindPrefix = (kind: string) => en
+    ? (kind === "removed" ? "[Removed]" : kind === "added" ? "[Added]" : "[Changed]")
+    : (kind === "removed" ? "[下线]" : kind === "added" ? "[新增]" : "[改变]");
+  const editorCopy = en
+    ? "You are a product announcements editor who merges internal change records into one user-readable feature update note; reword only, never change the facts."
+    : "你是产品公告编辑，把内部变化记录合并成一条用户可读的功能更新说明，只改写措辞不改变事实。";
+  const editorHeadline = en
+    ? "You are a product announcements editor; output only a compliant headline."
+    : "你是产品公告编辑，只输出合规的标题。";
+  const editorLead = en
+    ? "You are a product announcements editor; reword only, never change the facts."
+    : "你是产品公告编辑，只改写措辞不改变事实。";
   const entries: FeatureCopyEntry[] = [];
   let failed = 0;
   for (const group of input.groups) {
-    const summaries = group.blocks.map((block) => `${block.kind === "removed" ? "[下线]" : block.kind === "added" ? "[新增]" : "[改变]"} ${block.summary}`);
+    const summaries = group.blocks.map((block) => `${kindPrefix(block.kind)} ${block.summary}`);
     try {
       const content = await deps.completion(
         [
-          { role: "system", content: "你是产品公告编辑，把内部变化记录合并成一条用户可读的功能更新说明，只改写措辞不改变事实。" },
-          { role: "user", content: buildFeatureCopyPrompt({ featureName: group.featureName, emphasis: input.emphasis, summaries }) },
+          { role: "system", content: editorCopy },
+          { role: "user", content: buildFeatureCopyPrompt({ featureName: group.featureName, emphasis: input.emphasis, summaries }, language) },
         ],
         { runId: null, accountId: null, chargeComponent: "main", callKind: "release_note_enhance" },
       );
@@ -225,8 +300,8 @@ export async function rewriteReleaseNoteCopy(
     try {
       const content = await deps.completion(
         [
-          { role: "system", content: "你是产品公告编辑，只输出合规的标题。" },
-          { role: "user", content: buildHeadlinePrompt({ releaseTitle: input.releaseTitle, bullets: entries.map((entry) => entry.text) }) },
+          { role: "system", content: editorHeadline },
+          { role: "user", content: buildHeadlinePrompt({ releaseTitle: input.releaseTitle, bullets: entries.map((entry) => entry.text) }, language) },
         ],
         { runId: null, accountId: null, chargeComponent: "main", callKind: "release_note_enhance" },
       );
@@ -240,8 +315,8 @@ export async function rewriteReleaseNoteCopy(
     try {
       const content = await deps.completion(
         [
-          { role: "system", content: "你是产品公告编辑，只改写措辞不改变事实。" },
-          { role: "user", content: buildLeadPrompt({ releaseSummary: input.releaseSummary }) },
+          { role: "system", content: editorLead },
+          { role: "user", content: buildLeadPrompt({ releaseSummary: input.releaseSummary }, language) },
         ],
         { runId: null, accountId: null, chargeComponent: "main", callKind: "release_note_enhance" },
       );
