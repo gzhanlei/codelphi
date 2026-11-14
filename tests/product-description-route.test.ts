@@ -90,6 +90,14 @@ describe("product rename route", () => {
     expect(updateProductDescription).toHaveBeenCalledWith("codelphi", 7, "概况");
   });
 
+  it("dispatches the output language change to the identity update path", async () => {
+    vi.mocked(updateProductIdentity).mockResolvedValue({ status: "updated", id: 2, name: "SalesBuddy", slug: "salesbuddy" });
+    const response = await patchRequest("salesbuddy", { outputLanguage: "en" });
+    expect(response.status).toBe(200);
+    expect(updateProductIdentity).toHaveBeenCalledWith("salesbuddy", 7, { outputLanguage: "en" });
+    expect((await patchRequest("salesbuddy", { outputLanguage: "fr" })).status).toBe(400);
+  });
+
   it("toggles the public demo flag for workspace members and rejects product-scoped editors", async () => {
     vi.mocked(updateProductIdentity).mockResolvedValue({ status: "updated", id: 2, name: "SalesBuddy", slug: "salesbuddy" });
     const response = await patchRequest("salesbuddy", { isPublicDemo: true });

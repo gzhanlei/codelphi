@@ -1,4 +1,5 @@
 import { getDb } from "./db";
+import type { OutputLanguage } from "./analysis-language";
 
 export type ProductRenameResult =
   | { status: "updated"; id: number; name: string; slug: string }
@@ -9,6 +10,7 @@ export interface ProductRenameInput {
   name?: string;
   newSlug?: string;
   isPublicDemo?: boolean;
+  outputLanguage?: OutputLanguage;
 }
 
 function isDuplicateEntryError(error: unknown) {
@@ -36,8 +38,8 @@ export async function updateProductIdentity(slug: string, organizationId: number
 
   try {
     await db.execute(
-      "UPDATE products SET name = COALESCE(?, name), slug = COALESCE(?, slug), is_public_demo = COALESCE(?, is_public_demo) WHERE id = ?",
-      [nextName ?? null, slugChanged ? nextSlug : null, input.isPublicDemo === undefined ? null : input.isPublicDemo ? 1 : 0, product.id],
+      "UPDATE products SET name = COALESCE(?, name), slug = COALESCE(?, slug), is_public_demo = COALESCE(?, is_public_demo), output_language = COALESCE(?, output_language) WHERE id = ?",
+      [nextName ?? null, slugChanged ? nextSlug : null, input.isPublicDemo === undefined ? null : input.isPublicDemo ? 1 : 0, input.outputLanguage ?? null, product.id],
     );
   } catch (error) {
     // 并发下唯一键 (organization_id, slug) 冲突视为改名失败。
