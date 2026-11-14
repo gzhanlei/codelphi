@@ -6,6 +6,8 @@
  * 一致性告警（产品定位：AI 翻译 + 人工核实签发）。
  */
 
+import { isNegatedNearToken } from "./text-script";
+
 export interface ConsistencyScenario {
   reference: string;
   outcome: string;
@@ -26,16 +28,10 @@ function errorTokens(outcome: string): string[] {
   return [...tokens];
 }
 
-/** 「不再」紧邻 token（中间无句读）→ 否定性陈述（修改后的行为：不再发生）；
- *  「不再重试，直接返回 504」这类否定的是别的动作（重试）不算。 */
+/** 否定性陈述判定（双语）：中文「不再」/英文 no longer/not/never 紧邻 token（中间无句读）
+ *  → 修改后的行为不再发生；「不再重试，直接返回 504」这类否定的是别的动作（重试）不算。 */
 function isNegated(outcome: string, token: string): boolean {
-  const index = outcome.indexOf(token);
-  if (index === -1) return false;
-  const window = outcome.slice(Math.max(0, index - 16), index);
-  const at = window.lastIndexOf("不再");
-  if (at === -1) return false;
-  const between = window.slice(at + "不再".length);
-  return !/[。；！？→，、]/.test(between);
+  return isNegatedNearToken(outcome, token);
 }
 
 export function detectOutcomeConflicts(features: Array<{ name: string; scenarios: ConsistencyScenario[] }>): OutcomeConflict[] {

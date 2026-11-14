@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { PoolConnection } from "mysql2/promise";
 import type { AnalysisResult } from "../lib/ai";
 import type { RunContext } from "../lib/analysis";
-import { detectFeatureCollapses, detectMisplacedScenarios, detectSpecCollapse, featureParentKey, insertSpecVersion, loadPreviousFeatureNames } from "../lib/spec-versions";
+import { detectFeatureCollapses, detectMisplacedScenarios, detectSpecCollapse, featureParentKey, insertSpecVersion, loadLatestSpecVersionLanguage, loadPreviousFeatureNames } from "../lib/spec-versions";
 
 const run: RunContext = { id: 8, repositoryId: 3, productId: 4, owner: "gzhanlei", name: "radar", beforeSha: "a", afterSha: "b", connectionId: null, provider: "github", organizationId: 1, productSlug: "radar", productName: "Radar" };
 const scenario = { reference: "HP-1", context: "Visitor", action: "Signs in", outcome: "Dashboard", category: "happy" as const, evidence: [] };
@@ -291,5 +291,35 @@ describe("loadPreviousFeatureNames", () => {
   it("returns an empty list when no spec version exists", async () => {
     const execute = vi.fn(async () => [[], []]);
     await expect(loadPreviousFeatureNames(3, execute)).resolves.toEqual([]);
+  });
+});
+
+describe("output language stamping (072)", () => {
+  it("stamps the run output language onto the version row and English diff summaries", async () => {
+    const conn = connection([{ id: 7 }]);
+    await insertSpecVersion(conn, { ...run, outputLanguage: "en" }, result);
+    const insert = conn.execute.mock.calls.find(([sql]) => String(sql).includes("INSERT INTO spec_versions"));
+    expect(insert?.[0]).toContain("output_language");
+    expect(insert?.[1]).toContain("en");
+    const change = conn.changes.find((parameters) => String(parameters[7]).startsWith("Added feature"));
+    expect(change).toBeDefined();
+  });
+
+  it("defaults to zh-CN when the run carries no language", async () => {
+    const conn = connection([{ id: 7 }]);
+    await insertSpecVersion(conn, run, result);
+    const insert = conn.execute.mock.calls.find(([sql]) => String(sql).includes("INSERT INTO spec_versions"));
+    expect(insert?.[1]).toContain("zh-CN");
+    expect(conn.changes.find((parameters) => String(parameters[7]).startsWith("新增功能"))).toBeDefined();
+  });
+
+  it("loads the latest version language for switch detection", async () => {
+    const conn = connection([]);
+    conn.execute.mockImplementationOnce(async () => [[{ outputLanguage: "en" }]]);
+    await expect(loadLatestSpecVersionLanguage(4, conn.execute)).resolves.toBe("en");
+    conn.execute.mockImplementationOnce(async () => [[{ outputLanguage: "zh-CN" }]]);
+    await expect(loadLatestSpecVersionLanguage(4, conn.execute)).resolves.toBe("zh-CN");
+    conn.execute.mockImplementationOnce(async () => [[]]);
+    await expect(loadLatestSpecVersionLanguage(4, conn.execute)).resolves.toBeNull();
   });
 });

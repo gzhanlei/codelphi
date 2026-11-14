@@ -57,4 +57,15 @@ describe("detectOutcomeConflicts", () => {
   it("returns empty for specs without error tokens", () => {
     expect(detectOutcomeConflicts([{ name: "A", scenarios: [scenario("HP-1", "写入成功")] }])).toEqual([]);
   });
+
+  it("detects negated/affirmative contradictions in English outcomes", () => {
+    const conflicts = detectOutcomeConflicts([
+      { name: "A", scenarios: [
+        scenario("HP-1", "The creation succeeds and never returns 422"),
+        scenario("HP-2", "The creation returns 422 when the token is missing"),
+      ] },
+    ]);
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0]).toMatchObject({ token: "422", negated: { reference: "HP-1" }, affirmative: { reference: "HP-2" } });
+  });
 });

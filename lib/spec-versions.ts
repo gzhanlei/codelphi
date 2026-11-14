@@ -248,14 +248,17 @@ export async function insertSpecVersion(connection: PoolConnection, run: RunCont
   // 行为窗口只在增量/RC2-carry 模式下有语义：提取确实被窗口框定时，「证据全在窗口外」
   // 才能证伪一个新增功能（superset 盲评 #1009）。全量重建时整库重提取、窗口只覆盖本发布
   // 的几个文件——门禁会把所有新功能吞掉（生产 v201 实证：70 个新功能 0 条 added，
-  // 118 个旧名记为移除）。
-  const changes = diffSpec(previous === null ? null : previous.features, features, affectedKeys ? { behavioralChangePaths: options.behavioralChangePaths } : undefined);
+  // 118 个旧名记为移除）。语言与模式无关：确定性变化摘要按本版输出语言生成（072）。
+  const changes = diffSpec(previous === null ? null : previous.features, features, {
+    behavioralChangePaths: affectedKeys ? options.behavioralChangePaths : undefined,
+    language: run.outputLanguage === "en" ? "en" : "zh-CN",
+  });
   const collapse = detectSpecCollapse(previous, features);
   const featureCollapses = detectFeatureCollapses(previous, features);
   const misplacedScenarios = detectMisplacedScenarios(previous, features);
   const [versionResult] = await connection.execute(
-    "INSERT INTO spec_versions (product_id, repository_id, analysis_run_id, sha) VALUES (?, ?, ?, ?)",
-    [run.productId, run.repositoryId, run.id, run.afterSha],
+    "INSERT INTO spec_versions (product_id, repository_id, analysis_run_id, sha, output_language) VALUES (?, ?, ?, ?, ?)",
+    [run.productId, run.repositoryId, run.id, run.afterSha, run.outputLanguage === "en" ? "en" : "zh-CN"],
   );
   const versionId = Number((versionResult as { insertId: number }).insertId);
   await insertFeatures(connection, versionId, features);
@@ -408,6 +411,22 @@ export type { SpecAnchorFeature };
 
 /** P0 措辞锚定：读取最新 spec 版本的场景级全文（分析前调用，未变行为要求 AI 逐字沿用）。加载失败由调用方降级处理。
  * 变体治理 A1：锚有 24k 字符上限，按 position 装入时受影响功能可能被截断在窗外（无锚可沿用 → 模型重推导、重编号）。
+ * 传入 prioritize（受影响功能名）时把这些功能稳定排到最前，保证 24k 预算先覆盖它们。 */
+/** 上一版规格的语言（072）：null = 无历史版本。语言切换检测据此强制全量重建。 */
+export async function loadLatestSpecVersionLanguage(repositoryId: number, execute: Execute = defaultExecute): Promise<"zh-CN" | "en" | null> {
+  const result = await execute(
+    `SELECT sv.output_language AS outputLanguage FROM spec_versions sv
+     JOIN analysis_runs r ON r.id = sv.analysis_run_id
+     WHERE r.repository_id = ? ORDER BY sv.id DESC LIMIT 1`,
+    [repositoryId],
+  );
+  const payload = Array.isArray(result) ? result[0] : [];
+  const row = (Array.isArray(payload) ? payload : [])[0] as { outputLanguage?: string } | undefined;
+  if (!row) return null;
+  return row.outputLanguage === "en" ? "en" : "zh-CN";
+}
+
+/* 变体治理 A1：锚有 24k 字符上限，按 position 装入时受影响功能可能被截断在窗外（无锚可沿用 → 模型重推导、重编号）。
  * 传入 prioritize（受影响功能名）时把这些功能稳定排到最前，保证 24k 预算先覆盖它们。 */
 export async function loadPreviousSpecText(repositoryId: number, execute: Execute = defaultExecute, prioritize: readonly string[] = []): Promise<SpecAnchorFeature[]> {
   const versionResult = await execute(
