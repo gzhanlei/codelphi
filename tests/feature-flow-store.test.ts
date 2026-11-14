@@ -116,6 +116,36 @@ describe("feature flow store", () => {
     expect(allFlows.some((row) => row.specFeatureId === 200)).toBe(true);
   });
 
+  it("inherits a previous guardrail rejection when scenarios are unchanged", async () => {
+    const previous = versionRows(1);
+    const fingerprint = scenarioFingerprint(scenarios);
+    previous.flows.push({ specFeatureId: 100, graphJson: null, fingerprint, lastErrorCode: "UNREACHABLE_NODE" });
+    const next = versionRows(2);
+    const execute = memoryExecute({ features: [...previous.features, ...next.features], scenarios: [...previous.scenarios, ...next.scenarios], flows: previous.flows });
+
+    expect(await api!.copyInheritedFeatureFlowGraphs(execute, 1, 2)).toBe(1);
+    expect(previous.flows.some((row) => row.specFeatureId === 200 && row.lastErrorCode === "UNREACHABLE_NODE")).toBe(true);
+  });
+
+  it("does not inherit a rejection when the scenario set changed", async () => {
+    const previous = versionRows(1);
+    previous.flows.push({ specFeatureId: 100, graphJson: null, fingerprint: scenarioFingerprint(scenarios), lastErrorCode: "UNREACHABLE_NODE" });
+    const changed = { ...feature, scenarios: [{ ...scenarios[0], action: "不同操作" }, scenarios[1]] };
+    const next = versionRows(2, changed);
+    const execute = memoryExecute({ features: [...previous.features, ...next.features], scenarios: [...previous.scenarios, ...next.scenarios], flows: previous.flows });
+
+    expect(await api!.copyInheritedFeatureFlowGraphs(execute, 1, 2)).toBe(0);
+    expect(previous.flows.some((row) => row.specFeatureId === 200)).toBe(false);
+  });
+
+  it("lists previous failures for the next retry round", async () => {
+    const state = versionRows(1);
+    state.flows.push({ specFeatureId: 100, graphJson: null, fingerprint: scenarioFingerprint(scenarios), lastErrorCode: "UNREACHABLE_NODE" });
+
+    const failures = await api!.loadFeatureFlowFailures(memoryExecute(state), 1);
+    expect(failures.get("固定性能门槛")).toBe(scenarioFingerprint(scenarios));
+  });
+
   it("does not copy when the new version changed the scenario content", async () => {
     const previous = versionRows(1);
     previous.flows.push({ specFeatureId: 100, graphJson: JSON.stringify(graph), fingerprint: scenarioFingerprint(scenarios) });

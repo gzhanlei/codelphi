@@ -28,6 +28,7 @@ interface FlowDbRow {
   stableKey: string;
   graphJson: unknown;
   fingerprint: string;
+  lastErrorCode: string | null;
 }
 
 function payloadRows<T>(payload: unknown): T[] {
@@ -118,7 +119,7 @@ export async function loadFeatureFlowErrors(execute: Execute, versionId: number,
 
 async function loadFlowRows(execute: Execute, versionId: number) {
   return payloadRows<FlowDbRow>(await execute(
-    `SELECT sf.stable_key AS stableKey, ff.graph_json AS graphJson, ff.scenario_fingerprint AS fingerprint
+    `SELECT sf.stable_key AS stableKey, ff.graph_json AS graphJson, ff.scenario_fingerprint AS fingerprint, ff.last_error_code AS lastErrorCode
      FROM spec_feature_flows ff JOIN spec_features sf ON sf.id = ff.spec_feature_id
      WHERE sf.spec_version_id = ?`,
     [versionId],
@@ -132,6 +133,12 @@ async function loadErrorRows(execute: Execute, versionId: number) {
      WHERE sf.spec_version_id = ? AND ff.graph_json IS NULL AND ff.last_error_code IS NOT NULL`,
     [versionId],
   ));
+}
+
+/** 上版被护栏拒绝的失败集（stableKey → 失败时场景指纹），供下一轮分析纳入重试目标。 */
+export async function loadFeatureFlowFailures(execute: Execute, versionId: number) {
+  const rows = await loadErrorRows(execute, versionId);
+  return new Map(rows.map((row) => [row.stableKey, row.fingerprint]));
 }
 
 function graphFromRow(row: FlowDbRow, feature: SpecFeature) {
@@ -175,9 +182,16 @@ export async function copyInheritedFeatureFlowGraphs(execute: Execute, previousV
     const nextFingerprint = scenarioFingerprint(next.feature.scenarios);
     if (scenarioFingerprint(previous.feature.scenarios) !== nextFingerprint || row.fingerprint !== nextFingerprint) continue;
     const graph = graphFromRow(row, next.feature);
-    if (!graph) continue;
-    await saveFeatureFlowGraph(execute, next.id, graph, nextFingerprint);
-    copied += 1;
+    if (graph) {
+      await saveFeatureFlowGraph(execute, next.id, graph, nextFingerprint);
+      copied += 1;
+      continue;
+    }
+    // 上版被护栏拒绝且场景未变：失败码一并继承，避免新版本落成无图无错的空行
+    if (row.lastErrorCode) {
+      await saveFeatureFlowError(execute, next.id, row.lastErrorCode, nextFingerprint);
+      copied += 1;
+    }
   }
   return copied;
 }

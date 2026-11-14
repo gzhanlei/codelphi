@@ -7,14 +7,18 @@ const mocks = vi.hoisted(() => ({
   generate: vi.fn(),
   loadRecords: vi.fn(),
   save: vi.fn(),
+  saveError: vi.fn(),
   copy: vi.fn(),
+  loadFailures: vi.fn(),
   execute: vi.fn(),
 }));
 vi.mock("../lib/feature-flow-generation", () => ({ generateFeatureFlowGraph: mocks.generate }));
 vi.mock("../lib/feature-flow-store", () => ({
   loadVersionFeatureRecords: mocks.loadRecords,
   saveFeatureFlowGraph: mocks.save,
+  saveFeatureFlowError: mocks.saveError,
   copyInheritedFeatureFlowGraphs: mocks.copy,
+  loadFeatureFlowFailures: mocks.loadFailures,
 }));
 vi.mock("../lib/db", () => ({ defaultExecute: mocks.execute, getDb: () => ({ execute: mocks.execute }) }));
 
@@ -46,6 +50,8 @@ describe("feature flow service", () => {
     mocks.generate.mockResolvedValue(graph);
     mocks.loadRecords.mockResolvedValue(records);
     mocks.copy.mockResolvedValue(0);
+    mocks.saveError.mockResolvedValue(undefined);
+    mocks.loadFailures.mockResolvedValue(new Map());
     mocks.execute.mockResolvedValue([[]]);
   });
 
@@ -69,6 +75,26 @@ describe("feature flow service", () => {
     const result = await syncFeatureFlowsForVersion({ specVersionId: 42, repositoryId: 3, affectedKeys: new Set(["a"]) });
     expect(result).toEqual({ generated: 1, copied: 1, failed: 0 });
     expect(mocks.copy).toHaveBeenCalledWith(expect.anything(), 41, 42);
+    expect(mocks.generate).toHaveBeenCalledTimes(1);
+    expect(mocks.generate).toHaveBeenCalledWith(records[0].feature, undefined);
+  });
+
+  it("retries previously failed features whose scenario set is unchanged", async () => {
+    const { syncFeatureFlowsForVersion } = await import("../lib/feature-flow-service");
+    mocks.execute.mockImplementation(async (sql: string) => sql.includes("FROM spec_versions WHERE repository_id") ? [[{ id: 41 }]] : [[]]);
+    mocks.loadFailures.mockResolvedValue(new Map([["b", scenarioFingerprint(scenarios)]]));
+
+    await syncFeatureFlowsForVersion({ specVersionId: 42, repositoryId: 3, affectedKeys: new Set(["a"]) });
+    expect(mocks.generate).toHaveBeenCalledTimes(2);
+    expect(mocks.generate).toHaveBeenCalledWith(records[1].feature, undefined);
+  });
+
+  it("does not retry a previously failed feature whose scenarios changed without being affected", async () => {
+    const { syncFeatureFlowsForVersion } = await import("../lib/feature-flow-service");
+    mocks.execute.mockImplementation(async (sql: string) => sql.includes("FROM spec_versions WHERE repository_id") ? [[{ id: 41 }]] : [[]]);
+    mocks.loadFailures.mockResolvedValue(new Map([["b", "stale-fingerprint"]]));
+
+    await syncFeatureFlowsForVersion({ specVersionId: 42, repositoryId: 3, affectedKeys: new Set(["a"]) });
     expect(mocks.generate).toHaveBeenCalledTimes(1);
     expect(mocks.generate).toHaveBeenCalledWith(records[0].feature, undefined);
   });

@@ -2,7 +2,7 @@ import type { LlmBillingContext } from "./ai";
 import { defaultExecute, type Execute } from "./db";
 import { evidenceItems } from "./evidence";
 import { generateFeatureFlowGraph } from "./feature-flow-generation";
-import { copyInheritedFeatureFlowGraphs, loadVersionFeatureRecords, saveFeatureFlowError, saveFeatureFlowGraph } from "./feature-flow-store";
+import { copyInheritedFeatureFlowGraphs, loadFeatureFlowFailures, loadVersionFeatureRecords, saveFeatureFlowError, saveFeatureFlowGraph } from "./feature-flow-store";
 import { FlowValidationError, scenarioFingerprint, type FeatureFlowGraph } from "./semantic-feature-flow";
 import { specFeatureKey, type SpecFeature, type SpecScenario } from "./spec-diff";
 
@@ -36,8 +36,12 @@ export async function syncFeatureFlowsForVersion(options: { specVersionId: numbe
   const { specVersionId, repositoryId, affectedKeys, billing } = options;
   const previousId = await previousVersionId(execute, repositoryId, specVersionId);
   const copied = previousId === null ? 0 : await copyInheritedFeatureFlowGraphs(execute, previousId, specVersionId);
+  const previousFailures = previousId === null ? new Map<string, string>() : await loadFeatureFlowFailures(execute, previousId);
   const records = await loadVersionFeatureRecords(execute, specVersionId);
-  const targets = affectedKeys == null ? records : records.filter((record) => affectedKeys.has(record.stableKey));
+  // 上版被护栏拒绝且场景集未变的功能纳入重试，兑现「下次分析会自动重试生成」的空态承诺
+  const targets = affectedKeys == null
+    ? records
+    : records.filter((record) => affectedKeys.has(record.stableKey) || previousFailures.get(record.stableKey) === scenarioFingerprint(record.feature.scenarios));
   let generated = 0;
   let failed = 0;
   let cursor = 0;
