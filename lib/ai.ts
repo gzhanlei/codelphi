@@ -316,7 +316,7 @@ export interface LlmBillingContext {
   callKind?: string | null;
 }
 
-export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext, context: { previousFeatureNames?: string[]; previousSpec?: SpecAnchorFeature[]; affectedFeatureNames?: string[]; unassignedBehavioralPaths?: string[]; partition?: { index: number; total: number }; billing?: LlmBillingContext } = {}): Promise<AnalysisResult> {
+export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext, context: { previousFeatureNames?: string[]; previousSpec?: SpecAnchorFeature[]; affectedFeatureNames?: string[]; unassignedBehavioralPaths?: string[]; partition?: { index: number; total: number }; outputLanguage?: "zh-CN" | "en"; billing?: LlmBillingContext } = {}): Promise<AnalysisResult> {
   const anchor = specAnchoringSection(context.previousSpec);
   const continuity = anchor ? null : featureContinuitySection(context.previousFeatureNames);
   const scope = incrementalScopeSection(context.affectedFeatureNames, context.unassignedBehavioralPaths);

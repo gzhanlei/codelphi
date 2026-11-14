@@ -233,6 +233,14 @@ describe("analysis orchestration", () => {
     expect(connection.commit).toHaveBeenCalledOnce();
   });
 
+  it("passes the product output language to the extraction context", async () => {
+    runRows = [{ ...run, outputLanguage: "en" }];
+    await runAnalysis(8);
+    expect(analyzeWithAI).toHaveBeenCalled();
+    const context = vi.mocked(analyzeWithAI).mock.calls[0][2] as Record<string, unknown>;
+    expect(context.outputLanguage).toBe("en");
+  });
+
   it("runs a shadow full extraction after a successful incremental analysis", async () => {
     runRows = [{ ...run, analyzeMode: "incremental" }];
     sourceRows = [];

@@ -48,6 +48,8 @@ export interface RunContext {
   /** 计费账户（= organization_id），run 创建时固化；结算禁止执行期读 cookie（契约 §4.8/B13）。 */
   accountId?: number | null;
   analyzeMode?: "full" | "incremental";
+  /** 分析输出语言（migration 072）：决定提取/发布稿/问答各 prompt 的语言段；缺省按 zh-CN。 */
+  outputLanguage?: "zh-CN" | "en";
 }
 
 /**
@@ -285,7 +287,7 @@ async function loadRun(runId: number) {
   const [rows] = await getDb().execute(
     `SELECT r.id, r.repository_id AS repositoryId, p.id AS productId, p.slug AS productSlug, p.name AS productName,
             repo.owner, repo.name, r.before_sha AS beforeSha, r.after_sha AS afterSha, repo.connection_id AS connectionId,
-            repo.provider, p.organization_id AS organizationId, r.account_id AS accountId, p.analyze_mode AS analyzeMode
+            repo.provider, p.organization_id AS organizationId, r.account_id AS accountId, p.analyze_mode AS analyzeMode, p.output_language AS outputLanguage
      FROM analysis_runs r
      JOIN repositories repo ON repo.id = r.repository_id
      JOIN products p ON p.id = repo.product_id
@@ -474,6 +476,7 @@ async function runAnalysisBody(run: RunContext) {
         previousFeatureNames,
         previousSpec: previousSpecText,
         ...(affectedKeys !== null ? { affectedFeatureNames, unassignedBehavioralPaths } : {}),
+        outputLanguage: run.outputLanguage,
         billing: { runId: run.id, accountId: run.accountId ?? null, chargeComponent: "main" },
       },
       allowSet: evidenceAllowSet(single, change),
@@ -493,6 +496,7 @@ async function runAnalysisBody(run: RunContext) {
           previousSpec: previousSpecText,
           ...(affectedKeys !== null ? { affectedFeatureNames, unassignedBehavioralPaths } : {}),
           partition: { index: index + 1, total: partitions.length },
+          outputLanguage: run.outputLanguage,
           billing: { runId: run.id, accountId: run.accountId ?? null, chargeComponent: "main" },
         },
         allowSet: evidenceAllowSet(partition, change),
