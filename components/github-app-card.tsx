@@ -1,6 +1,7 @@
 import Link from "next/link";
+import { pick, type UiLocale } from "@/lib/ui-locale";
+import { CONNECTION_STATUS, GITHUB_APP_CARD } from "@/lib/ui-strings/workspace";
 import { ConnectionActions } from "./connection-actions";
-import { connectionStatusLabel } from "../lib/integration-ui";
 
 interface App {
   slug: string;
@@ -14,14 +15,18 @@ interface Connection {
   installationId: number;
 }
 
-function ConnectionList({ connections, canEdit }: { connections: Connection[]; canEdit: boolean }) {
-  if (connections.length === 0) return <div className="empty-state compact"><p>App 已创建，但尚未安装到任何 GitHub 账号或组织。</p></div>;
+function connectionStatusLabel(locale: UiLocale, status: string) {
+  return pick(locale, status === "active" ? CONNECTION_STATUS.connected : CONNECTION_STATUS.disconnected);
+}
+
+function ConnectionList({ connections, canEdit, locale }: { connections: Connection[]; canEdit: boolean; locale: UiLocale }) {
+  if (connections.length === 0) return <div className="empty-state compact"><p>{pick(locale, GITHUB_APP_CARD.listEmpty)}</p></div>;
   return (
     <div className="connection-list">
       {connections.map((connection) => (
         <article className="connection-row" key={connection.id}>
           <div><strong>{connection.accountLogin}</strong><span>{connection.accountType} · Installation {connection.installationId}</span></div>
-          <span className={`connection-status ${connection.status}`}>{connectionStatusLabel(connection.status)}</span>
+          <span className={`connection-status ${connection.status}`}>{connectionStatusLabel(locale, connection.status)}</span>
           {canEdit && <ConnectionActions id={connection.id} status={connection.status} />}
         </article>
       ))}
@@ -29,16 +34,17 @@ function ConnectionList({ connections, canEdit }: { connections: Connection[]; c
   );
 }
 
-export function GitHubAppCard({ app, connections, canEdit = true }: { app: App | null; connections: Connection[]; canEdit?: boolean }) {
+export function GitHubAppCard({ app, connections, canEdit = true, locale = "zh-CN" }: { app: App | null; connections: Connection[]; canEdit?: boolean; locale?: UiLocale }) {
+  const L = GITHUB_APP_CARD;
   return (
     <section className="integration-card" id="github">
-      <div className="integration-card-heading"><div className="integration-icon" aria-hidden="true">GH</div><div><h2>GitHub</h2><p>推荐使用 GitHub App · 按仓库授权 · Contents 与 Metadata 只读</p></div></div>
+      <div className="integration-card-heading"><div className="integration-icon" aria-hidden="true">GH</div><div><h2>GitHub</h2><p>{pick(locale, L.subtitle)}</p></div></div>
       {!app ? (
-        <div className="integration-empty"><p>{canEdit ? "通过 GitHub 官方引导创建 CoDelphi App，然后选择允许读取的仓库。" : "尚未创建 GitHub App，请联系工作区编辑者或所有者配置。"}</p>{canEdit && <Link className="primary-button" href="/integrations/github/manifest">连接 GitHub</Link>}</div>
+        <div className="integration-empty"><p>{canEdit ? pick(locale, L.emptyEditor) : pick(locale, L.emptyViewer)}</p>{canEdit && <Link className="primary-button" href="/integrations/github/manifest">{pick(locale, L.connectLink)}</Link>}</div>
       ) : (
         <>
-          <div className="integration-summary"><span>应用 <strong>{app.slug}</strong></span><span>{connections.filter((connection) => connection.status === "active").length} 个可用安装</span>{canEdit && <Link className="secondary-button" href="/integrations/github/install">添加账号或组织</Link>}{canEdit && <a className="secondary-button" href={`https://github.com/settings/apps/${encodeURIComponent(app.slug)}`} target="_blank" rel="noreferrer">设置 Push 通知</a>}</div>
-          <ConnectionList connections={connections} canEdit={canEdit} />
+          <div className="integration-summary"><span>{pick(locale, L.appPrefix)}<strong>{app.slug}</strong></span><span>{connections.filter((connection) => connection.status === "active").length}{pick(locale, connections.filter((connection) => connection.status === "active").length === 1 ? L.installationsSuffixOne : L.installationsSuffix)}</span>{canEdit && <Link className="secondary-button" href="/integrations/github/install">{pick(locale, L.addAccountLink)}</Link>}{canEdit && <a className="secondary-button" href={`https://github.com/settings/apps/${encodeURIComponent(app.slug)}`} target="_blank" rel="noreferrer">{pick(locale, L.pushSettingsLink)}</a>}</div>
+          <ConnectionList connections={connections} canEdit={canEdit} locale={locale} />
         </>
       )}
     </section>

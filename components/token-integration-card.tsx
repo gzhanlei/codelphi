@@ -2,6 +2,8 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { pick, type UiLocale } from "@/lib/ui-locale";
+import { CONNECTION_STATUS, TOKEN_CARD } from "@/lib/ui-strings/workspace";
 import { errorMessage } from "../lib/error-message";
 import { saveRepositoryConnection } from "../lib/integration-client";
 import type { RepositoryConnectionState } from "../lib/repository-connections";
@@ -15,30 +17,32 @@ interface TokenIntegrationCardProps {
   connections: RepositoryConnectionState[];
   canEdit: boolean;
   allowlistConfigured?: boolean;
+  locale?: UiLocale;
 }
 
 const providerNames: Record<RepositoryProvider, string> = { gitee: "Gitee", gitlab: "GitLab", gitea: "Gitea" };
 
-function ConnectionGuide({ kind, allowlistConfigured }: { kind: TokenIntegrationCardProps["kind"]; allowlistConfigured?: boolean }) {
+function ConnectionGuide({ kind, allowlistConfigured, locale }: { kind: TokenIntegrationCardProps["kind"]; allowlistConfigured?: boolean; locale: UiLocale }) {
+  const L = TOKEN_CARD;
   if (kind === "gitee") {
     return (
       <div className="connection-guide">
-        <ol><li>在 Gitee 创建私人令牌，只勾选读取用户信息和仓库所需的最小权限。</li><li>粘贴令牌，CoDelphi 会验证账号后再加密保存。</li></ol>
-        <a href="https://gitee.com/profile/personal_access_tokens" target="_blank" rel="noreferrer">打开 Gitee 令牌设置 ↗</a>
+        <ol><li>{pick(locale, L.giteeStep1)}</li><li>{pick(locale, L.giteeStep2)}</li></ol>
+        <a href="https://gitee.com/profile/personal_access_tokens" target="_blank" rel="noreferrer">{pick(locale, L.giteeTokenLink)}</a>
       </div>
     );
   }
   return (
     <div className="connection-guide">
-      <ol><li>确保 CoDelphi 服务器能访问你的 Git 服务，并启用有效的 HTTPS 证书。</li><li>创建访问令牌：GitLab 使用 <code>read_api</code>，Gitea 使用 <code>read:user</code>，再按仓库读取需要授权。</li></ol>
-      <span>当前支持 GitLab 与 Gitea API；暂不支持 SSH 地址。</span>
-      <span className="allowlist-note">{allowlistConfigured ? "仅允许 REPOSITORY_HOST_ALLOWLIST 中登记的主机和端口；GitLab.com 默认可用。" : "自有服务尚未配置主机白名单，请联系管理员设置 REPOSITORY_HOST_ALLOWLIST；GitLab.com 可直接连接。"}</span>
+      <ol><li>{pick(locale, L.selfHostedStep1)}</li><li>{pick(locale, L.selfHostedStep2Prefix)}<code>read_api</code>{pick(locale, L.selfHostedStep2Middle)}<code>read:user</code>{pick(locale, L.selfHostedStep2Suffix)}</li></ol>
+      <span>{pick(locale, L.selfHostedApiNote)}</span>
+      <span className="allowlist-note">{allowlistConfigured ? pick(locale, L.allowlistConfigured) : pick(locale, L.allowlistMissing)}</span>
     </div>
   );
 }
 
-function SavedConnections({ connections, canEdit }: { connections: RepositoryConnectionState[]; canEdit: boolean }) {
-  if (connections.length === 0) return <div className="empty-state compact"><p>还没有已保存的连接。</p></div>;
+function SavedConnections({ connections, canEdit, locale }: { connections: RepositoryConnectionState[]; canEdit: boolean; locale: UiLocale }) {
+  if (connections.length === 0) return <div className="empty-state compact"><p>{pick(locale, TOKEN_CARD.savedEmpty)}</p></div>;
   return (
     <div className="connection-list">
       {connections.map((connection) => (
@@ -49,7 +53,7 @@ function SavedConnections({ connections, canEdit }: { connections: RepositoryCon
             <span>{connection.baseUrl}</span>
             {connection.lastError && <span className="connection-error">{connection.lastError}</span>}
           </div>
-          <span className={`connection-status ${connection.status}`}>{connectionStatusLabel(connection.status)}</span>
+          <span className={`connection-status ${connection.status}`}>{pick(locale, connection.status === "active" ? CONNECTION_STATUS.connected : CONNECTION_STATUS.disconnected)}</span>
           {canEdit && <ConnectionActions id={connection.id} status={connection.status} kind="repository" />}
         </article>
       ))}
@@ -57,28 +61,30 @@ function SavedConnections({ connections, canEdit }: { connections: RepositoryCon
   );
 }
 
-function IntegrationHeading({ kind }: { kind: TokenIntegrationCardProps["kind"] }) {
+function IntegrationHeading({ kind, locale }: { kind: TokenIntegrationCardProps["kind"]; locale: UiLocale }) {
   const isGitee = kind === "gitee";
-  return <div className="integration-card-heading"><div className="integration-icon" aria-hidden="true">{isGitee ? "G" : "⌂"}</div><div><h2>{isGitee ? "Gitee" : "自有 Git 服务"}</h2><p>{isGitee ? "使用私人令牌连接 Gitee 账号" : "连接 GitLab、Gitea 或内网部署的 Git 服务"}</p></div></div>;
+  return <div className="integration-card-heading"><div className="integration-icon" aria-hidden="true">{isGitee ? "G" : "⌂"}</div><div><h2>{isGitee ? "Gitee" : pick(locale, TOKEN_CARD.selfHostedHeading)}</h2><p>{isGitee ? pick(locale, TOKEN_CARD.giteeSubtitle) : pick(locale, TOKEN_CARD.selfHostedSubtitle)}</p></div></div>;
 }
 
-function ProviderFields({ kind, provider, baseUrl, onProviderChange, onBaseUrlChange }: { kind: TokenIntegrationCardProps["kind"]; provider: RepositoryProvider; baseUrl: string; onProviderChange: (provider: RepositoryProvider) => void; onBaseUrlChange: (value: string) => void }) {
+function ProviderFields({ kind, provider, baseUrl, locale, onProviderChange, onBaseUrlChange }: { kind: TokenIntegrationCardProps["kind"]; provider: RepositoryProvider; baseUrl: string; locale: UiLocale; onProviderChange: (provider: RepositoryProvider) => void; onBaseUrlChange: (value: string) => void }) {
+  const L = TOKEN_CARD;
   if (kind === "gitee") return null;
   return <>
-    <label className="field"><span>平台类型 <b>*</b></span><select value={provider} onChange={(event) => onProviderChange(event.target.value as RepositoryProvider)}><option value="gitlab">GitLab（云端或自托管）</option><option value="gitea">Gitea</option></select></label>
-    <label className="field"><span>服务地址 <b>*</b></span><input type="url" value={baseUrl} onChange={(event) => onBaseUrlChange(event.target.value)} placeholder="https://git.example.com" required /><small>填写服务根地址，不要包含 /api/v4、/api/v1 或仓库路径。</small></label>
+    <label className="field"><span>{pick(locale, L.providerLabel)}<b>*</b></span><select value={provider} onChange={(event) => onProviderChange(event.target.value as RepositoryProvider)}><option value="gitlab">{pick(locale, L.gitlabOption)}</option><option value="gitea">Gitea</option></select></label>
+    <label className="field"><span>{pick(locale, L.baseUrlLabel)}<b>*</b></span><input type="url" value={baseUrl} onChange={(event) => onBaseUrlChange(event.target.value)} placeholder="https://git.example.com" required /><small>{pick(locale, L.baseUrlHint)}</small></label>
   </>;
 }
 
-function TokenField({ kind, provider, token, onTokenChange }: { kind: TokenIntegrationCardProps["kind"]; provider: RepositoryProvider; token: string; onTokenChange: (value: string) => void }) {
-  return <label className="field"><span>访问令牌 <b>*</b></span><input type="password" value={token} onChange={(event) => onTokenChange(event.target.value)} placeholder={kind === "gitee" ? "粘贴 Gitee 私人令牌" : `粘贴 ${providerNames[provider]} 访问令牌`} autoComplete="off" spellCheck={false} required /><small>仅用于服务端连接验证，保存后不会再次显示；删除连接会清除令牌。</small></label>;
+function TokenField({ kind, provider, token, locale, onTokenChange }: { kind: TokenIntegrationCardProps["kind"]; provider: RepositoryProvider; token: string; locale: UiLocale; onTokenChange: (value: string) => void }) {
+  const L = TOKEN_CARD;
+  return <label className="field"><span>{pick(locale, L.tokenLabel)}<b>*</b></span><input type="password" value={token} onChange={(event) => onTokenChange(event.target.value)} placeholder={kind === "gitee" ? pick(locale, L.giteeTokenPlaceholder) : `${pick(locale, L.providerTokenPlaceholderPrefix)}${providerNames[provider]}${pick(locale, L.providerTokenPlaceholderSuffix)}`} autoComplete="off" spellCheck={false} required /><small>{pick(locale, L.tokenHint)}</small></label>;
 }
 
-function ConnectionFormStatus({ pending, error, success }: { pending: boolean; error: string; success: string }) {
-  return <><FormError message={error} />{success && <p className="form-success" role="status">{success}</p>}<button className="primary-button" type="submit" disabled={pending}>{pending ? "正在验证连接…" : "验证并保存连接"}</button></>;
+function ConnectionFormStatus({ pending, error, success, locale }: { pending: boolean; error: string; success: string; locale: UiLocale }) {
+  return <><FormError message={error} />{success && <p className="form-success" role="status">{success}</p>}<button className="primary-button" type="submit" disabled={pending}>{pending ? pick(locale, TOKEN_CARD.verifying) : pick(locale, TOKEN_CARD.saveConnectionButton)}</button></>;
 }
 
-export function TokenIntegrationCard({ kind, connections, canEdit, allowlistConfigured = false }: TokenIntegrationCardProps) {
+export function TokenIntegrationCard({ kind, connections, canEdit, allowlistConfigured = false, locale = "zh-CN" }: TokenIntegrationCardProps) {
   const router = useRouter();
   const [provider, setProvider] = useState<RepositoryProvider>(kind === "gitee" ? "gitee" : "gitlab");
   const [baseUrl, setBaseUrl] = useState("");
@@ -96,7 +102,7 @@ export function TokenIntegrationCard({ kind, connections, canEdit, allowlistConf
     try {
       const result = await saveRepositoryConnection({ provider, baseUrl: isGitee ? undefined : baseUrl, token });
       setToken("");
-      setSuccess(`已连接 ${providerNames[provider]} 账号 @${result.accountLogin}。`);
+      setSuccess(`${pick(locale, TOKEN_CARD.connectedPrefix)}${providerNames[provider]}${pick(locale, TOKEN_CARD.connectedMiddle)}${result.accountLogin}${pick(locale, TOKEN_CARD.connectedSuffix)}`);
       router.refresh();
     } catch (cause) {
       setError(errorMessage(cause, "连接保存失败"));
@@ -107,17 +113,17 @@ export function TokenIntegrationCard({ kind, connections, canEdit, allowlistConf
 
   return (
     <section className="integration-card token-integration-card">
-      <IntegrationHeading kind={kind} />
-      <p className="connection-capability">当前开放连接配置与验证；添加产品和代码分析仍仅支持 GitHub。</p>
-      <ConnectionGuide kind={kind} allowlistConfigured={allowlistConfigured} />
+      <IntegrationHeading kind={kind} locale={locale} />
+      <p className="connection-capability">{pick(locale, TOKEN_CARD.capability)}</p>
+      <ConnectionGuide kind={kind} allowlistConfigured={allowlistConfigured} locale={locale} />
       {canEdit ? (
         <form onSubmit={submit}>
-          <ProviderFields kind={kind} provider={provider} baseUrl={baseUrl} onProviderChange={(nextProvider) => { setProvider(nextProvider); setToken(""); setSuccess(""); }} onBaseUrlChange={setBaseUrl} />
-          <TokenField kind={kind} provider={provider} token={token} onTokenChange={setToken} />
-          <ConnectionFormStatus pending={pending} error={error} success={success} />
+          <ProviderFields kind={kind} provider={provider} baseUrl={baseUrl} locale={locale} onProviderChange={(nextProvider) => { setProvider(nextProvider); setToken(""); setSuccess(""); }} onBaseUrlChange={setBaseUrl} />
+          <TokenField kind={kind} provider={provider} token={token} locale={locale} onTokenChange={setToken} />
+          <ConnectionFormStatus pending={pending} error={error} success={success} locale={locale} />
         </form>
-      ) : <p className="permission-note">工作区查看者只能查看连接状态，请联系编辑者或所有者配置。</p>}
-      <SavedConnections connections={connections} canEdit={canEdit} />
+      ) : <p className="permission-note">{pick(locale, TOKEN_CARD.viewerNote)}</p>}
+      <SavedConnections connections={connections} canEdit={canEdit} locale={locale} />
     </section>
   );
 }

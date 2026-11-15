@@ -16,6 +16,13 @@ describe("workspace output language settings", () => {
     expect(html).toContain("默认输出语言");
   });
 
+  it("renders the English interface copy when the ui locale is en", () => {
+    const html = renderToStaticMarkup(createElement(WorkspaceOutputLanguageSettings, { canEdit: true, current: "zh-CN", locale: "en" }));
+    expect(html).toContain("Default output language for new repositories");
+    expect(html).not.toContain("新仓库默认输出语言");
+    expect(html).toContain("Feature specs, scenarios and release notes will be generated in Simplified Chinese");
+  });
+
   it("hides the panel from viewers", () => {
     expect(renderToStaticMarkup(createElement(WorkspaceOutputLanguageSettings, { canEdit: false, current: "zh-CN" }))).toBe("");
   });

@@ -8,23 +8,28 @@ import { requireSessionUser } from "@/lib/session";
 import { integrationFeedback } from "@/lib/integration-ui";
 import { requireOrganization } from "@/lib/organizations";
 import { listRepositoryConnections } from "@/lib/repository-connections";
+import { resolveUiLocale } from "@/lib/ui-locale-server";
+import { pick, type LocaleEntry } from "@/lib/ui-locale";
+import { INTEGRATIONS_PAGE } from "@/lib/ui-strings/workspace";
 
 export const dynamic = "force-dynamic";
 
-const messages: Record<string, string> = {
-  manifest_state: "GitHub App 创建状态已失效，请重新发起。",
-  conversion_failed: "无法转换 GitHub App 凭据，请重试。",
-  app_missing: "尚未创建 GitHub App。",
-  installation_id: "GitHub 返回的 Installation ID 无效。",
-  installation_failed: "无法验证 GitHub 安装，请检查应用权限后重试。",
-  installation_state: "GitHub 安装状态已失效或与当前工作区不匹配，请重新发起连接。",
-  connected: "GitHub 已连接，现在可以添加产品。",
+const messages: Record<string, LocaleEntry> = {
+  manifest_state: INTEGRATIONS_PAGE.messageManifestState,
+  conversion_failed: INTEGRATIONS_PAGE.messageConversionFailed,
+  app_missing: INTEGRATIONS_PAGE.messageAppMissing,
+  installation_id: INTEGRATIONS_PAGE.messageInstallationId,
+  installation_failed: INTEGRATIONS_PAGE.messageInstallationFailed,
+  installation_state: INTEGRATIONS_PAGE.messageInstallationState,
+  connected: INTEGRATIONS_PAGE.messageConnected,
 };
 
 export default async function IntegrationsPage({ searchParams }: { searchParams: Promise<{ error?: string; success?: string }> }) {
   const user = await requireSessionUser();
   const organization = await requireOrganization(user);
   const { error, success } = await searchParams;
+  const locale = await resolveUiLocale();
+  const L = INTEGRATIONS_PAGE;
   const [app, connections, repositoryConnections] = await Promise.all([
     getLatestGitHubApp(),
     listConnectionStates(organization.id),
@@ -32,20 +37,21 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
   ]);
   const hasPat = Boolean(process.env.GITHUB_TOKEN?.trim());
   const canEdit = organization.role !== "viewer";
-  const feedback = integrationFeedback(error, success, messages);
+  const localizedMessages = Object.fromEntries(Object.entries(messages).map(([key, entry]) => [key, pick(locale, entry)]));
+  const feedback = integrationFeedback(error, success, localizedMessages);
 
   return (
     <AppShell user={user} organizationName={organization.name}>
       <div className="page-heading">
-        <div><span className="eyebrow">REPOSITORY CONNECTIONS</span><h1>代码仓库连接</h1><p>连接 GitHub、Gitee 或自有 Git 服务。按最小权限授权，访问令牌仅保存在服务端加密存储中。</p></div>
+        <div><span className="eyebrow">REPOSITORY CONNECTIONS</span><h1>{pick(locale, L.heading)}</h1><p>{pick(locale, L.headingBody)}</p></div>
       </div>
       <IntegrationMessage message={feedback.text} isError={feedback.isError} />
-      <GitHubAppCard app={app} connections={connections} canEdit={canEdit} />
+      <GitHubAppCard app={app} connections={connections} canEdit={canEdit} locale={locale} />
       <div className="repository-provider-grid">
-        <TokenIntegrationCard kind="gitee" connections={repositoryConnections.filter((connection) => connection.provider === "gitee")} canEdit={canEdit} />
-        <TokenIntegrationCard kind="self-hosted" connections={repositoryConnections.filter((connection) => connection.provider !== "gitee")} canEdit={canEdit} allowlistConfigured={Boolean(process.env.REPOSITORY_HOST_ALLOWLIST?.trim())} />
+        <TokenIntegrationCard kind="gitee" connections={repositoryConnections.filter((connection) => connection.provider === "gitee")} canEdit={canEdit} locale={locale} />
+        <TokenIntegrationCard kind="self-hosted" connections={repositoryConnections.filter((connection) => connection.provider !== "gitee")} canEdit={canEdit} allowlistConfigured={Boolean(process.env.REPOSITORY_HOST_ALLOWLIST?.trim())} locale={locale} />
       </div>
-      {hasPat && <PatFallbackCard configured />}
+      {hasPat && <PatFallbackCard configured locale={locale} />}
     </AppShell>
   );
 }

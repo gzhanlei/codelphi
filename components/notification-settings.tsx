@@ -2,14 +2,17 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { errorMessage } from "@/lib/error-message";
+import { pick, type LocaleEntry, type UiLocale } from "@/lib/ui-locale";
+import { NOTIFICATIONS } from "@/lib/ui-strings/workspace";
 import type { NotificationChannelView } from "@/lib/notifications";
 import { listChannels, getEmailPref, setEmailPref, removeChannel, saveChannel, testChannel, toggleChannel } from "@/lib/notification-client";
 import { useDemoGuard } from "./demo-mode";
 
-const kindLabels: Record<NotificationChannelView["kind"], string> = { slack: "Slack", webhook: "通用 Webhook" };
+const kindLabels: Record<NotificationChannelView["kind"], LocaleEntry> = { slack: { "zh-CN": "Slack", en: "Slack" }, webhook: NOTIFICATIONS.kindWebhook };
 
 /** 通知渠道设置（现挂产品设置页）：每类渠道一条，目标加密存储，可启停、测试、删除；viewer 仍可改自己的邮件偏好。 */
-export function NotificationSettings({ slug, canEditChannels = true }: { slug: string; canEditChannels?: boolean }) {
+export function NotificationSettings({ slug, canEditChannels = true, locale = "zh-CN" }: { slug: string; canEditChannels?: boolean; locale?: UiLocale }) {
+  const L = NOTIFICATIONS;
   const guard = useDemoGuard();
   const [channels, setChannels] = useState<NotificationChannelView[]>([]);
   const [kind, setKind] = useState<"slack" | "webhook">("slack");
@@ -47,11 +50,11 @@ export function NotificationSettings({ slug, canEditChannels = true }: { slug: s
 
   return (
     <section className="overview-panel notification-panel">
-      <div className="overview-panel-heading"><span>04</span><h2>通知分发</h2></div>
-      <p className="overview-note">分析发现规格行为变化时，把变化摘要推送到团队日常动线；无变化则保持静默。</p>
+      <div className="overview-panel-heading"><span>04</span><h2>{pick(locale, L.heading)}</h2></div>
+      <p className="overview-note">{pick(locale, L.note)}</p>
       <div className="notification-email-row">
         <span className="notification-kind on">Email</span>
-        <span className="notification-email-text">给我自己发行为变化摘要（发送到登录邮箱）</span>
+        <span className="notification-email-text">{pick(locale, L.emailSelf)}</span>
         <button
           className="text-button"
           type="button"
@@ -59,28 +62,28 @@ export function NotificationSettings({ slug, canEditChannels = true }: { slug: s
           onClick={() => act(async () => {
             await setEmailPref(slug, !emailPref);
             setEmailPrefState(!emailPref);
-          }, emailPref ? "邮件通知已关闭" : "邮件通知已开启")}
+          }, emailPref ? pick(locale, L.emailOffNotice) : pick(locale, L.emailOnNotice))}
         >
-          {emailPref === null ? "…" : emailPref ? "已开启，点击关闭" : "已关闭，点击开启"}
+          {emailPref === null ? "…" : emailPref ? pick(locale, L.emailOnButton) : pick(locale, L.emailOffButton)}
         </button>
       </div>
-      <p className="overview-note">每周还有一封周期行为摘要（滚动 7 天，无变化不发）。<a className="text-button" href={`/api/products/${slug}/digests/latest`} target="_blank" rel="noreferrer">查看最近一期 ↗</a></p>
+      <p className="overview-note">{pick(locale, L.weeklyNote)}<a className="text-button" href={`/api/products/${slug}/digests/latest`} target="_blank" rel="noreferrer">{pick(locale, L.latestDigestLink)}</a></p>
       {canEditChannels && channels.length > 0 ? (
         <ul className="notification-channel-list">
           {channels.map((channel) => (
             <li key={channel.id} className="notification-channel">
-              <span className={`notification-kind ${channel.enabled ? "on" : "off"}`}>{kindLabels[channel.kind]}</span>
+              <span className={`notification-kind ${channel.enabled ? "on" : "off"}`}>{pick(locale, kindLabels[channel.kind])}</span>
               <code className="notification-target">{channel.target}</code>
               <span className="notification-channel-actions">
-                <button className="text-button" type="button" disabled={pending} onClick={() => act(() => testChannel(slug, channel.id), "测试消息已发送")}>测试</button>
-                <button className="text-button" type="button" disabled={pending} onClick={() => act(() => toggleChannel(slug, channel.id, !channel.enabled), channel.enabled ? "渠道已停用" : "渠道已启用")}>{channel.enabled ? "停用" : "启用"}</button>
-                <button className="text-button" type="button" disabled={pending} onClick={() => act(() => removeChannel(slug, channel.id), "渠道已删除")}>删除</button>
+                <button className="text-button" type="button" disabled={pending} onClick={() => act(() => testChannel(slug, channel.id), pick(locale, L.testNotice))}>{pick(locale, L.testButton)}</button>
+                <button className="text-button" type="button" disabled={pending} onClick={() => act(() => toggleChannel(slug, channel.id, !channel.enabled), channel.enabled ? pick(locale, L.disabledNotice) : pick(locale, L.enabledNotice))}>{channel.enabled ? pick(locale, L.disableButton) : pick(locale, L.enableButton)}</button>
+                <button className="text-button" type="button" disabled={pending} onClick={() => act(() => removeChannel(slug, channel.id), pick(locale, L.deletedNotice))}>{pick(locale, L.deleteButton)}</button>
               </span>
             </li>
           ))}
         </ul>
       ) : (
-        <p className="empty-state">尚未配置通知渠道。</p>
+        <p className="empty-state">{pick(locale, L.noneConfigured)}</p>
       )}
       {canEditChannels ? (
         <form
@@ -90,22 +93,22 @@ export function NotificationSettings({ slug, canEditChannels = true }: { slug: s
           void act(async () => {
             await saveChannel(slug, kind, target.trim());
             setTarget("");
-          }, "通知渠道已保存");
+          }, pick(locale, L.savedNotice));
         }}
       >
-        <select aria-label="渠道类型" value={kind} onChange={(event) => setKind(event.target.value as "slack" | "webhook")}>
+        <select aria-label={pick(locale, L.kindAria)} value={kind} onChange={(event) => setKind(event.target.value as "slack" | "webhook")}>
           <option value="slack">Slack</option>
-          <option value="webhook">通用 Webhook</option>
+          <option value="webhook">{pick(locale, L.kindWebhook)}</option>
         </select>
         <input
-          aria-label="Webhook 地址"
+          aria-label={pick(locale, L.targetAria)}
           type="url"
           required
           placeholder={kind === "slack" ? "https://hooks.slack.com/services/…" : "https://example.com/hooks/codelphi"}
           value={target}
           onChange={(event) => setTarget(event.target.value)}
         />
-        <button className="secondary-button" type="submit" disabled={pending}>{pending ? "处理中…" : "保存渠道"}</button>
+        <button className="secondary-button" type="submit" disabled={pending}>{pending ? pick(locale, L.processing) : pick(locale, L.saveButton)}</button>
         </form>
       ) : null}
       {error ? <p className="description-dialog-error" role="alert">{error}</p> : null}

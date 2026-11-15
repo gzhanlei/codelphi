@@ -1,26 +1,35 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import { AppShell } from "@/components/app-shell";
 import { PublicShell } from "@/components/public-shell";
 import { PricingPanel } from "@/components/pricing-panel";
 import { getSessionUser } from "@/lib/session";
 import { currentOrganization } from "@/lib/organizations";
+import { resolveUiLocale } from "@/lib/ui-locale-server";
+import { pick } from "@/lib/ui-locale";
+import { PRICING_PAGE } from "@/lib/ui-strings/workspace";
 
 export const dynamic = "force-dynamic";
 
-export const metadata = { title: "套餐与定价" };
+export async function generateMetadata(): Promise<Metadata> {
+  const locale = await resolveUiLocale();
+  return { title: pick(locale, PRICING_PAGE.title) };
+}
 
 /** 定价页（M4-T2）：价格由 BILLING_PLAN_PRICES 配置驱动——M2 校准前不配置即显示「定价校准中」，不对外承诺。 */
 export default async function PricingPage() {
   const user = await getSessionUser();
+  const locale = await resolveUiLocale();
+  const L = PRICING_PAGE;
   const page = (
     <>
       <div className="page-heading">
-        <div><span className="eyebrow">PRICING</span><h1>套餐与定价</h1><p>月费提供确定额度，超量按 SAU 计费；失败的分析不扣额度，消费封顶可配。</p></div>
+        <div><span className="eyebrow">PRICING</span><h1>{pick(locale, L.title)}</h1><p>{pick(locale, L.headingBody)}</p></div>
       </div>
-      <PricingPanel />
-      <p className="sidebar-note">价格与配额以实测成本校准后公布（当前为占位展示，不构成价格承诺）；退款、发票条款以正式服务条款为准。</p>
-      <p><Link href="/terms" className="text-button">服务条款与数据处理 →</Link></p>
-      {!user ? <p><Link href="/" className="text-button">← 返回产品总览</Link></p> : null}
+      <PricingPanel locale={locale} />
+      <p className="sidebar-note">{pick(locale, L.calibrationNote)}</p>
+      <p><Link href="/terms" className="text-button">{pick(locale, L.termsLink)}</Link></p>
+      {!user ? <p><Link href="/" className="text-button">{pick(locale, L.backToOverview)}</Link></p> : null}
     </>
   );
   if (!user) return <PublicShell activeHref="/pricing">{page}</PublicShell>;

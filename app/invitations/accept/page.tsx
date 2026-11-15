@@ -4,6 +4,9 @@ import { acceptOrganizationInvitation, getInvitationByToken, invitationUrl } fro
 import { acceptProductInvitation, getProductInvitationByToken } from "@/lib/product-members";
 import { chandlerBaseUrl } from "@/lib/env";
 import { getSessionUser } from "@/lib/session";
+import { resolveUiLocale } from "@/lib/ui-locale-server";
+import { pick } from "@/lib/ui-locale";
+import { INVITATION_ACCEPT } from "@/lib/ui-strings/workspace";
 
 export const dynamic = "force-dynamic";
 
@@ -32,19 +35,21 @@ function InviteNotice({ title, children }: { title: string; children: React.Reac
 
 export default async function AcceptInvitationPage({ searchParams }: { searchParams: Promise<{ token?: string }> }) {
   const { token = "" } = await searchParams;
+  const locale = await resolveUiLocale();
+  const L = INVITATION_ACCEPT;
   const invitation = token ? await resolveInvitation(token) : null;
   if (!invitation) {
-    return <InviteNotice title="邀请链接无效或已过期"><p>请联系工作区所有者重新发送邀请链接。</p><Link className="primary-button" href="/">返回 CoDelphi</Link></InviteNotice>;
+    return <InviteNotice title={pick(locale, L.invalidTitle)}><p>{pick(locale, L.invalidBody)}</p><Link className="primary-button" href="/">{pick(locale, L.backHome)}</Link></InviteNotice>;
   }
 
-  const targetLabel = invitation.kind === "product" ? `产品「${invitation.targetName}」` : `工作区「${invitation.targetName}」`;
+  const targetLabel = `${pick(locale, invitation.kind === "product" ? L.productTargetPrefix : L.workspaceTargetPrefix)}${invitation.targetName}${pick(locale, L.targetSuffix)}`;
   const user = await getSessionUser();
   if (!user) {
     const next = `/invitations/accept?token=${encodeURIComponent(token)}`;
-    return <InviteNotice title="接受邀请">
-      <p>你被邀请加入 <strong>{targetLabel}</strong>，角色为 <strong>{invitation.role}</strong>。请使用 {invitation.email} 对应的 Chandler 账号继续。</p>
-      <p><Link className="primary-button" href={`/auth/login?next=${encodeURIComponent(next)}`}>已有 Chandler 账号，登录并接受邀请</Link></p>
-      <p><a className="secondary-button" href={`${chandlerBaseUrl()}/user/register?next=${encodeURIComponent(invitationUrl(token))}`}>没有 Chandler 账号？注册后接受邀请</a></p>
+    return <InviteNotice title={pick(locale, L.acceptTitle)}>
+      <p>{pick(locale, L.bodyPrefix)}<strong>{targetLabel}</strong>{pick(locale, L.bodyRolePrefix)}<strong>{invitation.role}</strong>{pick(locale, L.bodyEmailPrefix)}{invitation.email}{pick(locale, L.bodyEmailSuffix)}</p>
+      <p><Link className="primary-button" href={`/auth/login?next=${encodeURIComponent(next)}`}>{pick(locale, L.loginAcceptButton)}</Link></p>
+      <p><a className="secondary-button" href={`${chandlerBaseUrl()}/user/register?next=${encodeURIComponent(invitationUrl(token))}`}>{pick(locale, L.registerAcceptButton)}</a></p>
     </InviteNotice>;
   }
 
@@ -59,9 +64,9 @@ export default async function AcceptInvitationPage({ searchParams }: { searchPar
     redirect(redirectPath);
   } catch (error) {
     const message = error instanceof Error && error.message === "invitation_email_mismatch"
-      ? `此邀请仅接受 ${invitation.email} 对应的账号。请退出当前账号后重新登录。`
-      : "无法接受邀请，请重新打开链接或联系工作区所有者。";
+      ? `${pick(locale, L.mismatchPrefix)}${invitation.email}${pick(locale, L.mismatchSuffix)}`
+      : pick(locale, L.failureBody);
     const next = `/invitations/accept?token=${encodeURIComponent(token)}`;
-    return <InviteNotice title="无法接受邀请"><p>{message}</p><Link className="primary-button" href={`/auth/login?next=${encodeURIComponent(next)}`}>重新登录</Link></InviteNotice>;
+    return <InviteNotice title={pick(locale, L.failureTitle)}><p>{message}</p><Link className="primary-button" href={`/auth/login?next=${encodeURIComponent(next)}`}>{pick(locale, L.reloginButton)}</Link></InviteNotice>;
   }
 }

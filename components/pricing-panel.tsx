@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
+import { pick, type UiLocale } from "@/lib/ui-locale";
+import { PRICING_PANEL } from "@/lib/ui-strings/workspace";
 
 /**
  * 套餐购买面板（M4-T2）：POST /api/pay/orders 建单 → 展示渠道支付参数 → 轮询查单至终态。
@@ -31,7 +33,8 @@ interface OrderState {
   prepay?: { codeUrl?: string | null; payUrl?: string | null; h5Url?: string | null };
 }
 
-export function PricingPanel() {
+export function PricingPanel({ locale = "zh-CN" }: { locale?: UiLocale }) {
+  const L = PRICING_PANEL;
   const [offers, setOffers] = useState<Offers | null>(null);
   const [order, setOrder] = useState<OrderState | null>(null);
   const [pending, setPending] = useState(false);
@@ -97,12 +100,12 @@ export function PricingPanel() {
     };
   }, [order]);
 
-  if (!offers) return <div className="panel"><p>加载中…</p></div>;
+  if (!offers) return <div className="panel"><p>{pick(locale, L.loading)}</p></div>;
   if (offers.plans.length === 0) {
     return (
       <div className="panel">
-        <h2>定价校准中</h2>
-        <p>套餐价格与配额正在按实测用量校准，暂不开放购买。已注册账户保留试用额度。</p>
+        <h2>{pick(locale, L.calibratingHeading)}</h2>
+        <p>{pick(locale, L.calibratingBody)}</p>
       </div>
     );
   }
@@ -113,24 +116,24 @@ export function PricingPanel() {
         {offers.plans.map((plan) => (
           <div className="panel pricing-card" key={plan.planId}>
             <h2>{plan.planId}</h2>
-            <p className="price">¥{(plan.amount / 100).toFixed(2)} / {plan.durationMonths} 个月</p>
-            <p>每月包含 {plan.includedSau} SAU 标准分析额度</p>
-            <p>失败不扣额度 · 消费封顶可配 · 规格历史永久保留</p>
+            <p className="price">¥{(plan.amount / 100).toFixed(2)} / {plan.durationMonths}{pick(locale, L.priceMonthUnit)}</p>
+            <p>{pick(locale, L.monthlyIncludePrefix)}{plan.includedSau}{pick(locale, L.monthlyIncludeSuffix)}</p>
+            <p>{pick(locale, L.planPromise)}</p>
             <button className="primary-button" type="button" disabled={pending}
               onClick={() => purchase({ kind: "subscription", planId: plan.planId, durationMonths: plan.durationMonths })}>
-              {pending ? "下单中…" : "订阅"}
+              {pending ? pick(locale, L.ordering) : pick(locale, L.subscribeButton)}
             </button>
           </div>
         ))}
         {offers.overageEnabled
           ? offers.packs.map((pack) => (
             <div className="panel pricing-card" key={pack.sku}>
-              <h2>超额包 {pack.sku}</h2>
+              <h2>{pick(locale, L.packHeadingPrefix)}{pack.sku}</h2>
               <p className="price">¥{(pack.amount / 100).toFixed(2)}</p>
-              <p>额外 {pack.units} SAU（12 个月有效）</p>
+              <p>{pick(locale, L.packExtraPrefix)}{pack.units}{pick(locale, L.packExtraSuffix)}</p>
               <button className="primary-button" type="button" disabled={pending}
                 onClick={() => purchase({ kind: "overage_pack", packSku: pack.sku })}>
-                {pending ? "下单中…" : "购买"}
+                {pending ? pick(locale, L.ordering) : pick(locale, L.buyButton)}
               </button>
             </div>
           ))
@@ -139,22 +142,22 @@ export function PricingPanel() {
 
       {order ? (
         <div className="panel" id="pay-panel">
-          <h2>待支付订单 {order.orderNo.slice(0, 18)}…</h2>
+          <h2>{pick(locale, L.pendingOrderPrefix)}{order.orderNo.slice(0, 18)}…</h2>
           {order.status === "pending" ? (
             <>
               {order.prepay?.codeUrl ? (
                 <>
-                  {qrDataUrl ? <img src={qrDataUrl} alt="微信支付二维码" width={220} height={220} style={{ border: "1px solid #ddd", borderRadius: 8 }} /> : null}
-                  <p>微信扫码：请打开微信「扫一扫」支付<br /><code className="pay-code">{order.prepay.codeUrl}</code></p>
+                  {qrDataUrl ? <img src={qrDataUrl} alt={pick(locale, L.qrAlt)} width={220} height={220} style={{ border: "1px solid #ddd", borderRadius: 8 }} /> : null}
+                  <p>{pick(locale, L.wechatScan)}<br /><code className="pay-code">{order.prepay.codeUrl}</code></p>
                 </>
               ) : null}
-              {order.prepay?.h5Url ? <p><a href={order.prepay.h5Url} target="_blank" rel="noreferrer">打开微信 H5 收银台支付 →</a></p> : null}
-              <p>支付完成后本页自动更新（轮询中…）。</p>
+              {order.prepay?.h5Url ? <p><a href={order.prepay.h5Url} target="_blank" rel="noreferrer">{pick(locale, L.wechatH5Link)}</a></p> : null}
+              <p>{pick(locale, L.pollingNote)}</p>
             </>
           ) : order.status === "fulfilled" || order.status === "paid" ? (
-            <p className="success-text">支付成功，额度已到账。可在「设置」页查看余额。</p>
+            <p className="success-text">{pick(locale, L.paidNotice)}</p>
           ) : (
-            <p>订单状态：{order.status}。如长时间未更新请刷新或联系支持。</p>
+            <p>{pick(locale, L.statusPrefix)}{order.status}{pick(locale, L.statusSuffix)}</p>
           )}
         </div>
       ) : null}

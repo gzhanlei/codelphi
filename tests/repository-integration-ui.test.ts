@@ -74,6 +74,17 @@ describe("repository connection setup UI", () => {
     expect(html).not.toContain("断开连接");
   });
 
+  it("switches the integration cards to English copy when the ui locale is en", () => {
+    const gitee = renderToStaticMarkup(createElement(TokenIntegrationCard, { kind: "gitee", connections: [connection], canEdit: true, locale: "en" }));
+    expect(gitee).toContain("Verify and save connection");
+    expect(gitee).toContain("Connected");
+    expect(gitee).not.toContain("验证并保存连接");
+    const github = renderToStaticMarkup(createElement(GitHubAppCard, { app: { slug: "radar-app" }, connections: [{ id: 1, accountLogin: "radar-user", accountType: "User", status: "active", installationId: 42 }], locale: "en" }));
+    expect(github).toContain("1 active installation");
+    expect(github).toContain("Add an account or organization");
+    expect(github).not.toContain("个可用安装");
+  });
+
   it("disables every connection action while one is pending", () => {
     const html = renderToStaticMarkup(createElement(ConnectionActionButtons, { pending: "check", status: "active", kind: "repository", onRun: vi.fn() }));
     expect(html).toContain("检查中…");

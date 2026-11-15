@@ -4,6 +4,9 @@ import Link from "next/link";
 import { useState } from "react";
 import { errorMessage } from "@/lib/error-message";
 import { mcpServersJson } from "@/lib/mcp/connect-configs";
+import { pick, type UiLocale } from "@/lib/ui-locale";
+import { MCP_KEYS, SETTINGS_COMMON } from "@/lib/ui-strings/workspace";
+import { formatDateTimeIn } from "@/lib/format";
 
 interface McpKeyView {
   id: number;
@@ -14,14 +17,11 @@ interface McpKeyView {
   revokedAt: string | Date | null;
 }
 
-function formatDate(value: string | Date | null) {
-  if (!value) return "—";
-  return new Date(value).toLocaleString("zh-CN", { dateStyle: "medium", timeStyle: "short" });
-}
-
 /** MCP 集成面板（设置页）：组织级只读 key 的签发与撤销；明文仅创建时出现一次。
  *  连接向导：通用 mcpServers JSON 模板，签发后自动烤入真实 key（HP-3 展示端点与连接配置）。 */
-export function McpKeysSettings({ initialKeys, canManage }: { initialKeys: McpKeyView[]; canManage: boolean }) {
+export function McpKeysSettings({ initialKeys, canManage, locale = "zh-CN" }: { initialKeys: McpKeyView[]; canManage: boolean; locale?: UiLocale }) {
+  const L = MCP_KEYS;
+  const formatDate = (value: string | Date | null) => formatDateTimeIn(locale, value);
   const [keys, setKeys] = useState(initialKeys);
   const [name, setName] = useState("");
   const [plaintext, setPlaintext] = useState<string | null>(null);
@@ -56,7 +56,7 @@ export function McpKeysSettings({ initialKeys, canManage }: { initialKeys: McpKe
       setPlaintext(data.plaintext ?? null);
       setCopied(false);
       setCopiedConfig(false);
-      setNotice("key 已签发，明文只显示这一次，请立即保存");
+      setNotice(pick(locale, L.issuedNotice));
       setName("");
       await load();
     } catch (cause: unknown) {
@@ -74,7 +74,7 @@ export function McpKeysSettings({ initialKeys, canManage }: { initialKeys: McpKe
       const response = await fetch(`/api/mcp-keys/${id}`, { method: "POST" });
       const data = await response.json() as { error?: string };
       if (!response.ok) throw new Error(data.error ?? "撤销失败");
-      setNotice("key 已撤销，使用该 key 的连接将立即失效");
+      setNotice(pick(locale, L.revokedNotice));
       await load();
     } catch (cause: unknown) {
       setError(errorMessage(cause, "撤销失败"));
@@ -96,23 +96,23 @@ export function McpKeysSettings({ initialKeys, canManage }: { initialKeys: McpKe
 
   return (
     <section className="overview-panel mcp-keys-panel">
-      <div className="overview-panel-heading"><span>06</span><h2>MCP 集成</h2></div>
-      <p>组织级只读 API key，供 Claude / ChatGPT 等 AI 客户端经 MCP 读取产品规格与行为变化（每条结论附证据链接）。撤销后立即失效。</p>
+      <div className="overview-panel-heading"><span>06</span><h2>{pick(locale, L.heading)}</h2></div>
+      <p>{pick(locale, L.intro)}</p>
       <div className="mcp-guide">
-        <span className="mcp-key-meta">MCP 端点（Streamable HTTP，Authorization: Bearer &lt;key&gt;）：<code>{endpoint}</code></span>
+        <span className="mcp-key-meta">{pick(locale, L.endpointLabel)}<code>{endpoint}</code></span>
         <div className="mcp-guide-config">
           <div className="mcp-guide-config-head">
-            <span>{plaintext ? "连接配置（已写入刚签发的 key，复制即用）" : "连接配置（签发 key 后自动写入真实值）"}</span>
-            <button className="secondary-button" type="button" onClick={copyConfig}>{copiedConfig ? "已复制" : "复制配置"}</button>
+            <span>{plaintext ? pick(locale, L.configFresh) : pick(locale, L.configPlaceholder)}</span>
+            <button className="secondary-button" type="button" onClick={copyConfig}>{copiedConfig ? pick(locale, SETTINGS_COMMON.copied) : pick(locale, SETTINGS_COMMON.copyConfig)}</button>
           </div>
           <pre className="mcp-guide-code"><code>{configJson}</code></pre>
         </div>
         <ul className="mcp-guide-notes">
-          <li>Claude Code：存为项目根目录 <code>.mcp.json</code>，或执行 <code>claude mcp add --transport http codelphi {endpoint} --header "Authorization: Bearer &lt;key&gt;"</code></li>
-          <li>ZCode：<code>~/.zcode/cli/config.json</code> 的 <code>mcp.servers</code>（服务器对象同形状；团队共享可放仓库 <code>.zcode/config.json</code>）</li>
-          <li>Cursor：<code>~/.cursor/mcp.json</code>（同样的 mcpServers 形状）</li>
-          <li>ChatGPT / Claude 网页版连接器：选择 OAuth 连接，会自动发现本站授权页；详见 <Link href="/mcp">MCP 连接指南</Link></li>
-          <li>接入验证：在 agent 里问「列出我的 CoDelphi 产品」，应触发 list_projects 返回本工作区产品</li>
+          <li>{pick(locale, L.claudeGuidePrefix)}<code>.mcp.json</code>{pick(locale, L.claudeGuideMiddle)}<code>claude mcp add --transport http codelphi {endpoint} --header "Authorization: Bearer &lt;key&gt;"</code></li>
+          <li>{pick(locale, L.zcodeGuidePrefix)}<code>~/.zcode/cli/config.json</code>{pick(locale, L.zcodeGuideMiddle)}<code>mcp.servers</code>{pick(locale, L.zcodeGuideMiddle2)}<code>.zcode/config.json</code>{pick(locale, L.zcodeGuideSuffix)}</li>
+          <li>{pick(locale, L.cursorGuidePrefix)}<code>~/.cursor/mcp.json</code>{pick(locale, L.cursorGuideSuffix)}</li>
+          <li>{pick(locale, L.connectorGuidePrefix)}<Link href="/mcp">{pick(locale, L.guideLink)}</Link></li>
+          <li>{pick(locale, L.verifyGuide)}</li>
         </ul>
       </div>
       {canManage ? (
@@ -120,31 +120,31 @@ export function McpKeysSettings({ initialKeys, canManage }: { initialKeys: McpKe
           <input
             value={name}
             maxLength={191}
-            placeholder="key 名称（如：ChatGPT / Claude）"
-            aria-label="key 名称"
+            placeholder={pick(locale, L.namePlaceholder)}
+            aria-label={pick(locale, L.nameAria)}
             onChange={(event) => setName(event.target.value)}
           />
-          <button className="secondary-button" type="button" disabled={pending || !name.trim()} onClick={create}>签发 key</button>
+          <button className="secondary-button" type="button" disabled={pending || !name.trim()} onClick={create}>{pick(locale, L.issueButton)}</button>
         </div>
       ) : null}
       {plaintext ? (
         <div className="mcp-keys-plaintext">
           <code>{plaintext}</code>
-          <button className="secondary-button" type="button" onClick={copyPlaintext}>{copied ? "已复制" : "复制"}</button>
+          <button className="secondary-button" type="button" onClick={copyPlaintext}>{copied ? pick(locale, SETTINGS_COMMON.copied) : pick(locale, SETTINGS_COMMON.copy)}</button>
         </div>
       ) : null}
       <div className="mcp-keys-list">
-        {keys.length === 0 ? <p className="overview-note">尚无 key。</p> : keys.map((key) => (
+        {keys.length === 0 ? <p className="overview-note">{pick(locale, L.noKeys)}</p> : keys.map((key) => (
           <div className="mcp-key-row" key={key.id}>
             <div>
               <strong>{key.name}</strong>
               <code className="mcp-key-hint">sk_cd_…{key.keyHint}</code>
-              <span className="mcp-key-meta">由 {key.createdBy} 创建于 {formatDate(key.createdAt)}</span>
+              <span className="mcp-key-meta">{pick(locale, L.createdByPrefix)}{key.createdBy}{pick(locale, L.createdByMiddle)}{formatDate(key.createdAt)}</span>
             </div>
             {key.revokedAt ? (
-              <span className="mcp-key-status revoked">已撤销 {formatDate(key.revokedAt)}</span>
+              <span className="mcp-key-status revoked">{pick(locale, L.revokedPrefix)}{formatDate(key.revokedAt)}</span>
             ) : (
-              <span className="mcp-key-status active">生效中{canManage ? <button className="mcp-key-revoke" type="button" disabled={pending} onClick={() => revoke(key.id)}>撤销</button> : null}</span>
+              <span className="mcp-key-status active">{pick(locale, L.activeStatus)}{canManage ? <button className="mcp-key-revoke" type="button" disabled={pending} onClick={() => revoke(key.id)}>{pick(locale, L.revokeButton)}</button> : null}</span>
             )}
           </div>
         ))}

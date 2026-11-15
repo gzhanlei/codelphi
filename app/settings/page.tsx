@@ -6,6 +6,8 @@ import { McpKeysSettings } from "@/components/mcp-keys-settings";
 import { listApiKeys } from "@/lib/mcp/api-keys";
 import { getWorkspaceTriggerDefault, getWorkspaceOutputLanguageDefault } from "@/lib/analysis-trigger";
 import { resolveUiLocale } from "@/lib/ui-locale-server";
+import { pick, type LocaleEntry } from "@/lib/ui-locale";
+import { SETTINGS_PAGE } from "@/lib/ui-strings/workspace";
 import { formatDateTimeIn } from "@/lib/format";
 import { getDb } from "@/lib/db";
 import { requireSessionUser } from "@/lib/session";
@@ -13,14 +15,14 @@ import { currentOrganization } from "@/lib/organizations";
 
 export const dynamic = "force-dynamic";
 
-const STATUS_LABEL: Record<string, string> = {
-  trialing: "试用中（累计额度，不按周期重置）",
-  active: "生效中",
-  grace: "宽限期（只读）",
-  expired: "已到期",
+const STATUS_LABEL: Record<string, LocaleEntry> = {
+  trialing: SETTINGS_PAGE.statusTrialing,
+  active: SETTINGS_PAGE.statusActive,
+  grace: SETTINGS_PAGE.statusGrace,
+  expired: SETTINGS_PAGE.statusExpired,
 };
 
-const WALLET_LABEL: Record<string, string> = { trial: "试用额度", plan: "套餐额度", gift: "活动赠送", pack: "超额包" };
+const WALLET_LABEL: Record<string, LocaleEntry> = { trial: SETTINGS_PAGE.walletTrial, plan: SETTINGS_PAGE.walletPlan, gift: SETTINGS_PAGE.walletGift, pack: SETTINGS_PAGE.walletPack };
 
 function formatDate(locale: "zh-CN" | "en", value: unknown) {
   return formatDateTimeIn(locale, value);
@@ -98,81 +100,82 @@ export default async function SettingsPage() {
   const isTrial = (account?.plan_status ?? "trialing") === "trialing";
   const hold = Boolean(account?.reconciliation_hold);
   const canEdit = organization.role !== "viewer";
+  const L = SETTINGS_PAGE;
 
   return (
     <AppShell user={user} organizationName={organization.name}>
       <div className="page-heading">
-        <div><span className="eyebrow">SETTINGS</span><h1>设置</h1><p>套餐额度、分析触发与订单记录的统一入口；各产品的成员、通知等设置在对应产品页内。</p></div>
+        <div><span className="eyebrow">SETTINGS</span><h1>{pick(uiLocale, L.heading)}</h1><p>{pick(uiLocale, L.headingBody)}</p></div>
       </div>
 
-      {hold ? <div className="overview-panel"><p className="overview-error">账户正在对账冻结：暂时无法发起新分析；已有预留与分析结果不受影响，完成后自动解除。</p></div> : null}
+      {hold ? <div className="overview-panel"><p className="overview-error">{pick(uiLocale, L.holdBanner)}</p></div> : null}
 
       <section className="overview-panel settings-panel">
-        <div className="overview-panel-heading"><span>01</span><h2>套餐与额度</h2></div>
+        <div className="overview-panel-heading"><span>01</span><h2>{pick(uiLocale, L.planHeading)}</h2></div>
         <div className="stats-grid">
-          <div className="stat-card"><span>可用额度</span><strong>{available}</strong><small>SAU · 当前周期</small></div>
-          <div className="stat-card"><span>预留中</span><strong>{used}</strong><small>在途分析占用</small></div>
-          <div className="stat-card"><span>套餐状态</span><strong style={{ fontSize: 18 }}>{STATUS_LABEL[account?.plan_status ?? "trialing"] ?? account?.plan_status ?? "试用中"}</strong><small>{account?.plan_id ?? "trial"}</small></div>
+          <div className="stat-card"><span>{pick(uiLocale, L.statAvailable)}</span><strong>{available}</strong><small>{pick(uiLocale, L.statAvailableUnit)}</small></div>
+          <div className="stat-card"><span>{pick(uiLocale, L.statReserved)}</span><strong>{used}</strong><small>{pick(uiLocale, L.statReservedUnit)}</small></div>
+          <div className="stat-card"><span>{pick(uiLocale, L.statPlanStatus)}</span><strong style={{ fontSize: 18 }}>{STATUS_LABEL[account?.plan_status ?? "trialing"] ? pick(uiLocale, STATUS_LABEL[account?.plan_status ?? "trialing"]) : (account?.plan_status ?? pick(uiLocale, L.statusUnknown))}</strong><small>{account?.plan_id ?? "trial"}</small></div>
         </div>
         {isTrial ? (
-          <p className="overview-note">试用额度累计发放、不按周期重置；升级付费后剩余试用额度保留并优先消耗。</p>
+          <p className="overview-note">{pick(uiLocale, L.trialNote)}</p>
         ) : (
-          <p className="overview-note">当前计费周期：{formatDate(uiLocale, account?.current_period_start)} → {formatDate(uiLocale, account?.current_period_end)}；下次额度重置：{formatDate(uiLocale, account?.current_period_end)}</p>
+          <p className="overview-note">{pick(uiLocale, L.periodPrefix)}{formatDate(uiLocale, account?.current_period_start)}{pick(uiLocale, L.periodSeparator)}{formatDate(uiLocale, account?.current_period_end)}{pick(uiLocale, L.periodResetPrefix)}{formatDate(uiLocale, account?.current_period_end)}</p>
         )}
-        {account?.grace_until && account.plan_status === "grace" ? <p className="overview-error">宽限期至 {formatDate(uiLocale, account.grace_until)}：期间无法发起新分析，续费立即恢复。</p> : null}
-        {openExceptions > 0 ? <p className="overview-error">结算异常待人工确认：{openExceptions} 条。</p> : null}
-        <p className="overview-note">失败的分析不扣额度（累计释放 {failedReleased} 次）。<Link href="/pricing" className="text-button">升级 / 续费 / 购买超额包 →</Link></p>
+        {account?.grace_until && account.plan_status === "grace" ? <p className="overview-error">{pick(uiLocale, L.gracePrefix)}{formatDate(uiLocale, account.grace_until)}{pick(uiLocale, L.graceSuffix)}</p> : null}
+        {openExceptions > 0 ? <p className="overview-error">{pick(uiLocale, L.exceptionPrefix)}{openExceptions}{pick(uiLocale, L.exceptionSuffix)}</p> : null}
+        <p className="overview-note">{pick(uiLocale, L.failedReleasedPrefix)}{failedReleased}{pick(uiLocale, L.failedReleasedSuffix)}<Link href="/pricing" className="text-button">{pick(uiLocale, L.upgradeLink)}</Link></p>
       </section>
 
-      <WorkspaceTriggerDefaultSettings canEdit={canEdit} current={workspaceDefault} />
+      <WorkspaceTriggerDefaultSettings canEdit={canEdit} current={workspaceDefault} locale={uiLocale} />
 
-      <WorkspaceOutputLanguageSettings canEdit={canEdit} current={await getWorkspaceOutputLanguageDefault(accountId)} />
+      <WorkspaceOutputLanguageSettings canEdit={canEdit} current={await getWorkspaceOutputLanguageDefault(accountId)} locale={uiLocale} />
 
-      <McpKeysSettings canManage={canEdit} initialKeys={await listApiKeys(db, organization.id)} />
+      <McpKeysSettings canManage={canEdit} initialKeys={await listApiKeys(db, organization.id)} locale={uiLocale} />
 
       <section className="overview-panel settings-panel">
-        <div className="overview-panel-heading"><span>03</span><h2>各产品分析设置</h2></div>
-        <p className="overview-note">触发模式、通知渠道、成员权限等设置在每个产品的「设置」页内管理；额度不足被跳过的自动推送，可在产品页用「补分析最新提交」恢复同步。</p>
+        <div className="overview-panel-heading"><span>03</span><h2>{pick(uiLocale, L.productsHeading)}</h2></div>
+        <p className="overview-note">{pick(uiLocale, L.productsNote)}</p>
         {products.map((product) => {
           const skipped = skippedByProduct.get(product.id);
           return (
             <div key={product.id} className="settings-form" style={{ marginBottom: 14 }}>
               <p style={{ fontWeight: 650, margin: "0 0 4px" }}>
                 <Link href={`/products/${organization.slug}/${product.slug}?view=settings`}>{product.name}</Link>
-                <span style={{ fontWeight: 400 }}> · 设置 →</span>
+                <span style={{ fontWeight: 400 }}>{pick(uiLocale, L.productSettingsSuffix)}</span>
               </p>
               <p className="overview-note" style={{ margin: 0 }}>
-                {skipped ? `自动分析跳过 ${skipped.count} 次（最近 ${formatDate(uiLocale, skipped.lastAt)}）——恢复同步请到产品页「补分析最新提交」` : "无被跳过的自动分析"}
+                {skipped ? `${pick(uiLocale, L.skippedPrefix)}${skipped.count}${pick(uiLocale, L.skippedMiddle)}${formatDate(uiLocale, skipped.lastAt)}${pick(uiLocale, L.skippedSuffix)}` : pick(uiLocale, L.noSkipped)}
               </p>
             </div>
           );
         })}
-        {products.length === 0 ? <p className="overview-note">尚未接入产品。</p> : null}
+        {products.length === 0 ? <p className="overview-note">{pick(uiLocale, L.noProducts)}</p> : null}
       </section>
 
       <section className="overview-panel settings-panel">
-        <div className="overview-panel-heading"><span>04</span><h2>额度钱包</h2></div>
+        <div className="overview-panel-heading"><span>04</span><h2>{pick(uiLocale, L.walletHeading)}</h2></div>
         <table className="data-table">
-          <thead><tr><th>类型</th><th>状态</th><th>剩余</th><th>预留中</th><th>到期</th></tr></thead>
+          <thead><tr><th>{pick(uiLocale, L.walletType)}</th><th>{pick(uiLocale, L.walletStatus)}</th><th>{pick(uiLocale, L.walletRemaining)}</th><th>{pick(uiLocale, L.walletReserved)}</th><th>{pick(uiLocale, L.walletExpires)}</th></tr></thead>
           <tbody>
             {wallets.map((wallet) => (
               <tr key={wallet.wallet_id}>
-                <td>{WALLET_LABEL[wallet.quota_type] ?? wallet.quota_type}</td>
+                <td>{WALLET_LABEL[wallet.quota_type] ? pick(uiLocale, WALLET_LABEL[wallet.quota_type]) : wallet.quota_type}</td>
                 <td>{wallet.status}</td>
                 <td>{wallet.remaining_sau}</td>
                 <td>{wallet.reserved_sau}</td>
                 <td>{wallet.expires_at ? formatDate(uiLocale, wallet.expires_at) : "—"}</td>
               </tr>
             ))}
-            {wallets.length === 0 ? <tr><td colSpan={5}>尚无额度钱包。</td></tr> : null}
+            {wallets.length === 0 ? <tr><td colSpan={5}>{pick(uiLocale, L.noWallets)}</td></tr> : null}
           </tbody>
         </table>
       </section>
 
       <section className="overview-panel settings-panel">
-        <div className="overview-panel-heading"><span>05</span><h2>最近订单</h2></div>
+        <div className="overview-panel-heading"><span>05</span><h2>{pick(uiLocale, L.ordersHeading)}</h2></div>
         <table className="data-table">
-          <thead><tr><th>单号</th><th>类型</th><th>状态</th><th>退款</th><th>金额</th><th>创建</th></tr></thead>
+          <thead><tr><th>{pick(uiLocale, L.orderNo)}</th><th>{pick(uiLocale, L.orderKind)}</th><th>{pick(uiLocale, L.orderStatus)}</th><th>{pick(uiLocale, L.orderRefund)}</th><th>{pick(uiLocale, L.orderAmount)}</th><th>{pick(uiLocale, L.orderCreated)}</th></tr></thead>
           <tbody>
             {orders.map((order) => (
               <tr key={order.order_no}>
@@ -184,7 +187,7 @@ export default async function SettingsPage() {
                 <td>{formatDate(uiLocale, order.created_at)}</td>
               </tr>
             ))}
-            {orders.length === 0 ? <tr><td colSpan={6}>暂无订单。</td></tr> : null}
+            {orders.length === 0 ? <tr><td colSpan={6}>{pick(uiLocale, L.noOrders)}</td></tr> : null}
           </tbody>
         </table>
       </section>
