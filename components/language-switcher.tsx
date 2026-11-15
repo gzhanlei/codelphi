@@ -1,29 +1,23 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { UI_LOCALES, UI_LOCALE_LABELS, type UiLocale } from "@/lib/ui-locale";
+import { UI_LOCALES, UI_LOCALE_COOKIE, UI_LOCALE_LABELS, type UiLocale } from "@/lib/ui-locale";
 
-/** 界面语言切换器（顶栏显眼 pill）：两种语言自名直呼，点击写 cookie 后刷新当前页。
- *  服务端组件壳里拿不到当前路径，redirectTo 在点击时从 window.location 读取。 */
+/**
+ * 界面语言切换器（顶栏显眼 pill）：两种语言自名直呼。
+ * cookie 非 HttpOnly——客户端直写 document.cookie 后整页 reload：语言切换天然是
+ * 整页文案替换，reload 是确定性路径（router.refresh 的 RSC 缓存语义在部分页面
+ * 不会重渲染，实测不切）。服务端 /api/ui-locale 保留作无 JS 回退。
+ */
 export function LanguageSwitcher({ locale }: { locale: UiLocale }) {
-  const router = useRouter();
   const [pending, setPending] = useState(false);
 
-  const switchTo = async (next: UiLocale) => {
+  const switchTo = (next: UiLocale) => {
     if (next === locale || pending) return;
     setPending(true);
-    try {
-      const path = `${window.location.pathname}${window.location.search}`;
-      await fetch("/api/ui-locale", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ locale: next, redirectTo: path || "/" }),
-      });
-      router.refresh();
-    } finally {
-      setPending(false);
-    }
+    const secure = window.location.protocol === "https:" ? "; Secure" : "";
+    document.cookie = `${UI_LOCALE_COOKIE}=${next}; path=/; max-age=${60 * 60 * 24 * 365}; samesite=lax${secure}`;
+    window.location.reload();
   };
 
   return (
