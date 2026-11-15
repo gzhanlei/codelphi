@@ -4,6 +4,8 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
+import { pick, type UiLocale } from "@/lib/ui-locale";
+import { PAY_ORDERS } from "@/lib/ui-strings/admin";
 
 export interface AdminOrderRow {
   order_no: string;
@@ -19,40 +21,40 @@ export interface AdminOrderRow {
   fulfilled_at: string | null;
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  pending: "待支付",
-  paid: "已支付",
-  fulfilled: "已履约",
-  closed: "已关闭",
-  refunded: "已退款",
-  failed: "失败",
+const STATUS_LABEL: Record<string, keyof typeof PAY_ORDERS> = {
+  pending: "statusPending",
+  paid: "statusPaid",
+  fulfilled: "statusFulfilled",
+  closed: "statusClosed",
+  refunded: "statusRefunded",
+  failed: "statusFailed",
 };
 
-const REFUND_LABEL: Record<string, string> = {
-  none: "—",
-  refund_pending: "退款待提交",
-  refund_submitted: "退款已提交（待确认）",
-  refund_confirmed: "退款已确认",
-  refund_failed: "退款失败",
+const REFUND_LABEL: Record<string, keyof typeof PAY_ORDERS> = {
+  none: "refundNone",
+  refund_pending: "refundPending",
+  refund_submitted: "refundSubmitted",
+  refund_confirmed: "refundConfirmed",
+  refund_failed: "refundFailed",
 };
 
 /** 超管支付操作面板：测试单创建、订单台账、退款（动作走既有 API，状态机语义在服务端）。 */
-function PayQrCode({ codeUrl }: { codeUrl: string }) {
+function PayQrCode({ codeUrl, locale }: { codeUrl: string; locale: UiLocale }) {
   const [dataUrl, setDataUrl] = useState<string | null>(null);
   useEffect(() => {
     QRCode.toDataURL(codeUrl, { width: 440, margin: 1 }).then(setDataUrl).catch(() => setDataUrl(null));
   }, [codeUrl]);
-  if (!dataUrl) return <p>二维码生成中…</p>;
+  if (!dataUrl) return <p>{pick(locale, PAY_ORDERS.qrGenerating)}</p>;
   return (
     <p style={{ textAlign: "center" }}>
-      微信扫码支付
+      {pick(locale, PAY_ORDERS.qrWechat)}
       <br />
-      <img src={dataUrl} alt="微信支付二维码" width={220} height={220} style={{ border: "1px solid #ddd", borderRadius: 8 }} />
+      <img src={dataUrl} alt={pick(locale, PAY_ORDERS.qrWechatAlt)} width={220} height={220} style={{ border: "1px solid #ddd", borderRadius: 8 }} />
     </p>
   );
 }
 
-export function AdminPayOrders({ orders }: { orders: AdminOrderRow[] }) {
+export function AdminPayOrders({ orders, locale = "zh-CN" }: { orders: AdminOrderRow[]; locale?: UiLocale }) {
   const router = useRouter();
   const [pending, setPending] = useState<string | null>(null);
   const [message, setMessage] = useState("");
@@ -109,16 +111,16 @@ export function AdminPayOrders({ orders }: { orders: AdminOrderRow[] }) {
   return (
     <>
       <div className="panel">
-        <h2>联调测试单</h2>
-        <p>0.01 元「CoDelphi 测试支付」：走完整建单/支付/webhook/履约链路，履约不授予任何额度（kind=test）。</p>
+        <h2>{pick(locale, PAY_ORDERS.testHeading)}</h2>
+        <p>{pick(locale, PAY_ORDERS.testBody)}</p>
         <button className="primary-button" type="button" onClick={createTestOrder} disabled={pending !== null}>
-          {pending === "test" ? "创建中…" : "创建 0.01 元测试单"}
+          {pending === "test" ? pick(locale, PAY_ORDERS.creating) : pick(locale, PAY_ORDERS.createTest)}
         </button>
         {prepay ? (
           <div>
-            {prepay.codeUrl ? <PayQrCode codeUrl={prepay.codeUrl} /> : null}
-            {prepay.h5Url ? <p><a href={prepay.h5Url} target="_blank" rel="noreferrer">微信 H5 收银台 →</a></p> : null}
-            {prepay.payUrl ? <p><a href={prepay.payUrl} target="_blank" rel="noreferrer">支付宝 →</a></p> : null}
+            {prepay.codeUrl ? <PayQrCode codeUrl={prepay.codeUrl} locale={locale} /> : null}
+            {prepay.h5Url ? <p><a href={prepay.h5Url} target="_blank" rel="noreferrer">{pick(locale, PAY_ORDERS.wechatH5)}</a></p> : null}
+            {prepay.payUrl ? <p><a href={prepay.payUrl} target="_blank" rel="noreferrer">{pick(locale, PAY_ORDERS.alipay)}</a></p> : null}
           </div>
         ) : null}
       </div>
@@ -126,10 +128,10 @@ export function AdminPayOrders({ orders }: { orders: AdminOrderRow[] }) {
       {message ? <div className="panel"><p>{message}</p></div> : null}
 
       <div className="panel">
-        <h2>订单台账（最近 20 笔）</h2>
+        <h2>{pick(locale, PAY_ORDERS.ledgerHeading)}</h2>
         <table className="scenario-table">
           <thead>
-            <tr><th>商户单号</th><th>平台单号</th><th>类型 / 渠道</th><th>金额</th><th>支付态</th><th>退款态</th><th>创建 / 支付时间</th><th>操作</th></tr>
+            <tr><th>{pick(locale, PAY_ORDERS.colOrderNo)}</th><th>{pick(locale, PAY_ORDERS.colPlatformNo)}</th><th>{pick(locale, PAY_ORDERS.colKindChannel)}</th><th>{pick(locale, PAY_ORDERS.colAmount)}</th><th>{pick(locale, PAY_ORDERS.colPayStatus)}</th><th>{pick(locale, PAY_ORDERS.colRefundStatus)}</th><th>{pick(locale, PAY_ORDERS.colTimes)}</th><th>{pick(locale, PAY_ORDERS.colActions)}</th></tr>
           </thead>
           <tbody>
             {orders.map((order) => (
@@ -138,13 +140,13 @@ export function AdminPayOrders({ orders }: { orders: AdminOrderRow[] }) {
                 <td><code>{order.platform_order_no ?? "—"}</code></td>
                 <td>{order.kind} / {order.channel}</td>
                 <td>¥{(order.amount / 100).toFixed(2)}</td>
-                <td>{STATUS_LABEL[order.status] ?? order.status}</td>
-                <td>{REFUND_LABEL[order.refund_status] ?? order.refund_status}{order.refund_amount ? `（${(order.refund_amount / 100).toFixed(2)}）` : ""}</td>
-                <td>{order.created_at.slice(0, 16).replace("T", " ")}<br />{order.paid_at ? `支付 ${order.paid_at.slice(5, 16).replace("T", " ")}` : ""}</td>
+                <td>{pick(locale, PAY_ORDERS[STATUS_LABEL[order.status] ?? "statusPending"])}</td>
+                <td>{pick(locale, PAY_ORDERS[REFUND_LABEL[order.refund_status] ?? "refundNone"])}{order.refund_amount ? `（${(order.refund_amount / 100).toFixed(2)}）` : ""}</td>
+                <td>{order.created_at.slice(0, 16).replace("T", " ")}<br />{order.paid_at ? `${pick(locale, PAY_ORDERS.paidAt)}${order.paid_at.slice(5, 16).replace("T", " ")}` : ""}</td>
                 <td>
                   {(order.status === "paid" || order.status === "fulfilled") && (order.refund_status === "none" || order.refund_status === "refund_failed") ? (
                     <button className="text-button" type="button" disabled={pending !== null} onClick={() => refund(order.order_no)}>
-                      {pending === order.order_no ? "提交中…" : "退款"}
+                      {pending === order.order_no ? pick(locale, PAY_ORDERS.refunding) : pick(locale, PAY_ORDERS.refundButton)}
                     </button>
                   ) : (
                     <span className="sidebar-note">—</span>
@@ -152,10 +154,10 @@ export function AdminPayOrders({ orders }: { orders: AdminOrderRow[] }) {
                 </td>
               </tr>
             ))}
-            {orders.length === 0 ? <tr><td colSpan={8}>暂无订单。先创建一笔测试单。</td></tr> : null}
+            {orders.length === 0 ? <tr><td colSpan={8}>{pick(locale, PAY_ORDERS.emptyOrders)}</td></tr> : null}
           </tbody>
         </table>
-        <p className="sidebar-note">退款语义：提交后停在 refund_submitted 属正常（结果未知），webhook/对账会在确认后推进 refund_confirmed 并原子完成权益回收；绝不因超时重发退款请求。</p>
+        <p className="sidebar-note">{pick(locale, PAY_ORDERS.refundNote)}</p>
       </div>
     </>
   );

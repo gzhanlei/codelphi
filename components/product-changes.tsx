@@ -5,9 +5,11 @@ import { ReleaseCard } from "./release-card";
 import { loadMoreReleases } from "@/lib/release-client";
 import type { RegressionTaskView } from "@/lib/regression-task-view";
 import { errorMessage } from "@/lib/error-message";
+import { pick, type UiLocale } from "@/lib/ui-locale";
+import { PRODUCT_CHANGES as L } from "@/lib/ui-strings/product";
 import type { BehaviorChangeRow, ChangeRow, FoldedBehaviorChangeRow, ReleaseRow } from "@/lib/types";
 
-export function ProductChanges({ slug, releases: initialReleases, changes: initialChanges, behaviorChanges: initialBehaviorChanges, foldedChanges: initialFoldedChanges = [], regressionTasks = [], releaseTotal = 0, canEdit = false, changelogHref }: {
+export function ProductChanges({ slug, releases: initialReleases, changes: initialChanges, behaviorChanges: initialBehaviorChanges, foldedChanges: initialFoldedChanges = [], regressionTasks = [], releaseTotal = 0, canEdit = false, changelogHref, locale = "zh-CN" }: {
   changelogHref?: string;
   slug: string;
   releases: ReleaseRow[];
@@ -17,6 +19,7 @@ export function ProductChanges({ slug, releases: initialReleases, changes: initi
   regressionTasks?: RegressionTaskView[];
   releaseTotal?: number;
   canEdit?: boolean;
+  locale?: UiLocale;
 }) {
   const [releases, setReleases] = useState(initialReleases);
   const [changes, setChanges] = useState(initialChanges);
@@ -37,26 +40,26 @@ export function ProductChanges({ slug, releases: initialReleases, changes: initi
       setBehaviorChanges((current) => [...current, ...page.behaviorChanges]);
       setFoldedChanges((current) => [...current, ...page.foldedChanges]);
     } catch (cause: unknown) {
-      setError(errorMessage(cause, "加载更多发布失败"));
+      setError(errorMessage(cause, pick(locale, L.loadError)));
     } finally {
       setLoading(false);
     }
   };
 
   if (releases.length === 0) {
-    return <div className="empty-state"><strong>还没有发布记录</strong><p>GitHub push 或手动分析后，这里会显示产品变化。</p></div>;
+    return <div className="empty-state"><strong>{pick(locale, L.emptyTitle)}</strong><p>{pick(locale, L.emptyBody)}</p></div>;
   }
 
   return (
     <div className="release-list">
       <div className="release-list-head">
-        <a className="overview-text-link" href={`/api/products/${slug}/progress-summary?days=30`}>导出 30 天变更索引 ↓</a>
+        <a className="overview-text-link" href={`/api/products/${slug}/progress-summary?days=30`}>{pick(locale, L.exportIndex)}</a>
       </div>
-      {releases.map((release) => <ReleaseCard slug={slug} release={release} changes={changes} behaviorChanges={behaviorChanges} foldedChanges={foldedChanges} tasks={regressionTasks} canEdit={canEdit} changelogHref={changelogHref} key={release.id} />)}
+      {releases.map((release) => <ReleaseCard slug={slug} release={release} changes={changes} behaviorChanges={behaviorChanges} foldedChanges={foldedChanges} tasks={regressionTasks} canEdit={canEdit} changelogHref={changelogHref} locale={locale} key={release.id} />)}
       {hasMore ? (
         <div className="release-load-more">
           <button className="secondary-button" type="button" onClick={() => void loadMore()} disabled={loading}>
-            {loading ? "加载中…" : `加载更多（还有 ${releaseTotal - releases.length} 条）`}
+            {loading ? pick(locale, L.loading) : pick(locale, L.loadMore).replace("{count}", String(releaseTotal - releases.length))}
           </button>
         </div>
       ) : null}

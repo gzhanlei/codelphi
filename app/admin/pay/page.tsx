@@ -44,6 +44,7 @@ export default async function PayAdminPage() {
       </div>
       <AdminBillingGrant />
       <AdminPayOrders
+        locale={locale}
         orders={orders.map((order) => ({
           ...order,
           created_at: String(order.created_at),

@@ -287,6 +287,10 @@ export const SPEC_ASK = {
 
 // ── 规格编辑器 UI（lib/spec-editor-ui.ts） ──
 export const SPEC_EDITOR = {
+  deleteFeatureError: { "zh-CN": "删除功能失败", en: "Failed to delete the feature" },
+  emptyTitle: { "zh-CN": "选择一个功能", en: "Select a feature" },
+  emptyBody: { "zh-CN": "从左侧功能树选择，或新建顶级功能。", en: "Pick one from the feature tree, or create a new top-level feature." },
+  newFeature: { "zh-CN": "＋ 新功能", en: "＋ New feature" },
   categoryHappy: { "zh-CN": "正常路径", en: "Happy path" },
   categoryEdge: { "zh-CN": "边界情况", en: "Edge case" },
   categoryError: { "zh-CN": "错误路径", en: "Error path" },
@@ -335,6 +339,9 @@ export const LEDGER = {
   overallNotApplicable: { "zh-CN": "不适用", en: "Not applicable" },
   statePartial: { "zh-CN": "部分", en: "partial" },
   stateFailed: { "zh-CN": "失败", en: "failed" },
+  dimensionsTitle: { "zh-CN": "六维度状态：{states}", en: "Six-dimension states: {states}" },
+  disclosurePrefix: { "zh-CN": "分析完整性：{overall}", en: "Analysis completeness: {overall}" },
+  disclosureSuffix: { "zh-CN": "。分析成功不等于完整，完整不等于正确；结论采纳前应经人工核实。", en: ". A successful analysis is not a complete one, and complete is not correct; have a human verify before adopting conclusions." },
 } satisfies Record<string, LocaleEntry>;
 
 // ── 覆盖率展示（lib/coverage-display.ts） ──
@@ -344,6 +351,15 @@ export const COVERAGE = {
   explainer: {
     "zh-CN": "覆盖率指本次分析实际读取的源码占仓库全部实现面的比例：大仓库按预算分趟读取，低于 100% 是设计内行为，不代表分析出错或结论不可信；判断单条结论是否可信，看它附带的源码证据链接，而不是这个比例。",
     en: "Coverage is the share of the repository's full implementation surface actually read by this analysis: large repositories are read in budgeted passes, so below 100% is by design and does not mean the analysis failed or conclusions are untrustworthy; to judge a single conclusion, look at its source evidence links, not this ratio.",
+  },
+  disclosureTitle: { "zh-CN": "源码装配覆盖率按本规格版本对应的完整实现面（文件字节）计算", en: "Source assembly coverage is computed over the full implementation surface (file bytes) of this spec version" },
+  partitionsUnit: { "zh-CN": "{count} 趟提取", en: "{count} extraction pass(es)" },
+  cappedNote: { "zh-CN": "；本规格未覆盖全部实现面（提取趟数触顶），未覆盖部分不产生结论", en: "; this spec does not cover the full implementation surface (extraction pass cap reached); uncovered parts produce no conclusions" },
+  runtimeBlindSpotPrefix: { "zh-CN": "运行时开关与数据依赖行为静态提取不可见（", en: "Runtime switches and data-dependent behavior are invisible to static extraction (" },
+  boundaryLabel: { "zh-CN": "边界说明", en: "boundary notice" },
+  runtimeBlindSpotTail: {
+    "zh-CN": "）；发现缺口请在左侧功能树进入功能页，用「编辑/新增场景」人工补充并标记核实。",
+    en: "); to fill gaps, open the feature page from the feature tree and add scenarios manually, marking them verified.",
   },
 } satisfies Record<string, LocaleEntry>;
 
@@ -408,4 +424,14 @@ export const INTEGRATION = {
   patNotConfigured: { "zh-CN": "未配置", en: "Not configured" },
   patOptionFallback: { "zh-CN": "Personal Access Token 回退", en: "Personal Access Token fallback" },
   patOptionApp: { "zh-CN": "选择 GitHub App 安装", en: "Install the GitHub App" },
+} satisfies Record<string, LocaleEntry>;
+
+/** 发布变化视图（ProductChanges，客户端）chrome。 */
+export const PRODUCT_CHANGES = {
+  emptyTitle: { "zh-CN": "还没有发布记录", en: "No releases yet" },
+  emptyBody: { "zh-CN": "GitHub push 或手动分析后，这里会显示产品变化。", en: "After a GitHub push or a manual analysis, product changes appear here." },
+  exportIndex: { "zh-CN": "导出 30 天变更索引 ↓", en: "Export 30-day change index ↓" },
+  loadMore: { "zh-CN": "加载更多（还有 {count} 条）", en: "Load more ({count} remaining)" },
+  loading: { "zh-CN": "加载中…", en: "Loading…" },
+  loadError: { "zh-CN": "加载更多发布失败", en: "Failed to load more releases" },
 } satisfies Record<string, LocaleEntry>;
