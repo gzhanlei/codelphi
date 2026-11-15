@@ -8,6 +8,13 @@ import { pick } from "@/lib/ui-locale";
 import { resolveUiLocale } from "@/lib/ui-locale-server";
 import { ADMIN_FEEDBACK as L } from "@/lib/ui-strings/admin";
 
+type AdminFeedbackStrings = typeof L;
+const VERDICT_LABEL: Record<string, keyof AdminFeedbackStrings> = {
+  confirmed_defect: "verdictConfirmed",
+  false_alarm: "verdictFalseAlarm",
+  needs_human: "verdictNeedsHuman",
+};
+
 export const dynamic = "force-dynamic";
 
 export default async function FeedbackAdminPage() {
@@ -22,14 +29,17 @@ export default async function FeedbackAdminPage() {
       <div className="page-heading"><div><span className="eyebrow">FEEDBACK ADMIN</span><h1>{pick(locale, L.heading)}</h1><p>{pick(locale, L.subheading)}</p></div></div>
       <div className="panel">
         {reports.length === 0 ? <p className="overview-note">{pick(locale, L.empty)}</p> : <table className="scenario-table">
-          <thead><tr><th>{pick(locale, L.tableProduct)}</th><th>{pick(locale, L.tableWorkspace)}</th><th>{pick(locale, L.tableSource)}</th><th>{pick(locale, L.tableRevision)}</th><th>{pick(locale, L.tableError)}</th><th>{pick(locale, L.tableStatus)}</th><th>{pick(locale, L.tableActions)}</th></tr></thead>
+          <thead><tr><th>{pick(locale, L.tableProduct)}</th><th>{pick(locale, L.tableWorkspace)}</th><th>{pick(locale, L.tableSource)}</th><th>{pick(locale, L.tableRevision)}</th><th>{pick(locale, L.tableError)}</th><th>{pick(locale, L.verdictColumn)}</th><th>{pick(locale, L.tableStatus)}</th><th>{pick(locale, L.tableActions)}</th></tr></thead>
           <tbody>{reports.map((report) => <tr key={report.id}>
             <td><strong>{report.productName}</strong><br /><small>{report.repositoryFullName}</small></td>
             <td>{report.organizationName}</td>
             <td>{report.reporterName ?? pick(locale, L.systemSource)}</td>
             <td><code>{report.revision.slice(0, 7)}</code></td>
             <td><span className="feedback-error">{report.errorMessage}</span>{report.architectureError ? <small className="feedback-error">{report.architectureError}</small> : null}</td>
-            <td>{report.status === "submitted" ? pick(locale, L.statusSubmitted) : report.status === "failed" ? pick(locale, L.statusFailed) : pick(locale, L.statusPending)}</td>
+            <td>{report.verdict
+        ? <span className="badge">{pick(locale, L[VERDICT_LABEL[report.verdict] ?? "verdictPending"])}{report.correctiveRunId ? <> · <a href={`/products/${""}`} className="text-button">{pick(locale, L.correctiveRunLabel)} #{report.correctiveRunId}</a></> : null}</span>
+        : <span className="badge">{pick(locale, L.verdictPending)}</span>}{report.verdictReason ? <small style={{ display: "block", maxWidth: 320, whiteSpace: "normal" }}>{report.verdictReason}</small> : null}</td>
+    <td>{report.status === "submitted" ? pick(locale, L.statusSubmitted) : report.status === "failed" ? pick(locale, L.statusFailed) : pick(locale, L.statusPending)}</td>
             <td><FeedbackIssueButton id={report.id} issueUrl={report.githubIssueUrl} status={report.status} /></td>
           </tr>)}</tbody>
         </table>}

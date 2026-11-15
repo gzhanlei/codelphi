@@ -22,6 +22,12 @@ export const ADMIN_FEEDBACK = {
   statusSubmitted: { "zh-CN": "已提交", en: "Submitted" },
   statusFailed: { "zh-CN": "提交失败", en: "Submission failed" },
   statusPending: { "zh-CN": "待处理", en: "Pending" },
+  verdictColumn: { "zh-CN": "裁决", en: "Verdict" },
+  verdictPending: { "zh-CN": "待裁决", en: "Awaiting verdict" },
+  verdictConfirmed: { "zh-CN": "缺陷已确认 · 已触发修复", en: "Defect confirmed · repair triggered" },
+  verdictFalseAlarm: { "zh-CN": "误报已驳回", en: "Dismissed as false alarm" },
+  verdictNeedsHuman: { "zh-CN": "证据不足 · 转人工", en: "Insufficient evidence · escalated" },
+  correctiveRunLabel: { "zh-CN": "修复 run", en: "Repair run" },
 } satisfies Record<string, LocaleEntry>;
 
 // ── admin/pay ──

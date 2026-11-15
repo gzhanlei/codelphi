@@ -239,7 +239,7 @@ curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3008/login
 
 ## 让 AI 编程助手接入（MCP）
 
-CoDelphi 提供 13 个 MCP 工具（只读 + 1 个反馈通道），供 Claude Code、Codex、ChatGPT 等 AI 编程助手在整个开发周期使用：改文件前 `lookup_by_files` 反查改动会碰哪些功能与场景，理解既有行为用 `search_scenarios` 检索带源码证据的行为约定，push 后用 `list_releases` / `get_release` 核对「这次实际改变了什么」，发现账本与代码不符用 `send_feedback` 上报、由人裁决。
+CoDelphi 提供 13 个 MCP 工具（只读 + 1 个反馈通道），供 Claude Code、Codex、ChatGPT 等 AI 编程助手在整个开发周期使用：改文件前 `lookup_by_files` 反查改动会碰哪些功能与场景，理解既有行为用 `search_scenarios` 检索带源码证据的行为约定，push 后用 `list_releases` / `get_release` 核对「这次实际改变了什么」，发现账本与代码不符用 `send_feedback` 上报、由 AI 裁决管线自动核实处置（确认缺陷即触发修复性重建，误报驳回）。
 
 接入三步：
 
@@ -255,7 +255,7 @@ CoDelphi 提供 13 个 MCP 工具（只读 + 1 个反馈通道），供 Claude C
 - 动手改文件前：lookup_by_files 反查这些文件是哪些功能/场景的证据；结果为空且覆盖率低时，明说「账本未覆盖，影响面未知」。
 - 需要理解既有行为时：search_scenarios 检索规格原文（带 stableKey 与证据行号），不要只靠读代码猜约定。
 - push 后：list_releases 找到本次 sha 对应的发布，get_release 核对变化清单与本次意图一致；计划外变化回查并向用户报告。
-- 账本与代码不符：send_feedback 上报由人裁决。账本只读；「没搜到 ≠ 不存在」。
+- 账本与代码不符：send_feedback 上报，AI 裁决管线自动核实处置。账本只读；「没搜到 ≠ 不存在」。
 ```
 
 工具语义、红线与完整工作流配方见 [docs/coding-agent-mcp.md](docs/coding-agent-mcp.md)。

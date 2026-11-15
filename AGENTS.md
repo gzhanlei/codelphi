@@ -16,7 +16,7 @@
 - 做计划时（早于任何文件改动）：`lookup_by_files` 反查**计划要改的文件**是哪些功能/场景的证据（爆炸半径），把回归红线场景与 push 后对账锚点写进计划；必要时 `get_feature_connections(path)` 看共享该文件的功能邻域。方案已定但未反查 = 计划未完成，不得动手。
 - 需要理解既有行为时：`search_scenarios` 检索规格原文，用返回的 `stableKey` 深入 `get_feature`。
 - push 后：`list_releases` 找到本次 sha 对应的发布，`get_release` 核对行为变化清单与意图一致；计划外的变化要回查。
-- 发现账本与代码不符：`send_feedback` 上报由人裁决；账本是只读面，且「没搜到 ≠ 不存在」（以 `specSnapshot` + `evidenceCoverage` 判断账本新旧与覆盖）。
+- 发现账本与代码不符：`send_feedback` 上报，AI 裁决管线自动核实处置（确认缺陷即触发修复性重建，误报驳回），仅证据不足的进入人工队列；账本是只读面，且「没搜到 ≠ 不存在」（以 `specSnapshot` + `evidenceCoverage` 判断账本新旧与覆盖）。
 
 <!-- BEGIN:nextjs-agent-rules -->
 

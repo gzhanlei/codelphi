@@ -166,7 +166,7 @@ describe("analysis failure feedback", () => {
       repositoryFullName: "gzhanlei/workmembership",
       revision: "abcdef1234567890",
       errorMessage: "No architecture components detected",
-      architectureError: null,
+      architectureError: null, kind: "bug", verdict: null, verdictReason: null, adjudicatedAt: null, correctiveRunId: null,
       status: "new",
       githubIssueUrl: null,
       submissionError: null,
@@ -189,7 +189,7 @@ describe("analysis failure feedback", () => {
   it("explains missing issue write permission", async () => {
     const report = {
       id: 42, organizationId: 1, organizationName: "Default Workspace", productId: 3, productName: "Chandler", repositoryFullName: "gzhanlei/workmembership",
-      revision: "abcdef1234567890", errorMessage: "failed", architectureError: null, status: "new", githubIssueUrl: null, submissionError: null, reporterName: null, createdAt: new Date(),
+      revision: "abcdef1234567890", errorMessage: "failed", architectureError: null, kind: "bug", verdict: null, verdictReason: null, adjudicatedAt: null, correctiveRunId: null, status: "new", githubIssueUrl: null, submissionError: null, reporterName: null, createdAt: new Date(),
     };
     execute.mockImplementation(async (sql = "") => sql.includes("FROM feedback_reports f") ? [[report]] : [{ affectedRows: 1 }]);
     const fetcher = vi.fn(async () => new Response("forbidden", { status: 403 }));

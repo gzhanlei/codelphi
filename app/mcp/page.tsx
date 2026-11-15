@@ -27,7 +27,7 @@ const WORKFLOW_AGENTS_SNIPPET = `## 行为账本（CoDelphi MCP）——门控�
 - 做计划时（早于任何文件改动）：lookup_by_files 反查计划要改的文件的爆炸半径，把回归红线场景与 push 后对账锚点写进计划；必要时 get_feature_connections(path) 看共享邻域。方案已定但未反查 = 计划未完成，不得动手。
 - 需要理解既有行为时：search_scenarios 检索规格原文，用返回的 stableKey 深入 get_feature，不要只靠读代码猜约定。
 - push 后：list_releases 找到本次 sha 对应的发布，get_release 核对行为变化清单 ⊆ 本次意图；计划外的变化回查并向用户报告。
-- 发现账本与代码不符：send_feedback 上报由人裁决；账本是只读面，「没搜到 ≠ 不存在」。`;
+- 发现账本与代码不符：send_feedback 上报，AI 裁决管线自动核实处置（确认缺陷即触发修复性重建，误报驳回），仅证据不足的进入人工队列；账本是只读面，「没搜到 ≠ 不存在」。`;
 
 const TOOL_GROUPS_ZH: Array<{ heading: string; tools: Array<{ name: string; desc: string }> }> = [
   {
@@ -55,7 +55,7 @@ const TOOL_GROUPS_ZH: Array<{ heading: string; tools: Array<{ name: string; desc
   {
     heading: "反馈（唯一写入口）",
     tools: [
-      { name: "send_feedback", desc: "发现账本与代码不符时上报，由人裁决；账本本身只读" },
+      { name: "send_feedback", desc: "发现账本与代码不符时上报，AI 裁决管线自动核实处置（确认缺陷触发修复性重建，误报驳回），仅证据不足的进入人工队列；账本本身只读" },
     ],
   },
 ];
@@ -86,7 +86,7 @@ const TOOL_GROUPS_EN: Array<{ heading: string; tools: Array<{ name: string; desc
   {
     heading: "Feedback (the only write tool)",
     tools: [
-      { name: "send_feedback", desc: "Report ledger-vs-code mismatches for human adjudication; the ledger itself is read-only" },
+      { name: "send_feedback", desc: "Report ledger-vs-code mismatches — the AI adjudication pipeline verifies automatically (confirmed defects trigger corrective rebuilds, false alarms are dismissed); only evidence-insufficient cases reach the human queue. The ledger itself is read-only" },
     ],
   },
 ];
@@ -99,7 +99,7 @@ Whenever tools prefixed mcp__codelphi__ are visible in a session AND the current
 - When planning (before any file edit): run lookup_by_files against the files you plan to change to map the blast radius; put regression red-line scenarios and post-push reconciliation anchors into the plan; use get_feature_connections(path) for the shared neighborhood when needed. A plan without the reverse lookup is incomplete — do not start editing.
 - To understand existing behavior: search_scenarios to retrieve spec wording (with stableKey and evidence line numbers) instead of guessing from code.
 - After a push: list_releases to find the release for this sha, get_release to verify the change list is within your intent; investigate unexpected changes and report them to the user.
-- When the ledger disagrees with the code: send_feedback for human adjudication; the ledger is read-only, and "no search hit" does not mean "does not exist".`;
+- When the ledger disagrees with the code: report with send_feedback — the AI adjudication pipeline verifies automatically (confirmed defects trigger corrective rebuilds, false alarms are dismissed); only evidence-insufficient cases reach the human queue. The ledger is read-only, and "no search hit" does not mean "does not exist".`;
 
 /** MCP 连接指南（公开页）：coding agent 用 API key + 通用 mcpServers JSON；ChatGPT/Claude Web 连接器走 OAuth 自动发现。 */
 export default async function McpGuidePage() {
@@ -159,7 +159,7 @@ export default async function McpGuidePage() {
           <li>{t("动手改文件前：用 lookup_by_files 反查要改的文件是哪些功能/场景的证据（爆炸半径）", "Before editing files: use lookup_by_files to reverse-lookup which features/scenarios cite them (blast radius)")}</li>
           <li>{t("需要理解既有行为：用 search_scenarios 检索规格原文，别只靠读代码猜约定", "To understand existing behavior: use search_scenarios for spec wording instead of guessing from code")}</li>
           <li>{t("push 后：用 list_releases 找到本次提交对应的发布，get_release 核对行为变化清单与意图一致", "After a push: use list_releases to find the release for this commit and get_release to verify the change list matches your intent")}</li>
-          <li>{t("发现账本与代码不符：用 send_feedback 上报由人裁决；账本是只读面", "On ledger-vs-code mismatches: report with send_feedback for human adjudication; the ledger is read-only")}</li>
+          <li>{t("发现账本与代码不符：用 send_feedback 上报，AI 裁决管线自动核实处置（确认缺陷触发修复性重建，误报驳回），仅证据不足的进入人工队列；账本是只读面", "On ledger-vs-code mismatches: report with send_feedback — the AI adjudication pipeline verifies automatically (confirmed defects trigger corrective rebuilds, false alarms are dismissed); only evidence-insufficient cases reach the human queue. The ledger is read-only")}</li>
         </ul>
         <p>{t("让 agent 自觉执行以上约定，推荐贴进", "To make your agent follow these rules on its own, paste them into a ")}<strong>{t("用户级", "user-level")}</strong>{t("指令文件——每人一次，所有仓库生效（段内自带门控：未连接 codelphi MCP 或仓库匹配不到时自动跳过，不影响未接入的项目）：", " instruction file — once per person, effective across all repositories (the section carries its own gate: it skips automatically when the codelphi MCP is not connected or the remote does not match)")}</p>
         <CopyBlock label={t("用户级常驻指令段（贴进 ~/.zcode/AGENTS.md 或 ~/.claude/CLAUDE.md）", "User-level instruction snippet (paste into ~/.zcode/AGENTS.md or ~/.claude/CLAUDE.md)")} text={snippet} locale={locale} />

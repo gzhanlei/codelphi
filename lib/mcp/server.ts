@@ -80,7 +80,7 @@ export const MCP_WORKFLOW_INSTRUCTIONS = [
   "1. 做 plan 或改任何文件前：先用 list_projects 按 git remote 的 owner/name 匹配产品取 slug，再 lookup_by_files 反查计划要改文件的爆炸半径，把回归红线场景与 push 后对账锚点写进计划；必要时 get_feature_connections(path) 看共享邻域。",
   "2. 需要理解既有行为：search_scenarios 检索规格原文，用 stableKey 深入 get_feature，不要只靠读代码猜约定。",
   "3. push 后：list_releases 找到本次 sha 对应的发布（per-push 一条，docs-only 也有零变化条目），get_release 核对行为变化清单与本次意图一致；计划外变化回查并向用户报告。",
-  "4. 发现账本与代码不符：send_feedback(kind:bug) 带三要素（哪个场景、哪份证据、代码实际行为）上报由人裁决；账本是只读面，「没搜到 ≠ 不存在」，用 get_project_summary 的 specSnapshot/evidenceCoverage 判断覆盖。",
+  "4. 发现账本与代码不符：send_feedback(kind:bug) 带三要素（哪个场景、哪份证据、代码实际行为）上报由 AI 裁决管线自动核实处置（确认缺陷即触发修复性重建，误报驳回），仅证据不足的进入人工队列；账本是只读面，「没搜到 ≠ 不存在」，用 get_project_summary 的 specSnapshot/evidenceCoverage 判断覆盖。",
 ].join("\n");
 
 export const MCP_TOOLS: McpToolDef[] = [
@@ -96,7 +96,7 @@ export const MCP_TOOLS: McpToolDef[] = [
   { name: "get_feature_connections", description: "功能间的确定性连接（共享证据文件面；每条带依据文件清单，无 LLM 推断）。可选 path=只看以该文件为证据的功能邻域；可选 feature=稳定键，只返回该功能的连接", inputSchema: { type: "object", properties: { slug: { type: "string" }, path: { type: "string" }, feature: { type: "string" } }, required: ["slug"] } },
   { name: "get_release_notes", description: "单条发布的人工发布稿（块级、含 override 后文案与证据路径；未生成返回空）", inputSchema: { type: "object", properties: { slug: { type: "string" }, releaseId: { type: "number" } }, required: ["slug", "releaseId"] } },
   { name: "get_digest", description: "最近一期周期行为摘要（滚动 7 天分桶：support/sales/marketing；无则返回空）", inputSchema: { type: "object", properties: { slug: { type: "string" } }, required: ["slug"] } },
-  { name: "send_feedback", description: "发现账本与代码不符时上报（只写反馈表，无其他写权限）：带三要素——哪个场景、哪份证据、代码实际行为，由人裁决", inputSchema: { type: "object", properties: { slug: { type: "string" }, kind: { type: "string", enum: ["bug", "question", "suggestion"] }, message: { type: "string" } }, required: ["slug", "kind", "message"] } },
+  { name: "send_feedback", description: "发现账本与代码不符时上报（只写反馈表，无其他写权限）：带三要素——哪个场景、哪份证据、代码实际行为，由 AI 裁决管线自动核实处置（确认缺陷即触发修复性重建，误报驳回），仅证据不足的进入人工队列", inputSchema: { type: "object", properties: { slug: { type: "string" }, kind: { type: "string", enum: ["bug", "question", "suggestion"] }, message: { type: "string" } }, required: ["slug", "kind", "message"] } },
 ];
 
 interface RpcRequest { jsonrpc: string; id?: string | number | null; method: string; params?: Record<string, unknown> }
@@ -368,17 +368,18 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
   if (name === "send_feedback") {
     // feedback_reports 与会话用户耦合（createFeedbackReport 需要 SessionUser），
     // API key 身份直写：reporter_user_id 置 NULL，消息进 error_message（该表无独立 message 列）。
+    // kind 为结构化列（073）：bug 类报告进入 AI 裁决管线自动核实处置。
     const kind = String(args.kind ?? "question");
     const message = String(args.message ?? "").slice(0, 5000);
     const insertResult = await insertResultOf(
       execute(
-        `INSERT INTO feedback_reports (organization_id, product_id, repository_full_name, revision, error_message)
-       SELECT ?, ?, COALESCE(CONCAT(r.provider, ':', r.owner, '/', r.name), 'unknown'),
+        `INSERT INTO feedback_reports (organization_id, product_id, kind, repository_full_name, revision, error_message)
+       SELECT ?, ?, ?, COALESCE(CONCAT(r.provider, ':', r.owner, '/', r.name), 'unknown'),
               COALESCE((SELECT ar.after_sha FROM analysis_runs ar WHERE ar.repository_id = r.id AND ar.status = 'succeeded' ORDER BY ar.id DESC LIMIT 1), ''), ?
        FROM products p
        LEFT JOIN repositories r ON r.product_id = p.id
        WHERE p.id = ? LIMIT 1`,
-        [runtime.identity.organizationId, product.id, `[mcp:${kind}] ${message}`, product.id],
+        [runtime.identity.organizationId, product.id, kind, `[mcp:${kind}] ${message}`, product.id],
       ),
     );
     return { feedbackId: Number(insertResult.insertId) };
