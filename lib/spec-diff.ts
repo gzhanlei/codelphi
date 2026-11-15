@@ -263,6 +263,94 @@ function isScenarioShape(value: unknown): value is SpecScenario {
     && typeof (value as SpecScenario).outcome === "string";
 }
 
+/**
+ * BM-11 功能级变体判定（确定性、零模型调用）：同一组件/行为被 LLM 换字命名析成两个功能
+ * （「无壳页面语言切换」↔「无外壳页面语言切换」，f7b2d60/38d3c7e 两 run 各立；release 220
+ * 同一面板单 run 内 ×4）的根治判定器。scenarioVariantSimilar 只折叠同功能内场景对，功能
+ * identity = specFeatureKey(name) 使任何一字之差都成为新功能——此判定器供两处接线：
+ * mergeChunkResults 跨 group 折叠（run 内）与 insertSpecVersion 装配折叠（跨 run）。
+ * 三重门禁全过才判同（宁漏勿错合，对齐 feature_aliases 的 C-lite 哲学）：
+ * 1. 名门禁：specTextEquivalent（无壳↔无外壳编辑距离 0.889 命中）或名称 contentJaccard
+ *    ≥ 0.5（管理端支付台账↔管理端支付订单台账 0.556 命中）；跨语种直接拒绝。
+ * 2. 身门禁：证据路径交集 ≥1 / 名字编辑距离等价 / summary contentJaccard ≥ 0.34 三选一
+ *    ——无壳/无外壳两功能证据不交（language-switcher.tsx vs 四个 page.tsx）且 summary
+ *    实测仅 0.339，靠名字等价通道命中；支付台账组靠共享证据文件命中。
+ * 3. 场景门禁：featureScenarioPairMatch 贪心配对（category+数字签名+outcome 否定计数
+ *    守护 + 合并文本 Jaccard ≥ 0.34，比 scenarioVariantSimilar 的逐字段地板宽——见该
+ *    函数注释），命中数 ≥ max(2, ⌈0.6×min(nA,nB)⌉)（min=1 时 ≥1）——防「泛化名巧合」
+ *    误合的关键护栏。
+ * 已知误拒（可接受）：功能名含否定字时一字之差会触发否定计数冲突（外壳↔无壳 0↔1），
+ * 名门禁与场景门禁同时过不了即不折——宁漏勿错合口径下留待人工/别名通道。
+ */
+const FEATURE_NAME_JACCARD_THRESHOLD = 0.5;
+/** 与场景字段地板 VARIANT_FIELD_JACCARD_THRESHOLD 同口径：summary 只是身份信号之一，取宽不取严。 */
+const FEATURE_SUMMARY_JACCARD_THRESHOLD = VARIANT_FIELD_JACCARD_FLOOR;
+const FEATURE_SCENARIO_MATCH_MIN = 2;
+const FEATURE_SCENARIO_MATCH_RATIO = 0.6;
+
+function featureEvidencePaths(feature: SpecFeature): Set<string> {
+  return new Set(feature.scenarios.flatMap((scenario) => scenario.evidence.map((item) => item.path)));
+}
+
+/**
+ * 功能级场景配对：scenarioVariantSimilar 的逐字段严守护在这里太紧——跨 run 重提取
+ * 对「同一行为」的结果字段常被大段改写（实测：「创建测试单并展示二维码/H5/支付宝
+ * 支付入口」↔「展示微信支付二维码、H5 收银台与支付宝跳转链接」被 outcome 字段地板
+ * 拒光，合并文本 0.55；空态对合并文本 0.348）。功能级判定已有名字+身份双重门禁在
+ * 前面、且要求较小一方**多数场景**配对成功，配对阈值取字段地板同口径 0.34——
+ * 即 scenarioVariantSimilar 的规则 1+5，跳过逐字段地板；真差异功能对靠「多数决 +
+ * 名字/身份门禁」三重护栏隔离。
+ */
+/** 导出给合并层/装配层的功能级场景配对（BM-11 折叠通道内的场景去重口径），判定规则见上。 */
+export function featureScenarioPairMatch(previous: SpecScenario, current: SpecScenario): boolean {
+  if (previous.category !== current.category) return false;
+  if (scenarioBehaviorEqual(previous, current) || scenarioVariantSimilar(previous, current)) return true;
+  const separator = hasCjk(`${previous.context}${previous.action}${previous.outcome}`) ? "" : " ";
+  const previousCombined = `${previous.context}${separator}${previous.action}${separator}${previous.outcome}`;
+  const currentCombined = `${current.context}${separator}${current.action}${separator}${current.outcome}`;
+  if (crossLanguageText(previousCombined, currentCombined)) return false;
+  if (digitSignature(specContent(previousCombined)) !== digitSignature(specContent(currentCombined))) return false;
+  // 否定守护只看 outcome：合并串上会误杀中文空态措辞的等价变体（「未退款」↔「可退款」、
+  // 「表格显示空态」↔「显示无任何订单提示」——无/未是空态句式的常用字，不是语义翻转）；
+  // 真正的语义翻转（可以重试↔不可以重试）发生在结果字段。
+  if (negationCountOf(previous.outcome) !== negationCountOf(current.outcome)) return false;
+  // 宽松合并通道只对中文开放：中文 2-gram 按字、实测等价变体 0.346-0.512（字段地板口径
+  // 0.34）；纯英文合并串是词 token、粒度粗，同情境同操作的英文对仅结果一词之差也能到
+  // 0.6（"Signs in → Dashboard" ↔ "Signs in → Onboarding" 实测），宽松通道会吞掉真差异
+  // ——英文只走 scenarioVariantSimilar 严通道（已在上面尝试过），宁漏勿错合。
+  if (!hasCjk(previousCombined)) return false;
+  return contentJaccard(previousCombined, currentCombined) >= VARIANT_FIELD_JACCARD_FLOOR;
+}
+
+export function featureVariantSimilar(previous: SpecFeature, current: SpecFeature): boolean {
+  if (crossLanguageText(previous.name, current.name)) return false;
+  // 名门禁：specTextEquivalent 之外再开 Jaccard 通道——编辑距离对两字插入恰好过线
+  // （管理端支付台账↔管理端支付订单台账 0.778 < 0.85），2-gram（0.556）补位。
+  const nameEquivalent = specTextEquivalent(previous.name, current.name);
+  const nameGate = nameEquivalent || contentJaccard(previous.name, current.name) >= FEATURE_NAME_JACCARD_THRESHOLD;
+  if (!nameGate) return false;
+  // 身门禁：证据路径交集、summary 近似、名字编辑距离等价（短串 0.85 阈值很紧，本身就是
+  // 强改名信号——无壳↔无外壳 0.889 命中且其 summary 实测仅 0.339、证据不交）三选一。
+  const sharedPaths = [...featureEvidencePaths(previous)].filter((path) => featureEvidencePaths(current).has(path));
+  const identityGate = sharedPaths.length >= 1
+    || nameEquivalent
+    || (previous.summary !== "" && current.summary !== "" && contentJaccard(previous.summary, current.summary) >= FEATURE_SUMMARY_JACCARD_THRESHOLD);
+  if (!identityGate) return false;
+  // 场景门禁：贪心配对，两个特征里较小一方的多数场景能配上才算同行为；
+  // 单场景功能要求 1:1 命中，零场景功能直接拒绝（没有行为就没有身份可比）。
+  const smaller = previous.scenarios.length <= current.scenarios.length ? previous : current;
+  const larger = smaller === previous ? current : previous;
+  if (smaller.scenarios.length === 0) return false;
+  let matched = 0;
+  for (const candidate of smaller.scenarios) {
+    if (larger.scenarios.some((other) => featureScenarioPairMatch(candidate, other))) matched += 1;
+  }
+  const required = smaller.scenarios.length === 1
+    ? 1
+    : Math.max(FEATURE_SCENARIO_MATCH_MIN, Math.ceil(FEATURE_SCENARIO_MATCH_RATIO * smaller.scenarios.length));
+  return matched >= required;
+}
+
 function isFeatureShape(value: unknown): value is SpecFeature {
   return typeof value === "object" && value !== null
     && typeof (value as SpecFeature).name === "string"

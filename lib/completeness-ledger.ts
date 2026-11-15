@@ -54,6 +54,8 @@ export interface MergeIntegrityDimension {
   state: LedgerState;
   changesTruncated: number;
   scenariosDeduped: number;
+  /** BM-11 功能级变体折叠：跨分区/跨 run 的异名同行为功能被收口的数量（护栏拦截 ≠ 没发生）。 */
+  featuresFolded: number;
   /** BM-4 身份门禁：增量模式下 AI 覆盖 carried 键（同名键身份劫持）被丢弃的特征数。 */
   identityHijacksDropped: number;
   /** BM-7 单功能坍缩护栏：受影响功能被窗口内容顶掉（场景骤降/删除达阈值）的功能数。 */
@@ -155,10 +157,11 @@ export function deriveEvidenceIntegrity(summaries: EvidenceSanitizeSummary[]): E
   return { state, droppedClaims, droppedScenarios, droppedFeatures, allCandidatesRejectedPasses };
 }
 
-export function deriveMergeIntegrity(input: { changesTruncated: number; scenariosDeduped: number; identityHijacksDropped: number; featureCollapses: number; misplacedScenarios: number; outcomeConflicts: number; collapse: boolean }): MergeIntegrityDimension {
+export function deriveMergeIntegrity(input: { changesTruncated: number; scenariosDeduped: number; featuresFolded: number; identityHijacksDropped: number; featureCollapses: number; misplacedScenarios: number; outcomeConflicts: number; collapse: boolean }): MergeIntegrityDimension {
   let state: LedgerState = "complete";
-  // BM-4/BM-7/BM-6：身份劫持被门禁拦下、单功能坍缩被护栏发现、跨域放置被检出 ≠ 没发生——如实 partial
-  if (input.changesTruncated > 0 || input.outcomeConflicts > 0 || input.collapse || input.identityHijacksDropped > 0 || input.featureCollapses > 0 || input.misplacedScenarios > 0) state = "partial";
+  // BM-4/BM-7/BM-6/BM-11：身份劫持被门禁拦下、单功能坍缩被护栏发现、跨域放置被检出、
+  // 功能级变体被折叠 ≠ 没发生——如实 partial
+  if (input.changesTruncated > 0 || input.outcomeConflicts > 0 || input.collapse || input.identityHijacksDropped > 0 || input.featureCollapses > 0 || input.misplacedScenarios > 0 || input.featuresFolded > 0) state = "partial";
   return { state, ...input };
 }
 

@@ -134,3 +134,34 @@ describe("mergeChunkResults", () => {
     }
   });
 });
+
+describe("mergeChunkResults cross-group variant folding (BM-11)", () => {
+  it("folds differently-named features of the same component into the first-seen keeper (release 220 ×4 pattern)", () => {
+    const merged = mergeChunkResults([
+      chunk([{ name: "管理端支付台账", summary: "超管支付操作面板", scenarios: [scenario("HP-1", "创建测试单并展示扫码支付入口"), scenario("HP-2", "表格显示空态文案", "edge")] }]),
+      chunk([{ name: "管理端支付订单台账", summary: "超管支付页的联调测试单与订单台账面板", scenarios: [scenario("HP-1", "创建测试单并展示扫码收银台与跳转链接"), scenario("HP-2", "显示空订单提示行", "edge")] }]),
+      chunk([{ name: "管理端支付台账面板", summary: "超管后台支付面板", scenarios: [scenario("HP-1", "创建测试单并展示支付入口"), scenario("HP-2", "空订单提示行渲染", "edge")] }]),
+    ]);
+    expect(merged.features).toHaveLength(1);
+    expect(merged.features[0].name).toBe("管理端支付台账");
+    // 变体场景并入 keeper 时按行为去重，同行为不再重复建条
+    expect(merged.features[0].scenarios).toHaveLength(2);
+  });
+
+  it("keeps genuinely different features that only share generic name words", () => {
+    const merged = mergeChunkResults([
+      chunk([{ name: "管理端支付台账", summary: "超管支付操作面板", scenarios: [scenario("HP-1", "创建测试单并展示支付入口")] }]),
+      chunk([{ name: "管理端退款流水", summary: "超管退款流水视图", scenarios: [scenario("HP-1", "按订单维度展示退款请求与退款态")] }]),
+    ]);
+    expect(merged.features).toHaveLength(2);
+  });
+
+  it("reports featuresFolded in stats (BM-11 mergeIntegrity)", () => {
+    const onStats = vi.fn();
+    mergeChunkResults([
+      chunk([{ name: "无壳页面语言切换", summary: "s", scenarios: [scenario("HP-1", "登录页按新语言整页刷新")] }]),
+      chunk([{ name: "无外壳页面语言切换", summary: "s", scenarios: [scenario("HP-1", "登录页按新语言整页刷新")] }]),
+    ], onStats);
+    expect(onStats).toHaveBeenCalledWith(expect.objectContaining({ featuresFolded: 1 }));
+  });
+});
