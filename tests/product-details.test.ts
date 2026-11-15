@@ -47,12 +47,14 @@ describe("product details", () => {
       if (sql.includes("AS changeId")) return [[]];
       if (sql.includes("COALESCE(ss.reference")) return [[]];
       if (sql.includes("FROM changes")) return [[{ id: 9, releaseId: 6, featureName: "Login", kind: "modified", description: "Changed", userImpact: "Impact", evidence: [] }]];
+      if (sql.includes("FROM release_reviewed_items")) return [[{ id: 10, releaseId: 6, featureName: "Login", description: "Reviewed internals", evidence: [] }]];
       if (sql.includes("AS baseVersionId")) return [[{ versionId: 3, baseVersionId: 2 }]];
       if (sql.includes("FROM spec_features WHERE spec_version_id IN")) return [[{ id: 5, versionId: 3, name: "Login", summary: "OAuth", parentKey: null, source: "generated" }]];
       if (sql.includes("FROM spec_scenarios ss JOIN")) return [[{ versionId: 3, featureId: 5, reference: "happy", context: "c", action: "a", outcome: "o", category: "happy", source: "generated", evidence: [] }]];
       if (sql.includes("FROM release_files WHERE behavioral_change")) return [[{ release_id: 6, path: "lib/analysis.ts" }]];
       if (sql.includes("FROM analysis_coverage_receipts")) return [[{ specVersionId: 3, implFilesAssembled: 1, implFilesTotal: 2, implBytesAssembled: 1000, implBytesTotal: 4000, coverageRatio: 0.25, partitionsUsed: 1, partitionsCapped: 0 }]];
       if (sql.includes("analysis_completeness_ledger")) return [[{ runId: 9, sourceCoverage: "partial", behavioralEnumeration: "complete", extractionCompletion: "complete", evidenceIntegrity: "complete", mergeIntegrity: "partial", verification: "not_applicable", overall: "partial", details: { sourceCoverage: { state: "partial" }, behavioralEnumeration: { state: "complete" }, extractionCompletion: { state: "complete" }, evidenceIntegrity: { state: "complete" }, mergeIntegrity: { state: "partial" }, verification: { state: "not_applicable" }, overall: "partial" } }]];
+      if (sql.includes("FROM release_reviewed_items")) return [[]];
       if (!sql) return [[]];
       if (sql.includes("FROM release_notes WHERE product_id")) return [[{ id: 1, releaseId: 10, status: "published", headline: null }]];
       throw new Error(`Unexpected query: ${sql}`);
@@ -64,6 +66,7 @@ describe("product details", () => {
     expect(details?.featureFlows.get("Login")).toEqual(featureGraph);
     expect(loadFeatureFlowGraphs).toHaveBeenCalledWith(expect.anything(), 3, [expect.objectContaining({ name: "Login" })]);
     expect(details?.changes).toHaveLength(1);
+    expect(details?.reviewedChanges).toEqual([{ id: 10, releaseId: 6, featureName: "Login", kind: "reviewed", description: "Reviewed internals", userImpact: "", evidence: [] }]);
     expect(details?.behaviorChanges[0]).toMatchObject({ before: { old: true }, after: { new: true } });
     expect(details?.foldedChanges).toEqual([]);
     expect(details).not.toHaveProperty("architecture");
@@ -98,6 +101,7 @@ describe("product details", () => {
       if (sql.includes("FROM release_files WHERE behavioral_change")) return [[]];
       if (sql.includes("FROM analysis_coverage_receipts")) return [[{ specVersionId: 3, implFilesAssembled: 1, implFilesTotal: 2, implBytesAssembled: 1000, implBytesTotal: 4000, coverageRatio: 0.25, partitionsUsed: 1, partitionsCapped: 0 }]];
       if (sql.includes("analysis_completeness_ledger")) return [[{ runId: 9, sourceCoverage: "partial", behavioralEnumeration: "complete", extractionCompletion: "complete", evidenceIntegrity: "complete", mergeIntegrity: "partial", verification: "not_applicable", overall: "partial", details: { sourceCoverage: { state: "partial" }, behavioralEnumeration: { state: "complete" }, extractionCompletion: { state: "complete" }, evidenceIntegrity: { state: "complete" }, mergeIntegrity: { state: "partial" }, verification: { state: "not_applicable" }, overall: "partial" } }]];
+      if (sql.includes("FROM release_reviewed_items")) return [[]];
       if (!sql) return [[]];
       if (sql.includes("FROM release_notes WHERE product_id")) return [[{ id: 1, releaseId: 10, status: "published", headline: null }]];
       throw new Error(`Unexpected query: ${sql}`);
@@ -128,6 +132,7 @@ describe("product details", () => {
       if (sql.includes("FROM release_files WHERE behavioral_change")) return [[{ release_id: 6, path: "lib/analysis.ts" }]];
       if (sql.includes("FROM analysis_coverage_receipts")) return [[{ specVersionId: 3, implFilesAssembled: 1, implFilesTotal: 2, implBytesAssembled: 1000, implBytesTotal: 4000, coverageRatio: 0.25, partitionsUsed: 1, partitionsCapped: 0 }]];
       if (sql.includes("analysis_completeness_ledger")) return [[{ runId: 9, sourceCoverage: "partial", behavioralEnumeration: "complete", extractionCompletion: "complete", evidenceIntegrity: "complete", mergeIntegrity: "partial", verification: "not_applicable", overall: "partial", details: { sourceCoverage: { state: "partial" }, behavioralEnumeration: { state: "complete" }, extractionCompletion: { state: "complete" }, evidenceIntegrity: { state: "complete" }, mergeIntegrity: { state: "partial" }, verification: { state: "not_applicable" }, overall: "partial" } }]];
+      if (sql.includes("FROM release_reviewed_items")) return [[]];
       if (!sql) return [[]];
       if (sql.includes("FROM release_notes WHERE product_id")) return [[{ id: 1, releaseId: 10, status: "published", headline: null }]];
       throw new Error(`Unexpected query: ${sql}`);

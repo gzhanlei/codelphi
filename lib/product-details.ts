@@ -51,6 +51,11 @@ async function loadChanges(releases: ReleaseRow[]) {
   return queryByIds<ChangeRow>(releases.map((release) => release.id), "SELECT id, release_id AS releaseId, feature_name AS featureName, kind, description, user_impact AS userImpact, evidence FROM changes WHERE release_id IN ({{placeholders}}) ORDER BY id");
 }
 
+async function loadReviewedChanges(releases: ReleaseRow[]): Promise<ChangeRow[]> {
+  const rows = await queryByIds<Omit<ChangeRow, "kind" | "userImpact">>(releases.map((release) => release.id), "SELECT id, release_id AS releaseId, feature_name AS featureName, description, evidence FROM release_reviewed_items WHERE release_id IN ({{placeholders}}) ORDER BY id");
+  return rows.map((row) => ({ ...row, kind: "reviewed", userImpact: "" }));
+}
+
 async function loadBehaviorChanges(releases: ReleaseRow[]) {
   if (releases.length === 0) return [];
   const ids = releases.map((release) => release.id);
@@ -174,7 +179,7 @@ export async function getProductDetails(slug: string, organizationId?: number) {
   const features = featureRows as FeatureRow[];
   const releases = releaseRows[0] as ReleaseRow[];
   const releaseTotal = Number((countRows[0] as Array<{ total: number }>)[0]?.total ?? 0);
-  const [scenarios, changes, behaviorChanges, regressionTasks, foldedChanges] = await Promise.all([loadScenarios(features), loadChanges(releases), loadBehaviorChanges(releases), loadRegressionTasks(product.id), loadFoldedChanges(releases)]);
+  const [scenarios, changes, reviewedChanges, behaviorChanges, regressionTasks, foldedChanges] = await Promise.all([loadScenarios(features), loadChanges(releases), loadReviewedChanges(releases), loadBehaviorChanges(releases), loadRegressionTasks(product.id), loadFoldedChanges(releases)]);
   // B1 覆盖披露：最新发布对应的覆盖率回执（migration 054 之前的历史版本无回执，为 null）。
   // BM-10 沿用版本不落自有回执 → 沿版本链向上取最近有效回执（沿用版本的覆盖面 = 被沿用版本的
   // 覆盖面）；合成零回执（implFilesTotal = 0）同样视为无、跳过。
@@ -240,6 +245,7 @@ export async function getProductDetails(slug: string, organizationId?: number) {
     releases,
     releaseTotal,
     changes: changes.map((change) => ({ ...change, evidence: decorateEvidence(change.evidence, source) })),
+    reviewedChanges: reviewedChanges.map((change) => ({ ...change, evidence: decorateEvidence(change.evidence, source) })),
     behaviorChanges: annotateSuspectedRenames(behaviorChanges.map((change) => ({ ...change, before: decorateSubject(change.before, source), after: decorateSubject(change.after, source) }))),
     regressionTasks,
     foldedChanges: foldedChanges.map((change) => ({ ...change, before: decorateSubject(change.before, source), after: decorateSubject(change.after, source) })),
@@ -276,7 +282,7 @@ export async function loadReleasePage(slug: string, organizationId: number | und
   ]);
   const releases = releaseRows[0] as ReleaseRow[];
   const total = Number((countRows[0] as Array<{ total: number }>)[0]?.total ?? 0);
-  const [changes, behaviorChanges, foldedChanges] = await Promise.all([loadChanges(releases), loadBehaviorChanges(releases), loadFoldedChanges(releases)]);
+  const [changes, reviewedChanges, behaviorChanges, foldedChanges] = await Promise.all([loadChanges(releases), loadReviewedChanges(releases), loadBehaviorChanges(releases), loadFoldedChanges(releases)]);
 
   const repository = (repositories as Array<{ owner: string; name: string }>)[0];
   const afterSha = (runs as Array<{ afterSha?: string | null }>)[0]?.afterSha;
@@ -286,6 +292,7 @@ export async function loadReleasePage(slug: string, organizationId: number | und
     total,
     releases,
     changes: changes.map((change) => ({ ...change, evidence: decorateEvidence(change.evidence, source) })),
+    reviewedChanges: reviewedChanges.map((change) => ({ ...change, evidence: decorateEvidence(change.evidence, source) })),
     behaviorChanges: annotateSuspectedRenames(behaviorChanges.map((change) => ({ ...change, before: decorateSubject(change.before, source), after: decorateSubject(change.after, source) }))),
     foldedChanges: foldedChanges.map((change) => ({ ...change, before: decorateSubject(change.before, source), after: decorateSubject(change.after, source) })),
   };

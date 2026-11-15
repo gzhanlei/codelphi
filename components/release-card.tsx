@@ -168,11 +168,12 @@ function AiChangeList({ changes, locale = "zh-CN" }: { changes: ChangeRow[]; loc
   return <div className="ai-change-section"><h3>{pick(locale, RELEASE_CARD.aiChangeHeading)}</h3>{changes.map((change) => <ChangeItem change={change} key={change.id} />)}</div>;
 }
 
-export function ReleaseCard({ slug, release, changes, behaviorChanges, foldedChanges = [], tasks = [], canEdit = false, changelogHref, defaultOpen = false, locale = "zh-CN" }: {
+export function ReleaseCard({ slug, release, changes, reviewedChanges = [], behaviorChanges, foldedChanges = [], tasks = [], canEdit = false, changelogHref, defaultOpen = false, locale = "zh-CN" }: {
   changelogHref?: string;
   slug: string;
   release: ReleaseRow;
   changes: ChangeRow[];
+  reviewedChanges?: ChangeRow[];
   behaviorChanges: BehaviorChangeRow[];
   foldedChanges?: FoldedBehaviorChangeRow[];
   tasks?: RegressionTaskView[];
@@ -181,6 +182,7 @@ export function ReleaseCard({ slug, release, changes, behaviorChanges, foldedCha
   locale?: UiLocale;
 }) {
   const releaseChanges = changes.filter((change) => change.releaseId === release.id);
+  const releaseReviewedChanges = reviewedChanges.filter((change) => change.releaseId === release.id);
   // 深链定位（总览 CTA「去校对并发布」）：命中 #release-{id} 时自动展开并滚动到卡片
   const [openByHash, setOpenByHash] = useState(false);
   const sectionRef = useRef<HTMLElement | null>(null);
@@ -193,7 +195,7 @@ export function ReleaseCard({ slug, release, changes, behaviorChanges, foldedCha
   const releaseBehaviorChanges = behaviorChanges.filter((change) => change.releaseId === release.id);
   const releaseFolded = foldedChanges.filter((change) => change.releaseId === release.id);
   const releaseTasks = tasks.filter((task) => task.releaseId === release.id);
-  const hasDetails = releaseBehaviorChanges.length > 0 || releaseChanges.length > 0;
+  const hasDetails = releaseBehaviorChanges.length > 0 || releaseChanges.length > 0 || releaseReviewedChanges.length > 0;
   return (
     <section className="release-card" id={`release-${release.id}`} ref={sectionRef}>
       <div className="release-header">
@@ -204,11 +206,11 @@ export function ReleaseCard({ slug, release, changes, behaviorChanges, foldedCha
       {hasDetails ? (
         <details className="release-details" open={defaultOpen || openByHash}>
           <summary>
-            <span>{pick(locale, RELEASE_CARD.detailsSummary).replace("{behavior}", String(releaseBehaviorChanges.length)).replace("{notes}", String(releaseChanges.length))}</span>
+            <span>{pick(locale, RELEASE_CARD.detailsSummary).replace("{behavior}", String(releaseBehaviorChanges.length)).replace("{notes}", String(releaseChanges.length + releaseReviewedChanges.length))}</span>
             <span className="release-details-toggle">{defaultOpen ? pick(locale, RELEASE_CARD.collapse) : pick(locale, RELEASE_CARD.expand)}</span>
           </summary>
           <BehaviorList slug={slug} release={release} changes={releaseBehaviorChanges} tasks={releaseTasks} canEdit={canEdit} locale={locale} />
-          <AiChangeList changes={releaseChanges} locale={locale} />
+          <AiChangeList changes={[...releaseChanges, ...releaseReviewedChanges]} locale={locale} />
           <ReleaseNotesPanel slug={slug} releaseId={release.id} canEdit={canEdit} changelogHref={changelogHref} locale={locale} />
         </details>
       ) : (

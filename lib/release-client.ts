@@ -8,6 +8,7 @@ export interface ReleasePagePayload {
   releases: ReleaseRow[];
   changes: ChangeRow[];
   behaviorChanges: BehaviorChangeRow[];
+  reviewedChanges: ChangeRow[];
   foldedChanges: FoldedBehaviorChangeRow[];
 }
 

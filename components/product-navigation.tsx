@@ -65,6 +65,7 @@ interface ProductViewProps {
   scenarios: ScenarioRow[];
   releases: ReleaseRow[];
   changes: ChangeRow[];
+  reviewedChanges?: ChangeRow[];
   behaviorChanges: BehaviorChangeRow[];
   foldedChanges?: FoldedBehaviorChangeRow[];
   regressionTasks?: RegressionTaskView[];
@@ -85,11 +86,11 @@ interface ProductViewProps {
   locale?: UiLocale;
 }
 
-function ProductWorkspace({ view, productSlug, productBase, features, scenarios, releases, changes, behaviorChanges, foldedChanges, regressionTasks, releaseTotal, coverage, completeness, featureFlows, featureFlowErrors, mode = "spec", featureId, canEdit, changelogHref, locale = "zh-CN" }: Omit<ProductViewProps, "overview">) {
+function ProductWorkspace({ view, productSlug, productBase, features, scenarios, releases, changes, reviewedChanges, behaviorChanges, foldedChanges, regressionTasks, releaseTotal, coverage, completeness, featureFlows, featureFlowErrors, mode = "spec", featureId, canEdit, changelogHref, locale = "zh-CN" }: Omit<ProductViewProps, "overview">) {
   const selectedFeature = selectFeature(features, featureId);
   return view === "spec"
     ? <SpecWorkspace slug={productSlug} productBase={productBase} tree={buildFeatureTree(features)} feature={selectedFeature} scenarios={scenarios} mode={mode} coverage={coverage} completeness={completeness} featureFlows={featureFlows} featureFlowErrors={featureFlowErrors} locale={locale} />
-    : <ProductChanges slug={productSlug} releases={releases} changes={changes} behaviorChanges={behaviorChanges} foldedChanges={foldedChanges} regressionTasks={regressionTasks} releaseTotal={releaseTotal} canEdit={canEdit} changelogHref={changelogHref} locale={locale} />;
+    : <ProductChanges slug={productSlug} releases={releases} changes={changes} reviewedChanges={reviewedChanges} behaviorChanges={behaviorChanges} foldedChanges={foldedChanges} regressionTasks={regressionTasks} releaseTotal={releaseTotal} canEdit={canEdit} changelogHref={changelogHref} locale={locale} />;
 }
 
 export function ProductView(props: ProductViewProps) {

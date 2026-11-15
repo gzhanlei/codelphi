@@ -12,6 +12,7 @@ const payload = {
   releases: [{ id: 3, title: "t", summary: "s", sha: "abc1234def5678", url: "u", committedAt: "2026-11-07T00:00:00.000Z", specVersionId: 9 }],
   changes: [],
   behaviorChanges: [],
+  reviewedChanges: [{ id: 12, releaseId: 3, featureName: "AI", kind: "reviewed", description: "内部实现已检查", userImpact: "", evidence: [] }],
 };
 
 describe("load more releases", () => {

@@ -9,11 +9,12 @@ import { pick, type UiLocale } from "@/lib/ui-locale";
 import { PRODUCT_CHANGES as L } from "@/lib/ui-strings/product";
 import type { BehaviorChangeRow, ChangeRow, FoldedBehaviorChangeRow, ReleaseRow } from "@/lib/types";
 
-export function ProductChanges({ slug, releases: initialReleases, changes: initialChanges, behaviorChanges: initialBehaviorChanges, foldedChanges: initialFoldedChanges = [], regressionTasks = [], releaseTotal = 0, canEdit = false, changelogHref, locale = "zh-CN" }: {
+export function ProductChanges({ slug, releases: initialReleases, changes: initialChanges, reviewedChanges: initialReviewedChanges = [], behaviorChanges: initialBehaviorChanges, foldedChanges: initialFoldedChanges = [], regressionTasks = [], releaseTotal = 0, canEdit = false, changelogHref, locale = "zh-CN" }: {
   changelogHref?: string;
   slug: string;
   releases: ReleaseRow[];
   changes: ChangeRow[];
+  reviewedChanges?: ChangeRow[];
   behaviorChanges: BehaviorChangeRow[];
   foldedChanges?: FoldedBehaviorChangeRow[];
   regressionTasks?: RegressionTaskView[];
@@ -23,6 +24,7 @@ export function ProductChanges({ slug, releases: initialReleases, changes: initi
 }) {
   const [releases, setReleases] = useState(initialReleases);
   const [changes, setChanges] = useState(initialChanges);
+  const [reviewedChanges, setReviewedChanges] = useState(initialReviewedChanges);
   const [behaviorChanges, setBehaviorChanges] = useState(initialBehaviorChanges);
   const [foldedChanges, setFoldedChanges] = useState(initialFoldedChanges);
   const [loading, setLoading] = useState(false);
@@ -37,6 +39,7 @@ export function ProductChanges({ slug, releases: initialReleases, changes: initi
       const page = await loadMoreReleases(slug, releases.length);
       setReleases((current) => [...current, ...page.releases]);
       setChanges((current) => [...current, ...page.changes]);
+      setReviewedChanges((current) => [...current, ...page.reviewedChanges]);
       setBehaviorChanges((current) => [...current, ...page.behaviorChanges]);
       setFoldedChanges((current) => [...current, ...page.foldedChanges]);
     } catch (cause: unknown) {
@@ -55,7 +58,7 @@ export function ProductChanges({ slug, releases: initialReleases, changes: initi
       <div className="release-list-head">
         <a className="overview-text-link" href={`/api/products/${slug}/progress-summary?days=30`}>{pick(locale, L.exportIndex)}</a>
       </div>
-      {releases.map((release) => <ReleaseCard slug={slug} release={release} changes={changes} behaviorChanges={behaviorChanges} foldedChanges={foldedChanges} tasks={regressionTasks} canEdit={canEdit} changelogHref={changelogHref} locale={locale} key={release.id} />)}
+      {releases.map((release) => <ReleaseCard slug={slug} release={release} changes={changes} reviewedChanges={reviewedChanges} behaviorChanges={behaviorChanges} foldedChanges={foldedChanges} tasks={regressionTasks} canEdit={canEdit} changelogHref={changelogHref} locale={locale} key={release.id} />)}
       {hasMore ? (
         <div className="release-load-more">
           <button className="secondary-button" type="button" onClick={() => void loadMore()} disabled={loading}>

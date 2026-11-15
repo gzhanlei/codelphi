@@ -17,12 +17,13 @@ const behaviorChanges: BehaviorChangeRow[] = [
 ];
 const aiChanges: ChangeRow[] = [{ id: 201, releaseId: 7, featureName: "统一登录", kind: "changed", description: "登录跳转逻辑调整", userImpact: "", evidence: [] }];
 
-function renderCard(overrides: { defaultOpen?: boolean; behaviorChanges?: BehaviorChangeRow[]; aiChanges?: ChangeRow[]; tasks?: RegressionTaskView[] } = {}) {
+function renderCard(overrides: { defaultOpen?: boolean; behaviorChanges?: BehaviorChangeRow[]; aiChanges?: ChangeRow[]; reviewedChanges?: ChangeRow[]; tasks?: RegressionTaskView[] } = {}) {
   return renderToStaticMarkup(createElement(ReleaseCard, {
     slug: "codelphi",
     release,
     changes: overrides.aiChanges ?? aiChanges,
     behaviorChanges: overrides.behaviorChanges ?? behaviorChanges,
+    reviewedChanges: overrides.reviewedChanges,
     tasks: overrides.tasks ?? tasks,
     canEdit: false,
     defaultOpen: overrides.defaultOpen,
@@ -45,6 +46,16 @@ describe("release card collapse", () => {
     expect(html).toContain(' open');
     expect(html).toContain("行为变化 2 条");
     expect(html).toContain("变更说明 1 条");
+  });
+
+  it("renders reviewed audit items alongside the canonical projection", () => {
+    const html = renderCard({
+      defaultOpen: true,
+      reviewedChanges: [{ id: 301, releaseId: 7, featureName: "统一登录", kind: "reviewed", description: "内部实现已检查", userImpact: "", evidence: [] }],
+    });
+    expect(html).toContain("变更说明 2 条");
+    expect(html).toContain("已检查");
+    expect(html).toContain("内部实现已检查");
   });
 
   it("renders older releases collapsed", () => {
