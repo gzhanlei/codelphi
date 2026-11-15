@@ -27,7 +27,7 @@ describe("mcp server (A1)", () => {
   it("lists the read-only tool surface with JSON schemas", async () => {
     const response = await handleMcpRpc(runtime, rpc("tools/list"));
     const tools = (response?.result as { tools: Array<{ name: string }> }).tools;
-    expect(tools.map((tool) => tool.name)).toEqual(["list_projects", "get_project_summary", "get_feature", "get_scenario", "search_scenarios", "lookup_by_files", "list_releases", "get_release", "get_knowledge_health", "get_feature_connections", "get_release_notes", "get_digest", "send_feedback"]);
+    expect(tools.map((tool) => tool.name)).toEqual(["list_projects", "get_project_summary", "get_feature", "get_scenario", "search_scenarios", "lookup_by_files", "list_releases", "get_release", "reconcile_release", "get_knowledge_health", "get_feature_connections", "get_release_notes", "get_digest", "send_feedback"]);
   });
 
   it("returns no response for notifications (no id)", async () => {
@@ -271,6 +271,65 @@ describe("mcp server (A1)", () => {
     expect(sql).toContain("ar.repository_id = r.id");
     expect(sql).toContain("ORDER BY ar.id DESC LIMIT 1");
     expect(sql).not.toContain("LEFT JOIN (SELECT repository_id, after_sha FROM analysis_runs");
+  });
+
+  it("reconciles a release using direct scenario evidence and a name-level intent", async () => {
+    execute.mockImplementation(async (sql: string) => {
+      if (String(sql).includes("FROM products WHERE organization_id")) return [[{ id: 9, slug: "radar", name: "Radar", description: "d" }]];
+      if (String(sql).includes("FROM repositories")) return [[{ provider: "github", owner: "gzhanlei", name: "radar", defaultBranch: "main", sha: "abc123" }]];
+      if (String(sql).includes("FROM releases WHERE id = ?")) return [[{ id: 229, title: "v", summary: "s", sha: "abc123", url: "u", committedAt: new Date(), specVersionId: 230, analysis_run_id: 333 }]];
+      if (String(sql).includes("FROM analysis_runs WHERE id = ?")) return [[{ id: 333, status: "succeeded", error_message: null }]];
+      if (String(sql).includes("FROM release_files")) return [[{ path: "lib/a.ts" }]];
+      if (String(sql).includes("FROM spec_changes c JOIN releases")) return [[{ id: 1, kind: "added", entityType: "scenario", featureName: "功能", scenarioReference: "EC-1", summary: "s", highlightType: null, beforeJson: null, afterJson: { reference: "EC-1", evidence: [{ path: "lib/a.ts" }] } }]];
+      return [[]];
+    });
+
+    const response = await handleMcpRpc(runtime, rpc("tools/call", { name: "reconcile_release", arguments: { slug: "radar", releaseId: 229, expectedIntents: [{ stableKey: "功能" }] } }));
+    const result = (response?.result as { structuredContent: { verdict: string; intentResults: Array<{ status: string }>; unexpected: unknown[] } }).structuredContent;
+    expect(result.verdict).toBe("pass");
+    expect(result.intentResults[0].status).toBe("matched");
+    expect(result.unexpected).toEqual([]);
+    expect(JSON.stringify(result)).not.toContain("beforeJson");
+  });
+
+  it("paginates release changes with stable ids and compatible response fields", async () => {
+    execute.mockImplementation(async (sql: string) => {
+      if (String(sql).includes("FROM products WHERE organization_id")) return [[{ id: 9, slug: "radar", name: "Radar", description: "d" }]];
+      if (String(sql).includes("FROM repositories")) return [[{ provider: "github", owner: "gzhanlei", name: "radar", defaultBranch: "main", sha: "abc123" }]];
+      if (String(sql).includes("FROM releases WHERE id = ?")) return [[{ id: 229, title: "v", summary: "s", sha: "abc123", url: "u", committedAt: new Date() }]];
+      if (String(sql).includes("COUNT(*) AS total FROM spec_changes")) return [[{ total: 3 }]];
+      if (String(sql).includes("FROM spec_changes c JOIN releases")) {
+        return [[
+          { id: 1, kind: "added", entityType: "scenario", featureName: "功能", scenarioReference: "EC-1", summary: "s", highlightType: null, beforeJson: null, afterJson: null },
+          { id: 2, kind: "added", entityType: "scenario", featureName: "功能", scenarioReference: "EC-2", summary: "s", highlightType: null, beforeJson: null, afterJson: null },
+          { id: 3, kind: "added", entityType: "scenario", featureName: "功能", scenarioReference: "EC-3", summary: "s", highlightType: null, beforeJson: null, afterJson: null },
+        ]];
+      }
+      return [[]];
+    });
+
+    const response = await handleMcpRpc(runtime, rpc("tools/call", { name: "get_release", arguments: { slug: "radar", releaseId: 229, limit: 1, offset: 1 } }));
+    const result = (response?.result as { structuredContent: { changes: Array<{ id: number }>; offset: number; limit: number; total: number; hasMore: boolean } }).structuredContent;
+    expect(result.changes.map((change) => change.id)).toEqual([2]);
+    expect(result).toMatchObject({ offset: 1, limit: 1, total: 3, hasMore: true });
+  });
+
+  it("returns a bounded risk projection with uncovered paths", async () => {
+    execute.mockImplementation(async (sql: string) => {
+      if (String(sql).includes("FROM products WHERE organization_id")) return [[{ id: 9, slug: "radar", name: "Radar", description: "d" }]];
+      if (String(sql).includes("FROM repositories")) return [[{ provider: "github", owner: "gzhanlei", name: "radar", defaultBranch: "main", sha: "abc123" }]];
+      if (String(sql).includes("s.evidence LIKE ?")) {
+        return [[{ id: 1, featureId: 1, featureName: "统一登录", reference: "HP-1", context: "c", action: "a", outcome: "o", source: "manual", evidence: [{ path: "lib/auth.ts", startLine: 10 }] }]];
+      }
+      return [[]];
+    });
+
+    const response = await handleMcpRpc(runtime, rpc("tools/call", { name: "lookup_by_files", arguments: { slug: "radar", paths: ["lib/auth.ts", "lib/missing.ts"], view: "risk" } }));
+    const result = (response?.result as { structuredContent: { snapshotSha: string; coveredPaths: string[]; uncoveredPaths: string[]; risks: Array<{ severity: string }> } }).structuredContent;
+    expect(result.snapshotSha).toBe("abc123");
+    expect(result.coveredPaths).toEqual(["lib/auth.ts"]);
+    expect(result.uncoveredPaths).toEqual(["lib/missing.ts"]);
+    expect(result.risks[0].severity).toBe("high");
   });
 
   it("never exposes write tools", () => {

@@ -44,7 +44,7 @@ export interface FileImpactFeature {
   featureName: string;
   stableKey: string;
   scenarioCount: number;
-  scenarios: Array<{ reference: string; context: string; action: string; outcome: string; source: string; evidence: unknown }>;
+  scenarios: Array<{ id: number; reference: string; context: string; action: string; outcome: string; source: string; evidence: unknown }>;
 }
 
 export interface FileImpactEntry {
@@ -192,7 +192,7 @@ export function buildFileImpact(rows: ScenarioEvidenceRow[], paths: string[]): F
         scenarios: [],
       };
       if (feature.scenarios.length < FILE_IMPACT_SCENARIO_CAP) {
-        feature.scenarios.push({ reference: row.reference, context: row.context ?? "", action: row.action ?? "", outcome: row.outcome ?? "", source: row.source ?? "", evidence: row.evidence });
+        feature.scenarios.push({ id: row.id, reference: row.reference, context: row.context ?? "", action: row.action ?? "", outcome: row.outcome ?? "", source: row.source ?? "", evidence: row.evidence });
       }
       feature.scenarioCount += 1;
       perFeature.set(row.featureId, feature);

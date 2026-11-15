@@ -5,6 +5,8 @@ import { loadRegressionTasks } from "../regression-tasks";
 import { loadCoverageReceipt } from "../analysis-coverage";
 import { loadCompletenessLedgerBySpecVersion } from "../completeness-ledger";
 import { defaultExecute, type Execute } from "../db";
+import { reconcileRelease, evidencePathsFromSubject as evidencePathsForReconcile } from "./reconcile";
+import { canonicalizeScenarios, paginateById, projectFileRisks } from "./projections";
 
 /**
  * 稳定键解析内联版（与 lib/stable-links.ts 同语义）。2026-11-10 生产事故：各 route bundle
@@ -91,7 +93,8 @@ export const MCP_TOOLS: McpToolDef[] = [
   { name: "search_scenarios", description: "按关键词检索规格原文（命中条目 = 已过证据校验的原文，未覆盖时明确返回空）。理解既有行为优先用它，不要只靠读代码猜", inputSchema: { type: "object", properties: { slug: { type: "string" }, query: { type: "string" } }, required: ["slug", "query"] } },
   { name: "lookup_by_files", description: "做计划或改文件前必查：按文件路径反查以该文件为证据的功能与场景（爆炸半径；paths 最多 20 个，每功能场景截前 10 条并附真实总数；账本未覆盖的文件返回空）", inputSchema: { type: "object", properties: { slug: { type: "string" }, paths: { type: "array", items: { type: "string" } } }, required: ["slug", "paths"] } },
   { name: "list_releases", description: "列产品的发布（per-push 一条，docs-only 也有零变化条目；时间倒序，默认 10 条）。push 后用本次 sha 找对应发布", inputSchema: { type: "object", properties: { slug: { type: "string" }, limit: { type: "number" } }, required: ["slug"] } },
-  { name: "get_release", description: "单条发布的行为变化清单（含前后差异摘要与证据链接）。push 后对账：与本次提交意图核对，计划外变化要回查报告", inputSchema: { type: "object", properties: { slug: { type: "string" }, releaseId: { type: "number" } }, required: ["slug", "releaseId"] } },
+  { name: "get_release", description: "单条发布的行为变化清单（含前后差异摘要与证据链接）。push 后对账：与本次提交意图核对，计划外变化要回查报告", inputSchema: { type: "object", properties: { slug: { type: "string" }, releaseId: { type: "number" }, view: { type: "string", enum: ["raw", "canonical"] }, offset: { type: "number" }, limit: { type: "number" } }, required: ["slug", "releaseId"] } },
+  { name: "reconcile_release", description: "按 stableKey（名称级）与 evidence paths 对账发布意图，返回 missing/unexpected/重复信号与 verdict，不返回完整 before/after", inputSchema: { type: "object", properties: { slug: { type: "string" }, releaseId: { type: "number" }, expectedIntents: { type: "array", items: { type: "object", properties: { stableKey: { type: "string" }, paths: { type: "array", items: { type: "string" } }, note: { type: "string" } } } } }, required: ["slug", "releaseId"] } },
   { name: "get_knowledge_health", description: "知识健康事实统计（漂移清单/核实覆盖/回归四态/维护分布；无综合分、无 Bus Factor）", inputSchema: { type: "object", properties: { slug: { type: "string" } }, required: ["slug"] } },
   { name: "get_feature_connections", description: "功能间的确定性连接（共享证据文件面；每条带依据文件清单，无 LLM 推断）。可选 path=只看以该文件为证据的功能邻域；可选 feature=稳定键，只返回该功能的连接", inputSchema: { type: "object", properties: { slug: { type: "string" }, path: { type: "string" }, feature: { type: "string" } }, required: ["slug"] } },
   { name: "get_release_notes", description: "单条发布的人工发布稿（块级、含 override 后文案与证据路径；未生成返回空）", inputSchema: { type: "object", properties: { slug: { type: "string" }, releaseId: { type: "number" } }, required: ["slug", "releaseId"] } },
@@ -200,6 +203,8 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
   }
 
   if (name === "get_feature") {
+    const view = String(args.view ?? "raw");
+    if (view !== "raw" && view !== "canonical") throw new Error("invalid view");
     const stableKey = specFeatureKey(String(args.stableKey ?? ""));
     const featureId = await resolveFeatureByStableKey(product.id, stableKey, execute);
     if (featureId === null) return {};
@@ -208,9 +213,18 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
     );
     const feature = features[0];
     if (!feature) return {};
-    const scenarios = await queryRows<{ reference: string; context: string; action: string; outcome: string; category: string; source: string; evidence: unknown }>(
-      execute("SELECT reference, context, action, outcome, category, source, evidence FROM scenarios WHERE feature_id = ? AND active = 1 ORDER BY reference", [featureId]),
+    const scenarios = await queryRows<{ id: number; reference: string; context: string; action: string; outcome: string; category: string; source: string; evidence: unknown }>(
+      execute("SELECT id, reference, context, action, outcome, category, source, evidence FROM scenarios WHERE feature_id = ? AND active = 1 ORDER BY reference", [featureId]),
     );
+    if (view === "canonical") {
+      return canonicalizeScenarios(scenarios.map((scenario) => ({
+        id: scenario.id,
+        featureName: feature.name,
+        reference: scenario.reference,
+        specReference: "live",
+        evidencePaths: Array.isArray(scenario.evidence) ? scenario.evidence.map((item) => String((item as { path?: string }).path ?? "")).filter(Boolean) : [],
+      })));
+    }
     return {
       feature: { name: feature.name, summary: feature.summary, source: feature.source, stablePath: `${product.slug}/spec/feature/${encodeURIComponent(stableKey)}` },
       scenarios: scenarios.map((scenario) => ({ ...scenario, evidence: decorateEvidence(scenario.evidence, source) })),
@@ -238,10 +252,35 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
   }
 
   if (name === "lookup_by_files") {
+    const view = String(args.view ?? "raw");
+    if (!["raw", "canonical", "risk"].includes(view)) throw new Error("invalid view");
     const paths = (Array.isArray(args.paths) ? args.paths : []).map((path) => String(path).trim()).filter(Boolean);
     if (paths.length === 0) throw new Error("paths must be a non-empty array of file paths");
     if (paths.length > 20) throw new Error("paths must contain at most 20 file paths");
     const files = await lookupFilesImpact(execute, product.id, paths);
+    if (view === "risk") {
+      return projectFileRisks({
+        requestedPaths: paths,
+        snapshotSha: source?.repo.sha ?? null,
+        rows: files.flatMap((entry) => entry.features.flatMap((feature) => feature.scenarios.map((scenario) => ({
+          stableKey: feature.stableKey,
+          source: scenario.source,
+          changeIds: [scenario.id],
+          evidencePaths: Array.isArray(scenario.evidence) ? scenario.evidence.map((item) => String((item as { path?: string }).path ?? "")).filter(Boolean) : [],
+        })))),
+      });
+    }
+    if (view === "canonical") {
+      const scenarios = files.flatMap((entry) => entry.features.flatMap((feature) => feature.scenarios.map((scenario) => ({
+        id: scenario.id,
+        featureName: feature.featureName,
+        reference: scenario.reference,
+        specReference: source?.repo.sha ?? "unknown",
+        evidencePaths: Array.isArray(scenario.evidence) ? scenario.evidence.map((item) => String((item as { path?: string }).path ?? "")).filter(Boolean) : [],
+      }))));
+      const canonical = canonicalizeScenarios(scenarios);
+      return { ...canonical, coveredPaths: files.map((entry) => entry.path), uncoveredPaths: paths.filter((path) => !files.some((entry) => entry.path === path)) };
+    }
     return {
       files: files.map((entry) => ({
         path: entry.path,
@@ -262,31 +301,90 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
   }
 
   if (name === "get_release") {
+    const view = String(args.view ?? "raw");
+    if (view !== "raw" && view !== "canonical") throw new Error("invalid view");
     const releaseId = Number(args.releaseId ?? 0);
-    const releases = await queryRows<{ id: number; title: string; summary: string; sha: string; url: string; committedAt: Date }>(
-      execute("SELECT id, title, summary, sha, url, committed_at AS committedAt FROM releases WHERE id = ? AND product_id = ?", [releaseId, product.id]),
+    const releases = await queryRows<{ id: number; title: string; summary: string; sha: string; url: string; committedAt: Date; specVersionId: number | null }>(
+      execute("SELECT id, title, summary, sha, url, committed_at AS committedAt, spec_version_id AS specVersionId FROM releases WHERE id = ? AND product_id = ?", [releaseId, product.id]),
     );
     const release = releases[0];
     if (!release) return {};
-    const changes = await queryRows<{ kind: string; entityType: string; featureName: string; scenarioReference: string; summary: string; highlightType: string | null; beforeJson: unknown; afterJson: unknown }>(
+    const changes = await queryRows<{ id: number; kind: string; entityType: string; featureName: string; scenarioReference: string; summary: string; highlightType: string | null; beforeJson: unknown; afterJson: unknown }>(
       execute(
-        `SELECT c.kind, c.entity_type AS entityType, c.feature_name AS featureName, c.scenario_reference AS scenarioReference,
+        `SELECT c.id, c.kind, c.entity_type AS entityType, c.feature_name AS featureName, c.scenario_reference AS scenarioReference,
               c.summary, c.highlight_type AS highlightType, c.before_json AS beforeJson, c.after_json AS afterJson
        FROM spec_changes c JOIN releases r ON r.spec_version_id = c.spec_version_id
        WHERE r.id = ? AND c.wording_only = 0 ORDER BY c.id`,
         [release.id],
       ),
     );
-    return {
-      release,
-      changes: changes.map((change) => ({
-        ...change,
-        before: change.beforeJson,
-        after: change.afterJson,
-        beforeJson: undefined,
-        afterJson: undefined,
-      })),
-    };
+    if (view === "canonical") {
+      return {
+        release,
+        ...canonicalizeScenarios(changes.map((change) => ({
+          id: change.id,
+          featureName: change.featureName,
+          reference: change.scenarioReference,
+          specReference: String(release.specVersionId ?? "unknown"),
+          evidencePaths: [...evidencePathsForReconcile(change.beforeJson), ...evidencePathsForReconcile(change.afterJson)],
+        }))),
+      };
+    }
+    const page = paginateById(changes, { offset: args.offset === undefined ? undefined : Number(args.offset), limit: args.limit === undefined ? undefined : Number(args.limit) });
+    const paginated = page.changes.map((change) => ({
+      ...change,
+      before: change.beforeJson,
+      after: change.afterJson,
+      beforeJson: undefined,
+      afterJson: undefined,
+    }));
+    return args.limit === undefined
+      ? { release, changes: paginated }
+      : { release, changes: paginated, offset: page.offset, limit: page.limit, total: page.total, hasMore: page.hasMore };
+  }
+
+  if (name === "reconcile_release") {
+    const releaseId = Number(args.releaseId ?? 0);
+    const releases = await queryRows<{ id: number; sha: string; specVersionId: number | null; analysisRunId: number | null }>(
+      execute("SELECT id, sha, spec_version_id AS specVersionId, analysis_run_id AS analysisRunId FROM releases WHERE id = ? AND product_id = ?", [releaseId, product.id]),
+    );
+    const release = releases[0];
+    if (!release) return {};
+    const runs = release.analysisRunId === null ? [] : await queryRows<{ id: number; status: string; error_message: string | null }>(
+      execute("SELECT id, status, error_message FROM analysis_runs WHERE id = ?", [release.analysisRunId]),
+    );
+    const run = runs[0];
+    const releaseFiles = await queryRows<{ path: string }>(execute("SELECT path FROM release_files WHERE release_id = ? ORDER BY path", [release.id]));
+    const changes = await queryRows<{ id: number; kind: string; entityType: string; featureName: string; scenarioReference: string | null; beforeJson: unknown; afterJson: unknown }>(
+      execute(
+        `SELECT c.id, c.kind, c.entity_type AS entityType, c.feature_name AS featureName, c.scenario_reference AS scenarioReference,
+                c.before_json AS beforeJson, c.after_json AS afterJson
+         FROM spec_changes c JOIN releases r ON r.spec_version_id = c.spec_version_id
+         WHERE r.id = ? AND c.wording_only = 0 ORDER BY c.id`,
+        [release.id],
+      ),
+    );
+    const rawIntents = Array.isArray(args.expectedIntents) ? args.expectedIntents as Array<{ stableKey?: unknown; paths?: unknown; note?: unknown }> : undefined;
+    const expectedIntents = rawIntents?.map((intent) => {
+      const stableKey = intent.stableKey === undefined ? undefined : String(intent.stableKey).trim();
+      const paths = Array.isArray(intent.paths) ? intent.paths.map((path) => String(path).trim()).filter(Boolean) : undefined;
+      if (!stableKey && (!paths || paths.length === 0)) throw new Error("each intent requires stableKey or paths");
+      if (paths?.some((path) => path.startsWith("/") || path.split("/").includes(".."))) throw new Error("paths must be relative repository paths");
+      return { stableKey: stableKey || undefined, paths, note: intent.note === undefined ? undefined : String(intent.note) };
+    });
+    return reconcileRelease({
+      releaseId: release.id,
+      slug: product.slug,
+      sha: release.sha,
+      changes: changes.map((change) => ({ id: change.id, featureName: change.featureName, entityType: change.entityType, scenarioReference: change.scenarioReference, before: change.beforeJson, after: change.afterJson })),
+      releaseFilePaths: releaseFiles.map((file) => file.path),
+      analysis: {
+        status: !run ? "unknown" : run.status === "succeeded" ? "complete" : run.status === "failed" ? "failed" : "partial",
+        runId: run?.id ?? null,
+        error: run?.error_message ?? null,
+      },
+      expectedIntents,
+    });
   }
 
   if (name === "get_knowledge_health") {
