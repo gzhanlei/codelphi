@@ -24,8 +24,22 @@ export interface AnalysisCoverageReceipt {
   diffOmittedPaths: number | null;
 }
 
+/** 与索引 assertAllowed("list") 同构的目录可见性：scope 内、scope 根祖先、或无 scope 配置。 */
+function isDirWithinScope(path: string, scopeRoots: OpenedRemoteSourceRevision["scopeRoots"]): boolean {
+  if (scopeRoots.length === 0) return true;
+  return scopeRoots.some((scope) => scope.path === "" || path === scope.path || path.startsWith(`${scope.path}/`) || scope.path.startsWith(`${path}/`));
+}
+
+/** 文件实现面分母只含 scope 内条目：read 侧守卫对非 scope 后代一律拒绝。 */
+function isFileWithinScope(path: string, scopeRoots: OpenedRemoteSourceRevision["scopeRoots"]): boolean {
+  if (scopeRoots.length === 0) return true;
+  return scopeRoots.some((scope) => scope.path === "" || path === scope.path || path.startsWith(`${scope.path}/`));
+}
+
 /** 全树实现面枚举：BFS listDir，元数据级（不读文件内容），受索引预算约束。 */
 export async function enumerateImplementationSurface(index: OpenedRemoteSourceRevision, maxDirs = 1000): Promise<Array<{ path: string; size: number }>> {
+  // scopeRoots 缺省按「无 scope 配置」处理（与索引 assertAllowed 同语义；测试 mock 可能不带该字段）
+  const scopeRoots = index.scopeRoots ?? [];
   const impl: Array<{ path: string; size: number }> = [];
   const queue: string[] = [""];
   const seenDirs = new Set<string>([""]);
@@ -33,14 +47,20 @@ export async function enumerateImplementationSurface(index: OpenedRemoteSourceRe
     const current = queue.shift()!;
     const listing = current === "" ? await index.listRoot() : await index.listDir(current);
     for (const item of listing.entries) {
+      // prune 条目（third_party / 构建产物 / 二进制等）不进实现面；scope 边界须在每一层
+      // 自查——索引只在根层把 scope 外条目标记 pruned，scope 根祖先目录内的 scope 外
+      // 兄弟子树（如 app/src/test 对 scope app/src/main）不会被 prune，但 listDir/read
+      // 的 assertAllowed 照样抛 path_outside_product_scope（run 80：整个 run 因此失败）。
+      if (item.pruned) continue;
       if (item.type === "tree") {
+        if (!isDirWithinScope(item.path, scopeRoots)) continue;
         if (!seenDirs.has(item.path)) {
           seenDirs.add(item.path);
           queue.push(item.path);
         }
         continue;
       }
-      if (evidenceKind(item.path) === "implementation") impl.push({ path: item.path, size: item.size ?? 0 });
+      if (isFileWithinScope(item.path, scopeRoots) && evidenceKind(item.path) === "implementation") impl.push({ path: item.path, size: item.size ?? 0 });
     }
   }
   return impl;

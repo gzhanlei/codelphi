@@ -1,3 +1,5 @@
+import { pick, type UiLocale } from "./ui-locale";
+import { REGRESSION } from "./ui-strings/product";
 import type { BehaviorChangeRow, ReleaseRow } from "./types";
 
 /**
@@ -11,9 +13,21 @@ export type RegressionTaskStatus = "pending" | "passed" | "failed" | "skipped";
 
 export const regressionStatusLabels: Record<RegressionTaskStatus, string> = { pending: "待验证", passed: "已通过", failed: "未通过", skipped: "已跳过" };
 
+/** 按 locale 取回归四态标签（缺省 zh-CN 与 regressionStatusLabels 一致）。 */
+export function regressionStatusLabel(status: RegressionTaskStatus, locale: UiLocale = "zh-CN") {
+  const entry = { pending: REGRESSION.statusPending, passed: REGRESSION.statusPassed, failed: REGRESSION.statusFailed, skipped: REGRESSION.statusSkipped }[status];
+  return pick(locale, entry);
+}
+
 export type RegressionHitType = "behavior_change" | "evidence_path" | "feature_wide";
 
 export const hitTypeLabels: Record<RegressionHitType, string> = { behavior_change: "行为变化", evidence_path: "证据路径命中", feature_wide: "整功能受影响" };
+
+/** 按 locale 取推荐理由标签（缺省 zh-CN 与 hitTypeLabels 一致）。 */
+export function hitTypeLabel(hitType: RegressionHitType, locale: UiLocale = "zh-CN") {
+  const entry = { behavior_change: REGRESSION.hitBehaviorChange, evidence_path: REGRESSION.hitEvidencePath, feature_wide: REGRESSION.hitFeatureWide }[hitType];
+  return pick(locale, entry);
+}
 
 export interface PlannedChange {
   id: number;

@@ -3,6 +3,8 @@
  * 避免两处文案与算法漂移。覆盖率 = implBytesAssembled / implBytesTotal（按文件字节），
  * 文件数量是独立事实，不得从文件数推算百分比，不得改名为「规格正确率」类结论性指标。
  */
+import { pick, type UiLocale } from "./ui-locale";
+import { COVERAGE } from "./ui-strings/product";
 
 interface CoverageReceiptShape {
   coverageRatio: number;
@@ -16,13 +18,13 @@ export function coveragePercent(receipt: CoverageReceiptShape) {
 }
 
 /** 显式声明字节口径，防止读者把比例误读成文件数占比或结论正确率。 */
-export function coverageByteLabel(receipt: CoverageReceiptShape) {
-  return `源码装配覆盖率（按文件字节）${coveragePercent(receipt)}`;
+export function coverageByteLabel(receipt: CoverageReceiptShape, locale: UiLocale = "zh-CN") {
+  return `${pick(locale, COVERAGE.byteLabel)}${coveragePercent(receipt)}`;
 }
 
 /** 已装配实现文件数：独立于字节比例的第二个事实，并排展示但不合成百分比。 */
-export function coverageFilesLabel(receipt: CoverageReceiptShape) {
-  return `已装配实现文件 ${receipt.implFilesAssembled}/${receipt.implFilesTotal} 个`;
+export function coverageFilesLabel(receipt: CoverageReceiptShape, locale: UiLocale = "zh-CN") {
+  return pick(locale, COVERAGE.filesLabel).replace("{assembled}", String(receipt.implFilesAssembled)).replace("{total}", String(receipt.implFilesTotal));
 }
 
 /**
@@ -30,6 +32,6 @@ export function coverageFilesLabel(receipt: CoverageReceiptShape) {
  * 设计内行为）与单条结论可信度看什么（随附源码证据链接，不看这个比例）。概览信任行与规格
  * 工作台披露行共用，避免解释漂移。
  */
-export function coverageExplainer() {
-  return "覆盖率指本次分析实际读取的源码占仓库全部实现面的比例：大仓库按预算分趟读取，低于 100% 是设计内行为，不代表分析出错或结论不可信；判断单条结论是否可信，看它附带的源码证据链接，而不是这个比例。";
+export function coverageExplainer(locale: UiLocale = "zh-CN") {
+  return pick(locale, COVERAGE.explainer);
 }

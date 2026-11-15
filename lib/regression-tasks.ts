@@ -13,7 +13,7 @@ import {
   type TaskSubject,
 } from "./regression-task-view";
 
-export { planRegressionTasks, renderRegressionTaskMarkdown, hitTypeLabels, regressionStatusLabels, type FeatureScenario, type IndexHit, type PlannedChange, type PlannedReason, type PlannedTask, type RegressionHitType, type RegressionTaskStatus, type RegressionTaskView, type TaskSubject } from "./regression-task-view";
+export { planRegressionTasks, renderRegressionTaskMarkdown, hitTypeLabel, hitTypeLabels, regressionStatusLabel, regressionStatusLabels, type FeatureScenario, type IndexHit, type PlannedChange, type PlannedReason, type PlannedTask, type RegressionHitType, type RegressionTaskStatus, type RegressionTaskView, type TaskSubject } from "./regression-task-view";
 
 export async function ensureRegressionTasks(connection: Pick<PoolConnection, "execute">, releaseId: number) {
   const [releaseRows, changeRows, fileRows] = await Promise.all([

@@ -3,6 +3,8 @@
  * lib/completeness-ledger.ts 的类型——后者含 saveCompletenessLedger 等服务端函数，
  * 若未来引入 db import 会把 mysql2 拖进浏览器 bundle（regression-tasks 先例）。
  */
+import { pick, type LocaleEntry, type UiLocale } from "./ui-locale";
+import { LEDGER } from "./ui-strings/product";
 
 export type LedgerStateView = "complete" | "partial" | "failed" | "not_applicable";
 
@@ -20,6 +22,15 @@ export interface LedgerDetailsView {
   overall: LedgerStateView;
 }
 
+const LEDGER_DIMENSION_ENTRIES: Record<keyof Omit<LedgerDetailsView, "overall">, LocaleEntry> = {
+  sourceCoverage: LEDGER.dimSourceCoverage,
+  behavioralEnumeration: LEDGER.dimBehavioralEnumeration,
+  extractionCompletion: LEDGER.dimExtractionCompletion,
+  evidenceIntegrity: LEDGER.dimEvidenceIntegrity,
+  mergeIntegrity: LEDGER.dimMergeIntegrity,
+  verification: LEDGER.dimVerification,
+};
+
 export const LEDGER_DIMENSION_LABELS: Record<keyof Omit<LedgerDetailsView, "overall">, string> = {
   sourceCoverage: "源码覆盖",
   behavioralEnumeration: "行为枚举",
@@ -29,14 +40,19 @@ export const LEDGER_DIMENSION_LABELS: Record<keyof Omit<LedgerDetailsView, "over
   verification: "核验",
 };
 
+/** 按 locale 取维度标签（缺省 zh-CN 与 LEDGER_DIMENSION_LABELS 一致）。 */
+function ledgerDimensionLabel(key: keyof Omit<LedgerDetailsView, "overall">, locale: UiLocale): string {
+  return pick(locale, LEDGER_DIMENSION_ENTRIES[key]);
+}
+
 /** 各维度 partial/failed 时的短因（与 lib/completeness-ledger.ts 的推导输入对应，措辞按实际交付语义）。 */
-const DIMENSION_REASON: Record<keyof Omit<LedgerDetailsView, "overall">, string> = {
-  sourceCoverage: "未覆盖全部实现面，未覆盖部分不产生结论",
-  behavioralEnumeration: "部分行为文件未完成枚举",
-  extractionCompletion: "部分提取趟重试或为空结果",
-  evidenceIntegrity: "存在被剔除的不可溯源声明",
-  mergeIntegrity: "合并层有截断/冲突/护栏检出",
-  verification: "存在一致性冲突或影子对比不一致",
+const DIMENSION_REASON_ENTRIES: Record<keyof Omit<LedgerDetailsView, "overall">, LocaleEntry> = {
+  sourceCoverage: LEDGER.reasonSourceCoverage,
+  behavioralEnumeration: LEDGER.reasonBehavioralEnumeration,
+  extractionCompletion: LEDGER.reasonExtractionCompletion,
+  evidenceIntegrity: LEDGER.reasonEvidenceIntegrity,
+  mergeIntegrity: LEDGER.reasonMergeIntegrity,
+  verification: LEDGER.reasonVerification,
 };
 
 /** 六维度徽章顺序。 */
@@ -45,25 +61,25 @@ export const LEDGER_DIMENSION_ORDER = ["sourceCoverage", "behavioralEnumeration"
 export type LedgerDimensionKey = (typeof LEDGER_DIMENSION_ORDER)[number];
 
 /** overall 的展示文案：complete 不夸大（「完整」仅指账本六维度全绿），失败如实列维度。 */
-export function describeLedgerOverall(overall: LedgerStateView): { label: string; tone: "ok" | "warn" | "bad" | "muted" } {
-  if (overall === "complete") return { label: "完整分析", tone: "ok" };
-  if (overall === "partial") return { label: "部分完整", tone: "warn" };
-  if (overall === "failed") return { label: "完整性不足", tone: "bad" };
-  return { label: "不适用", tone: "muted" };
+export function describeLedgerOverall(overall: LedgerStateView, locale: UiLocale = "zh-CN"): { label: string; tone: "ok" | "warn" | "bad" | "muted" } {
+  if (overall === "complete") return { label: pick(locale, LEDGER.overallComplete), tone: "ok" };
+  if (overall === "partial") return { label: pick(locale, LEDGER.overallPartial), tone: "warn" };
+  if (overall === "failed") return { label: pick(locale, LEDGER.overallFailed), tone: "bad" };
+  return { label: pick(locale, LEDGER.overallNotApplicable), tone: "muted" };
 }
 
 /** 非 complete/not_applicable 维度的「标签：短因」清单，partial/failed 展示用；全绿返回空数组。
  * hideDimensions：已在别处给出事实的维度不重复内联（如源码覆盖——覆盖率披露行已给量化数字，维度状态仍在悬浮明细可见）。 */
-export function summarizeLedgerIssues(details: LedgerDetailsView, hideDimensions?: ReadonlyArray<LedgerDimensionKey>): Array<{ label: string; state: LedgerStateView; reason: string }> {
+export function summarizeLedgerIssues(details: LedgerDetailsView, hideDimensions?: ReadonlyArray<LedgerDimensionKey>, locale: UiLocale = "zh-CN"): Array<{ label: string; state: LedgerStateView; reason: string }> {
   const hidden = new Set(hideDimensions ?? []);
   return LEDGER_DIMENSION_ORDER
     .filter((key) => !hidden.has(key) && (details[key].state === "partial" || details[key].state === "failed"))
-    .map((key) => ({ label: LEDGER_DIMENSION_LABELS[key], state: details[key].state, reason: DIMENSION_REASON[key] }));
+    .map((key) => ({ label: ledgerDimensionLabel(key, locale), state: details[key].state, reason: pick(locale, DIMENSION_REASON_ENTRIES[key]) }));
 }
 
 /** 六维度「标签 状态」行，title 悬浮明细用。 */
-export function formatLedgerDimensions(details: LedgerDetailsView): string {
-  return LEDGER_DIMENSION_ORDER.map((key) => `${LEDGER_DIMENSION_LABELS[key]} ${details[key].state === "complete" ? "✓" : details[key].state === "not_applicable" ? "—" : details[key].state === "partial" ? "部分" : "失败"}`).join(" · ");
+export function formatLedgerDimensions(details: LedgerDetailsView, locale: UiLocale = "zh-CN"): string {
+  return LEDGER_DIMENSION_ORDER.map((key) => `${ledgerDimensionLabel(key, locale)} ${details[key].state === "complete" ? "✓" : details[key].state === "not_applicable" ? "—" : details[key].state === "partial" ? pick(locale, LEDGER.statePartial) : pick(locale, LEDGER.stateFailed)}`).join(" · ");
 }
 
 const LEDGER_STATES: readonly LedgerStateView[] = ["complete", "partial", "failed", "not_applicable"];

@@ -11,6 +11,8 @@ import { NotificationSettings } from "@/components/notification-settings";
 import { ProductIdentitySettings } from "@/components/product-identity-settings";
 import { ProductOutputLanguageSettings } from "@/components/product-output-language-settings";
 import { resolveUiLocale } from "@/lib/ui-locale-server";
+import { pick, type UiLocale } from "@/lib/ui-locale";
+import { PRODUCT_PAGE } from "@/lib/ui-strings/product";
 import { ProductMembersSettings } from "@/components/product-members-settings";
 import { ProductTabs, ProductView, RepositoryLink, RunStatus } from "@/components/product-navigation";
 import { PublicDemoSettings } from "@/components/public-demo-settings";
@@ -33,7 +35,7 @@ export const dynamic = "force-dynamic";
 type ProductDetails = NonNullable<Awaited<ReturnType<typeof getProductDetails>>>;
 
 /** 产品页主体：标题区、运行状态、视图 Tab 与视图内容；demo 与登录分支共用。 */
-function ProductPageBody({ productBase, view, mode, featureId, details, overview, actions, canEdit, writeAccess = "edit", showFeedback, showSettings, settings }: {
+function ProductPageBody({ productBase, view, mode, featureId, details, overview, actions, canEdit, writeAccess = "edit", showFeedback, showSettings, settings, locale = "zh-CN" }: {
   productBase: string;
   view: string;
   mode: string;
@@ -47,6 +49,7 @@ function ProductPageBody({ productBase, view, mode, featureId, details, overview
   showFeedback: boolean;
   showSettings: boolean;
   settings?: ReactNode;
+  locale?: UiLocale;
 }) {
   // 漂移横幅直达第一个待核实条目所在功能；核实在规格工作台的功能详情页完成。
   const driftFeatureId = details.driftCount > 0 ? driftTargetFeatureId(details.features, details.scenarios) : undefined;
@@ -61,16 +64,16 @@ function ProductPageBody({ productBase, view, mode, featureId, details, overview
         <div className="page-actions">
           {actions}
           {details.releases[0] ? <OverviewPublishButton slug={details.product.slug} releaseId={details.releases[0].id} releaseTitle={details.releases[0].title} writeAccess={writeAccess} features={overview.changeGroups.map((group) => ({ featureName: group.featureName, added: group.added, changed: group.changed, removed: group.removed }))} /> : null}
-          <details className="export-details"><summary>导出 ▾</summary><div className="export-details-menu"><a href={`/api/products/${details.product.slug}/spec.json`} target="_blank" rel="noreferrer">spec.json ↗</a><a href={`/api/products/${details.product.slug}/export/tests?format=gherkin`}>Gherkin ↓</a><a href={`/api/products/${details.product.slug}/export/tests?format=markdown`}>用例 Markdown ↓</a><a href={`/api/products/${details.product.slug}/explainer`} target="_blank" rel="noreferrer">Explainer ↗</a></div></details>
+          <details className="export-details"><summary>{pick(locale, PRODUCT_PAGE.export)}</summary><div className="export-details-menu"><a href={`/api/products/${details.product.slug}/spec.json`} target="_blank" rel="noreferrer">spec.json ↗</a><a href={`/api/products/${details.product.slug}/export/tests?format=gherkin`}>Gherkin ↓</a><a href={`/api/products/${details.product.slug}/export/tests?format=markdown`}>{pick(locale, PRODUCT_PAGE.exportCasesMarkdown)}</a><a href={`/api/products/${details.product.slug}/explainer`} target="_blank" rel="noreferrer">Explainer ↗</a></div></details>
         </div>
       </div>
-      <RunStatus run={details.latestRun} />
-      {details.driftCount > 0 ? <div className="drift-banner" role="status">⚠️ {details.driftCount} 条人工规格可能已过时（最近一次分析的行为变化触及了这些功能）。逐条「标记已核实」后标记会消除。{driftFeatureId ? <Link className="drift-banner-link" href={featureHref(driftFeatureId)}>去核实 →</Link> : null}</div> : null}
+      <RunStatus run={details.latestRun} locale={locale} />
+      {details.driftCount > 0 ? <div className="drift-banner" role="status">⚠️ {details.driftCount}{pick(locale, PRODUCT_PAGE.driftBanner)}{driftFeatureId ? <Link className="drift-banner-link" href={featureHref(driftFeatureId)}>{pick(locale, PRODUCT_PAGE.driftBannerGo)}</Link> : null}</div> : null}
       {showFeedback && details.latestRun?.status === "failed" ? <AnalysisFeedbackButton slug={details.product.slug} /> : null}
-      <ProductTabs productBase={productBase} view={view} featureCount={details.features.length} releaseCount={details.releaseTotal} noteBadge={details.latestReleaseNote?.status === "draft" ? "待校对" : details.latestReleaseNote?.status === "published" ? "✓" : undefined} showSettings={showSettings} />
+      <ProductTabs productBase={productBase} view={view} featureCount={details.features.length} releaseCount={details.releaseTotal} noteBadge={details.latestReleaseNote?.status === "draft" ? pick(locale, PRODUCT_PAGE.noteBadgeDraft) : details.latestReleaseNote?.status === "published" ? "✓" : undefined} showSettings={showSettings} locale={locale} />
       {settings}
       {/* settings 是独立视图；ProductView 对未知 view 会静默落到发布变化，这里显式排除 */}
-      {view === "settings" ? null : <ProductView view={view} productSlug={details.product.slug} productBase={productBase} features={details.features} featureFlows={details.featureFlows} featureFlowErrors={details.featureFlowErrors} scenarios={details.scenarios} releases={details.releases} changes={details.changes} behaviorChanges={details.behaviorChanges} foldedChanges={details.foldedChanges} regressionTasks={details.regressionTasks} releaseTotal={details.releaseTotal} coverage={details.coverage} completeness={details.completeness} mode={mode} featureId={featureId} overview={overview} canEdit={canEdit} changelogHref={details.product.isPublicDemo ? `/share/changelog${productBase.replace(/^\/products/, "")}` : undefined} latestReleaseId={details.releases[0]?.id} />}
+      {view === "settings" ? null : <ProductView view={view} productSlug={details.product.slug} productBase={productBase} features={details.features} featureFlows={details.featureFlows} featureFlowErrors={details.featureFlowErrors} scenarios={details.scenarios} releases={details.releases} changes={details.changes} behaviorChanges={details.behaviorChanges} foldedChanges={details.foldedChanges} regressionTasks={details.regressionTasks} releaseTotal={details.releaseTotal} coverage={details.coverage} completeness={details.completeness} mode={mode} featureId={featureId} overview={overview} canEdit={canEdit} changelogHref={details.product.isPublicDemo ? `/share/changelog${productBase.replace(/^\/products/, "")}` : undefined} latestReleaseId={details.releases[0]?.id} locale={locale} />}
     </>
   );
 }
@@ -82,6 +85,7 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
   const rawParams = await searchParams;
   const { view = "overview", mode = "spec", feature } = await rawParams;
   const featureId = featureIdFromParam(feature);
+  const locale = await resolveUiLocale();
   const user = await getSessionUser();
   // URL org 段是权威上下文：鉴权直接按该工作区解析，不依赖 cookie 停在哪个工作区。
   const access = user ? await requireProductAccess(user, slug, "viewer", defaultExecute, undefined, org) : null;
@@ -99,12 +103,12 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
     const productBase = productBasePath(demo.organizationSlug, demo.slug);
     const demoDetails = await getProductDetails(slug, demo.organizationId);
     if (!demoDetails) notFound();
-    const demoOverview = buildProductOverview({ ...demoDetails, productBase }, await resolveUiLocale());
+    const demoOverview = buildProductOverview({ ...demoDetails, productBase }, locale);
     const demoView = view === "settings" ? "overview" : view;
     return (
       <DemoShell>
         {/* 设计 §11.1：demo 不再为展示控件传 canEdit=true——编辑控件隐藏，写操作降为登录引导（writeAccess="demo"）。 */}
-        <ProductPageBody productBase={productBase} view={demoView} mode={mode} featureId={featureId} details={demoDetails} overview={demoOverview} canEdit={false} writeAccess="demo" showFeedback={false} showSettings={false} actions={<AnalyzeButton slug={demoDetails.product.slug} writeAccess="demo" />} />
+        <ProductPageBody productBase={productBase} view={demoView} mode={mode} featureId={featureId} details={demoDetails} overview={demoOverview} canEdit={false} writeAccess="demo" showFeedback={false} showSettings={false} locale={locale} actions={<AnalyzeButton slug={demoDetails.product.slug} writeAccess="demo" />} />
       </DemoShell>
     );
   }
@@ -112,7 +116,7 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
   const productBase = productBasePath(access.organization.slug, slug);
   const details = await getProductDetails(slug, access.product.organizationId);
   if (!details) notFound();
-  const overview = buildProductOverview({ ...details, productBase }, await resolveUiLocale());
+  const overview = buildProductOverview({ ...details, productBase }, locale);
   const isOrganizationMember = access.via === "organization";
   const isOwner = isOrganizationMember && access.role === "owner";
 
@@ -145,7 +149,7 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
 
   return (
     <AppShell user={user} organizationName={access.organization.name}>
-      <Link href="/" className="back-link">← 所有产品</Link>
+      <Link href="/" className="back-link">{pick(locale, PRODUCT_PAGE.backLink)}</Link>
       <ProductPageBody
         productBase={productBase}
         view={view}
@@ -157,6 +161,7 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
         writeAccess={access.role !== "viewer" ? "edit" : "readonly"}
         showFeedback={true}
         showSettings={true}
+        locale={locale}
         settings={settings}
         actions={
           <>

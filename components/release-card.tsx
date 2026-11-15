@@ -2,30 +2,34 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import type { UiLocale } from "@/lib/ui-locale";
+import { pick } from "@/lib/ui-locale";
+import { RELEASE_CARD } from "@/lib/ui-strings/product";
+import { formatDateIn } from "@/lib/format";
 import type { BehaviorChangeRow, ChangeRow, FoldedBehaviorChangeRow, ReleaseRow } from "@/lib/types";
-import { hitTypeLabels, regressionStatusLabels, type RegressionTaskStatus, type RegressionTaskView } from "@/lib/regression-task-view";
+import { hitTypeLabel, regressionStatusLabel, type RegressionTaskStatus, type RegressionTaskView } from "@/lib/regression-task-view";
 import { errorMessage } from "@/lib/error-message";
 import { BehaviorChangeItem } from "./behavior-change-item";
 import { ChangeItem } from "./change-item";
 import { ReleaseNotesPanel } from "./release-notes-panel";
 import { useDemoGuard } from "./demo-mode";
 
-function QuietRelease({ specVersionId }: { specVersionId: number | null }) {
+function QuietRelease({ specVersionId, locale = "zh-CN" }: { specVersionId: number | null; locale?: UiLocale }) {
   return specVersionId
-    ? <p className="quiet-release">本次分析未发现规格行为变化，无需全量回归；建议做瘦身回归——按近期风险抽查核心路径与既有冒烟用例即可。</p>
+    ? <p className="quiet-release">{pick(locale, RELEASE_CARD.quietRelease)}</p>
     : null;
 }
 
-function ReasonTags({ task }: { task: RegressionTaskView }) {
+function ReasonTags({ task, locale = "zh-CN" }: { task: RegressionTaskView; locale?: UiLocale }) {
   const tags = task.reasons.filter((reason) => reason.hitType !== "behavior_change");
-  const extra = task.sources.length > 1 ? [<span className="regression-reason" key="sources">来自 {task.sources.length} 条变化</span>] : [];
+  const extra = task.sources.length > 1 ? [<span className="regression-reason" key="sources">{pick(locale, RELEASE_CARD.fromChanges).replace("{count}", String(task.sources.length))}</span>] : [];
   if (tags.length === 0 && extra.length === 0) return null;
   return (
     <span className="regression-reasons">
       {extra}
       {tags.map((reason, index) => (
         <span className="regression-reason" key={index} title={reason.matchedPath ?? undefined}>
-          {hitTypeLabels[reason.hitType]}
+          {hitTypeLabel(reason.hitType, locale)}
           {reason.matchedPath ? <code>{reason.matchedPath}</code> : null}
         </span>
       ))}
@@ -33,12 +37,13 @@ function ReasonTags({ task }: { task: RegressionTaskView }) {
   );
 }
 
-function RegressionChecklist({ slug, release, changes, tasks, canEdit }: {
+function RegressionChecklist({ slug, release, changes, tasks, canEdit, locale = "zh-CN" }: {
   slug: string;
   release: ReleaseRow;
   changes: BehaviorChangeRow[];
   tasks: RegressionTaskView[];
   canEdit: boolean;
+  locale?: UiLocale;
 }) {
   const router = useRouter();
   const guard = useDemoGuard();
@@ -61,11 +66,11 @@ function RegressionChecklist({ slug, release, changes, tasks, canEdit }: {
       });
       if (!response.ok) {
         const data = await response.json() as { error?: string };
-        throw new Error(data.error ?? "保存验证状态失败");
+        throw new Error(data.error ?? pick(locale, RELEASE_CARD.saveFailed));
       }
       router.refresh();
     } catch (cause: unknown) {
-      setError(errorMessage(cause, "保存验证状态失败"));
+      setError(errorMessage(cause, pick(locale, RELEASE_CARD.saveFailed)));
     }
   };
 
@@ -77,44 +82,47 @@ function RegressionChecklist({ slug, release, changes, tasks, canEdit }: {
     byFeature.set(task.featureName, list);
   }
 
+  const statuses: RegressionTaskStatus[] = ["pending", "passed", "failed", "skipped"];
+
   return (
     <div className="behavior-section regression-section">
       <h3>
-        回归清单
-        <a className="overview-text-link" href={`/api/products/${slug}/releases/${release.id}/regression`}>导出 Markdown ↓</a>
+        {pick(locale, RELEASE_CARD.regressionHeading)}
+        <a className="overview-text-link" href={`/api/products/${slug}/releases/${release.id}/regression`}>{pick(locale, RELEASE_CARD.exportMarkdown)}</a>
       </h3>
       {[...byFeature.entries()].map(([featureName, featureTasks]) => (
         <div className="regression-feature" key={featureName}>
           <h4>{featureName}</h4>
           {featureTasks.map((task) => {
             const primary = task.primaryChangeId !== null ? changeById.get(task.primaryChangeId) : undefined;
+            const subjectRef = task.reference ?? pick(locale, RELEASE_CARD.scenarioRef).replace("{id}", String(task.subject.kind === "scenario" ? task.subject.scenarioId : ""));
             return (
               <div className="regression-item" key={task.taskId}>
                 {primary ? <BehaviorChangeItem change={primary} /> : (
                   <div className="change-item">
-                    <strong>{task.reference ?? `场景 ${task.subject.kind === "scenario" ? task.subject.scenarioId : ""}`}</strong>
-                    <span className="regression-impact-hint">影响面推荐 · 证据路径与本次改动文件命中</span>
+                    <strong>{subjectRef}</strong>
+                    <span className="regression-impact-hint">{pick(locale, RELEASE_CARD.impactHint)}</span>
                   </div>
                 )}
                 <div className="regression-controls">
-                  <ReasonTags task={task} />
+                  <ReasonTags task={task} locale={locale} />
                   <select
-                    aria-label={`回归状态：${task.featureName} ${task.reference ?? ""}`}
+                    aria-label={pick(locale, RELEASE_CARD.statusAria).replace("{feature}", featureName).replace("{reference}", task.reference ?? "")}
                     className={`regression-status ${task.status}`}
                     value={task.status}
                     disabled={!canEdit}
                     onChange={(event) => void save(task.taskId, event.target.value as RegressionTaskStatus)}
                   >
-                    {(Object.keys(regressionStatusLabels) as RegressionTaskStatus[]).map((value) => (
-                      <option key={value} value={value}>{regressionStatusLabels[value]}</option>
+                    {statuses.map((value) => (
+                      <option key={value} value={value}>{regressionStatusLabel(value, locale)}</option>
                     ))}
                   </select>
                   {canEdit && task.status === "skipped" ? (
                     <input
                       className="regression-note"
-                      placeholder="跳过原因（可选）"
+                      placeholder={pick(locale, RELEASE_CARD.skipPlaceholder)}
                       defaultValue={task.skipReason ?? ""}
-                      aria-label={`跳过原因：${task.featureName} ${task.reference ?? ""}`}
+                      aria-label={pick(locale, RELEASE_CARD.skipAria).replace("{feature}", featureName).replace("{reference}", task.reference ?? "")}
                       onBlur={(event) => {
                         if ((task.skipReason ?? "") !== event.target.value) void save(task.taskId, "skipped", event.target.value);
                       }}
@@ -123,15 +131,15 @@ function RegressionChecklist({ slug, release, changes, tasks, canEdit }: {
                   {canEdit && task.status === "failed" ? (
                     <input
                       className="regression-note"
-                      placeholder="发现的问题 / 关联缺陷（可选）"
+                      placeholder={pick(locale, RELEASE_CARD.failPlaceholder)}
                       defaultValue={task.failureNote ?? ""}
-                      aria-label={`失败备注：${task.featureName} ${task.reference ?? ""}`}
+                      aria-label={pick(locale, RELEASE_CARD.failAria).replace("{feature}", featureName).replace("{reference}", task.reference ?? "")}
                       onBlur={(event) => {
                         if ((task.failureNote ?? "") !== event.target.value) void save(task.taskId, "failed", event.target.value);
                       }}
                     />
                   ) : null}
-                  {task.status !== "pending" && task.checkedBy ? <span className="regression-checked-by">由 {task.checkedBy} 标记</span> : null}
+                  {task.status !== "pending" && task.checkedBy ? <span className="regression-checked-by">{pick(locale, RELEASE_CARD.markedBy).replace("{name}", task.checkedBy)}</span> : null}
                 </div>
               </div>
             );
@@ -143,23 +151,24 @@ function RegressionChecklist({ slug, release, changes, tasks, canEdit }: {
   );
 }
 
-function BehaviorList({ slug, release, changes, tasks, canEdit }: {
+function BehaviorList({ slug, release, changes, tasks, canEdit, locale = "zh-CN" }: {
   slug: string;
   release: ReleaseRow;
   changes: BehaviorChangeRow[];
   tasks: RegressionTaskView[];
   canEdit: boolean;
+  locale?: UiLocale;
 }) {
-  if (tasks.length === 0) return <QuietRelease specVersionId={release.specVersionId} />;
-  return <RegressionChecklist slug={slug} release={release} changes={changes} tasks={tasks} canEdit={canEdit} />;
+  if (tasks.length === 0) return <QuietRelease specVersionId={release.specVersionId} locale={locale} />;
+  return <RegressionChecklist slug={slug} release={release} changes={changes} tasks={tasks} canEdit={canEdit} locale={locale} />;
 }
 
-function AiChangeList({ changes }: { changes: ChangeRow[] }) {
+function AiChangeList({ changes, locale = "zh-CN" }: { changes: ChangeRow[]; locale?: UiLocale }) {
   if (changes.length === 0) return null;
-  return <div className="ai-change-section"><h3>变更说明（AI）</h3>{changes.map((change) => <ChangeItem change={change} key={change.id} />)}</div>;
+  return <div className="ai-change-section"><h3>{pick(locale, RELEASE_CARD.aiChangeHeading)}</h3>{changes.map((change) => <ChangeItem change={change} key={change.id} />)}</div>;
 }
 
-export function ReleaseCard({ slug, release, changes, behaviorChanges, foldedChanges = [], tasks = [], canEdit = false, changelogHref, defaultOpen = false }: {
+export function ReleaseCard({ slug, release, changes, behaviorChanges, foldedChanges = [], tasks = [], canEdit = false, changelogHref, defaultOpen = false, locale = "zh-CN" }: {
   changelogHref?: string;
   slug: string;
   release: ReleaseRow;
@@ -169,6 +178,7 @@ export function ReleaseCard({ slug, release, changes, behaviorChanges, foldedCha
   tasks?: RegressionTaskView[];
   canEdit?: boolean;
   defaultOpen?: boolean;
+  locale?: UiLocale;
 }) {
   const releaseChanges = changes.filter((change) => change.releaseId === release.id);
   // 深链定位（总览 CTA「去校对并发布」）：命中 #release-{id} 时自动展开并滚动到卡片
@@ -187,28 +197,28 @@ export function ReleaseCard({ slug, release, changes, behaviorChanges, foldedCha
   return (
     <section className="release-card" id={`release-${release.id}`} ref={sectionRef}>
       <div className="release-header">
-        <div><time>{new Intl.DateTimeFormat("zh-CN", { dateStyle: "long" }).format(new Date(release.committedAt))}</time><h2>{release.title}</h2></div>
+        <div><time>{formatDateIn(locale, release.committedAt, { dateStyle: "long" })}</time><h2>{release.title}</h2></div>
         <a href={release.url} target="_blank" rel="noreferrer"><code>{release.sha.slice(0, 7)}</code> ↗</a>
       </div>
       <p className="release-summary">{release.summary}</p>
       {hasDetails ? (
         <details className="release-details" open={defaultOpen || openByHash}>
           <summary>
-            <span>行为变化 {releaseBehaviorChanges.length} 条 · 变更说明 {releaseChanges.length} 条</span>
-            <span className="release-details-toggle">{defaultOpen ? "收起" : "展开"}</span>
+            <span>{pick(locale, RELEASE_CARD.detailsSummary).replace("{behavior}", String(releaseBehaviorChanges.length)).replace("{notes}", String(releaseChanges.length))}</span>
+            <span className="release-details-toggle">{defaultOpen ? pick(locale, RELEASE_CARD.collapse) : pick(locale, RELEASE_CARD.expand)}</span>
           </summary>
-          <BehaviorList slug={slug} release={release} changes={releaseBehaviorChanges} tasks={releaseTasks} canEdit={canEdit} />
-          <AiChangeList changes={releaseChanges} />
-          <ReleaseNotesPanel slug={slug} releaseId={release.id} canEdit={canEdit} changelogHref={changelogHref} />
+          <BehaviorList slug={slug} release={release} changes={releaseBehaviorChanges} tasks={releaseTasks} canEdit={canEdit} locale={locale} />
+          <AiChangeList changes={releaseChanges} locale={locale} />
+          <ReleaseNotesPanel slug={slug} releaseId={release.id} canEdit={canEdit} changelogHref={changelogHref} locale={locale} />
         </details>
       ) : (
-        <BehaviorList slug={slug} release={release} changes={releaseBehaviorChanges} tasks={releaseTasks} canEdit={canEdit} />
+        <BehaviorList slug={slug} release={release} changes={releaseBehaviorChanges} tasks={releaseTasks} canEdit={canEdit} locale={locale} />
       )}
       {releaseFolded.length > 0 ? (
         <details className="release-details folded-changes">
           <summary>
-            <span>另有 {releaseFolded.length} 条差异判定为仅措辞/编号调整，已折叠（未计入行为变化）</span>
-            <span className="release-details-toggle">展开</span>
+            <span>{pick(locale, RELEASE_CARD.foldedSummary).replace("{count}", String(releaseFolded.length))}</span>
+            <span className="release-details-toggle">{pick(locale, RELEASE_CARD.expand)}</span>
           </summary>
           {releaseFolded.map((change) => <BehaviorChangeItem change={change} key={change.id} />)}
         </details>

@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { pick, type UiLocale } from "@/lib/ui-locale";
+import { PRODUCT_TABS, RUN_STATUS } from "@/lib/ui-strings/product";
 import { AnalysisStatusRefresh } from "./analysis-status-refresh";
 import { ProductChanges } from "./product-changes";
 import { ProductMapView } from "./product-map-view";
@@ -35,21 +37,21 @@ function RunError({ message }: { message?: string }) {
   return <p>{explainRunFailure(message).userMessage}</p>;
 }
 
-export function RunStatus({ run }: { run?: { status: string; errorMessage?: string } }) {
+export function RunStatus({ run, locale = "zh-CN" }: { run?: { status: string; errorMessage?: string }; locale?: UiLocale }) {
   if (!run) return null;
-  return <div className={`run-status ${run.status}`} role="status" aria-live="polite"><span>最近一次分析：{run.status}</span><RunError message={run.errorMessage} /><AnalysisStatusRefresh status={run.status} /></div>;
+  return <div className={`run-status ${run.status}`} role="status" aria-live="polite"><span>{pick(locale, RUN_STATUS.label)}{run.status}</span><RunError message={run.errorMessage} /><AnalysisStatusRefresh status={run.status} /></div>;
 }
 
-export function ProductTabs({ productBase, view, featureCount, releaseCount, noteBadge, showSettings = false }: { productBase: string; view: string; featureCount: number; releaseCount: number; noteBadge?: string; showSettings?: boolean }) {
+export function ProductTabs({ productBase, view, featureCount, releaseCount, noteBadge, showSettings = false, locale = "zh-CN" }: { productBase: string; view: string; featureCount: number; releaseCount: number; noteBadge?: string; showSettings?: boolean; locale?: UiLocale }) {
   return (
-    <nav className="view-tabs" aria-label="产品视图">
-      <Link className={selectedClass(view === "overview")} href={productBase}>概览</Link>
+    <nav className="view-tabs" aria-label={pick(locale, PRODUCT_TABS.aria)}>
+      <Link className={selectedClass(view === "overview")} href={productBase}>{pick(locale, PRODUCT_TABS.overview)}</Link>
       {/* 产品地图始终展示（含 0 功能空态），不因数据为空被隐藏（入口偏好）。 */}
-      <Link className={selectedClass(view === "map")} href={`${productBase}?view=map`}>产品地图</Link>
-      <Link className={selectedClass(view === "spec")} href={`${productBase}?view=spec`}>产品规格 <span>{featureCount}</span></Link>
-      {releaseCount > 0 ? <Link className={selectedClass(view === "notes")} href={`${productBase}?view=notes`}>发布稿{noteBadge ? <span className="notes-badge">{noteBadge}</span> : null}</Link> : null}
-      <Link className={selectedClass(view === "changes")} href={`${productBase}?view=changes`}>发布变化 <span>{releaseCount}</span></Link>
-      {showSettings ? <Link className={selectedClass(view === "settings")} href={`${productBase}?view=settings`}>设置</Link> : null}
+      <Link className={selectedClass(view === "map")} href={`${productBase}?view=map`}>{pick(locale, PRODUCT_TABS.map)}</Link>
+      <Link className={selectedClass(view === "spec")} href={`${productBase}?view=spec`}>{pick(locale, PRODUCT_TABS.spec)} <span>{featureCount}</span></Link>
+      {releaseCount > 0 ? <Link className={selectedClass(view === "notes")} href={`${productBase}?view=notes`}>{pick(locale, PRODUCT_TABS.notes)}{noteBadge ? <span className="notes-badge">{noteBadge}</span> : null}</Link> : null}
+      <Link className={selectedClass(view === "changes")} href={`${productBase}?view=changes`}>{pick(locale, PRODUCT_TABS.changes)} <span>{releaseCount}</span></Link>
+      {showSettings ? <Link className={selectedClass(view === "settings")} href={`${productBase}?view=settings`}>{pick(locale, PRODUCT_TABS.settings)}</Link> : null}
     </nav>
   );
 }
@@ -79,6 +81,8 @@ interface ProductViewProps {
   changelogHref?: string;
   /** 最新发布的 id（发布稿视图用；无发布时不显示该 Tab）。 */
   latestReleaseId?: number;
+  /** 界面语言：由服务端页面传入；客户端孙组件再经 props 下传（缺省 zh-CN 保持存量渲染）。 */
+  locale?: UiLocale;
 }
 
 function ProductWorkspace({ view, productSlug, productBase, features, scenarios, releases, changes, behaviorChanges, foldedChanges, regressionTasks, releaseTotal, coverage, completeness, featureFlows, featureFlowErrors, mode = "spec", featureId, canEdit, changelogHref }: Omit<ProductViewProps, "overview">) {
@@ -89,10 +93,10 @@ function ProductWorkspace({ view, productSlug, productBase, features, scenarios,
 }
 
 export function ProductView(props: ProductViewProps) {
-  if (props.view === "overview") return <ProductOverview data={props.overview} canEdit={props.canEdit} />;
+  if (props.view === "overview") return <ProductOverview data={props.overview} canEdit={props.canEdit} locale={props.locale} />;
   if (props.view === "map") return <ProductMapView features={props.features} scenarios={props.scenarios} />;
   if (props.view === "notes") {
-    return props.latestReleaseId ? <ReleaseNotesView slug={props.productSlug} releaseId={props.latestReleaseId} canEdit={Boolean(props.canEdit)} changelogHref={props.changelogHref} /> : <p className="overview-note">尚无发布，先生成一次分析。</p>;
+    return props.latestReleaseId ? <ReleaseNotesView slug={props.productSlug} releaseId={props.latestReleaseId} canEdit={Boolean(props.canEdit)} changelogHref={props.changelogHref} locale={props.locale} /> : <p className="overview-note">{pick(props.locale ?? "zh-CN", PRODUCT_TABS.noReleases)}</p>;
   }
   return <ProductWorkspace {...props} />;
 }

@@ -1,4 +1,6 @@
 import type { FeatureTreeItem } from "./feature-tree";
+import { pick, type LocaleEntry, type UiLocale } from "./ui-locale";
+import { SPEC_EDITOR } from "./ui-strings/product";
 import type { FeatureRow, ScenarioRow } from "./types";
 
 function textOrEmpty(value?: string) {
@@ -14,21 +16,21 @@ export function scenarioFormState(scenario?: ScenarioRow) {
   };
 }
 
-export function scenarioFormTitle(scenario?: ScenarioRow) {
-  return scenario ? `编辑场景 ${scenario.reference}` : "新建场景";
+export function scenarioFormTitle(scenario: ScenarioRow | undefined, locale: UiLocale = "zh-CN") {
+  return scenario ? pick(locale, SPEC_EDITOR.scenarioEditTitle).replace("{reference}", scenario.reference) : pick(locale, SPEC_EDITOR.scenarioNewTitle);
 }
 
 export function featureFormState(feature?: FeatureRow) {
   return { name: textOrEmpty(feature?.name), summary: textOrEmpty(feature?.summary) };
 }
 
-export function featureFormTitle(feature: FeatureRow | undefined, parentId: number | null) {
-  if (feature) return "编辑功能";
-  return parentId === null ? "新建顶级功能" : "新建子功能";
+export function featureFormTitle(feature: FeatureRow | undefined, parentId: number | null, locale: UiLocale = "zh-CN") {
+  if (feature) return pick(locale, SPEC_EDITOR.featureEditTitle);
+  return parentId === null ? pick(locale, SPEC_EDITOR.featureNewTopTitle) : pick(locale, SPEC_EDITOR.featureNewChildTitle);
 }
 
-export function editorSubmitLabel(pending: boolean, label: string) {
-  return pending ? "保存中…" : label;
+export function editorSubmitLabel(pending: boolean, label: string, locale: UiLocale = "zh-CN") {
+  return pending ? pick(locale, SPEC_EDITOR.saving) : label;
 }
 
 export function featureMatches(feature: FeatureTreeItem, query: string) {
@@ -61,10 +63,15 @@ export function featureHref(featureId: number, mode?: string) {
   return mode ? `?view=spec&feature=${featureId}&mode=${mode}` : `?view=spec&feature=${featureId}`;
 }
 
-const scenarioCategoryLabels: Record<string, string> = { happy: "正常路径", edge: "边界情况", error: "错误路径" };
+const scenarioCategoryEntries: Record<string, LocaleEntry> = {
+  happy: SPEC_EDITOR.categoryHappy,
+  edge: SPEC_EDITOR.categoryEdge,
+  error: SPEC_EDITOR.categoryError,
+};
 
-export function scenarioCategoryLabel(category: string) {
-  return scenarioCategoryLabels[category];
+export function scenarioCategoryLabel(category: string, locale: UiLocale = "zh-CN") {
+  const entry = scenarioCategoryEntries[category];
+  return entry ? pick(locale, entry) : undefined;
 }
 
 function editorParentId(editor: "root" | "child" | "edit" | null, feature?: FeatureRow) {
@@ -102,22 +109,33 @@ export function scenarioBeingEdited(editing: ScenarioRow | "new" | null | undefi
   return editing && editing !== "new" ? editing : undefined;
 }
 
-export function scenarioFilterLabel(category?: ScenarioRow["category"]) {
-  return category ? scenarioCategoryLabel(category) : "全部";
+export function scenarioFilterLabel(category: ScenarioRow["category"] | undefined, locale: UiLocale = "zh-CN") {
+  return category ? scenarioCategoryLabel(category, locale) : pick(locale, SPEC_EDITOR.filterAll);
 }
 
 export function scenarioFilterCount(scenarios: ScenarioRow[], category?: ScenarioRow["category"]) {
   return category ? scenarios.filter((scenario) => scenario.category === category).length : scenarios.length;
 }
 
-export function featureSourceLabel(source: "generated" | "manual") {
-  return source === "manual" ? "人工维护" : "代码生成";
+export function featureSourceLabel(source: "generated" | "manual", locale: UiLocale = "zh-CN") {
+  return source === "manual" ? pick(locale, SPEC_EDITOR.sourceManual) : pick(locale, SPEC_EDITOR.sourceGenerated);
 }
 
 // P1 核实状态：由 verified_at × stale_since 推导（不存状态列，见 docs/spec-verification-lifecycle-design.md）。
 export type VerificationState = "unverified" | "verified" | "stale-verified";
 
 export const verificationLabels: Record<VerificationState, string> = { unverified: "未核实", verified: "已核实", "stale-verified": "待重新核实" };
+
+const verificationEntries: Record<VerificationState, LocaleEntry> = {
+  unverified: SPEC_EDITOR.verificationUnverified,
+  verified: SPEC_EDITOR.verificationVerified,
+  "stale-verified": SPEC_EDITOR.verificationStale,
+};
+
+/** 按 locale 取核实状态标签（缺省 zh-CN 与 verificationLabels 一致）。 */
+export function verificationLabel(state: VerificationState, locale: UiLocale = "zh-CN") {
+  return pick(locale, verificationEntries[state]);
+}
 
 export function verificationState(item: { verifiedAt?: Date | string | null; staleSince?: Date | string | null }): VerificationState {
   if (!item.verifiedAt) return "unverified";

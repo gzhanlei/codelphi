@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { computeCoverageReceipt, enumerateImplementationSurface, isCoverageCapped, loadInheritedCoverageReceipt } from "../lib/analysis-coverage";
+import { createRemoteSourceIndex, type RemoteSourceBackend } from "../lib/remote-source-index";
 import type { AnalysisPartition, } from "../lib/remote-analysis";
 import type { OpenedRemoteSourceRevision, SourceTreeListing } from "../lib/remote-source-index";
 
@@ -89,6 +90,50 @@ describe("computeCoverageReceipt", () => {
     const receipt = computeCoverageReceipt({ index, partitions: [], maxPartitions: 6 });
     expect(receipt.implFilesAssembled).toBe(0);
     expect(receipt.coverageRatio).toBe(0);
+  });
+
+  it("skips pruned out-of-scope top-level directories instead of hitting the index scope guard (run 80)", async () => {
+    // run 80（uxplay-android）：source_roots=["app/src/main","uxplay/lib"]，仓库根还有 deps/、gradle/
+    // 等 scope 外目录。枚举 BFS 曾无条件 listDir 这些目录，索引 assertAllowed 抛
+    // path_outside_product_scope 使整个 run 失败——分母本应只含 scope 内实现面。
+    const trees = new Map<string, Array<{ path: string; type: "blob" | "tree"; sha: string; size?: number }>>([
+      ["", [
+        { path: "app", type: "tree", sha: "tree-app" },
+        { path: "deps", type: "tree", sha: "tree-deps" },
+        { path: "gradle", type: "tree", sha: "tree-gradle" },
+        { path: "LICENSE", type: "blob", sha: "blob-license", size: 1000 },
+      ]],
+      ["app", [{ path: "app/src", type: "tree", sha: "tree-app-src" }]],
+      ["app/src", [
+        { path: "app/src/main", type: "tree", sha: "tree-app-main" },
+        { path: "app/src/test", type: "tree", sha: "tree-app-test" },
+      ]],
+      ["app/src/main", [{ path: "app/src/main/MainActivity.kt", type: "blob", sha: "blob-main", size: 8000 }]],
+      ["app/src/test", [{ path: "app/src/test/MainTest.kt", type: "blob", sha: "blob-test", size: 2000 }]],
+    ]);
+    const backend: RemoteSourceBackend = {
+      kind: "github_api",
+      async resolveRevision() {
+        return { rootTreeSha: "tree-root" };
+      },
+      async listTree(_source, _treeSha, path) {
+        const entries = trees.get(path);
+        if (!entries) throw new Error(`unexpected tree path ${path}`);
+        return { entries, truncated: false };
+      },
+      async fetchBlob() {
+        throw new Error("metadata-level enumeration must not fetch blobs");
+      },
+    };
+    const index = await createRemoteSourceIndex(
+      { owner: "gzhanlei", repo: "uxplay-android", revision: "abc" },
+      { access: {}, scopeRoots: [{ path: "app/src/main" }], backend },
+    );
+    // 守卫确实会拒绝 scope 外目录（失败形态复现）
+    await expect(index.listDir("deps")).rejects.toThrow("path is outside product scope");
+    // 修复：枚举跳过 pruned 条目，只返回 scope 内实现面（测试文件不算实现面）
+    const surface = await enumerateImplementationSurface(index);
+    expect(surface).toEqual([{ path: "app/src/main/MainActivity.kt", size: 8000 }]);
   });
 });
 

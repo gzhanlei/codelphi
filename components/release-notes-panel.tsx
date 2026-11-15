@@ -1,6 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import type { UiLocale } from "@/lib/ui-locale";
+import { pick } from "@/lib/ui-locale";
+import { RELEASE_NOTES } from "@/lib/ui-strings/product";
 import type { ReleaseNoteBlockView, ReleaseNoteChange } from "@/lib/release-notes";
 import { errorMessage } from "@/lib/error-message";
 import {
@@ -13,28 +16,34 @@ import {
 import { EvidenceLinks } from "./evidence-links";
 import { useDemoGuard } from "./demo-mode";
 
-const statusLabels: Record<string, string> = { draft: "草稿", published: "已发布", unpublished: "已下线" };
-const kindLabels: Record<string, string> = { added: "新增", changed: "更新", removed: "移除" };
+const statusEntries: Record<string, typeof RELEASE_NOTES.statusDraft> = { draft: RELEASE_NOTES.statusDraft, published: RELEASE_NOTES.statusPublished, unpublished: RELEASE_NOTES.statusUnpublished };
+const kindEntries: Record<string, typeof RELEASE_NOTES.kindAdded> = { added: RELEASE_NOTES.kindAdded, changed: RELEASE_NOTES.kindChanged, removed: RELEASE_NOTES.kindRemoved };
 
-function blockTitle(block: { kind: string; featureName: string; scenarioReference: string; highlightType: string | null }) {
-  const kind = kindLabels[block.kind] ?? block.kind;
-  const subject = block.scenarioReference ? `${block.featureName} · ${block.scenarioReference}` : block.featureName;
-  return `${kind} · ${subject}${block.highlightType ? `（${block.highlightType}）` : ""}`;
+function statusLabel(status: string, locale: UiLocale) {
+  const entry = statusEntries[status];
+  return entry ? pick(locale, entry) : status;
 }
 
-function CandidatePicker({ candidates, selected, onToggle }: {
+function blockTitle(block: { kind: string; featureName: string; scenarioReference: string; highlightType: string | null }, locale: UiLocale) {
+  const kind = kindEntries[block.kind] ? pick(locale, kindEntries[block.kind]) : block.kind;
+  const subject = block.scenarioReference ? `${block.featureName} · ${block.scenarioReference}` : block.featureName;
+  return `${kind} · ${subject}${block.highlightType ? pick(locale, RELEASE_NOTES.highlightSuffix).replace("{type}", block.highlightType) : ""}`;
+}
+
+function CandidatePicker({ candidates, selected, onToggle, locale = "zh-CN" }: {
   candidates: ReleaseNoteChange[];
   selected: Set<number>;
   onToggle: (id: number) => void;
+  locale?: UiLocale;
 }) {
-  if (candidates.length === 0) return <p className="overview-note">本次发布没有行为变化，无可宣布项。</p>;
+  if (candidates.length === 0) return <p className="overview-note">{pick(locale, RELEASE_NOTES.noCandidates)}</p>;
   return (
     <div className="release-notes-pick">
       {candidates.map((candidate) => (
         <label className="release-notes-pick-item" key={candidate.id}>
           <input type="checkbox" checked={selected.has(candidate.id)} onChange={() => onToggle(candidate.id)} />
           <span>
-            <strong>{blockTitle(candidate)}</strong>
+            <strong>{blockTitle(candidate, locale)}</strong>
             <span className="release-notes-pick-summary">{candidate.summary}</span>
           </span>
         </label>
@@ -43,13 +52,14 @@ function CandidatePicker({ candidates, selected, onToggle }: {
   );
 }
 
-function BlockEditor({ slug, noteId, block, canEdit, onSave, onReset }: {
+function BlockEditor({ slug, noteId, block, canEdit, onSave, onReset, locale = "zh-CN" }: {
   slug: string;
   noteId: number;
   block: ReleaseNoteBlockView;
   canEdit: boolean;
   onSave: (position: number, summaryOverride: string) => void;
   onReset: (position: number) => void;
+  locale?: UiLocale;
 }) {
   const guard = useDemoGuard();
   const [value, setValue] = useState(block.summary);
@@ -67,11 +77,11 @@ function BlockEditor({ slug, noteId, block, canEdit, onSave, onReset }: {
         body: JSON.stringify({ position: block.position }),
       });
       const data = await response.json() as { suggestion?: string; error?: string };
-      if (!response.ok) throw new Error(data.error ?? "AI 改写失败");
+      if (!response.ok) throw new Error(data.error ?? pick(locale, RELEASE_NOTES.enhanceFailed));
       // 人在环：建议只替换文本框内容，失焦保存才落库
       setValue(data.suggestion ?? "");
     } catch (cause: unknown) {
-      setEnhanceError(errorMessage(cause, "AI 改写失败"));
+      setEnhanceError(errorMessage(cause, pick(locale, RELEASE_NOTES.enhanceFailed)));
     } finally {
       setEnhancing(false);
     }
@@ -80,15 +90,15 @@ function BlockEditor({ slug, noteId, block, canEdit, onSave, onReset }: {
   return (
     <div className="release-notes-block">
       <div className="release-notes-block-head">
-        <strong>{blockTitle(block)}</strong>
-        {block.overridden ? <span className="drift-badge">已人工改写 <button type="button" className="release-notes-reset" onClick={() => { setValue(block.summary); onReset(block.position); }}>还原原文</button></span> : null}
+        <strong>{blockTitle(block, locale)}</strong>
+        {block.overridden ? <span className="drift-badge">{pick(locale, RELEASE_NOTES.overriddenBadge)} <button type="button" className="release-notes-reset" onClick={() => { setValue(block.summary); onReset(block.position); }}>{pick(locale, RELEASE_NOTES.resetOriginal)}</button></span> : null}
       </div>
       {canEdit ? (
         <>
           <textarea
             className="release-notes-summary"
             value={value}
-            aria-label={`块文案：${blockTitle(block)}`}
+            aria-label={pick(locale, RELEASE_NOTES.blockAria).replace("{title}", blockTitle(block, locale))}
             maxLength={4000}
             onChange={(event) => setValue(event.target.value)}
             onBlur={() => {
@@ -96,7 +106,7 @@ function BlockEditor({ slug, noteId, block, canEdit, onSave, onReset }: {
             }}
           />
           <button className="text-button" type="button" disabled={enhancing} onClick={() => void enhance()}>
-            {enhancing ? "AI 改写中…" : "AI 润色（只改措辞，锚定与证据不变）"}
+            {enhancing ? pick(locale, RELEASE_NOTES.enhancing) : pick(locale, RELEASE_NOTES.enhance)}
           </button>
           {enhanceError ? <p className="description-dialog-error" role="alert">{enhanceError}</p> : null}
         </>
@@ -109,7 +119,7 @@ function BlockEditor({ slug, noteId, block, canEdit, onSave, onReset }: {
 }
 
 /** 发布稿动线（GTM 桥面批次 1）：勾选 → 生成草稿 → 块级校对 → 人工发布 → 公开链接/下线。 */
-export function ReleaseNotesPanel({ slug, releaseId, canEdit, changelogHref }: { slug: string; releaseId: number; canEdit: boolean; changelogHref?: string }) {
+export function ReleaseNotesPanel({ slug, releaseId, canEdit, changelogHref, locale = "zh-CN" }: { slug: string; releaseId: number; canEdit: boolean; changelogHref?: string; locale?: UiLocale }) {
   const guard = useDemoGuard();
   const [state, setState] = useState<ReleaseNoteState | null>(null);
   const [loadFailed, setLoadFailed] = useState<string | null>(null);
@@ -128,10 +138,10 @@ export function ReleaseNotesPanel({ slug, releaseId, canEdit, changelogHref }: {
       // 不自动全选：仅预勾选带 Highlight 分类（安全/定价等宣布信号）的变更，可随时调整。
       setSelected(new Set(data.candidates.filter((candidate) => candidate.highlightType).map((candidate) => candidate.id)));
     } catch (cause: unknown) {
-      const message = errorMessage(cause, "加载发布稿失败");
-      setLoadFailed(message === "未登录" ? "登录后可在工作区生成并发布本版的发布稿。" : message);
+      const message = errorMessage(cause, pick(locale, RELEASE_NOTES.loadFailed));
+      setLoadFailed(message === "未登录" ? pick(locale, RELEASE_NOTES.loginPromptPanel) : message);
     }
-  }, [slug, releaseId]);
+  }, [slug, releaseId, locale]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -144,13 +154,13 @@ export function ReleaseNotesPanel({ slug, releaseId, canEdit, changelogHref }: {
       await work();
       if (successNotice) setNotice(successNotice);
     } catch (cause: unknown) {
-      setError(errorMessage(cause, "操作失败"));
+      setError(errorMessage(cause, pick(locale, RELEASE_NOTES.operationFailed)));
     } finally {
       setPending(false);
     }
   };
 
-  if (loadFailed) return <p className="overview-note">发布稿：{loadFailed}</p>;
+  if (loadFailed) return <p className="overview-note">{pick(locale, RELEASE_NOTES.loadFailedPrefix).replace("{error}", loadFailed)}</p>;
   if (!state) return null;
   const note = state.note;
 
@@ -182,33 +192,33 @@ export function ReleaseNotesPanel({ slug, releaseId, canEdit, changelogHref }: {
       if (!note) return;
       await saveNoteEdits(slug, note.id, { emphasis });
       await load();
-    }, "强调语已保存");
+    }, pick(locale, RELEASE_NOTES.noticeEmphasisSaved));
 
   const generate = () =>
     act(async () => {
       await generateDraft(slug, releaseId, [...selected], "");
       await load();
       setPicking(false);
-    }, "发布稿草稿已生成，逐块校对后发布");
+    }, pick(locale, RELEASE_NOTES.noticeDraftGeneratedPanel));
 
   const publish = () =>
     act(async () => {
       if (!note) return;
       await setNoteStatus(slug, note.id, "publish");
       await load();
-    }, "已发布，公开链接可分享");
+    }, pick(locale, RELEASE_NOTES.noticePublished));
 
   const unpublish = () =>
     act(async () => {
       if (!note) return;
       await setNoteStatus(slug, note.id, "unpublish");
       await load();
-    }, "已下线，公开链接不再展示");
+    }, pick(locale, RELEASE_NOTES.noticeUnpublished));
 
   const copyLink = (url: string) =>
     act(async () => {
       await navigator.clipboard.writeText(url);
-    }, "公开链接已复制");
+    }, pick(locale, RELEASE_NOTES.noticeCopied));
 
   const editable = canEdit && note !== null && note.status !== "published";
   const published = note?.status === "published";
@@ -216,23 +226,23 @@ export function ReleaseNotesPanel({ slug, releaseId, canEdit, changelogHref }: {
   return (
     <div className="behavior-section release-notes-section">
       <h3>
-        发布稿（客户向）
-        {note ? <span className={`release-notes-status ${note.status}`}>{statusLabels[note.status] ?? note.status}</span> : null}
+        {pick(locale, RELEASE_NOTES.panelHeading)}
+        {note ? <span className={`release-notes-status ${note.status}`}>{statusLabel(note.status, locale)}</span> : null}
         {published && note?.publicUrl ? (
-          <a className="overview-text-link" href={note.publicUrl} target="_blank" rel="noreferrer">公开页 ↗</a>
+          <a className="overview-text-link" href={note.publicUrl} target="_blank" rel="noreferrer">{pick(locale, RELEASE_NOTES.publicPage)}</a>
         ) : null}
-        {changelogHref ? <a className="overview-text-link" href={changelogHref} target="_blank" rel="noreferrer">公开变更日志 ↗</a> : null}
+        {changelogHref ? <a className="overview-text-link" href={changelogHref} target="_blank" rel="noreferrer">{pick(locale, RELEASE_NOTES.changelog)}</a> : null}
         {note ? (
-          <a className="overview-text-link" href={`/api/products/${slug}/releases/${releaseId}/release-notes/markdown`}>导出 Markdown ↓</a>
+          <a className="overview-text-link" href={`/api/products/${slug}/releases/${releaseId}/release-notes/markdown`}>{pick(locale, RELEASE_NOTES.exportMarkdown)}</a>
         ) : null}
       </h3>
       {note === null ? (
         <>
-          <p className="overview-note">勾选要宣布的变更（不自动全选），生成客户向发布稿草稿；每条都锚定规格变更并附证据。</p>
-          <CandidatePicker candidates={state.candidates} selected={selected} onToggle={toggle} />
+          <p className="overview-note">{pick(locale, RELEASE_NOTES.pickPromptPanel)}</p>
+          <CandidatePicker candidates={state.candidates} selected={selected} onToggle={toggle} locale={locale} />
           {canEdit ? (
             <button className="secondary-button" type="button" disabled={pending || selected.size === 0} onClick={generate}>
-              生成发布稿{selected.size > 0 ? `（已选 ${selected.size} 条）` : ""}
+              {pick(locale, RELEASE_NOTES.generate)}{selected.size > 0 ? pick(locale, RELEASE_NOTES.generateSelected).replace("{count}", String(selected.size)) : ""}
             </button>
           ) : null}
         </>
@@ -240,12 +250,12 @@ export function ReleaseNotesPanel({ slug, releaseId, canEdit, changelogHref }: {
         <>
           {note.emphasis || editable ? (
             <div className="release-notes-emphasis">
-              <label htmlFor={`release-notes-emphasis-${releaseId}`}>重点强调（可选）</label>
+              <label htmlFor={`release-notes-emphasis-${releaseId}`}>{pick(locale, RELEASE_NOTES.emphasisLabel)}</label>
               <input
                 id={`release-notes-emphasis-${releaseId}`}
                 defaultValue={note.emphasis}
                 readOnly={!editable || pending}
-                placeholder="一句话强调本次发布的重点"
+                placeholder={pick(locale, RELEASE_NOTES.emphasisPlaceholder)}
                 onBlur={(event) => {
                   if (event.target.value !== note.emphasis) saveEmphasis(event.target.value);
                 }}
@@ -254,11 +264,11 @@ export function ReleaseNotesPanel({ slug, releaseId, canEdit, changelogHref }: {
           ) : null}
           {picking && editable ? (
             <>
-              <p className="overview-note">调整勾选后重新生成（覆盖当前草稿与块级改写）：</p>
-              <CandidatePicker candidates={state.candidates} selected={selected} onToggle={toggle} />
+              <p className="overview-note">{pick(locale, RELEASE_NOTES.regeneratePrompt)}</p>
+              <CandidatePicker candidates={state.candidates} selected={selected} onToggle={toggle} locale={locale} />
               <div className="release-notes-actions">
-                <button className="secondary-button" type="button" disabled={pending || selected.size === 0} onClick={generate}>按勾选重新生成</button>
-                <button className="secondary-button" type="button" onClick={() => setPicking(false)}>取消</button>
+                <button className="secondary-button" type="button" disabled={pending || selected.size === 0} onClick={generate}>{pick(locale, RELEASE_NOTES.regenerate)}</button>
+                <button className="secondary-button" type="button" onClick={() => setPicking(false)}>{pick(locale, RELEASE_NOTES.cancel)}</button>
               </div>
             </>
           ) : (
@@ -267,7 +277,7 @@ export function ReleaseNotesPanel({ slug, releaseId, canEdit, changelogHref }: {
               <div className="release-notes-feature" key={featureName}>
                 <h4 className="release-notes-feature-name">{featureName}</h4>
                 {state.blocks.filter((block) => block.featureName === featureName).map((block) => (
-                  <BlockEditor key={block.position} slug={slug} noteId={note.id} block={block} canEdit={editable} onSave={saveBlock} onReset={resetBlock} />
+                  <BlockEditor key={block.position} slug={slug} noteId={note.id} block={block} canEdit={editable} onSave={saveBlock} onReset={resetBlock} locale={locale} />
                 ))}
               </div>
             ))
@@ -275,14 +285,14 @@ export function ReleaseNotesPanel({ slug, releaseId, canEdit, changelogHref }: {
           <div className="release-notes-actions">
             {editable && !picking ? (
               <>
-                <button className="primary-button" type="button" disabled={pending} onClick={publish}>{note.status === "unpublished" ? "重新发布" : "发布"}</button>
-                <button className="secondary-button" type="button" disabled={pending} onClick={() => setPicking(true)}>调整勾选</button>
+                <button className="primary-button" type="button" disabled={pending} onClick={publish}>{note.status === "unpublished" ? pick(locale, RELEASE_NOTES.republish) : pick(locale, RELEASE_NOTES.publish)}</button>
+                <button className="secondary-button" type="button" disabled={pending} onClick={() => setPicking(true)}>{pick(locale, RELEASE_NOTES.adjustSelection)}</button>
               </>
             ) : null}
-            {published && note.publicUrl ? <button className="secondary-button" type="button" disabled={pending} onClick={() => copyLink(note.publicUrl ?? "")}>复制公开链接</button> : null}
-            {published && canEdit ? <button className="secondary-button" type="button" disabled={pending} onClick={unpublish}>下线</button> : null}
+            {published && note.publicUrl ? <button className="secondary-button" type="button" disabled={pending} onClick={() => copyLink(note.publicUrl ?? "")}>{pick(locale, RELEASE_NOTES.copyLink)}</button> : null}
+            {published && canEdit ? <button className="secondary-button" type="button" disabled={pending} onClick={unpublish}>{pick(locale, RELEASE_NOTES.unpublish)}</button> : null}
           </div>
-          {published ? <p className="overview-note">已发布只读：先下线才能修改或重新生成；公开页对匿名可见，证据仅展示路径。</p> : null}
+          {published ? <p className="overview-note">{pick(locale, RELEASE_NOTES.publishedNote)}</p> : null}
         </>
       )}
       {notice ? <p className="description-dialog-error release-notes-notice" role="status">{notice}</p> : null}

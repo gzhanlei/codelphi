@@ -1,4 +1,6 @@
 import { formatDateIn } from "./format";
+import { pick, type UiLocale } from "./ui-locale";
+import { OVERVIEW_DATA } from "./ui-strings/product";
 import { evidenceItems, isTestOnlyEvidence } from "./evidence";
 import { coverageByteLabel, coverageFilesLabel } from "./coverage-display";
 import type { RegressionTaskView } from "./regression-task-view";
@@ -25,16 +27,21 @@ interface ProductOverviewInput {
   coverage?: { coverageRatio: number; implFilesAssembled: number; implFilesTotal: number; partitionsCapped: boolean } | null;
 }
 
-function analysisLabel(status?: string) {
-  if (!status) return "尚无分析记录";
-  const label = { succeeded: "最近分析成功", failed: "最近分析失败", running: "正在分析", queued: "等待分析" }[status];
-  return label === undefined ? `分析状态：${status}` : label;
+function analysisLabel(status: string | undefined, locale: UiLocale = "zh-CN") {
+  if (!status) return pick(locale, OVERVIEW_DATA.analysisNone);
+  const label = {
+    succeeded: OVERVIEW_DATA.analysisSucceeded,
+    failed: OVERVIEW_DATA.analysisFailed,
+    running: OVERVIEW_DATA.analysisRunning,
+    queued: OVERVIEW_DATA.analysisQueued,
+  }[status];
+  return label === undefined ? `${pick(locale, OVERVIEW_DATA.analysisStatus)}${status}` : pick(locale, label);
 }
 
-function specLabel(specVersionId: number | null, sha?: string, committedAt?: Date) {
-  if (specVersionId === null) return "尚未生成规格";
+function specLabel(specVersionId: number | null, sha?: string, committedAt?: Date, locale: UiLocale = "zh-CN") {
+  if (specVersionId === null) return pick(locale, OVERVIEW_DATA.specNone);
   const shaPart = sha ? ` · ${sha.slice(0, 7)}` : "";
-  const timePart = committedAt ? ` · 更新 ${dayLabel(committedAt)}` : "";
+  const timePart = committedAt ? `${pick(locale, OVERVIEW_DATA.specUpdated)}${dayLabel(committedAt)}` : "";
   return `Spec v${specVersionId}${shaPart}${timePart}`;
 }
 
@@ -61,10 +68,10 @@ function changeIsTestOnly(change: BehaviorChangeRow): boolean {
 }
 
 /** 总览 02 面板的按功能聚合视图：大发布逐条列出会淹没在场景编号里，先给功能级摘要。 */
-function groupChangesByFeature(changes: Array<{ kind: string; featureName: string }>) {
+function groupChangesByFeature(changes: Array<{ kind: string; featureName: string }>, locale: UiLocale = "zh-CN") {
   const groups = new Map<string, { featureName: string; added: number; removed: number; changed: number }>();
   for (const change of changes) {
-    const featureName = change.featureName || "未知功能";
+    const featureName = change.featureName || pick(locale, OVERVIEW_DATA.unknownFeature);
     const group = groups.get(featureName) ?? { featureName, added: 0, removed: 0, changed: 0 };
     if (change.kind === "added") group.added += 1;
     else if (change.kind === "removed") group.removed += 1;
@@ -74,12 +81,12 @@ function groupChangesByFeature(changes: Array<{ kind: string; featureName: strin
   return [...groups.values()].sort((a, b) => (b.added + b.removed + b.changed) - (a.added + a.removed + a.changed) || a.featureName.localeCompare(b.featureName));
 }
 
-export function changeGroupLabel(group: { added: number; removed: number; changed: number }) {
+export function changeGroupLabel(group: { added: number; removed: number; changed: number }, locale: UiLocale = "zh-CN") {
   const parts = [];
-  if (group.added > 0) parts.push(`新增 ${group.added}`);
-  if (group.removed > 0) parts.push(`移除 ${group.removed}`);
-  if (group.changed > 0) parts.push(`更新 ${group.changed}`);
-  return parts.join(" · ") || "无行为变化";
+  if (group.added > 0) parts.push(pick(locale, OVERVIEW_DATA.groupAdded).replace("{count}", String(group.added)));
+  if (group.removed > 0) parts.push(pick(locale, OVERVIEW_DATA.groupRemoved).replace("{count}", String(group.removed)));
+  if (group.changed > 0) parts.push(pick(locale, OVERVIEW_DATA.groupChanged).replace("{count}", String(group.changed)));
+  return parts.join(" · ") || pick(locale, OVERVIEW_DATA.groupNone);
 }
 
 /**
@@ -157,15 +164,15 @@ export type TimelineGroup = { kind: "single"; release: TimelineEntry } | { kind:
  * 数据缺失时给出真实禁用原因，不产生指向不存在数据的链接；
  * 任务文案优先于角色标签。
  */
-function buildTaskEntries(input: ProductOverviewInput, latestRelease: ReleaseRow | undefined) {
+function buildTaskEntries(input: ProductOverviewInput, latestRelease: ReleaseRow | undefined, locale: UiLocale = "zh-CN") {
   const hasFeatures = input.features.length > 0;
   const latestRegressionTasks = latestRelease ? (input.regressionTasks ?? []).some((task) => task.releaseId === latestRelease.id) : false;
   const changesHref = latestRelease ? `${input.productBase}?view=changes#release-${latestRelease.id}` : null;
   return [
-    { key: "capability", question: "这个产品现在能做什么？", href: hasFeatures ? `${input.productBase}?view=spec` : null, disabledReason: hasFeatures ? null : "尚无功能规格" },
-    { key: "release-impact", question: "这次发布改变了什么？", href: changesHref, disabledReason: latestRelease ? null : "尚无发布" },
-    { key: "regression", question: "这次建议重新验证什么？", href: latestRegressionTasks ? changesHref : null, disabledReason: latestRelease ? (latestRegressionTasks ? null : "最新发布暂无回归建议") : "尚无发布" },
-    { key: "traceable-changes", question: "最近有哪些可追溯的变化？", href: input.releases.length > 0 ? `${input.productBase}?view=changes` : null, disabledReason: input.releases.length > 0 ? null : "尚无发布" },
+    { key: "capability", question: pick(locale, OVERVIEW_DATA.taskCapabilityQuestion), href: hasFeatures ? `${input.productBase}?view=spec` : null, disabledReason: hasFeatures ? null : pick(locale, OVERVIEW_DATA.taskDisabledNoSpec) },
+    { key: "release-impact", question: pick(locale, OVERVIEW_DATA.taskReleaseImpactQuestion), href: changesHref, disabledReason: latestRelease ? null : pick(locale, OVERVIEW_DATA.taskDisabledNoRelease) },
+    { key: "regression", question: pick(locale, OVERVIEW_DATA.taskRegressionQuestion), href: latestRegressionTasks ? changesHref : null, disabledReason: latestRelease ? (latestRegressionTasks ? null : pick(locale, OVERVIEW_DATA.taskDisabledNoRegression)) : pick(locale, OVERVIEW_DATA.taskDisabledNoRelease) },
+    { key: "traceable-changes", question: pick(locale, OVERVIEW_DATA.taskTraceableQuestion), href: input.releases.length > 0 ? `${input.productBase}?view=changes` : null, disabledReason: input.releases.length > 0 ? null : pick(locale, OVERVIEW_DATA.taskDisabledNoRelease) },
   ];
 }
 
@@ -182,7 +189,7 @@ export function buildProductOverview(input: ProductOverviewInput, locale: "zh-CN
   };
   // BM-6/B2：发布稿勾选与影响投影用实现证据口径；changeStats/发布变化视图保持全量。
   const userVisibleChanges = latestChanges.filter((change) => !changeIsTestOnly(change));
-  const changeGroups = groupChangesByFeature(userVisibleChanges);
+  const changeGroups = groupChangesByFeature(userVisibleChanges, locale);
   const changedReleaseIds = new Set(input.behaviorChanges.map((change) => change.releaseId));
   const entries: TimelineEntry[] = input.releases.map((release) => {
     const note = input.releaseNotes?.find((candidate) => candidate.releaseId === release.id);
@@ -219,19 +226,19 @@ export function buildProductOverview(input: ProductOverviewInput, locale: "zh-CN
     const group = timelineGroups[index];
     if (group.kind === "quiet-run" && group.count === 1) timelineGroups[index] = { kind: "single", release: group.releases[0] };
   }
-  const coverageByte = input.coverage ? coverageByteLabel(input.coverage) : null;
-  const coverageFiles = input.coverage ? coverageFilesLabel(input.coverage) : null;
+  const coverageByte = input.coverage ? coverageByteLabel(input.coverage, locale) : null;
+  const coverageFiles = input.coverage ? coverageFilesLabel(input.coverage, locale) : null;
   const userImpact = buildUserImpact(input, latestRelease, latestChanges, changeStats, locale);
 
   return {
     slug: input.product.slug,
     productBase: input.productBase,
     description: input.product.description,
-    headline: input.product.description.trim() || "产品概览",
+    headline: input.product.description.trim() || pick(locale, OVERVIEW_DATA.headlineFallback),
     headlineSource: input.product.descriptionSource === undefined ? "manual" : input.product.descriptionSource,
     headlineEvidence: evidenceItems(input.product.descriptionEvidence),
-    freshness: specLabel(specVersionId, revision, latestRelease?.committedAt),
-    analysisLabel: analysisLabel(input.latestRun ? input.latestRun.status : undefined),
+    freshness: specLabel(specVersionId, revision, latestRelease?.committedAt, locale),
+    analysisLabel: analysisLabel(input.latestRun ? input.latestRun.status : undefined, locale),
     capabilities: input.features.map((feature) => ({
       id: feature.id,
       name: feature.name,
@@ -246,7 +253,7 @@ export function buildProductOverview(input: ProductOverviewInput, locale: "zh-CN
     changeStats,
     changeGroups,
     userImpact,
-    taskEntries: buildTaskEntries(input, latestRelease),
+    taskEntries: buildTaskEntries(input, latestRelease, locale),
     latestRelease,
     latestReleaseNote: input.latestReleaseNote ?? null,
     noteByRelease: Object.fromEntries((input.releaseNotes ?? []).map((note) => [String(note.releaseId), { status: note.status, headline: note.headline }])),

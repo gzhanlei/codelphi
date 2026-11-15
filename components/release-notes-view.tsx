@@ -1,6 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import type { UiLocale } from "@/lib/ui-locale";
+import { pick } from "@/lib/ui-locale";
+import { RELEASE_NOTES } from "@/lib/ui-strings/product";
 import { errorMessage } from "@/lib/error-message";
 import {
   generateDraft,
@@ -12,28 +15,34 @@ import {
 import { EvidenceLinks } from "./evidence-links";
 import { useDemoGuard } from "./demo-mode";
 
-const statusLabels: Record<string, string> = { draft: "草稿", published: "已发布", unpublished: "已下线" };
-const kindLabels: Record<string, string> = { added: "新增", changed: "更新", removed: "移除" };
+const statusEntries: Record<string, typeof RELEASE_NOTES.statusDraft> = { draft: RELEASE_NOTES.statusDraft, published: RELEASE_NOTES.statusPublished, unpublished: RELEASE_NOTES.statusUnpublished };
+const kindEntries: Record<string, typeof RELEASE_NOTES.kindAdded> = { added: RELEASE_NOTES.kindAdded, changed: RELEASE_NOTES.kindChanged, removed: RELEASE_NOTES.kindRemoved };
 
-function blockTitle(block: { kind: string; featureName: string; scenarioReference: string; highlightType: string | null }) {
-  const kind = kindLabels[block.kind] ?? block.kind;
-  const subject = block.scenarioReference ? `${block.featureName} · ${block.scenarioReference}` : block.featureName;
-  return `${kind} · ${subject}${block.highlightType ? `（${block.highlightType}）` : ""}`;
+function statusLabel(status: string, locale: UiLocale) {
+  const entry = statusEntries[status];
+  return entry ? pick(locale, entry) : status;
 }
 
-function CandidatePicker({ candidates, selected, onToggle }: {
+function blockTitle(block: { kind: string; featureName: string; scenarioReference: string; highlightType: string | null }, locale: UiLocale) {
+  const kind = kindEntries[block.kind] ? pick(locale, kindEntries[block.kind]) : block.kind;
+  const subject = block.scenarioReference ? `${block.featureName} · ${block.scenarioReference}` : block.featureName;
+  return `${kind} · ${subject}${block.highlightType ? pick(locale, RELEASE_NOTES.highlightSuffix).replace("{type}", block.highlightType) : ""}`;
+}
+
+function CandidatePicker({ candidates, selected, onToggle, locale = "zh-CN" }: {
   candidates: Array<{ id: number; kind: string; featureName: string; scenarioReference: string; summary: string; highlightType: string | null }>;
   selected: Set<number>;
   onToggle: (id: number) => void;
+  locale?: UiLocale;
 }) {
-  if (candidates.length === 0) return <p className="overview-note">本次发布没有行为变化，无可宣布项。</p>;
+  if (candidates.length === 0) return <p className="overview-note">{pick(locale, RELEASE_NOTES.noCandidates)}</p>;
   return (
     <div className="release-notes-pick">
       {candidates.map((candidate) => (
         <label className="release-notes-pick-item" key={candidate.id}>
           <input type="checkbox" checked={selected.has(candidate.id)} onChange={() => onToggle(candidate.id)} />
           <span>
-            <strong>{blockTitle(candidate)}</strong>
+            <strong>{blockTitle(candidate, locale)}</strong>
             <span className="release-notes-pick-summary">{candidate.summary}</span>
           </span>
         </label>
@@ -42,25 +51,26 @@ function CandidatePicker({ candidates, selected, onToggle }: {
   );
 }
 
-function BlockRow({ block, canEdit, onSave, onReset }: {
+function BlockRow({ block, canEdit, onSave, onReset, locale = "zh-CN" }: {
   block: ReleaseNoteState["blocks"][number];
   canEdit: boolean;
   onSave: (position: number, summaryOverride: string) => void;
   onReset: (position: number) => void;
+  locale?: UiLocale;
 }) {
   const [value, setValue] = useState(block.summary);
   useEffect(() => setValue(block.summary), [block.summary]);
   return (
     <div className="release-notes-block">
       <div className="release-notes-block-head">
-        <strong>{blockTitle(block)}</strong>
-        {block.overridden ? <span className="drift-badge">已人工改写 <button type="button" className="release-notes-reset" onClick={() => { setValue(block.summary); onReset(block.position); }}>还原原文</button></span> : null}
+        <strong>{blockTitle(block, locale)}</strong>
+        {block.overridden ? <span className="drift-badge">{pick(locale, RELEASE_NOTES.overriddenBadge)} <button type="button" className="release-notes-reset" onClick={() => { setValue(block.summary); onReset(block.position); }}>{pick(locale, RELEASE_NOTES.resetOriginal)}</button></span> : null}
       </div>
       {canEdit ? (
         <textarea
           className="release-notes-summary"
           value={value}
-          aria-label={`块文案：${blockTitle(block)}`}
+          aria-label={pick(locale, RELEASE_NOTES.blockAria).replace("{title}", blockTitle(block, locale))}
           maxLength={4000}
           onChange={(event) => setValue(event.target.value)}
           onBlur={() => {
@@ -76,11 +86,12 @@ function BlockRow({ block, canEdit, onSave, onReset }: {
 }
 
 /** 发布稿一级视图（?view=notes，Specsight 的 Release notes tab 对位）：草稿校对与发布都在这里，全宽。 */
-export function ReleaseNotesView({ slug, releaseId, canEdit, changelogHref }: {
+export function ReleaseNotesView({ slug, releaseId, canEdit, changelogHref, locale = "zh-CN" }: {
   slug: string;
   releaseId: number;
   canEdit: boolean;
   changelogHref?: string;
+  locale?: UiLocale;
 }) {
   const guard = useDemoGuard();
   const [state, setState] = useState<ReleaseNoteState | null>(null);
@@ -100,10 +111,10 @@ export function ReleaseNotesView({ slug, releaseId, canEdit, changelogHref }: {
       // 不自动全选：仅预勾选带 Highlight 分类的变更，可随时调整
       setSelected(new Set(data.candidates.filter((candidate) => candidate.highlightType).map((candidate) => candidate.id)));
     } catch (cause: unknown) {
-      const message = errorMessage(cause, "加载发布稿失败");
-      setLoadFailed(message === "未登录" ? "登录后可在工作区生成并发布发布稿。" : message);
+      const message = errorMessage(cause, pick(locale, RELEASE_NOTES.loadFailed));
+      setLoadFailed(message === "未登录" ? pick(locale, RELEASE_NOTES.loginPrompt) : message);
     }
-  }, [slug, releaseId]);
+  }, [slug, releaseId, locale]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -116,13 +127,13 @@ export function ReleaseNotesView({ slug, releaseId, canEdit, changelogHref }: {
       await work();
       if (successNotice) setNotice(successNotice);
     } catch (cause: unknown) {
-      setError(errorMessage(cause, "操作失败"));
+      setError(errorMessage(cause, pick(locale, RELEASE_NOTES.operationFailed)));
     } finally {
       setPending(false);
     }
   };
 
-  if (loadFailed) return <p className="overview-note">发布稿：{loadFailed}</p>;
+  if (loadFailed) return <p className="overview-note">{pick(locale, RELEASE_NOTES.loadFailedPrefix).replace("{error}", loadFailed)}</p>;
   if (!state) return null;
   const note = state.note;
   const editable = canEdit && note !== null && note.status !== "published";
@@ -156,33 +167,33 @@ export function ReleaseNotesView({ slug, releaseId, canEdit, changelogHref }: {
       if (!note) return;
       await saveNoteEdits(slug, note.id, { emphasis });
       await load();
-    }, "强调语已保存");
+    }, pick(locale, RELEASE_NOTES.noticeEmphasisSaved));
 
   const generate = () =>
     act(async () => {
       await generateDraft(slug, releaseId, [...selected], "");
       await load();
       setPicking(false);
-    }, "发布稿草稿已生成");
+    }, pick(locale, RELEASE_NOTES.noticeDraftGenerated));
 
   const publish = () =>
     act(async () => {
       if (!note) return;
       await setNoteStatus(slug, note.id, "publish");
       await load();
-    }, "已发布，公开链接可分享");
+    }, pick(locale, RELEASE_NOTES.noticePublished));
 
   const unpublish = () =>
     act(async () => {
       if (!note) return;
       await setNoteStatus(slug, note.id, "unpublish");
       await load();
-    }, "已下线，公开链接不再展示");
+    }, pick(locale, RELEASE_NOTES.noticeUnpublished));
 
   const copyLink = (url: string) =>
     act(async () => {
       await navigator.clipboard.writeText(url);
-    }, "公开链接已复制");
+    }, pick(locale, RELEASE_NOTES.noticeCopied));
 
   // 按功能分组展示（合并发布：一次发布跨多功能）
   const featureOrder = [...new Set(state.blocks.map((block) => block.featureName))];
@@ -190,16 +201,16 @@ export function ReleaseNotesView({ slug, releaseId, canEdit, changelogHref }: {
   return (
     <div className="release-notes-view">
       <div className="page-heading">
-        <div><span className="eyebrow">RELEASE NOTES</span><h1>发布稿</h1><p>最新一次发布（release #{releaseId}）的客户向说明。每块锚定规格变更与证据，人工校对并发布后生成公开页。</p></div>
-        {published && note?.publicUrl ? <div className="page-actions"><a className="primary-button" href={note.publicUrl} target="_blank" rel="noreferrer">公开页 ↗</a></div> : null}
+        <div><span className="eyebrow">RELEASE NOTES</span><h1>{pick(locale, RELEASE_NOTES.heading)}</h1><p>{pick(locale, RELEASE_NOTES.headingDescription).replace("{id}", String(releaseId))}</p></div>
+        {published && note?.publicUrl ? <div className="page-actions"><a className="primary-button" href={note.publicUrl} target="_blank" rel="noreferrer">{pick(locale, RELEASE_NOTES.publicPage)}</a></div> : null}
       </div>
       {note === null ? (
         <>
-          <p className="overview-note">勾选本次发布要宣布的变更（不自动全选），生成发布稿草稿。</p>
-          <CandidatePicker candidates={state.candidates} selected={selected} onToggle={toggle} />
+          <p className="overview-note">{pick(locale, RELEASE_NOTES.pickPrompt)}</p>
+          <CandidatePicker candidates={state.candidates} selected={selected} onToggle={toggle} locale={locale} />
           {canEdit ? (
             <button className="primary-button" type="button" disabled={pending || selected.size === 0} onClick={generate}>
-              生成发布稿{selected.size > 0 ? `（已选 ${selected.size} 条）` : ""}
+              {pick(locale, RELEASE_NOTES.generate)}{selected.size > 0 ? pick(locale, RELEASE_NOTES.generateSelected).replace("{count}", String(selected.size)) : ""}
             </button>
           ) : null}
         </>
@@ -207,29 +218,29 @@ export function ReleaseNotesView({ slug, releaseId, canEdit, changelogHref }: {
         <>
           {editable ? (
             <div className="release-notes-emphasis">
-              <label htmlFor={`notes-headline-${releaseId}`}>公告标题（发布稿的 H1，AI 合成后可修改）</label>
+              <label htmlFor={`notes-headline-${releaseId}`}>{pick(locale, RELEASE_NOTES.headlineLabel)}</label>
               <input
                 id={`notes-headline-${releaseId}`}
                 defaultValue={note.headline ?? ""}
                 readOnly={!editable || pending}
-                placeholder="一句话公告标题，如：一条命令连接产品规格与 AI 助手"
+                placeholder={pick(locale, RELEASE_NOTES.headlinePlaceholder)}
                 onBlur={(event) => {
                   if (event.target.value !== (note.headline ?? "")) act(async () => {
                     await saveNoteEdits(slug, note.id, { headline: event.target.value });
                     await load();
-                  }, "标题已保存");
+                  }, pick(locale, RELEASE_NOTES.noticeHeadlineSaved));
                 }}
               />
             </div>
           ) : note.headline ? <h2 className="notes-headline">{note.headline}</h2> : null}
           {note.emphasis || editable ? (
             <div className="release-notes-emphasis">
-              <label htmlFor={`notes-emphasis-${releaseId}`}>重点强调（可选）</label>
+              <label htmlFor={`notes-emphasis-${releaseId}`}>{pick(locale, RELEASE_NOTES.emphasisLabel)}</label>
               <input
                 id={`notes-emphasis-${releaseId}`}
                 defaultValue={note.emphasis}
                 readOnly={!editable || pending}
-                placeholder="一句话强调本次发布的重点"
+                placeholder={pick(locale, RELEASE_NOTES.emphasisPlaceholder)}
                 onBlur={(event) => {
                   if (event.target.value !== note.emphasis) saveEmphasis(event.target.value);
                 }}
@@ -238,11 +249,11 @@ export function ReleaseNotesView({ slug, releaseId, canEdit, changelogHref }: {
           ) : null}
           {picking && editable ? (
             <>
-              <p className="overview-note">调整勾选后重新生成（覆盖当前草稿与块级改写）：</p>
-              <CandidatePicker candidates={state.candidates} selected={selected} onToggle={toggle} />
+              <p className="overview-note">{pick(locale, RELEASE_NOTES.regeneratePrompt)}</p>
+              <CandidatePicker candidates={state.candidates} selected={selected} onToggle={toggle} locale={locale} />
               <div className="release-notes-actions">
-                <button className="primary-button" type="button" disabled={pending || selected.size === 0} onClick={generate}>按勾选重新生成</button>
-                <button className="secondary-button" type="button" onClick={() => setPicking(false)}>取消</button>
+                <button className="primary-button" type="button" disabled={pending || selected.size === 0} onClick={generate}>{pick(locale, RELEASE_NOTES.regenerate)}</button>
+                <button className="secondary-button" type="button" onClick={() => setPicking(false)}>{pick(locale, RELEASE_NOTES.cancel)}</button>
               </div>
             </>
           ) : (
@@ -250,7 +261,7 @@ export function ReleaseNotesView({ slug, releaseId, canEdit, changelogHref }: {
               <div className="release-notes-feature" key={featureName}>
                 <h4 className="release-notes-feature-name">{featureName}</h4>
                 {state.blocks.filter((block) => block.featureName === featureName).map((block) => (
-                  <BlockRow key={block.position} block={block} canEdit={editable} onSave={saveBlock} onReset={resetBlock} />
+                  <BlockRow key={block.position} block={block} canEdit={editable} onSave={saveBlock} onReset={resetBlock} locale={locale} />
                 ))}
               </div>
             ))
@@ -258,17 +269,17 @@ export function ReleaseNotesView({ slug, releaseId, canEdit, changelogHref }: {
           <div className="release-notes-actions">
             {editable && !picking ? (
               <>
-                <button className="primary-button" type="button" disabled={pending} onClick={publish}>{note.status === "unpublished" ? "重新发布" : "发布"}</button>
-                <button className="secondary-button" type="button" disabled={pending} onClick={() => setPicking(true)}>调整勾选</button>
+                <button className="primary-button" type="button" disabled={pending} onClick={publish}>{note.status === "unpublished" ? pick(locale, RELEASE_NOTES.republish) : pick(locale, RELEASE_NOTES.publish)}</button>
+                <button className="secondary-button" type="button" disabled={pending} onClick={() => setPicking(true)}>{pick(locale, RELEASE_NOTES.adjustSelection)}</button>
               </>
             ) : null}
-            {published && note.publicUrl ? <button className="secondary-button" type="button" disabled={pending} onClick={() => copyLink(note.publicUrl ?? "")}>复制公开链接</button> : null}
-            {published && canEdit ? <button className="secondary-button" type="button" disabled={pending} onClick={unpublish}>下线</button> : null}
+            {published && note.publicUrl ? <button className="secondary-button" type="button" disabled={pending} onClick={() => copyLink(note.publicUrl ?? "")}>{pick(locale, RELEASE_NOTES.copyLink)}</button> : null}
+            {published && canEdit ? <button className="secondary-button" type="button" disabled={pending} onClick={unpublish}>{pick(locale, RELEASE_NOTES.unpublish)}</button> : null}
           </div>
-          {published ? <p className="overview-note">已发布只读：先下线才能修改或重新生成；公开页对匿名可见，证据仅展示路径。</p> : null}
+          {published ? <p className="overview-note">{pick(locale, RELEASE_NOTES.publishedNote)}</p> : null}
           <div className="release-notes-actions">
-            <a className="overview-text-link" href={`/api/products/${slug}/releases/${releaseId}/release-notes/markdown`}>导出 Markdown ↓</a>
-            {changelogHref ? <a className="overview-text-link" href={changelogHref} target="_blank" rel="noreferrer">公开变更日志 ↗</a> : null}
+            <a className="overview-text-link" href={`/api/products/${slug}/releases/${releaseId}/release-notes/markdown`}>{pick(locale, RELEASE_NOTES.exportMarkdown)}</a>
+            {changelogHref ? <a className="overview-text-link" href={changelogHref} target="_blank" rel="noreferrer">{pick(locale, RELEASE_NOTES.changelog)}</a> : null}
           </div>
         </>
       )}
