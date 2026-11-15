@@ -27,7 +27,7 @@ describe("mcp server (A1)", () => {
   it("lists the read-only tool surface with JSON schemas", async () => {
     const response = await handleMcpRpc(runtime, rpc("tools/list"));
     const tools = (response?.result as { tools: Array<{ name: string }> }).tools;
-    expect(tools.map((tool) => tool.name)).toEqual(["list_projects", "get_project_summary", "get_feature", "get_scenario", "search_scenarios", "lookup_by_files", "list_releases", "get_release", "reconcile_release", "get_knowledge_health", "get_feature_connections", "get_release_notes", "get_digest", "send_feedback"]);
+    expect(tools.map((tool) => tool.name)).toEqual(["list_projects", "get_project_summary", "get_feature", "get_scenario", "search_scenarios", "lookup_by_files", "list_releases", "get_release", "reconcile_release", "get_feedback", "wait_for_release", "get_knowledge_health", "get_feature_connections", "get_release_notes", "get_digest", "send_feedback"]);
   });
 
   it("returns no response for notifications (no id)", async () => {
@@ -330,6 +330,61 @@ describe("mcp server (A1)", () => {
     expect(result.coveredPaths).toEqual(["lib/auth.ts"]);
     expect(result.uncoveredPaths).toEqual(["lib/missing.ts"]);
     expect(result.risks[0].severity).toBe("high");
+  });
+
+  it("returns feedback lifecycle without inventing verification", async () => {
+    execute.mockImplementation(async (sql: string) => {
+      if (String(sql).includes("FROM products WHERE organization_id")) return [[{ id: 9, slug: "radar", name: "Radar", description: "d" }]];
+      if (String(sql).includes("FROM repositories")) return [[]];
+      if (String(sql).includes("FROM feedback_reports WHERE id = ?")) return [[{ id: 14, kind: "bug", status: "new", verdict: "needs_human", verdict_reason: "需要人工", adjudicated_at: new Date("2026-11-15T18:00:00Z"), github_issue_url: null, corrective_run_id: null, regression_stable_key: null }]];
+      return [[]];
+    });
+    const response = await handleMcpRpc(runtime, rpc("tools/call", { name: "get_feedback", arguments: { slug: "radar", feedbackId: 14 } }));
+    const result = (response?.result as { structuredContent: { correctiveAnalysis: { status: string }; verification: { status: string } } }).structuredContent;
+    expect(result.correctiveAnalysis.status).toBe("not_run");
+    expect(result.verification.status).toBe("unavailable");
+  });
+
+  it("waits for the exact SHA only when the run and release are both complete", async () => {
+    execute.mockImplementation(async (sql: string) => {
+      if (String(sql).includes("FROM products WHERE organization_id")) return [[{ id: 9, slug: "radar", name: "Radar", description: "d" }]];
+      if (String(sql).includes("after_sha = ?")) return [[{ id: 333, status: "succeeded", error_message: null }]];
+      if (String(sql).includes("FROM releases WHERE product_id = ? AND sha = ?")) return [[{ id: 231 }]];
+      return [[]];
+    });
+    const response = await handleMcpRpc(runtime, rpc("tools/call", { name: "wait_for_release", arguments: { slug: "radar", sha: "abc1234", timeoutSeconds: 0 } }));
+    const result = (response?.result as { structuredContent: { status: string; releaseId: number; analysisRunId: number } }).structuredContent;
+    expect(result).toMatchObject({ status: "completed", releaseId: 231, analysisRunId: 333 });
+  });
+
+  it("exposes scoped release health in the project summary", async () => {
+    execute.mockImplementation(async (sql: string) => {
+      if (String(sql).includes("FROM products WHERE organization_id")) return [[{ id: 9, slug: "radar", name: "Radar", description: "d" }]];
+      if (String(sql).includes("FROM repositories")) return [[]];
+      if (String(sql).includes("COUNT(*) AS count FROM features")) return [[{ count: 14 }]];
+      if (String(sql).includes("FROM releases WHERE product_id = ? ORDER BY committed_at DESC")) return [[{ id: 231, title: "v1", sha: "abc", committedAt: new Date(), specVersionId: 230 }]];
+      if (String(sql).includes("totalReleaseCount")) return [[{ totalReleaseCount: 223, eligibleReleaseCount: 167, linkedReleaseCount: 167, legacyReleaseCount: 0 }]];
+      if (String(sql).includes("eligibleChangeCount")) return [[{ eligibleChangeCount: 2239, sourceLinkedChangeCount: 2239, sourceLinkCount: 13699, orphanLinkCount: 0 }]];
+      if (String(sql).includes("FROM schema_migrations")) return [[{ name: "075.sql", appliedAt: "2026-11-15T19:00:00Z" }]];
+      if (String(sql).includes("FROM analysis_runs")) return [[{ id: 333, status: "succeeded", after_sha: "abc", error_message: null }]];
+      return [[]];
+    });
+    const response = await handleMcpRpc(runtime, rpc("tools/call", { name: "get_project_summary", arguments: { slug: "radar" } }));
+    const health = (response?.result as { structuredContent: { releaseHealth: { sourceLinkedRatio: number; canonicalProjectionRatio: number; legacyReleaseCount: number } } }).structuredContent.releaseHealth;
+    expect(health).toMatchObject({ sourceLinkedRatio: 1, canonicalProjectionRatio: 1, legacyReleaseCount: 0 });
+  });
+
+  it("validates and stores a name-level regression anchor", async () => {
+    execute.mockImplementation(async (sql: string) => {
+      if (String(sql).includes("FROM products WHERE organization_id")) return [[{ id: 9, slug: "radar", name: "Radar", description: "d" }]];
+      if (String(sql).includes("FROM spec_features")) return [[{ stable_key: "功能" }]];
+      if (String(sql).includes("INSERT INTO feedback_reports")) return [{ insertId: 77 }];
+      return [[]];
+    });
+    const response = await handleMcpRpc(runtime, rpc("tools/call", { name: "send_feedback", arguments: { slug: "radar", kind: "bug", message: "对账发现变化清单不完整", regressionStableKey: "功能" } }));
+    expect((response?.result as { structuredContent: { feedbackId: number } }).structuredContent.feedbackId).toBe(77);
+    const insert = execute.mock.calls.find(([sql]) => String(sql).includes("INSERT INTO feedback_reports"))!;
+    expect(insert[1]).toContain("功能");
   });
 
   it("never exposes write tools", () => {

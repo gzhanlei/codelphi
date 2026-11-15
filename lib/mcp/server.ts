@@ -7,6 +7,7 @@ import { loadCompletenessLedgerBySpecVersion } from "../completeness-ledger";
 import { defaultExecute, type Execute } from "../db";
 import { reconcileRelease, evidencePathsFromSubject as evidencePathsForReconcile } from "./reconcile";
 import { canonicalizeScenarios, paginateById, projectFileRisks } from "./projections";
+import { buildFeedbackLifecycle, buildReleaseHealth, waitForRelease } from "./operations";
 
 /**
  * 稳定键解析内联版（与 lib/stable-links.ts 同语义）。2026-11-10 生产事故：各 route bundle
@@ -81,7 +82,7 @@ export const MCP_WORKFLOW_INSTRUCTIONS = [
   "本服务是所在组织的产品行为账本（只读查询 + send_feedback 上报）。接入仓库的 coding agent 按以下约定工作：",
   "1. 做 plan 或改任何文件前：先用 list_projects 按 git remote 的 owner/name 匹配产品取 slug，再 lookup_by_files 反查计划要改文件的爆炸半径，把回归红线场景与 push 后对账锚点写进计划；必要时 get_feature_connections(path) 看共享邻域。",
   "2. 需要理解既有行为：search_scenarios 检索规格原文，用 stableKey 深入 get_feature，不要只靠读代码猜约定。",
-  "3. push 后：list_releases 找到本次 sha 对应的发布（per-push 一条，docs-only 也有零变化条目），get_release 核对行为变化清单与本次意图一致；计划外变化回查并向用户报告。",
+  "3. push 后：wait_for_release 等待本次 sha 对应的最新 run 与 release 完成，再用 reconcile_release 传入本次开发意图（stableKey 为名称级匹配、paths 为证据路径）核对；计划外变化回查并向用户报告。需要原始前后差异时再 get_release。",
   "4. 发现账本与代码不符：send_feedback(kind:bug) 带三要素（哪个场景、哪份证据、代码实际行为）上报由 AI 裁决管线自动核实处置（确认缺陷即触发修复性重建，误报驳回），仅证据不足的进入人工队列；账本是只读面，「没搜到 ≠ 不存在」，用 get_project_summary 的 specSnapshot/evidenceCoverage 判断覆盖。",
 ].join("\n");
 
@@ -95,11 +96,13 @@ export const MCP_TOOLS: McpToolDef[] = [
   { name: "list_releases", description: "列产品的发布（per-push 一条，docs-only 也有零变化条目；时间倒序，默认 10 条）。push 后用本次 sha 找对应发布", inputSchema: { type: "object", properties: { slug: { type: "string" }, limit: { type: "number" } }, required: ["slug"] } },
   { name: "get_release", description: "单条发布的行为变化清单（含前后差异摘要与证据链接）。push 后对账：与本次提交意图核对，计划外变化要回查报告", inputSchema: { type: "object", properties: { slug: { type: "string" }, releaseId: { type: "number" }, view: { type: "string", enum: ["raw", "canonical"] }, offset: { type: "number" }, limit: { type: "number" } }, required: ["slug", "releaseId"] } },
   { name: "reconcile_release", description: "按 stableKey（名称级）与 evidence paths 对账发布意图，返回 missing/unexpected/重复信号与 verdict，不返回完整 before/after", inputSchema: { type: "object", properties: { slug: { type: "string" }, releaseId: { type: "number" }, expectedIntents: { type: "array", items: { type: "object", properties: { stableKey: { type: "string" }, paths: { type: "array", items: { type: "string" } }, note: { type: "string" } } } } }, required: ["slug", "releaseId"] } },
+  { name: "get_feedback", description: "读取反馈的裁决、corrective analysis 与独立 verification 状态；不推断修复或复验", inputSchema: { type: "object", properties: { slug: { type: "string" }, feedbackId: { type: "number" } }, required: ["slug", "feedbackId"] } },
+  { name: "wait_for_release", description: "按 after_sha 等待最新分析尝试与 release 持久化；最长 60 秒，timeout 不等于 failed", inputSchema: { type: "object", properties: { slug: { type: "string" }, sha: { type: "string" }, timeoutSeconds: { type: "number" }, pollSeconds: { type: "number" } }, required: ["slug", "sha"] } },
   { name: "get_knowledge_health", description: "知识健康事实统计（漂移清单/核实覆盖/回归四态/维护分布；无综合分、无 Bus Factor）", inputSchema: { type: "object", properties: { slug: { type: "string" } }, required: ["slug"] } },
   { name: "get_feature_connections", description: "功能间的确定性连接（共享证据文件面；每条带依据文件清单，无 LLM 推断）。可选 path=只看以该文件为证据的功能邻域；可选 feature=稳定键，只返回该功能的连接", inputSchema: { type: "object", properties: { slug: { type: "string" }, path: { type: "string" }, feature: { type: "string" } }, required: ["slug"] } },
   { name: "get_release_notes", description: "单条发布的人工发布稿（块级、含 override 后文案与证据路径；未生成返回空）", inputSchema: { type: "object", properties: { slug: { type: "string" }, releaseId: { type: "number" } }, required: ["slug", "releaseId"] } },
   { name: "get_digest", description: "最近一期周期行为摘要（滚动 7 天分桶：support/sales/marketing；无则返回空）", inputSchema: { type: "object", properties: { slug: { type: "string" } }, required: ["slug"] } },
-  { name: "send_feedback", description: "发现账本与代码不符时上报（只写反馈表，无其他写权限）：带三要素——哪个场景、哪份证据、代码实际行为，由 AI 裁决管线自动核实处置（确认缺陷即触发修复性重建，误报驳回），仅证据不足的进入人工队列", inputSchema: { type: "object", properties: { slug: { type: "string" }, kind: { type: "string", enum: ["bug", "question", "suggestion"] }, message: { type: "string" } }, required: ["slug", "kind", "message"] } },
+  { name: "send_feedback", description: "发现账本与代码不符时上报（只写反馈表，无其他写权限）：带三要素——哪个场景、哪份证据、代码实际行为，由 AI 裁决管线自动核实处置（确认缺陷即触发修复性重建，误报驳回），仅证据不足的进入人工队列", inputSchema: { type: "object", properties: { slug: { type: "string" }, kind: { type: "string", enum: ["bug", "question", "suggestion"] }, message: { type: "string" }, regressionStableKey: { type: "string" } }, required: ["slug", "kind", "message"] } },
 ];
 
 interface RpcRequest { jsonrpc: string; id?: string | number | null; method: string; params?: Record<string, unknown> }
@@ -181,6 +184,58 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
     const coverage = latestRelease?.specVersionId ? await loadCoverageReceipt(execute as unknown as (sql: string, params?: unknown[]) => Promise<unknown>, latestRelease.specVersionId) : null;
     // R1 分析完整性账本（run 级 best-effort，历史版本为 null）
     const completeness = latestRelease?.specVersionId ? await loadCompletenessLedgerBySpecVersion(execute as unknown as (sql: string, params?: unknown[]) => Promise<unknown>, latestRelease.specVersionId) : null;
+    const releaseCounts = await queryRows<{ totalReleaseCount: number; eligibleReleaseCount: number; linkedReleaseCount: number; legacyReleaseCount: number }>(
+      execute(
+        `SELECT COUNT(*) AS totalReleaseCount,
+          SUM(CASE WHEN spec_version_id IS NOT NULL AND EXISTS (SELECT 1 FROM spec_changes sc WHERE sc.spec_version_id = releases.spec_version_id) THEN 1 ELSE 0 END) AS eligibleReleaseCount,
+          SUM(CASE WHEN spec_version_id IS NOT NULL AND EXISTS (SELECT 1 FROM spec_changes sc WHERE sc.spec_version_id = releases.spec_version_id)
+            AND EXISTS (SELECT 1 FROM change_sources s JOIN changes c ON c.id = s.change_id JOIN spec_changes ss ON ss.id = s.spec_change_id AND ss.spec_version_id = releases.spec_version_id WHERE c.release_id = releases.id) THEN 1 ELSE 0 END) AS linkedReleaseCount,
+          SUM(CASE WHEN spec_version_id IS NOT NULL AND EXISTS (SELECT 1 FROM spec_changes sc WHERE sc.spec_version_id = releases.spec_version_id)
+            AND NOT EXISTS (SELECT 1 FROM change_sources s JOIN changes c ON c.id = s.change_id JOIN spec_changes ss ON ss.id = s.spec_change_id AND ss.spec_version_id = releases.spec_version_id WHERE c.release_id = releases.id) THEN 1 ELSE 0 END) AS legacyReleaseCount
+         FROM releases WHERE product_id = ?`,
+        [product.id],
+      ),
+    );
+    const changeCounts = await queryRows<{ eligibleChangeCount: number; sourceLinkedChangeCount: number; sourceLinkCount: number }>(
+      execute(
+        `SELECT COUNT(DISTINCT c.id) AS eligibleChangeCount,
+          COUNT(DISTINCT s.change_id) AS sourceLinkedChangeCount,
+          COUNT(s.spec_change_id) AS sourceLinkCount
+         FROM changes c
+         JOIN releases r ON r.id = c.release_id AND r.product_id = ?
+           AND EXISTS (SELECT 1 FROM spec_changes sc WHERE sc.spec_version_id = r.spec_version_id)
+         LEFT JOIN change_sources s ON s.change_id = c.id
+           AND EXISTS (SELECT 1 FROM spec_changes ss WHERE ss.id = s.spec_change_id AND ss.spec_version_id = r.spec_version_id)
+         WHERE c.kind <> 'reviewed'`,
+        [product.id],
+      ),
+    );
+    const orphanCounts = await queryRows<{ orphanLinkCount: number }>(
+      execute(
+        `SELECT COUNT(*) AS orphanLinkCount FROM change_sources s
+         LEFT JOIN changes c ON c.id = s.change_id
+         LEFT JOIN releases r ON r.id = c.release_id
+         LEFT JOIN spec_changes sc ON sc.id = s.spec_change_id AND sc.spec_version_id = r.spec_version_id
+         WHERE r.product_id = ? OR r.id IS NULL`,
+        [product.id],
+      ),
+    );
+    const migrations = await queryRows<{ name: string; appliedAt: string }>(execute("SELECT name, applied_at AS appliedAt FROM schema_migrations ORDER BY applied_at DESC, name DESC LIMIT 1", []));
+    const analysisRuns = await queryRows<{ id: number; status: string; afterSha: string | null; errorMessage: string | null }>(
+      execute("SELECT ar.id, ar.status, ar.after_sha AS afterSha, ar.error_message AS errorMessage FROM analysis_runs ar JOIN repositories r ON r.id = ar.repository_id WHERE r.product_id = ? ORDER BY ar.id DESC LIMIT 1", [product.id]),
+    );
+    const releaseHealth = buildReleaseHealth({
+      totalReleaseCount: Number(releaseCounts[0]?.totalReleaseCount ?? 0),
+      eligibleReleaseCount: Number(releaseCounts[0]?.eligibleReleaseCount ?? 0),
+      linkedReleaseCount: Number(releaseCounts[0]?.linkedReleaseCount ?? 0),
+      legacyReleaseCount: Number(releaseCounts[0]?.legacyReleaseCount ?? 0),
+      eligibleChangeCount: Number(changeCounts[0]?.eligibleChangeCount ?? 0),
+      sourceLinkedChangeCount: Number(changeCounts[0]?.sourceLinkedChangeCount ?? 0),
+      sourceLinkCount: Number(changeCounts[0]?.sourceLinkCount ?? 0),
+      orphanLinkCount: Number(orphanCounts[0]?.orphanLinkCount ?? 0),
+      lastAppliedMigration: migrations[0] ?? null,
+      lastAnalysisStatus: analysisRuns[0] ? { runId: analysisRuns[0].id, status: analysisRuns[0].status, afterSha: analysisRuns[0].afterSha, errorMessage: analysisRuns[0].errorMessage } : null,
+    });
     return {
       slug: product.slug,
       name: product.name,
@@ -199,6 +254,7 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
         mergeIntegrity: completeness.mergeIntegrity,
         verification: completeness.verification,
       } : null,
+      releaseHealth,
     };
   }
 
@@ -387,6 +443,55 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
     });
   }
 
+  if (name === "get_feedback") {
+    const feedbackId = Number(args.feedbackId ?? 0);
+    const reports = await queryRows<{
+      id: number; kind: string | null; status: string | null; verdict: string | null; verdict_reason: string | null;
+      adjudicated_at: Date | null; github_issue_url: string | null; corrective_run_id: number | null; regression_stable_key: string | null;
+    }>(
+      execute("SELECT id, kind, status, verdict, verdict_reason, adjudicated_at, github_issue_url, corrective_run_id, regression_stable_key FROM feedback_reports WHERE id = ? AND product_id = ?", [feedbackId, product.id]),
+    );
+    const report = reports[0];
+    if (!report) return {};
+    const runs = report.corrective_run_id === null ? [] : await queryRows<{ id: number; status: string; after_sha: string | null }>(
+      execute("SELECT id, status, after_sha FROM analysis_runs WHERE id = ?", [report.corrective_run_id]),
+    );
+    return buildFeedbackLifecycle({
+      id: report.id,
+      kind: report.kind,
+      status: report.status,
+      verdict: report.verdict,
+      verdictReason: report.verdict_reason,
+      adjudicatedAt: report.adjudicated_at,
+      githubIssueUrl: report.github_issue_url,
+      correctiveRunId: report.corrective_run_id,
+      correctiveRunStatus: runs[0]?.status ?? null,
+      correctiveSha: runs[0]?.after_sha ?? null,
+      regressionStableKey: report.regression_stable_key,
+    });
+  }
+
+  if (name === "wait_for_release") {
+    const sha = String(args.sha ?? "");
+    return waitForRelease({
+      sha,
+      timeoutSeconds: args.timeoutSeconds === undefined ? undefined : Number(args.timeoutSeconds),
+      pollSeconds: args.pollSeconds === undefined ? undefined : Number(args.pollSeconds),
+      loadAttempt: async () => {
+        const runs = await queryRows<{ id: number; status: string; error_message: string | null }>(
+          execute("SELECT id, status, error_message FROM analysis_runs ar JOIN repositories repo ON repo.id = ar.repository_id WHERE ar.after_sha = ? AND repo.product_id = ? ORDER BY ar.created_at DESC, ar.id DESC LIMIT 1", [sha, product.id]),
+        );
+        const releases = await queryRows<{ id: number }>(execute("SELECT id FROM releases WHERE product_id = ? AND sha = ?", [product.id, sha]));
+        return {
+          analysisRunId: runs[0]?.id ?? null,
+          analysisStatus: runs[0]?.status ?? null,
+          analysisError: runs[0]?.error_message ?? null,
+          releaseId: releases[0]?.id ?? null,
+        };
+      },
+    });
+  }
+
   if (name === "get_knowledge_health") {
     const [features, scenarios] = await Promise.all([
       queryRows<{ id: number; name: string; staleSince: Date | null; verifiedAt: Date | null; lastEditedBy: string | null; lastEditedAt: Date | null }>(
@@ -469,15 +574,28 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
     // kind 为结构化列（073）：bug 类报告进入 AI 裁决管线自动核实处置。
     const kind = String(args.kind ?? "question");
     const message = String(args.message ?? "").slice(0, 5000);
+    const regressionStableKey = args.regressionStableKey === undefined ? null : specFeatureKey(String(args.regressionStableKey));
+    if (regressionStableKey) {
+      const anchors = await queryRows<{ stable_key: string }>(
+        execute(
+          `SELECT sf.stable_key FROM spec_features sf
+           JOIN spec_versions v ON v.id = sf.spec_version_id
+           JOIN repositories r ON r.id = v.repository_id
+           WHERE sf.stable_key = ? AND r.product_id = ? ORDER BY sf.spec_version_id DESC LIMIT 1`,
+          [regressionStableKey, product.id],
+        ),
+      );
+      if (anchors.length === 0) throw new Error("invalid regressionStableKey");
+    }
     const insertResult = await insertResultOf(
       execute(
-        `INSERT INTO feedback_reports (organization_id, product_id, kind, repository_full_name, revision, error_message)
+        `INSERT INTO feedback_reports (organization_id, product_id, kind, repository_full_name, revision, error_message, regression_stable_key)
        SELECT ?, ?, ?, COALESCE(CONCAT(r.provider, ':', r.owner, '/', r.name), 'unknown'),
-              COALESCE((SELECT ar.after_sha FROM analysis_runs ar WHERE ar.repository_id = r.id AND ar.status = 'succeeded' ORDER BY ar.id DESC LIMIT 1), ''), ?
+              COALESCE((SELECT ar.after_sha FROM analysis_runs ar WHERE ar.repository_id = r.id AND ar.status = 'succeeded' ORDER BY ar.id DESC LIMIT 1), ''), ?, ?
        FROM products p
        LEFT JOIN repositories r ON r.product_id = p.id
        WHERE p.id = ? LIMIT 1`,
-        [runtime.identity.organizationId, product.id, kind, `[mcp:${kind}] ${message}`, product.id],
+        [runtime.identity.organizationId, product.id, kind, `[mcp:${kind}] ${message}`, regressionStableKey, product.id],
       ),
     );
     return { feedbackId: Number(insertResult.insertId) };
