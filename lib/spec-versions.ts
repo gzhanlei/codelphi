@@ -4,6 +4,7 @@ import type { RunContext } from "./analysis";
 import { defaultExecute, type Execute } from "./db";
 import { evidenceItems } from "./evidence";
 import { nextReference } from "./extraction-merge";
+import type { ReleaseChangeFact } from "./release-change-projection";
 import { diffSpec, featureScenarioPairMatch, featureVariantSimilar, mergeSpecSources, scenarioBehaviorEqual, specFeatureKey, specScenarioKey, type SpecChange, type SpecFeature, type SpecScenario, type SpecTombstones } from "./spec-diff";
 import { classifySpecHighlight } from "./spec-highlights";
 
@@ -187,11 +188,12 @@ async function insertFeatures(connection: PoolConnection, versionId: number, fea
   }
 }
 
-async function insertChanges(connection: PoolConnection, versionId: number, baseVersionId: number | null, changes: SpecChange[]) {
+async function insertChanges(connection: PoolConnection, versionId: number, baseVersionId: number | null, changes: SpecChange[]): Promise<ReleaseChangeFact[]> {
+  const persisted: ReleaseChangeFact[] = [];
   for (const change of changes) {
     // A3 Highlight：确定性规则打标（零 AI 成本），绝大多数 change 为 NULL 不强标
     const highlight = classifySpecHighlight(change);
-    await connection.execute(
+    const [insertResult] = await connection.execute(
       `INSERT INTO spec_changes
         (spec_version_id, base_spec_version_id, entity_type, kind, feature_key, feature_name,
          scenario_reference, summary, highlight_type, highlight_reason, before_json, after_json)
@@ -211,7 +213,9 @@ async function insertChanges(connection: PoolConnection, versionId: number, base
         change.after ? JSON.stringify(change.after) : null,
       ],
     );
+    persisted.push({ ...change, id: Number((insertResult as { insertId: number }).insertId) });
   }
+  return persisted;
 }
 
 /** BM-11 功能级折叠回执：变体名并入旧身份的审计记录（folded 不落库，走 mergeIntegrity + 日志）。 */
@@ -300,7 +304,7 @@ export function foldVariantFeatures(previousFeatures: SpecFeature[], features: S
   return { features: result, folds };
 }
 
-export async function insertSpecVersion(connection: PoolConnection, run: RunContext, result: AnalysisResult, options: { affectedKeys?: ReadonlySet<string>; behavioralChangePaths?: ReadonlySet<string> } = {}): Promise<{ specVersionId: number; features: ReturnType<typeof mergeSpecSources>; collapse: SpecVersionCollapse | null; featureCollapses: FeatureCollapse[]; misplacedScenarios: MisplacedScenario[]; identityHijacksDropped: number; featureFolds: FeatureFold[] }> {
+export async function insertSpecVersion(connection: PoolConnection, run: RunContext, result: AnalysisResult, options: { affectedKeys?: ReadonlySet<string>; behavioralChangePaths?: ReadonlySet<string> } = {}): Promise<{ specVersionId: number; specChanges: ReleaseChangeFact[]; features: ReturnType<typeof mergeSpecSources>; collapse: SpecVersionCollapse | null; featureCollapses: FeatureCollapse[]; misplacedScenarios: MisplacedScenario[]; identityHijacksDropped: number; featureFolds: FeatureFold[] }> {
   const [previous, manual, tombstones] = await Promise.all([loadPreviousSpec(connection, run), loadManualSpec(connection, run.productId), loadManualTombstones(connection, run.productId)]);
   // M9 增量模式：受影响集之外的 generated 条目原样沿用上一版（三分合并：carried 种子 < AI < manual）。
   const affectedKeys = options.affectedKeys;
@@ -358,9 +362,9 @@ export async function insertSpecVersion(connection: PoolConnection, run: RunCont
   );
   const versionId = Number((versionResult as { insertId: number }).insertId);
   await insertFeatures(connection, versionId, foldedFeatures);
-  await insertChanges(connection, versionId, previous === null ? null : previous.id, changes);
+  const specChanges = await insertChanges(connection, versionId, previous === null ? null : previous.id, changes);
   // 合并后的完整 spec 一并返回：M9 影子对比必须以 carry-forward 之后的规格为对象。
-  return { specVersionId: versionId, features: foldedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds };
+  return { specVersionId: versionId, specChanges, features: foldedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds };
 }
 
 /** 规格坍缩（护栏）：新版场景数较上一版骤降超过阈值。生产 v95（2026-11-08）178→83 即此形态。 */

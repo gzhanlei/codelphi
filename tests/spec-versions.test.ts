@@ -18,6 +18,7 @@ const result: AnalysisResult = {
 function connection(previousVersions: Array<{ id: number }>, manual = false, tombstones: { feature?: string; scenario?: string } = {}) {
   const changes: unknown[][] = [];
   let featureId = 100;
+  let changeId = 500;
   const connection = {
     execute: vi.fn(async (sql: string, parameters: unknown[] = []) => {
       if (sql.includes("SELECT id FROM spec_versions")) return [previousVersions];
@@ -34,7 +35,10 @@ function connection(previousVersions: Array<{ id: number }>, manual = false, tom
       if (sql.includes("FROM scenarios WHERE source = 'manual'")) return [[{ featureId: 5, reference: "HP-9", context: "User", action: "Reads", outcome: "Learns", category: "happy", source: "manual", evidence: "[]" }]];
       if (sql.includes("INSERT INTO spec_versions")) return [{ insertId: 99 }];
       if (sql.includes("INSERT INTO spec_features")) return [{ insertId: featureId++ }];
-      if (sql.includes("INSERT INTO spec_changes")) changes.push(parameters);
+      if (sql.includes("INSERT INTO spec_changes")) {
+        changes.push(parameters);
+        return [{ insertId: changeId++ }];
+      }
       return [{}];
     }),
     changes,
@@ -45,9 +49,12 @@ function connection(previousVersions: Array<{ id: number }>, manual = false, tom
 describe("spec version persistence", () => {
   it("writes a complete version and deterministic before/after changes", async () => {
     const db = connection([{ id: 11 }]);
-    const { specVersionId } = await insertSpecVersion(db, run, result);
+    const { specVersionId, specChanges } = await insertSpecVersion(db, run, result);
     expect(specVersionId).toBe(99);
     expect(db.changes).toHaveLength(4);
+    expect(specChanges).toHaveLength(4);
+    expect(specChanges.map((change) => change.id)).toEqual([500, 501, 502, 503]);
+    expect(specChanges.map((change) => change.summary)).toEqual(db.changes.map((change) => change[7]));
     expect(db.changes.map((change) => change[3])).toEqual(expect.arrayContaining(["added", "changed", "removed"]));
     expect(db.changes.every((change) => change[1] === 11)).toBe(true);
     expect(db.changes.some((change) => change[8] === null)).toBe(true);

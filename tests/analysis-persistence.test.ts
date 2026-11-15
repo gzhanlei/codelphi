@@ -4,6 +4,7 @@ import type { AnalysisResult } from "../lib/ai";
 import type { Execute } from "../lib/db";
 import { assertLatestRun, upsertGeneratedSpec, upsertRelease, type RunContext } from "../lib/analysis";
 import { loadPreviousSpecText } from "../lib/spec-versions";
+import type { ReleaseChangeFact } from "../lib/release-change-projection";
 
 const run: RunContext = { id: 2, repositoryId: 3, productId: 4, owner: "gzhanlei", name: "radar", beforeSha: null, afterSha: "sha-2", connectionId: null, provider: "github", organizationId: 1, productSlug: "radar", productName: "Radar" };
 const result: AnalysisResult = {
@@ -13,6 +14,11 @@ const result: AnalysisResult = {
   features: [{ name: "Auth", summary: "Auth", scenarios: [] }],
 };
 const change = { message: "change", committedAt: "2026-11-01T00:00:00Z", url: "https://github.com/commit/sha-2", files: [] };
+const specChanges: ReleaseChangeFact[] = [
+  { id: 101, kind: "changed", entityType: "scenario", featureName: "Auth", scenarioReference: "EC-1", summary: "统一数字守护", before: null, after: { reference: "EC-1", context: "c", action: "a", outcome: "o", category: "edge", evidence: [{ path: "lib/auth.ts", startLine: 8 }] } },
+  { id: 102, kind: "changed", entityType: "scenario", featureName: "Auth", scenarioReference: "EC-2", summary: "保护短标题", before: null, after: { reference: "EC-2", context: "c", action: "a", outcome: "o", category: "edge", evidence: [{ path: "lib/auth.ts", startLine: 9 }] } },
+  { id: 103, kind: "added", entityType: "feature", featureName: "Billing", scenarioReference: null, summary: "新增账单", before: null, after: { name: "Billing", summary: "Billing", scenarios: [] } },
+];
 
 function connectionWithCount(count: number) {
   return {
@@ -42,15 +48,32 @@ describe("analysis persistence guards", () => {
 
   it("does not duplicate changes for an existing release", async () => {
     const connection = connectionWithCount(1);
-    await upsertRelease(connection, run, result, change);
+    const { projections } = await upsertRelease(connection, run, result, change, null, specChanges);
+    expect(projections).toEqual([]);
     expect(connection.execute).toHaveBeenCalledTimes(6);
+    expect(connection.execute).not.toHaveBeenCalledWith(expect.stringContaining("INSERT INTO change_sources"), expect.anything());
   });
 
-  it("inserts changes when the release has none", async () => {
+  it("persists one source-linked projection per canonical feature and keeps reviewed out of user changes", async () => {
     const connection = connectionWithCount(0);
-    await upsertRelease(connection, run, result, change);
-    expect(connection.execute).toHaveBeenCalledTimes(7);
-    expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO changes"), [10, "Auth", "changed", "Changed", "", "[]"]);
+    const input: AnalysisResult = {
+      ...result,
+      changes: [
+        { featureName: "Auth", kind: "changed", description: "旧自由文案不得落库", userImpact: "旧影响", evidence: [] },
+        { featureName: "Auth", kind: "reviewed", description: "内部实现已检查", userImpact: "", evidence: [{ path: "lib/auth.ts", startLine: 8 }] },
+      ],
+    };
+    const { projections } = await upsertRelease(connection, run, input, change, null, specChanges);
+
+    expect(projections).toHaveLength(2);
+    const changeInserts = (connection.execute as ReturnType<typeof vi.fn>).mock.calls.filter((call) => String(call[0]).includes("INSERT INTO changes"));
+    expect(changeInserts).toHaveLength(2);
+    expect(changeInserts[0][1]).toEqual([10, "Auth", "changed", "统一数字守护；保护短标题", "统一数字守护；保护短标题", JSON.stringify([{ path: "lib/auth.ts", startLine: 8 }, { path: "lib/auth.ts", startLine: 9 }])]);
+    expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO change_sources"), [expect.any(Number), 101]);
+    expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO change_sources"), [expect.any(Number), 102]);
+    expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO change_sources"), [expect.any(Number), 103]);
+    expect(connection.execute).not.toHaveBeenCalledWith(expect.stringContaining("INSERT INTO changes"), expect.arrayContaining(["旧自由文案不得落库"]));
+    expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT IGNORE INTO release_reviewed_items"), expect.arrayContaining([10, "Auth", "内部实现已检查"]));
   });
 
   it("stores the release's changed files for evidence-path mapping", async () => {
