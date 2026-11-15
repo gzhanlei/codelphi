@@ -1,6 +1,6 @@
 # Coding agent × CoDelphi MCP 工作流配方
 
-CoDelphi 的 MCP 工具面（12 个只读 + 1 个反馈写）不只是给人手动调用的：coding agent 在软件开发的整个周期里都可以把它当**跨会话的行为记忆**和**独立观察者**用。本文是给 agent（以及维护 AGENTS.md 的人）的操作配方。
+CoDelphi 的 MCP 工具面（15 个只读 + 1 个反馈写）不只是给人手动调用的：coding agent 在软件开发的整个周期里都可以把它当**跨会话的行为记忆**和**独立观察者**用。本文是给 agent（以及维护 AGENTS.md 的人）的操作配方。
 
 定位红线先说清楚：
 
@@ -50,6 +50,23 @@ push → list_releases(slug) 轮询到自己这次 push 的 sha
 ```
 
 出现计划外的行为变化 = 回去查代码。这是独立第三方观察者的对账，不是 agent 自评。
+
+## 4.1 确定性验收（需要明确通过/警告时）
+
+先用 `wait_for_release(slug, sha)` 等待最新 run 与同 SHA release 都完成，再传本次开发意图：
+
+```
+reconcile_release(slug, releaseId, expectedIntents: [
+  { stableKey: "某功能（名称级匹配）" },
+  { paths: ["lib/changed.ts"] }
+])
+```
+
+返回 `missingExpected`、`unexpected`、`duplicateClusters`、`sharedEvidenceWarnings` 和 `verdict`。path-only intent 只能做路径验收，不能单独产生 pass；stableKey 是名称级匹配，不是行为身份。shared path 只是复核信号，不是重复证明。
+
+`get_release` 默认 raw 全量；显式 `limit/offset` 分页时保留 `{release, changes}` 字段。`get_feature` 与 `lookup_by_files` 可用 `view=canonical` 合并已证明身份的重复投影；`lookup_by_files?view=risk` 返回前 10 条稳定排序的红线及 uncoveredPaths。
+
+`get_project_summary.releaseHealth` 给出 eligible release/change、source-linked 比例、legacy/orphan 数、最后成功 migration 与最新 run。`get_feedback(slug, feedbackId)` 分开返回 corrective analysis 与 verification；没有显式关联时 verification 为 unavailable，不能将纠正性分析完成当成代码修复或复验通过。
 
 ## 5. 发现账本与代码不符（任何时候）
 
