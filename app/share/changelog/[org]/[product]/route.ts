@@ -20,13 +20,15 @@ export async function GET(request: NextRequest, context: { params: Promise<{ org
     return NextResponse.json({ error: "产品不存在或未开放" }, { status: 404 });
   }
   const entries = await loadPublishedChangelog(demo.id);
+  const locale = demo.outputLanguage === "en" ? "en" : "zh-CN";
   const html = renderChangelogDocument({
     productName: demo.name,
     specBase: `/products/${org}/${product}`,
+    language: locale,
     entries,
   }).replace(
     '<a class="back" href="/">← 返回</a>',
-    `<a class="back" href="/products/${org}/${product}">← 产品页</a>`
+    `<a class="back" href="/products/${org}/${product}">${locale === "en" ? "← Product page" : "← 产品页"}</a>`
   );
   return new NextResponse(html, { headers: { "content-type": "text/html; charset=utf-8" } });
 }

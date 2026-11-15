@@ -19,6 +19,8 @@ export interface DemoReadProduct {
   organizationId: number;
   /** 所属工作区 slug，用于拼 canonical 页面地址 /products/{orgSlug}/{slug}。 */
   organizationSlug: string;
+  /** 分析输出语言（072）：share 公开页 chrome 按此语言渲染。 */
+  outputLanguage?: string;
 }
 
 /** 登录页公开演示入口：优先取数据库标记的 demo 产品，env 白名单兜底；都没有则返回 null（页面不渲染入口）。 */
@@ -36,7 +38,7 @@ export async function loadPublicDemoProduct(): Promise<{ slug: string; name: str
  *  env 白名单兜底。产品不存在、非 demo 或与 org 段不符返回 null。 */
 export async function resolvePublicDemoProduct(orgSlug: string, slug: string): Promise<DemoReadProduct | null> {
   const [rows] = await getDb().execute(
-    `SELECT p.id, p.slug, p.name, p.organization_id, p.is_public_demo, o.slug AS organization_slug
+    `SELECT p.id, p.slug, p.name, p.organization_id, p.is_public_demo, p.output_language AS outputLanguage, o.slug AS organization_slug
      FROM products p JOIN organizations o ON o.id = p.organization_id
      WHERE p.slug = ? AND o.slug = ? LIMIT 1`,
     [slug, orgSlug],
@@ -52,7 +54,7 @@ export async function resolvePublicDemoProduct(orgSlug: string, slug: string): P
  *  产品行不存在或非 demo（且不在 env 白名单）返回 null。 */
 export async function resolveLegacyPublicDemoProduct(slug: string): Promise<DemoReadProduct | null> {
   const [rows] = await getDb().execute(
-    `SELECT p.id, p.slug, p.name, p.organization_id, p.is_public_demo, o.slug AS organization_slug
+    `SELECT p.id, p.slug, p.name, p.organization_id, p.is_public_demo, p.output_language AS outputLanguage, o.slug AS organization_slug
      FROM products p JOIN organizations o ON o.id = p.organization_id
      WHERE p.slug = ? ORDER BY p.id LIMIT 1`,
     [slug],

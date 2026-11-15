@@ -5,6 +5,9 @@ import { getDb } from "@/lib/db";
 import { currentOrganization } from "@/lib/organizations";
 import { requirePlatformAdmin } from "@/lib/platform-admin";
 import { requireSessionUser } from "@/lib/session";
+import { pick } from "@/lib/ui-locale";
+import { resolveUiLocale } from "@/lib/ui-locale-server";
+import { ADMIN_PAY as L } from "@/lib/ui-strings/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +15,7 @@ export const dynamic = "force-dynamic";
 export default async function PayAdminPage() {
   const user = await requireSessionUser();
   const organization = await currentOrganization(user);
+  const locale = await resolveUiLocale();
   await requirePlatformAdmin(user, organization);
   const db = getDb();
   const [orderRows] = await db.execute(
@@ -36,7 +40,7 @@ export default async function PayAdminPage() {
   return (
     <AppShell user={user} organizationName={organization.name}>
       <div className="page-heading">
-        <div><span className="eyebrow">PAY ADMIN</span><h1>支付管理</h1><p>0.01 元联调测试单、订单台账与管理员退款（超时停 refund_submitted，由对账自动推进确认）。</p></div>
+        <div><span className="eyebrow">PAY ADMIN</span><h1>{pick(locale, L.heading)}</h1><p>{pick(locale, L.subheading)}</p></div>
       </div>
       <AdminBillingGrant />
       <AdminPayOrders

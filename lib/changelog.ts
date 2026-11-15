@@ -1,6 +1,9 @@
 import { getDb } from "./db";
 import { parseJsonValue } from "./json";
 import { loadBlockViews, type ReleaseNoteRow } from "./release-notes-service";
+import { formatDateIn } from "./format";
+import { pick } from "./ui-locale";
+import { SHARE_CHANGELOG as L } from "./ui-strings/admin";
 
 /**
  * M11 可信 changelog 聚合页数据层（GTM 桥面）：产品全部已发布发布稿，时间倒序。
@@ -75,6 +78,13 @@ export async function loadPublishedChangelog(productId: number, limit = 30): Pro
 
 const KIND_SECTION: Record<string, string> = { added: "新增", changed: "改进", removed: "移除" };
 const SECTION_ORDER = ["新增", "改进", "修复", "移除"];
+/** 分节展示标签（072）：featureCopy 存储值为中文规范值，公开页按产品语言映射展示。 */
+const SECTION_DISPLAY: Record<string, { "zh-CN": string; en: string }> = {
+  新增: { "zh-CN": "新增", en: "Added" },
+  改进: { "zh-CN": "改进", en: "Improved" },
+  修复: { "zh-CN": "修复", en: "Fixed" },
+  移除: { "zh-CN": "移除", en: "Removed" },
+};
 
 /** 修复分节判定（确定性）：summary 含修复/fix 语义信号 → Fixed；其余按 kind。 */
 function sectionOf(block: { kind: string; summary: string }): string {
@@ -86,8 +96,8 @@ function esc(value: string) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-function formatDate(date: Date) {
-  return new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "long", day: "numeric" }).format(new Date(date));
+function formatDate(date: Date, locale: "zh-CN" | "en" = "zh-CN") {
+  return formatDateIn(locale, date, { year: "numeric", month: "long", day: "numeric" });
 }
 
 /**
@@ -125,8 +135,11 @@ export interface ChangelogDocEntry {
 export function renderChangelogDocument(input: {
   productName: string;
   specBase?: string | null;
+  /** 公开页语言（072）= 产品分析输出语言；缺省 zh-CN 保持既有形态。 */
+  language?: "zh-CN" | "en";
   entries: ChangelogDocEntry[];
 }): string {
+  const locale = input.language ?? "zh-CN";
   const body = input.entries.map((entry: ChangelogDocEntry & { emphasis?: string | null }) => {
     // 合并发布成文优先：feature_copy_json 的每功能一条用户可读说明按分类分节；
     // 未生成时回退为块条目，并把同一功能的多条合并成一个条目（句子「；」连接）
@@ -160,22 +173,22 @@ export function renderChangelogDocument(input: {
     const leadText = entry.leadOverride ?? entry.releaseSummary;
 
     return `<section class="cl-entry">
-<div class="cl-meta">来源 · ${esc(formatDate(entry.publishedAt))}${entry.releaseUrl ? ` · <a href="${esc(entry.releaseUrl)}" rel="noreferrer">源码 ↗</a>` : ` · <code>${esc(entry.releaseSha.slice(0, 7))}</code>`}</div>
+<div class="cl-meta">${esc(pick(locale, L.source))}${esc(formatDate(entry.publishedAt, locale))}${entry.releaseUrl ? ` · <a href="${esc(entry.releaseUrl)}" rel="noreferrer">${esc(pick(locale, L.sourceLink))}</a>` : ` · <code>${esc(entry.releaseSha.slice(0, 7))}</code>`}</div>
 <h2>${esc(entry.headline || entry.releaseTitle)}</h2>
 ${leadText ? `<p class="cl-lead">${esc(leadText)}</p>` : ""}
 ${(entry.emphasis ?? "").trim() ? `<p class="cl-emphasis">${esc(entry.emphasis!.trim())}</p>` : ""}
-${ordered.map((label) => `<h3 class="cl-section">${esc(label)}</h3>
+${ordered.map((label) => `<h3 class="cl-section">${esc(pick(locale, SECTION_DISPLAY[label] ?? { "zh-CN": label, en: label }))}</h3>
 <ul class="cl-list">${(mergedBySection.get(label) ?? []).map((item) => `<li><strong>${esc(item.featureName)}</strong>${item.text ? `：${esc(item.text)}` : ""}</li>`).join("")}</ul>`).join("\n")}
-<details class="cl-all"><summary>全部变化（按功能）</summary>
+<details class="cl-all"><summary>${esc(pick(locale, L.allChanges))}</summary>
 ${[...byFeature.entries()].map(([feature, blocks]) => {
     const paths = [...new Set(blocks.flatMap((block) => block.evidencePaths ?? []))];
-    return `<div class="cl-feature"><h4>${esc(feature)}${input.specBase ? ` <a class="cl-spec" href="${esc(input.specBase)}/spec/feature/${encodeURIComponent(feature.toLowerCase())}">规格 ↗</a>` : ""}</h4><ul>${blocks.map((block) => `<li>${esc(block.summary)}${block.scenarioReference ? ` <code>${esc(block.scenarioReference)}</code>` : ""}</li>`).join("")}</ul>${paths.length > 0 ? `<div class="cl-paths">涉及代码：${paths.map((path) => `<code>${esc(path)}</code>`).join(" ")}</div>` : ""}</div>`;
+    return `<div class="cl-feature"><h4>${esc(feature)}${input.specBase ? ` <a class="cl-spec" href="${esc(input.specBase)}/spec/feature/${encodeURIComponent(feature.toLowerCase())}">${esc(pick(locale, L.specLink))}</a>` : ""}</h4><ul>${blocks.map((block) => `<li>${esc(block.summary)}${block.scenarioReference ? ` <code>${esc(block.scenarioReference)}</code>` : ""}</li>`).join("")}</ul>${paths.length > 0 ? `<div class="cl-paths">${esc(pick(locale, L.involvedCode))}${paths.map((path) => `<code>${esc(path)}</code>`).join(" ")}</div>` : ""}</div>`;
   }).join("\n")}
 </details>
 </section>`;
   }).join("\n");
 
-  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(input.productName)} 变更日志</title>
+  return `<!doctype html><html lang="${locale}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(input.productName)}${esc(pick(locale, L.title))}</title>
 <style>
 body{font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;max-width:720px;margin:0 auto;padding:48px 20px 64px;color:#1a1a1a;line-height:1.65}
 .back{font-size:13px;color:#666;text-decoration:none}
@@ -203,10 +216,10 @@ h2{font-size:20px;font-weight:650;margin:6px 0 8px}
 .cl-foot a{color:#36c}
 @media (prefers-color-scheme: dark){body{background:#111;color:#e8e8e8}.cl-entry{border-color:#333}.cl-meta,.cl-foot,.cl-feature code{color:#999}.cl-all summary{color:#aaa}.cl-feature{border-color:#2a2a2a}.cl-feature ul{color:#ccc}}
 </style></head><body>
-<a class="back" href="/">← 返回</a>
+<a class="back" href="/">${esc(pick(locale, L.back))}</a>
 <div class="eyebrow">CHANGELOG</div>
-<h1>${esc(input.productName)} 变更日志</h1>
+<h1>${esc(input.productName)}${esc(pick(locale, L.title))}</h1>
 ${body}
-<p class="cl-foot">每条变化由 CoDelphi 从代码行为中提取并附源码依据，经人工审核后发布。${input.specBase ? `完整功能规格见<a href="${esc(input.specBase)}">产品页</a>。` : ""}</p>
+<p class="cl-foot">${esc(pick(locale, L.footer))}${input.specBase ? `${esc(pick(locale, L.footerSpec))}<a href="${esc(input.specBase)}">${esc(pick(locale, L.footerSpecLink))}</a>${esc(pick(locale, L.footerSpecTail))}` : ""}</p>
 </body></html>`;
 }

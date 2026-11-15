@@ -6,6 +6,8 @@ import { buildCostReport } from "@/lib/billing/cost-observability";
 import { getDb } from "@/lib/db";
 import { resolveUiLocale } from "@/lib/ui-locale-server";
 import { formatDateTimeIn } from "@/lib/format";
+import { pick } from "@/lib/ui-locale";
+import { ADMIN_COSTS as L } from "@/lib/ui-strings/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +29,7 @@ export default async function CostAdminPage({ searchParams }: { searchParams: Pr
   return (
     <AppShell user={user} organizationName={organization.name}>
       <div className="page-heading">
-        <div><span className="eyebrow">COST ADMIN</span><h1>成本观测</h1><p>最近 {days} 天的 LLM 调用实际成本（llm_call_receipts 汇总）。成本 NULL = 单价未配置，按 0 计入行并单独披露调用数——未定价 ≠ 零成本。</p></div>
+        <div><span className="eyebrow">COST ADMIN</span><h1>{pick(locale, L.heading)}</h1><p>{pick(locale, L.body).replace("{days}", String(days))}</p></div>
         <div className="page-actions">
           {[7, 14, 30].map((option) => (
             <a key={option} className={`secondary-button${option === days ? " active" : ""}`} href={`/admin/costs?days=${option}`}>{option} 天</a>
