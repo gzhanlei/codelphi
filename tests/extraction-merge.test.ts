@@ -66,13 +66,14 @@ describe("mergeChunkResults", () => {
     expect(merged.features.map((feature) => feature.name)).toEqual(["统一登录", "规格导出", "额度账务核心"]);
   });
 
-  it("dedupes changes by feature+kind+description and takes product/release from the first chunk", () => {
+  it("keeps only exactly duplicated reviewed audit candidates and takes product/release from the first chunk", () => {
     const merged = mergeChunkResults([
-      chunk([], [{ featureName: "规格导出", kind: "added" as const, description: "新增 Gherkin 导出", userImpact: "", evidence: [] }]),
-      chunk([], [{ featureName: "规格导出", kind: "added" as const, description: "新增 Gherkin 导出", userImpact: "", evidence: [] }]),
+      chunk([], [{ featureName: "规格导出", kind: "reviewed" as const, description: "内部实现已检查", userImpact: "", evidence: [] }]),
+      chunk([], [{ featureName: "规格导出", kind: "reviewed" as const, description: "内部实现已检查", userImpact: "", evidence: [] }]),
       chunk([], [{ featureName: "规格导出", kind: "added" as const, description: "新增 Explainer 渲染", userImpact: "", evidence: [] }]),
     ]);
-    expect(merged.changes).toHaveLength(2);
+    expect(merged.changes).toHaveLength(1);
+    expect(merged.changes[0].kind).toBe("reviewed");
     expect(merged.product.description).toBe("代码驱动的产品知识库。");
     expect(merged.release.title).toBe("v1");
   });
@@ -104,22 +105,22 @@ describe("mergeChunkResults", () => {
   it("truncates changes to the schema cap of 150 after dedupe", () => {
     // 先去重再截断：两趟重复的 20 条去重后只算 20 条，不挤占 150 的额度
     const repeated: AnalysisResult["changes"] = Array.from({ length: 20 }, (_, index) => ({
-      featureName: "规格导出", kind: "added" as const, description: `变更${index}`, userImpact: "", evidence: [],
+      featureName: "规格导出", kind: "reviewed" as const, description: `变更${index}`, userImpact: "", evidence: [],
     }));
     const unique: AnalysisResult["changes"] = Array.from({ length: 140 }, (_, index) => ({
-      featureName: "规格导出", kind: "changed" as const, description: `独立变更${index}`, userImpact: "", evidence: [],
+      featureName: "规格导出", kind: "reviewed" as const, description: `独立变更${index}`, userImpact: "", evidence: [],
     }));
     const merged = mergeChunkResults([chunk([], repeated), chunk([], unique), chunk([], repeated)]);
     expect(merged.changes).toHaveLength(150);
     // 去重在前：重复的 20 条全部保留，被截掉的是排在其后的独立变更
-    expect(merged.changes.filter((change) => change.kind === "added")).toHaveLength(20);
+    expect(merged.changes.filter((change) => change.description.startsWith("变更"))).toHaveLength(20);
   });
 
   it("logs when truncation drops changes instead of discarding silently (W0-4)", () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
     try {
       const changes: AnalysisResult["changes"] = Array.from({ length: 160 }, (_, index) => ({
-        featureName: "规格导出", kind: "added" as const, description: `变更${index}`, userImpact: "", evidence: [],
+        featureName: "规格导出", kind: "reviewed" as const, description: `变更${index}`, userImpact: "", evidence: [],
       }));
       const merged = mergeChunkResults([chunk([], changes)]);
       expect(merged.changes).toHaveLength(150);
@@ -166,50 +167,18 @@ describe("mergeChunkResults cross-group variant folding (BM-11)", () => {
   });
 });
 
-describe("mergeChunkResults change description variant dedupe (BM-11)", () => {
-  const variantDescriptions = [
-    "mergeIntegrity 维度新增 featuresFolded 字段，折叠数大于 0 时该维度记为 partial；deriveMergeIntegrity 入参新增 featuresFolded。",
-    "合并完整性维度新增 featuresFolded 计数，大于 0 时该维度记为 partial。",
-    "MergeIntegrityDimension 新增 featuresFolded 字段，deriveMergeIntegrity 在 featuresFolded>0 时把合并完整性记为 partial。",
-    "合并完整性维度新增 featuresFolded 字段，功能级变体被折叠时该维度记为 partial 并如实披露折叠数量。",
-  ];
-  const change = (description: string, featureName = "分析完整性账本", kind: "added" | "changed" | "removed" = "changed") => ({
-    featureName, kind, description, userImpact: "", evidence: [],
+describe("mergeChunkResults reviewed-only audit boundary", () => {
+  it("discards every partition-generated user-facing changelog variant", () => {
+    const variants = [
+      "散文中的「≥1 对」「5 个」等数字噪声不再阻断变体折叠，而「变更0」与「独立变更0」这类短标题不再被误折。",
+      "散文里的个位数计数不再阻止同一行为的措辞变体折叠；「变更0」与「独立变更0」这类短标题不再被误折；404 与 400 等多位错误码仍被守护。",
+      "散文里的个位数计数不再导致同一变化被误判为不同条目；「变更0」与「独立变更0」这类短标题不再被误折。",
+    ];
+    const merged = mergeChunkResults(variants.map((description) => chunk([], [
+      { featureName: "变化条目措辞变体判定", kind: "changed" as const, description, userImpact: description, evidence: [{ path: "lib/spec-diff.ts", startLine: 305 }] },
+    ])));
+
+    expect(merged.changes).toEqual([]);
   });
 
-  it("collapses cross-partition wording variants of the same change (release 225 实证)", () => {
-    const merged = mergeChunkResults([
-      chunk([], variantDescriptions.slice(0, 2).map((description) => change(description))),
-      chunk([], [...variantDescriptions.slice(2).map((description) => change(description)), change("新增 scripts/merge-variant-features.ts 存量清理脚本", "功能变体存量清理脚本", "added")]),
-    ]);
-    const ledgerChanges = merged.changes.filter((item) => item.featureName === "分析完整性账本");
-    expect(ledgerChanges).toHaveLength(1);
-    expect(merged.changes).toHaveLength(2);
-  });
-
-  it("keeps genuinely different change items of the same feature and folds cross-kind variants via userImpact (release 227 实证)", () => {
-    const merged = mergeChunkResults([
-      chunk([], [
-        change("合并完整性维度新增 featuresFolded 字段，功能级变体被折叠时该维度记为 partial。"),
-        change("mergeChunkResults 的 onStats 回调新增 featuresFolded 计数，mergeStats 初始化与 saveResult 返回值新增 featureFolds 字段。"),
-      ]),
-    ]);
-    expect(merged.changes).toHaveLength(2);
-    const impact = "同一组件被换字命名析出的异名功能不再重复记为新增功能，发布变化清单更干净；同文件但行为不同的功能仍保持独立。";
-    const crossKind = mergeChunkResults([
-      chunk([], [
-        { featureName: "功能级变体判定与存量清理", kind: "changed" as const, description: "身份判定改为名字通道或双信号通道；场景门禁在双信号通道下放宽。", userImpact: impact, evidence: [] },
-        { featureName: "功能级变体判定与存量清理", kind: "fixed" as const, description: "身份判定改为名字通道或双信号通道；双信号通道下场景门禁放宽为至少 1 对配对。", userImpact: "同一组件被换名析出的多个功能不再在发布变化中重复记为 added，规格功能清单不再出现重复条目。", evidence: [] },
-      ]),
-    ]);
-    expect(crossKind.changes).toHaveLength(1);
-    // added↔removed 语义相反：描述近同文也不得互折
-    const conflict = mergeChunkResults([
-      chunk([], [
-        { featureName: "登录功能", kind: "added" as const, description: "新增邮箱密码登录入口", userImpact: "", evidence: [] },
-        { featureName: "登录功能", kind: "removed" as const, description: "新增邮箱密码登录入口", userImpact: "", evidence: [] },
-      ]),
-    ]);
-    expect(conflict.changes).toHaveLength(2);
-  });
 });

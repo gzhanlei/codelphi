@@ -28,7 +28,7 @@ import type { SpecAnchorFeature } from "./spec-versions";
 import { markSpecDrift } from "./spec-drift";
 import { deliverAnalysisNotifications } from "./notifications";
 import { rewriteReleaseNoteCopy } from "./release-notes-enhance";
-import { buildReleaseChangeProjections, type ReleaseChangeFact, type ReleaseChangeProjection } from "./release-change-projection";
+import { buildReleaseChangeProjections, rewriteReleaseChangeProjections, type ReleaseChangeFact, type ReleaseChangeProjection } from "./release-change-projection";
 import { requestStructuredCompletion } from "./ai";
 import { loadNoteByRelease, loadBlockViews } from "./release-notes-service";
 import { ensureRegressionTasks } from "./regression-tasks";
@@ -571,7 +571,16 @@ async function runAnalysisBody(run: RunContext) {
     console.log("[analysis] behavioral enumeration", { runId: run.id, ...enumerationMetrics });
   }
   } // else：提取分支结束（BM-10 零行为变更窗口不进入）
-  const { specVersionId, releaseId, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds } = await saveResult(run, result, change, affectedKeys, coverage);
+  const { specVersionId, releaseId, releaseChangeProjections, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds } = await saveResult(run, result, change, affectedKeys, coverage);
+  const projectionRewrite = await rewriteReleaseChangeProjections(
+    { execute: (sql, params) => getDb().execute(sql, params ?? []) },
+    { completion: requestStructuredCompletion, runId: run.id, accountId: run.accountId ?? null },
+    releaseChangeProjections,
+    run.outputLanguage,
+  );
+  if (releaseChangeProjections.length > 0) {
+    console.log("[release-changes] canonical projections rewritten", { runId: run.id, releaseId, projections: releaseChangeProjections.length, ...projectionRewrite });
+  }
   try {
     const flowStats = await syncFeatureFlowsForVersion({
       specVersionId,

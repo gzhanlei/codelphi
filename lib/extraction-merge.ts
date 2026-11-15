@@ -1,10 +1,10 @@
 import type { AnalysisResult } from "./ai";
-import { changeDescriptionVariantSimilar, featureScenarioPairMatch, featureVariantSimilar, normalizeSpecText, scenarioBehaviorEqual, scenarioVariantSimilar, specFeatureKey, type SpecFeature } from "./spec-diff";
+import { featureScenarioPairMatch, featureVariantSimilar, normalizeSpecText, scenarioBehaviorEqual, scenarioVariantSimilar, specFeatureKey, type SpecFeature } from "./spec-diff";
 
 /**
  * 多趟提取的确定性合并层：把 N 个分区窗口各自的 AnalysisResult 合并为一个完整规格。
  * 只做规则合并（无 AI 通道）：功能按 stable key 分组、场景按行为等价去重、引用冲突
- * 重编号、changes 去重截断。每趟结果在提取层已过 zod 与 assertEvidence（分区局部口径），
+ * 重编号、reviewed 审计候选精确去重截断。每趟结果在提取层已过 zod 与 assertEvidence（分区局部口径），
  * 合并对象有意绕过 zod 的 ≤50 功能/≤40 场景上限（DB 无对应上限）。
  */
 
@@ -108,31 +108,14 @@ export function mergeChunkResults(chunks: ExtractionChunk[], onStats?: (stats: {
 
   const changes: AnalysisResult["changes"] = [];
   const seenChanges = new Set<string>();
-  // 同 feature 的条目列表：变体判定（措辞改写）在其内做贪心去重——精确命中走 seenChanges
-  // 快通道，变体走 changeDescriptionVariantSimilar（release 224/225 实证：「分析完整性账本」
-  // partial 披露被逐分区写成 7 个措辞变体全量落 changes 表）。分组键只含 featureKey 不含
-  // kind：release 227 实证同一行为被标 changed 与 fixed 各一条（描述+userImpact 近同文），
-  // kind 是 AI 的呈现标签、不是行为边界——但 added↔removed 语义相反，禁止互折。
-  // 判定通道：description 为主，userImpact 为辅（release 227 实证描述措辞漂移过大时
-  // 影响文案仍近同文）。
-  const kindConflict = (a: string, b: string) => (a === "added" && b === "removed") || (a === "removed" && b === "added");
-  const changesByFeature = new Map<string, AnalysisResult["changes"]>();
+  // 提取趟只保留内部实现的 reviewed 审计候选；最终用户变化由合并后的 spec_changes 统一投影。
+  // 这里只做精确去重，不用自然语言相似度推断行为身份。
   for (const { result } of chunks) {
     for (const change of result.changes) {
-      const descriptionKey = `${specFeatureKey(change.featureName)}:${change.kind}:${normalizeSpecText(change.description)}`;
+      if (change.kind !== "reviewed") continue;
+      const descriptionKey = `${specFeatureKey(change.featureName)}:${normalizeSpecText(change.description)}:${JSON.stringify(change.evidence)}`;
       if (seenChanges.has(descriptionKey)) continue;
-      const featureKey = specFeatureKey(change.featureName);
-      const siblings = changesByFeature.get(featureKey);
-      const duplicate = siblings?.some((existing) => {
-        if (kindConflict(existing.kind, change.kind)) return false;
-        if (changeDescriptionVariantSimilar(existing.description, change.description)) return true;
-        return Boolean(existing.userImpact) && Boolean(change.userImpact)
-          && changeDescriptionVariantSimilar(existing.userImpact, change.userImpact);
-      });
-      if (duplicate) continue;
       seenChanges.add(descriptionKey);
-      if (siblings) siblings.push(change);
-      else changesByFeature.set(featureKey, [change]);
       changes.push(change);
     }
   }
@@ -140,7 +123,7 @@ export function mergeChunkResults(chunks: ExtractionChunk[], onStats?: (stats: {
   return {
     product: first.product,
     release: first.release,
-    // changes 截断到 schema 上限：分区越多越容易超；发布页 changelog 取去重后的前 150 条。
+    // reviewed 审计候选截断到 schema 上限：分区越多越容易超；精确去重后保留前 150 条。
     // 截断必须日志可查（W0-4）：不静默丢弃，runId 级排查靠这条日志对账。
     changes: (() => {
       if (changes.length <= 150) {

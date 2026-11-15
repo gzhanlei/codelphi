@@ -340,7 +340,7 @@ export function incrementalScopeSection(affectedFeatureNames?: string[], unassig
       parts.push(...unassignedBehavioralPaths.map((path) => `- ${path}`));
     }
     parts.push("Except for the two categories above, the remaining existing features are carried over by the system from the previous spec; do not output them.");
-    parts.push("The product description and the release changes must still cover the entire commit.");
+    parts.push("The product description must still cover the entire commit. Final release copy is composed once from canonical spec changes; changes may contain only kind=reviewed audit candidates.");
     return parts.filter(Boolean).join("\n");
   }
   const parts = [
@@ -355,7 +355,7 @@ export function incrementalScopeSection(affectedFeatureNames?: string[], unassig
     parts.push(...unassignedBehavioralPaths.map((path) => `- ${path}`));
   }
   parts.push("除上述两类之外，其余既有功能由系统沿用上一版规格，请勿输出。");
-  parts.push("product 简介与 release 变化仍需覆盖整个提交的内容。");
+  parts.push("product 简介仍需覆盖整个提交。发布说明由系统从规范 spec_changes 统一生成；changes 只能包含 kind=reviewed 审计候选。");
   return parts.filter(Boolean).join("\n");
 }
 
@@ -388,25 +388,27 @@ export function extractionInstructionLines(language: OutputLanguage, options: { 
   if (language === "en") {
     return [
       "You are maintaining a product knowledge base. State only facts grounded in the given code and diff; do not add speculation.",
-      "Generate the following in English — all natural-language text MUST be written in English, never Chinese: 1) the product description; 2) the current product feature spec; 3) the user-perceivable changes of this release.",
+      "Generate the following in English — all natural-language text MUST be written in English, never Chinese: 1) the product description; 2) the current product feature spec.",
+      "Do not write the final release changelog in an extraction pass: changes is reserved for kind=reviewed internal-implementation audit candidates; final release copy is composed once from canonical spec changes after all passes merge.",
       "The product description is one or two sentences naming the audience and the core capability, at most 200 characters, summarizing the whole codebase rather than this commit, and carries evidence from the input files; do not write just the product name or marketing copy.",
       "Organize the spec by features; every scenario contains a context, an action and an outcome, classified happy/edge/error, with references HP-n/EC-n/ER-n. JSON field names must match the template below verbatim (context/action/outcome); never use synonym keys such as result.",
       "Scenarios may carry an optional step: happy scenarios are numbered step=1..N in delivery order (within one feature and one context); an edge/error scenario's step is the happy step it branches from; omit step when the order is unclear and never invent one.",
       options.coverageMandate,
       "Prioritize feature coverage: keep the 1-5 most important scenarios per feature; do not miss other features because a single feature has too many scenarios.",
-      "Every scenario, change and the product description must carry evidence; path must come from the input files and startLine must use the input line numbers. A release without user-facing changes only emits reviewed items.",
+      "Every scenario, reviewed audit candidate and the product description must carry evidence; path must come from the input files and startLine must use the input line numbers. When there is no internal implementation to audit, return changes=[].",
       "Return JSON only, no Markdown. Structure:",
     ];
   }
   return [
     "你在维护一个产品知识库。仅根据给定代码和 diff 输出事实，不要补充猜测。",
-    "用简体中文生成：1) 产品简介；2) 当前产品功能规格；3) 本次发布的用户可感知变化。",
+    "用简体中文生成：1) 产品简介；2) 当前产品功能规格。",
+    "提取趟不得撰写最终发布变化清单：changes 仅用于 kind=reviewed 的内部实现审计候选；全部提取合并后，系统会从规范 spec_changes 统一生成发布说明。",
     "产品简介用一到两句话说明服务对象和核心能力，不超过 200 字，必须概括整个代码库而不是本次提交，并给出输入文件中的 evidence；不要只写产品名或营销词。",
     "规格按功能组织，每个场景包含情境、操作、结果，分类为 happy/edge/error，reference 使用 HP-n/EC-n/ER-n。JSON 字段名必须与下方模板逐字一致：情境=context、操作=action、结果=outcome，禁止用 result 等同义键名。",
     "场景可选标注 step：happy 场景按交付顺序标 step=1..N（同一功能同一情境内）；edge/error 场景的 step=其分支自的 happy 步骤号；不确定顺序时不写 step，不得编造。",
     options.coverageMandate,
     "优先保证功能覆盖，每个功能保留最关键的 1-5 个场景；不要因单个功能场景过多而遗漏其他功能。",
-    "每个场景、变化和产品简介必须给 evidence；path 必须来自输入文件，startLine 使用输入的行号。没有用户变化的发布只生成 reviewed 项。",
+    "每个场景、reviewed 审计候选和产品简介必须给 evidence；path 必须来自输入文件，startLine 使用输入的行号。没有内部实现需要审计时返回 changes=[]。",
     "只返回 JSON，不要 Markdown。结构：",
   ];
 }

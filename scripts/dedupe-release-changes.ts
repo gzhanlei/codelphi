@@ -1,5 +1,5 @@
 import "dotenv/config";
-import mysql, { type Pool, type PoolConnection } from "mysql2/promise";
+import mysql, { type Pool } from "mysql2/promise";
 import { databaseConfig } from "../lib/database-config";
 import { changeDescriptionVariantSimilar, specFeatureKey } from "../lib/spec-diff";
 
@@ -7,10 +7,10 @@ import { changeDescriptionVariantSimilar, specFeatureKey } from "../lib/spec-dif
  * BM-11 存量清理（changes 表）：release 的行为变化清单（changes 表）由各分区 AI 条目
  * 落库，BM-11 之前的合并层只做描述原文精确去重——同一行为变化的措辞变体（release 225
  * 「分析完整性账本」partial 披露 ×7、release 224 反馈后台条目 ×多）全量留存。
- * 判定复用 changeDescriptionVariantSimilar（与新管线合并层同一口径）。
- * 守护：同 release 内、同 featureKey+kind 分组才比较；keeper 取 id 最小（先落库者）；
- * 纯 dry-run 默认，--apply 才删。
- * 用法：npx tsx scripts/dedupe-release-changes.ts --repository <slug|id> [--release <id>] [--apply]
+ * 判定复用 changeDescriptionVariantSimilar，仅供历史数据 dry-run 诊断；新管线不再使用该相似度做合并决策。
+ * 守护：同 release 内、同 featureKey 分组比较，added↔removed 不互折；keeper 取 id 最小。
+ * 模糊文本 --apply 已停用，防止把真实差异物理删除。
+ * 用法：npx tsx scripts/dedupe-release-changes.ts --repository <slug|id> [--release <id>]
  */
 
 export interface PlannableChangeRow {
@@ -28,6 +28,10 @@ export interface ChangeDedupePlan {
   kind: string;
   keepId: number;
   dropIds: number[];
+}
+
+export function assertLegacyDedupeApplyDisabled(apply: boolean) {
+  if (apply) throw new Error("模糊文本去重的 --apply 已停用；请只使用 dry-run 诊断，并从 spec_changes 重建发布投影。");
 }
 
 /** added↔removed 语义相反，禁止互折（kind 是 AI 的呈现标签，其余标签可跨组比较）。 */
@@ -72,7 +76,7 @@ function parseArgs(argv: string[]) {
     if (argv[index] === "--apply") args.apply = true;
   }
   if (!args.repository) {
-    console.error("用法：npx tsx scripts/dedupe-release-changes.ts --repository <slug|id> [--release <id>] [--apply]");
+    console.error("用法：npx tsx scripts/dedupe-release-changes.ts --repository <slug|id> [--release <id>]（仅 dry-run）");
     process.exit(1);
   }
   return args;
@@ -86,6 +90,7 @@ async function resolveRepository(db: Pool, repository: string): Promise<{ id: nu
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  assertLegacyDedupeApplyDisabled(args.apply);
   const db = mysql.createPool(databaseConfig(true));
   try {
     const repository = await resolveRepository(db, args.repository);
@@ -115,27 +120,8 @@ async function main() {
       console.log(`  保留 #${plan.keepId}`);
       for (const dropId of plan.dropIds) console.log(`  - 删除变体行 #${dropId}`);
     }
-    console.log(`\n提案：${plans.length} 组、删除 ${dropTotal} 条变体行（changes 表无下游外键，历史 spec_changes/spec_versions 不涉及）。`);
-    if (!args.apply) {
-      console.log("dry-run 未改动数据；人工审阅后加 --apply 执行。");
-      return;
-    }
-    const connection = await db.getConnection();
-    try {
-      await connection.beginTransaction();
-      for (const plan of plans) {
-        for (const dropId of plan.dropIds) {
-          await connection.execute("DELETE FROM changes WHERE id = ?", [dropId]);
-        }
-      }
-      await connection.commit();
-      console.log(`\n已执行：删除 ${dropTotal} 条变体行（keep 各组首条）。`);
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    } finally {
-      connection.release();
-    }
+    console.log(`\n诊断提案：${plans.length} 组、${dropTotal} 条疑似变体行。`);
+    console.log("dry-run 未改动数据；模糊文本 --apply 已永久停用，请从 spec_changes 重建发布投影。");
   } finally {
     await db.end();
   }

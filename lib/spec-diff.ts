@@ -269,9 +269,10 @@ export function scenarioVariantSimilar(previous: SpecScenario, current: SpecScen
 }
 
 /**
- * BM-11 变化条目变体判定（合并层 changes 去重用）：run 的 changes 清单按分区各自产出，
+ * 历史 changes 行 dry-run 诊断用：旧管线的 changes 清单按分区各自产出，
  * 同一行为变化的描述被逐分区措辞改写（release 225 实证：「分析完整性账本」partial 披露
- * 被写成 7 个变体全量落 changes 表，合并层原只做描述原文精确去重）。判定在守护（跨语种
+ * 被写成 7 个变体全量落 changes 表）。新管线的用户变化从 spec_changes 统一投影，不调用此判定。
+ * 判定在守护（跨语种
  * 拒绝、数字签名一致 0.01≠0.02、否定计数一致）之外走 **term 词集**（latin run ≥5 字符
  * 按标识符词、CJK 按 2-gram；短 latin 词忽略——技术描述的区分度在标识符与中文关键词，
  * 字符 2-gram 被子句重排稀释，真变体对实测仅 0.20-0.39）：

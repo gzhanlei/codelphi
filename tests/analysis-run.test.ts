@@ -7,6 +7,7 @@ import { generateRepositoryArchitectureVersion } from "../lib/architecture-versi
 import { insertSpecVersion } from "../lib/spec-versions";
 import { BillingError, enqueueRunWithReservation, hasActiveReservation, heartbeat, capture, release, reserveForNewRun } from "../lib/billing/core";
 import { specFeatureKey } from "../lib/spec-diff";
+import { rewriteReleaseChangeProjections } from "../lib/release-change-projection";
 
 const execute = vi.fn();
 const readLines = vi.fn();
@@ -49,8 +50,12 @@ vi.mock("../lib/code-hosting", async (importOriginal) => ({
     product: { id: run.productId, slug: run.productSlug, name: run.productName },
   })),
 }));
-vi.mock("../lib/ai", () => ({ analyzeWithAI: vi.fn(), analyzeBehavioralGroup: vi.fn() }));
+vi.mock("../lib/ai", () => ({ analyzeWithAI: vi.fn(), analyzeBehavioralGroup: vi.fn(), requestStructuredCompletion: vi.fn() }));
 vi.mock("../lib/notifications", () => ({ deliverAnalysisNotifications: vi.fn(async () => undefined) }));
+vi.mock("../lib/release-change-projection", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../lib/release-change-projection")>(),
+  rewriteReleaseChangeProjections: vi.fn(async () => ({ rewritten: 0, failed: 0 })),
+}));
 const { compareIncrementalShadow } = vi.hoisted(() => ({ compareIncrementalShadow: vi.fn((incremental: { features: Array<{ name: string }>; changes: unknown[] }, _full: unknown) => ({ consistent: true, missingKeys: [] as string[], extraKeys: [] as string[], scenarioDiffs: [] as string[] })) }));
 vi.mock("../lib/incremental-shadow", () => ({ compareIncrementalShadow }));
 const { partitionedSourcesMock } = vi.hoisted(() => ({ partitionedSourcesMock: vi.fn() }));
@@ -174,6 +179,35 @@ describe("analysis orchestration", () => {
     expect(connection.commit.mock.invocationCallOrder[0]).toBeLessThan(syncFeatureFlowsForVersion.mock.invocationCallOrder[0]);
     expect(connection.release).toHaveBeenCalledOnce();
     expect(execute).not.toHaveBeenCalledWith(expect.stringContaining("status = 'failed'"), expect.anything());
+  });
+
+  it("rewrites persisted projections only after the canonical transaction commits", async () => {
+    vi.mocked(insertSpecVersion).mockResolvedValueOnce({
+      specVersionId: 44,
+      specChanges: [{ id: 501, kind: "changed", entityType: "feature", featureName: "统一登录", scenarioReference: null, summary: "更新登录行为", before: null, after: { name: "统一登录", summary: "s", scenarios: [] } }],
+      features: [{ name: "统一登录", summary: "s", scenarios: [] }],
+      collapse: null,
+      featureCollapses: [],
+      misplacedScenarios: [],
+      identityHijacksDropped: 0,
+      featureFolds: [],
+    });
+    connection.execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("SELECT id FROM analysis_runs WHERE repository_id = ?")) return [[{ id: 8 }]];
+      if (sql.includes("SELECT id FROM releases")) return [[{ id: 6 }]];
+      if (sql.includes("SELECT COUNT")) return [[{ count: 0 }]];
+      if (sql.includes("INSERT INTO changes")) return [{ insertId: 88 }];
+      if (sql.includes("FROM spec_features sf")) return [[]];
+      if (sql.includes("FROM spec_changes")) return [[]];
+      return [{}];
+    });
+
+    await runAnalysis(8);
+
+    const projections = vi.mocked(rewriteReleaseChangeProjections).mock.calls[0][2];
+    expect(projections).toHaveLength(1);
+    expect(projections[0]).toMatchObject({ changeId: 88, sourceSpecChangeIds: [501], featureName: "统一登录" });
+    expect(connection.commit.mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(rewriteReleaseChangeProjections).mock.invocationCallOrder[0]);
   });
 
   it("keeps the committed run successful when semantic flow synchronization fails", async () => {

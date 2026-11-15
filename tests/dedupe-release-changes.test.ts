@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planChangesDedupe, type PlannableChangeRow } from "../scripts/dedupe-release-changes";
+import { assertLegacyDedupeApplyDisabled, planChangesDedupe, type PlannableChangeRow } from "../scripts/dedupe-release-changes";
 
 const row = (id: number, featureName: string, kind: string, description: string, userImpact = ""): PlannableChangeRow => ({ id, releaseId: 225, featureName, kind, description, userImpact });
 
@@ -11,6 +11,11 @@ const partialDisclosureVariants = [
 ];
 
 describe("planChangesDedupe (BM-11 changes 存量清理规划器)", () => {
+  it("refuses destructive fuzzy apply while preserving dry-run diagnostics", () => {
+    expect(() => assertLegacyDedupeApplyDisabled(true)).toThrow("--apply 已停用");
+    expect(() => assertLegacyDedupeApplyDisabled(false)).not.toThrow();
+  });
+
   it("keeps the first row and drops wording variants within the same feature+kind", () => {
     const rows = partialDisclosureVariants.map((description, index) => row(index + 1, "分析完整性账本", "changed", description));
     const plans = planChangesDedupe(rows);

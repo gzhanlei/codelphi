@@ -17,7 +17,9 @@ describe("bilingual prompt assembly (EN output mode)", () => {
   it("keeps the zh instruction block byte-identical", () => {
     const lines = extractionInstructionLines("zh-CN", { coverageMandate: "当前产品功能规格必须覆盖输入代码里的全部主要用户功能" }).join("\n");
     expect(lines).toContain("你在维护一个产品知识库。仅根据给定代码和 diff 输出事实，不要补充猜测。");
-    expect(lines).toContain("用简体中文生成：1) 产品简介；2) 当前产品功能规格；3) 本次发布的用户可感知变化。");
+    expect(lines).toContain("用简体中文生成：1) 产品简介；2) 当前产品功能规格。");
+    expect(lines).toContain("changes 仅用于 kind=reviewed 的内部实现审计候选");
+    expect(lines).not.toContain("3) 本次发布的用户可感知变化");
     expect(lines).toContain("禁止用 result 等同义键名");
     expect(lines).toContain("当前产品功能规格必须覆盖输入代码里的全部主要用户功能");
     expect(lines).toContain("只返回 JSON，不要 Markdown。结构：");
@@ -29,6 +31,8 @@ describe("bilingual prompt assembly (EN output mode)", () => {
     expect(lines).toContain("Generate the following in English");
     expect(lines).toContain("never Chinese");
     expect(lines).toContain("cover every major capability");
+    expect(lines).toContain("changes is reserved for kind=reviewed internal-implementation audit candidates");
+    expect(lines).not.toContain("3) the user-perceivable changes of this release");
     expect(lines).toContain("Return JSON only, no Markdown. Structure:");
     expect(systemPrompt("en")).toMatch(/rigorous code analyzer/);
   });
@@ -56,6 +60,7 @@ describe("bilingual prompt assembly (EN output mode)", () => {
     expect(scope).toContain("[Incremental analysis mode]");
     expect(scope).toContain("output it as an independent feature");
     expect(scope).toContain("lib/new.ts");
+    expect(scope).toContain("Final release copy is composed once from canonical spec changes");
 
     expect(partitionNotice(2, 6, "en")).toContain("partition 2/6");
     expect(partitionNotice(2, 6, "zh-CN")).toContain("第 2/6 个分区");

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { OutputLanguage } from "./analysis-language";
+import type { Execute } from "./db";
 import type { CopyCompletion } from "./release-notes-enhance";
 import { specFeatureKey, type SpecChange, type SpecFeature, type SpecScenario } from "./spec-diff";
 import type { Evidence } from "./types";
@@ -97,7 +98,7 @@ function parseRewrite(content: string) {
 }
 
 export async function rewriteReleaseChangeProjections(
-  execute: { execute: (sql: string, params?: unknown[]) => Promise<unknown> },
+  execute: { execute: Execute },
   deps: { completion: CopyCompletion; runId: number; accountId: number | null },
   projections: ReleaseChangeProjection[],
   language: OutputLanguage = "zh-CN",
