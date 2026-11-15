@@ -490,7 +490,7 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
       pollSeconds: args.pollSeconds === undefined ? undefined : Number(args.pollSeconds),
       loadAttempt: async () => {
         const runs = await queryRows<{ id: number; status: string; error_message: string | null }>(
-          execute("SELECT id, status, error_message FROM analysis_runs ar JOIN repositories repo ON repo.id = ar.repository_id WHERE ar.after_sha = ? AND repo.product_id = ? ORDER BY ar.created_at DESC, ar.id DESC LIMIT 1", [sha, product.id]),
+          execute("SELECT ar.id, ar.status, ar.error_message FROM analysis_runs ar JOIN repositories repo ON repo.id = ar.repository_id WHERE ar.after_sha = ? AND repo.product_id = ? ORDER BY ar.created_at DESC, ar.id DESC LIMIT 1", [sha, product.id]),
         );
         const releases = await queryRows<{ id: number }>(execute("SELECT id FROM releases WHERE product_id = ? AND sha = ?", [product.id, sha]));
         return {
