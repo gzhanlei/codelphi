@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { featureVariantSimilar, type SpecFeature, type SpecScenario } from "../lib/spec-diff";
+import { changeDescriptionVariantSimilar, featureVariantSimilar, type SpecFeature, type SpecScenario } from "../lib/spec-diff";
 
 /**
  * BM-11 功能级变体通道：dogfood 账本实锤的变体形态作为 fixtures。
@@ -158,5 +158,27 @@ describe("featureVariantSimilar (BM-11 功能级变体通道)", () => {
 
   it("rejects outcome negation flips (可以重试 ↔ 不可以重试)", () => {
     expect(featureVariantSimilar(...outcomeNegationFlip)).toBe(false);
+  });
+});
+
+describe("changeDescriptionVariantSimilar (BM-11 changes 去重)", () => {
+  const variants = [
+    "mergeIntegrity 维度新增 featuresFolded 字段，折叠数大于 0 时该维度记为 partial；deriveMergeIntegrity 入参新增 featuresFolded。",
+    "合并完整性维度新增 featuresFolded 计数，大于 0 时该维度记为 partial。",
+    "MergeIntegrityDimension 新增 featuresFolded 字段，deriveMergeIntegrity 在 featuresFolded>0 时把合并完整性记为 partial。",
+    "合并完整性维度新增 featuresFolded 字段，功能级变体被折叠时该维度记为 partial 并如实披露折叠数量。",
+  ];
+  it("folds the real release-225 wording variants of the same change", () => {
+    for (let index = 1; index < variants.length; index += 1) {
+      expect(changeDescriptionVariantSimilar(variants[0], variants[index])).toBe(true);
+    }
+  });
+
+  it("rejects genuinely different change items and traps", () => {
+    expect(changeDescriptionVariantSimilar(variants[0], "新增 scripts/merge-variant-features.ts 存量清理脚本")).toBe(false);
+    // 数字签名冲突：不同阈值/计数的变更不得互折
+    expect(changeDescriptionVariantSimilar("错误响应携带 404 错误码", "错误响应携带 400 错误码")).toBe(false);
+    // 跨语种拒绝
+    expect(changeDescriptionVariantSimilar("合并完整性维度记为 partial", "Merge integrity marked as partial")).toBe(false);
   });
 });

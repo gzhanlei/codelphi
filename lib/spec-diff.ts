@@ -124,6 +124,18 @@ export function contentJaccard(left: string, right: string): number {
   return intersection / union;
 }
 
+/** 包含率：交集占较小一方 gram 集的比例（短变体 ⊂ 长变体的改写形态检测用）。 */
+function contentContainment(left: string, right: string): number {
+  const a = contentGrams(left);
+  const b = contentGrams(right);
+  const smaller = Math.min(a.size, b.size);
+  if (smaller === 0) return 0;
+  const [smallerSet, largerSet] = a.size <= b.size ? [a, b] : [b, a];
+  let intersection = 0;
+  for (const gram of smallerSet) if (largerSet.has(gram)) intersection += 1;
+  return intersection / smaller;
+}
+
 export function specTextEquivalent(before: string, after: string) {
   // 跨语种（单侧含 CJK）一律判不等：语言切换 run 的旧语种文本不得被英文新文本折叠。
   if (crossLanguageText(before, after)) return false;
@@ -254,6 +266,64 @@ export function scenarioVariantSimilar(previous: SpecScenario, current: SpecScen
   const previousCombined = `${previous.context}${separator}${previous.action}${separator}${previous.outcome}`;
   const currentCombined = `${current.context}${separator}${current.action}${separator}${current.outcome}`;
   return contentJaccard(previousCombined, currentCombined) >= VARIANT_JACCARD_THRESHOLD;
+}
+
+/**
+ * BM-11 变化条目变体判定（合并层 changes 去重用）：run 的 changes 清单按分区各自产出，
+ * 同一行为变化的描述被逐分区措辞改写（release 225 实证：「分析完整性账本」partial 披露
+ * 被写成 7 个变体全量落 changes 表，合并层原只做描述原文精确去重）。判定在守护（跨语种
+ * 拒绝、数字签名一致 0.01≠0.02、否定计数一致）之外走 **term 词集**（latin run ≥5 字符
+ * 按标识符词、CJK 按 2-gram；短 latin 词忽略——技术描述的区分度在标识符与中文关键词，
+ * 字符 2-gram 被子句重排稀释，真变体对实测仅 0.20-0.39）：
+ * - termJaccard ≥ 0.3（长度对称的改写）；
+ * - 或共享标识符词 ≥2 且包含率 ≥ 0.4（长短不对称：长版多一从句，Jaccard 被并集稀释）。
+ * 实测分界干净：真变体对 0.231-0.417 全折；真差异对（onStats 独立条目 anchors=1、
+ * 跨功能条目 anchors≤1、数字/跨语种陷阱）全拒。
+ */
+const CHANGE_TERM_JACCARD_THRESHOLD = 0.3;
+const CHANGE_ANCHOR_MIN = 2;
+const CHANGE_CONTAINMENT_THRESHOLD = 0.4;
+
+function changeTermGrams(text: string): Set<string> {
+  const grams = new Set<string>();
+  for (const chunk of normalizeSpecText(text).split(/[^A-Za-z0-9\u4e00-\u9fa5]+/)) {
+    const runs = chunk.match(/[A-Za-z0-9]+|[\u4e00-\u9fa5]+/g) ?? [];
+    for (const run of runs) {
+      if (/^[A-Za-z0-9]+$/.test(run)) {
+        if (run.length >= 5) grams.add(run.toLowerCase());
+        continue;
+      }
+      for (let index = 0; index + 2 <= run.length; index += 1) grams.add(run.slice(index, index + 2));
+    }
+  }
+  return grams;
+}
+
+export function changeDescriptionVariantSimilar(left: string, right: string): boolean {
+  if (crossLanguageText(left, right)) return false;
+  const l = specContent(left);
+  const r = specContent(right);
+  if (l === r) return true;
+  if (l === "" || r === "") return false;
+  // 数字守护剔除独立「0」token：散文里的「大于 0 / 0 次」不是语义值（release 225 真变体
+  // 对「折叠数大于 0」↔「被折叠时」被原始签名误杀）；404≠400 这类真实错误码不受影响。
+  const significantDigits = (text: string) => digitSignature([...text.matchAll(/[0-9]+/g)].filter((match) => match[0] !== "0").map((match) => match[0]).join(","));
+  if (significantDigits(l) !== significantDigits(r)) return false;
+  if (negationCountOf(left) !== negationCountOf(right)) return false;
+  if (specTextEquivalent(left, right)) return true;
+  const leftGrams = changeTermGrams(left);
+  const rightGrams = changeTermGrams(right);
+  let intersection = 0;
+  const anchors: string[] = [];
+  for (const gram of leftGrams) {
+    if (!rightGrams.has(gram)) continue;
+    intersection += 1;
+    if (/^[a-z0-9]{5,}$/.test(gram)) anchors.push(gram);
+  }
+  const union = leftGrams.size + rightGrams.size - intersection;
+  if (union > 0 && intersection / union >= CHANGE_TERM_JACCARD_THRESHOLD) return true;
+  const smaller = Math.min(leftGrams.size, rightGrams.size);
+  return anchors.length >= CHANGE_ANCHOR_MIN && smaller > 0 && intersection / smaller >= CHANGE_CONTAINMENT_THRESHOLD;
 }
 
 function isScenarioShape(value: unknown): value is SpecScenario {

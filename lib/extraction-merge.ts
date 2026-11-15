@@ -1,5 +1,5 @@
 import type { AnalysisResult } from "./ai";
-import { featureScenarioPairMatch, featureVariantSimilar, normalizeSpecText, scenarioBehaviorEqual, scenarioVariantSimilar, specFeatureKey, type SpecFeature } from "./spec-diff";
+import { changeDescriptionVariantSimilar, featureScenarioPairMatch, featureVariantSimilar, normalizeSpecText, scenarioBehaviorEqual, scenarioVariantSimilar, specFeatureKey, type SpecFeature } from "./spec-diff";
 
 /**
  * 多趟提取的确定性合并层：把 N 个分区窗口各自的 AnalysisResult 合并为一个完整规格。
@@ -108,11 +108,20 @@ export function mergeChunkResults(chunks: ExtractionChunk[], onStats?: (stats: {
 
   const changes: AnalysisResult["changes"] = [];
   const seenChanges = new Set<string>();
+  // 同 feature+kind 的条目列表：变体判定（措辞改写）在其内做贪心去重——精确命中走
+  // seenChanges 快通道，变体走 changeDescriptionVariantSimilar（release 224/225 实证：
+  // 「分析完整性账本」partial 披露被逐分区写成 7 个措辞变体全量落 changes 表）。
+  const changesByFeatureKind = new Map<string, AnalysisResult["changes"]>();
   for (const { result } of chunks) {
     for (const change of result.changes) {
-      const dedupeKey = `${specFeatureKey(change.featureName)}:${change.kind}:${normalizeSpecText(change.description)}`;
-      if (seenChanges.has(dedupeKey)) continue;
-      seenChanges.add(dedupeKey);
+      const descriptionKey = `${specFeatureKey(change.featureName)}:${change.kind}:${normalizeSpecText(change.description)}`;
+      if (seenChanges.has(descriptionKey)) continue;
+      const featureKindKey = `${specFeatureKey(change.featureName)}|${change.kind}`;
+      const siblings = changesByFeatureKind.get(featureKindKey);
+      if (siblings?.some((existing) => changeDescriptionVariantSimilar(existing.description, change.description))) continue;
+      seenChanges.add(descriptionKey);
+      if (siblings) siblings.push(change);
+      else changesByFeatureKind.set(featureKindKey, [change]);
       changes.push(change);
     }
   }
