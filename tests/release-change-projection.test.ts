@@ -45,6 +45,7 @@ describe("buildReleaseChangeProjections", () => {
     expect(projections[0].description).toContain(release229Summaries[0]);
     expect(projections[0].description).toContain(release229Summaries[1]);
     expect(projections[0].description).toContain(release229Summaries[2]);
+    expect(projections[0].userImpact).toBe("");
     expect(projections[0].evidence).toEqual([
       { path: "lib/spec-diff.ts", startLine: 301 },
       { path: "lib/spec-diff.ts", startLine: 302 },
@@ -64,6 +65,18 @@ describe("buildReleaseChangeProjections", () => {
     expect(projection.description).toContain("新增邮箱登录");
     expect(projection.description).toContain("移除旧令牌登录");
   });
+
+  it("truncates oversized fallback copy at a complete sentence boundary", () => {
+    const first = `${"甲".repeat(3_998)}。`;
+    const [projection] = buildReleaseChangeProjections([
+      fact(1, "长描述", first),
+      fact(2, "长描述", `${"乙".repeat(20)}。`),
+    ]);
+
+    expect(projection.description).toBe(first);
+    expect(projection.description).toHaveLength(3_999);
+    expect(projection.description.endsWith("。")).toBe(true);
+  });
 });
 
 describe("rewriteReleaseChangeProjections", () => {
@@ -78,7 +91,7 @@ describe("rewriteReleaseChangeProjections", () => {
       [projection],
     );
 
-    expect(result).toEqual({ rewritten: 1, failed: 0 });
+    expect(result).toEqual({ rewritten: 1, failed: 0, skipped: 0 });
     expect(execute).toHaveBeenCalledWith("UPDATE changes SET description = ?, user_impact = ? WHERE id = ?", ["统一修复变化条目判定", "同一修复只展示一次。", 99]);
     expect(projection.sourceSpecChangeIds).toEqual([1]);
     expect(completion.mock.calls[0][0][1].content).toContain("spec_change #1");
@@ -94,8 +107,28 @@ describe("rewriteReleaseChangeProjections", () => {
       [projection],
     );
 
-    expect(result).toEqual({ rewritten: 0, failed: 1 });
+    expect(result).toEqual({ rewritten: 0, failed: 1, skipped: 0 });
     expect(execute).not.toHaveBeenCalled();
     expect(projection.description).toBe(release229Summaries[0]);
+  });
+
+  it("caps AI rewrites per run and keeps remaining projections deterministic", async () => {
+    const projections = Array.from({ length: 13 }, (_, index) => ({
+      ...buildReleaseChangeProjections([fact(index + 1, `功能${index + 1}`, `事实${index + 1}`)])[0],
+      changeId: index + 1,
+    }));
+    const execute = vi.fn(async () => ({}));
+    const completion = vi.fn(async () => JSON.stringify({ description: "润色", userImpact: "影响" }));
+
+    const result = await rewriteReleaseChangeProjections(
+      { execute },
+      { completion, runId: 7, accountId: 3 },
+      projections,
+    );
+
+    expect(result).toEqual({ rewritten: 12, failed: 0, skipped: 1 });
+    expect(completion).toHaveBeenCalledTimes(12);
+    expect(execute).not.toHaveBeenCalledWith(expect.any(String), expect.arrayContaining([13]));
+    expect(projections[12].description).toBe("事实13");
   });
 });

@@ -224,6 +224,20 @@ describe("analysis orchestration", () => {
     }
   });
 
+  it("keeps the committed run successful when projection rewriting throws unexpectedly", async () => {
+    vi.mocked(rewriteReleaseChangeProjections).mockRejectedValueOnce(new Error("unexpected rewrite failure"));
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      await expect(runAnalysis(8)).resolves.toBeUndefined();
+      expect(connection.commit).toHaveBeenCalledOnce();
+      expect(vi.mocked(capture)).toHaveBeenCalled();
+      expect(error).toHaveBeenCalledWith("[release-changes] projection rewrite failed; keeping canonical copies", expect.objectContaining({ runId: 8 }));
+      expect(execute).not.toHaveBeenCalledWith(expect.stringContaining("status = 'failed'"), expect.anything());
+    } finally {
+      error.mockRestore();
+    }
+  });
+
   it("re-reserves on entry when no active reservation exists (failed-run retry, contract §6.6)", async () => {
     runRows = [{ ...run, accountId: 7 }];
     vi.mocked(hasActiveReservation).mockResolvedValueOnce(false);

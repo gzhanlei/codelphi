@@ -68,7 +68,7 @@ describe("analysis persistence guards", () => {
     expect(projections).toHaveLength(2);
     const changeInserts = (connection.execute as ReturnType<typeof vi.fn>).mock.calls.filter((call) => String(call[0]).includes("INSERT INTO changes"));
     expect(changeInserts).toHaveLength(2);
-    expect(changeInserts[0][1]).toEqual([10, "Auth", "changed", "统一数字守护；保护短标题", "统一数字守护；保护短标题", JSON.stringify([{ path: "lib/auth.ts", startLine: 8 }, { path: "lib/auth.ts", startLine: 9 }])]);
+    expect(changeInserts[0][1]).toEqual([10, "Auth", "changed", "统一数字守护；保护短标题", "", JSON.stringify([{ path: "lib/auth.ts", startLine: 8 }, { path: "lib/auth.ts", startLine: 9 }])]);
     expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO change_sources"), [expect.any(Number), 101]);
     expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO change_sources"), [expect.any(Number), 102]);
     expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO change_sources"), [expect.any(Number), 103]);

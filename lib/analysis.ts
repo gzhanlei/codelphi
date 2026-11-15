@@ -572,12 +572,17 @@ async function runAnalysisBody(run: RunContext) {
   }
   } // else：提取分支结束（BM-10 零行为变更窗口不进入）
   const { specVersionId, releaseId, releaseChangeProjections, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds } = await saveResult(run, result, change, affectedKeys, coverage);
-  const projectionRewrite = await rewriteReleaseChangeProjections(
-    { execute: (sql, params) => getDb().execute(sql, params ?? []) },
-    { completion: requestStructuredCompletion, runId: run.id, accountId: run.accountId ?? null },
-    releaseChangeProjections,
-    run.outputLanguage,
-  );
+  let projectionRewrite = { rewritten: 0, failed: 0, skipped: 0 };
+  try {
+    projectionRewrite = await rewriteReleaseChangeProjections(
+      { execute: (sql, params) => getDb().execute(sql, params ?? []) },
+      { completion: requestStructuredCompletion, runId: run.id, accountId: run.accountId ?? null },
+      releaseChangeProjections,
+      run.outputLanguage,
+    );
+  } catch (error) {
+    console.error("[release-changes] projection rewrite failed; keeping canonical copies", { runId: run.id, releaseId, message: error instanceof Error ? error.message : String(error) });
+  }
   if (releaseChangeProjections.length > 0) {
     console.log("[release-changes] canonical projections rewritten", { runId: run.id, releaseId, projections: releaseChangeProjections.length, ...projectionRewrite });
   }

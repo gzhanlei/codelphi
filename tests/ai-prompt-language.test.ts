@@ -14,7 +14,7 @@ import {
 const change: ChangeContext = { message: "fix: retry", files: [{ path: "lib/auth.ts", status: "modified", patch: "" }] };
 
 describe("bilingual prompt assembly (EN output mode)", () => {
-  it("keeps the zh instruction block byte-identical", () => {
+  it("reserves zh extraction changes for reviewed audit candidates", () => {
     const lines = extractionInstructionLines("zh-CN", { coverageMandate: "当前产品功能规格必须覆盖输入代码里的全部主要用户功能" }).join("\n");
     expect(lines).toContain("你在维护一个产品知识库。仅根据给定代码和 diff 输出事实，不要补充猜测。");
     expect(lines).toContain("用简体中文生成：1) 产品简介；2) 当前产品功能规格。");

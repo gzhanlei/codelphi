@@ -31,7 +31,15 @@ function factEvidence(fact: ReleaseChangeFact): Evidence[] {
 }
 
 function projectionCopy(facts: ReleaseChangeFact[]): string {
-  return [...new Set(facts.map((fact) => fact.summary.trim()).filter(Boolean))].join("；").slice(0, 4_000);
+  const copy = [...new Set(facts.map((fact) => fact.summary.trim()).filter(Boolean))].join("；");
+  if (copy.length <= 4_000) return copy;
+  const prefix = copy.slice(0, 4_000);
+  const sentenceBoundary = Math.max(...["。", ".", "!", "?"].map((mark) => prefix.lastIndexOf(mark)));
+  if (sentenceBoundary >= 0) return prefix.slice(0, sentenceBoundary + 1);
+  const clauseBoundary = prefix.lastIndexOf("；");
+  if (clauseBoundary >= 0) return prefix.slice(0, clauseBoundary);
+  const wordBoundary = prefix.lastIndexOf(" ");
+  return wordBoundary > 0 ? prefix.slice(0, wordBoundary) : prefix;
 }
 
 export function baselineReleaseChangeFacts(features: SpecFeature[]): ReleaseChangeFact[] {
@@ -69,7 +77,7 @@ export function buildReleaseChangeProjections(facts: ReleaseChangeFact[]): Relea
       featureName: group[0].featureName,
       kind: kinds.size === 1 ? group[0].kind : "changed",
       description,
-      userImpact: description,
+      userImpact: "",
       evidence: [...evidence.values()].slice(0, 5),
       sourceSpecChangeIds: group.map((fact) => fact.id).filter((id) => id > 0),
       facts: group,
@@ -115,11 +123,18 @@ export async function rewriteReleaseChangeProjections(
   deps: { completion: CopyCompletion; runId: number; accountId: number | null },
   projections: ReleaseChangeProjection[],
   language: OutputLanguage = "zh-CN",
-): Promise<{ rewritten: number; failed: number }> {
+): Promise<{ rewritten: number; failed: number; skipped: number }> {
   let rewritten = 0;
   let failed = 0;
+  let skipped = 0;
+  let attempted = 0;
   for (const projection of projections) {
     if (projection.changeId === null) continue;
+    if (attempted >= 12) {
+      skipped += 1;
+      continue;
+    }
+    attempted += 1;
     try {
       const content = await deps.completion(
         [
@@ -140,5 +155,5 @@ export async function rewriteReleaseChangeProjections(
       });
     }
   }
-  return { rewritten, failed };
+  return { rewritten, failed, skipped };
 }
