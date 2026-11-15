@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { planChangesDedupe, type PlannableChangeRow } from "../scripts/dedupe-release-changes";
 
-const row = (id: number, featureName: string, kind: string, description: string): PlannableChangeRow => ({ id, releaseId: 225, featureName, kind, description });
+const row = (id: number, featureName: string, kind: string, description: string, userImpact = ""): PlannableChangeRow => ({ id, releaseId: 225, featureName, kind, description, userImpact });
 
 const partialDisclosureVariants = [
   "mergeIntegrity 维度新增 featuresFolded 字段，折叠数大于 0 时该维度记为 partial；deriveMergeIntegrity 入参新增 featuresFolded。",
@@ -19,13 +19,22 @@ describe("planChangesDedupe (BM-11 changes 存量清理规划器)", () => {
     expect(plans[0].dropIds).toEqual([2, 3, 4]);
   });
 
-  it("does not cross feature or kind boundaries", () => {
+  it("kind is not a dedupe boundary (release 227 实证：同一行为标 changed 与 fixed 各一条), but added↔removed never folds", () => {
     const rows = [
-      row(1, "分析完整性账本", "changed", partialDisclosureVariants[0]),
-      row(2, "AI 规格分析与发布变化", "changed", partialDisclosureVariants[1]),
-      row(3, "分析完整性账本", "added", partialDisclosureVariants[2]),
+      row(1, "功能级变体判定与存量清理", "changed", "身份判定改为名字通道或双信号通道；场景门禁在双信号通道下放宽。", "同一组件被换字命名析出的异名功能不再重复记为新增功能，发布变化清单更干净；同文件但行为不同的功能仍保持独立。"),
+      row(2, "功能级变体判定与存量清理", "fixed", "身份判定改为名字通道或双信号通道；双信号通道下场景门禁放宽为至少 1 对配对。", "同一组件被换名析出的多个功能不再在发布变化中重复记为 added，规格功能清单不再出现重复条目。"),
+      row(3, "AI 规格分析与发布变化", "changed", partialDisclosureVariants[1]),
     ];
-    expect(planChangesDedupe(rows)).toEqual([]);
+    const plans = planChangesDedupe(rows);
+    expect(plans).toHaveLength(1);
+    expect(plans[0].keepId).toBe(1);
+    expect(plans[0].dropIds).toEqual([2]);
+    // added↔removed 语义相反：即使描述近同文也不得互折
+    const conflict = planChangesDedupe([
+      row(4, "登录功能", "added", "新增邮箱密码登录入口"),
+      row(5, "登录功能", "removed", "新增邮箱密码登录入口"),
+    ]);
+    expect(conflict).toEqual([]);
   });
 
   it("keeps genuinely different change items of the same feature+kind", () => {

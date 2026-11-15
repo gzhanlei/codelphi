@@ -19,6 +19,7 @@ export interface PlannableChangeRow {
   featureName: string;
   kind: string;
   description: string;
+  userImpact: string;
 }
 
 export interface ChangeDedupePlan {
@@ -29,12 +30,15 @@ export interface ChangeDedupePlan {
   dropIds: number[];
 }
 
-/** 纯函数（与执行分离）：同 release 同 featureKey+kind 内贪心去重，keeper=id 最小先落库者。 */
+/** added↔removed 语义相反，禁止互折（kind 是 AI 的呈现标签，其余标签可跨组比较）。 */
+const kindConflict = (a: string, b: string) => (a === "added" && b === "removed") || (a === "removed" && b === "added");
+
+/** 纯函数（与执行分离）：同 release 同 featureKey 内贪心去重（kind 不入分组键——release 227 实证同一行为被标 changed 与 fixed 各一条），keeper=id 最小先落库者。判定通道 description 为主、userImpact 为辅。 */
 export function planChangesDedupe(rows: PlannableChangeRow[]): ChangeDedupePlan[] {
   const plans: ChangeDedupePlan[] = [];
   const groups = new Map<string, PlannableChangeRow[]>();
   for (const row of rows) {
-    const key = `${row.releaseId}|${specFeatureKey(row.featureName)}|${row.kind}`;
+    const key = `${row.releaseId}|${specFeatureKey(row.featureName)}`;
     const list = groups.get(key) ?? [];
     list.push(row);
     groups.set(key, list);
@@ -44,7 +48,9 @@ export function planChangesDedupe(rows: PlannableChangeRow[]): ChangeDedupePlan[
     const kept: PlannableChangeRow[] = [];
     const dropIds: number[] = [];
     for (const row of sorted) {
-      const hit = kept.find((candidate) => changeDescriptionVariantSimilar(candidate.description, row.description));
+      const hit = kept.find((candidate) => !kindConflict(candidate.kind, row.kind)
+        && (changeDescriptionVariantSimilar(candidate.description, row.description)
+          || (Boolean(candidate.userImpact) && Boolean(row.userImpact) && changeDescriptionVariantSimilar(candidate.userImpact, row.userImpact))));
       if (hit) {
         dropIds.push(row.id);
         continue;
@@ -88,7 +94,7 @@ async function main() {
     const releaseFilter = args.release ? "AND r.id = ?" : "";
     const parameters = args.release ? [repository.id, args.release] : [repository.id];
     const [rows] = await db.execute(
-      `SELECT c.id, c.release_id AS releaseId, c.feature_name AS featureName, c.kind, c.description
+      `SELECT c.id, c.release_id AS releaseId, c.feature_name AS featureName, c.kind, c.description, c.user_impact AS userImpact
        FROM changes c JOIN releases r ON r.id = c.release_id
        WHERE r.repository_id = ? ${releaseFilter}
        ORDER BY c.release_id, c.id`,

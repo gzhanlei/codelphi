@@ -125,7 +125,7 @@ export function contentJaccard(left: string, right: string): number {
 }
 
 /** 包含率：交集占较小一方 gram 集的比例（短变体 ⊂ 长变体的改写形态检测用）。 */
-function contentContainment(left: string, right: string): number {
+export function contentContainment(left: string, right: string): number {
   const a = contentGrams(left);
   const b = contentGrams(right);
   const smaller = Math.min(a.size, b.size);
@@ -284,7 +284,7 @@ const CHANGE_TERM_JACCARD_THRESHOLD = 0.3;
 const CHANGE_ANCHOR_MIN = 2;
 const CHANGE_CONTAINMENT_THRESHOLD = 0.4;
 
-function changeTermGrams(text: string): Set<string> {
+export function changeTermGrams(text: string): Set<string> {
   const grams = new Set<string>();
   for (const chunk of normalizeSpecText(text).split(/[^A-Za-z0-9\u4e00-\u9fa5]+/)) {
     const runs = chunk.match(/[A-Za-z0-9]+|[\u4e00-\u9fa5]+/g) ?? [];
@@ -305,12 +305,17 @@ export function changeDescriptionVariantSimilar(left: string, right: string): bo
   const r = specContent(right);
   if (l === r) return true;
   if (l === "" || r === "") return false;
-  // 数字守护剔除独立「0」token：散文里的「大于 0 / 0 次」不是语义值（release 225 真变体
-  // 对「折叠数大于 0」↔「被折叠时」被原始签名误杀）；404≠400 这类真实错误码不受影响。
-  const significantDigits = (text: string) => digitSignature([...text.matchAll(/[0-9]+/g)].filter((match) => match[0] !== "0").map((match) => match[0]).join(","));
+  // 数字守护剔除全部单位数 token：散文里的「大于 0」「≥1 对」「5 个」是措辞噪声不是语义值
+  // （release 225「折叠数大于 0」↔「被折叠时」、release 227「≥1 对」↔无数字都被原始签名
+  // 误杀）；404≠400 这类多位错误码不受影响。已知残余：删 3 条↔删 7 条这类计数差异也失去
+  // 守护——此类行通常伴随其他措辞差异，且 description 之外的上下文有限，接受。
+  const significantDigits = (text: string) => digitSignature([...text.matchAll(/[0-9]+/g)].filter((match) => !/^[0-9]$/.test(match[0])).map((match) => match[0]).join(","));
   if (significantDigits(l) !== significantDigits(r)) return false;
   if (negationCountOf(left) !== negationCountOf(right)) return false;
   if (specTextEquivalent(left, right)) return true;
+  // 短串（<12 内容字符）不做变体近似：2-gram 证据太薄，「变更0」⊂「独立变更0」这类编号
+  // 短标题互含即误折——短串只走上面的精确/等价通道。
+  if (Math.min(l.length, r.length) < 12) return false;
   const leftGrams = changeTermGrams(left);
   const rightGrams = changeTermGrams(right);
   let intersection = 0;

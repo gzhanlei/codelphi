@@ -187,10 +187,29 @@ describe("mergeChunkResults change description variant dedupe (BM-11)", () => {
     expect(merged.changes).toHaveLength(2);
   });
 
-  it("keeps genuinely different change items of the same feature+kind", () => {
+  it("keeps genuinely different change items of the same feature and folds cross-kind variants via userImpact (release 227 实证)", () => {
     const merged = mergeChunkResults([
-      chunk([], [change("合并完整性维度新增 featuresFolded 字段，功能级变体被折叠时该维度记为 partial。"), change("mergeChunkResults 的 onStats 回调新增 featuresFolded 计数，mergeStats 初始化与 saveResult 返回值新增 featureFolds 字段。")]),
+      chunk([], [
+        change("合并完整性维度新增 featuresFolded 字段，功能级变体被折叠时该维度记为 partial。"),
+        change("mergeChunkResults 的 onStats 回调新增 featuresFolded 计数，mergeStats 初始化与 saveResult 返回值新增 featureFolds 字段。"),
+      ]),
     ]);
     expect(merged.changes).toHaveLength(2);
+    const impact = "同一组件被换字命名析出的异名功能不再重复记为新增功能，发布变化清单更干净；同文件但行为不同的功能仍保持独立。";
+    const crossKind = mergeChunkResults([
+      chunk([], [
+        { featureName: "功能级变体判定与存量清理", kind: "changed" as const, description: "身份判定改为名字通道或双信号通道；场景门禁在双信号通道下放宽。", userImpact: impact, evidence: [] },
+        { featureName: "功能级变体判定与存量清理", kind: "fixed" as const, description: "身份判定改为名字通道或双信号通道；双信号通道下场景门禁放宽为至少 1 对配对。", userImpact: "同一组件被换名析出的多个功能不再在发布变化中重复记为 added，规格功能清单不再出现重复条目。", evidence: [] },
+      ]),
+    ]);
+    expect(crossKind.changes).toHaveLength(1);
+    // added↔removed 语义相反：描述近同文也不得互折
+    const conflict = mergeChunkResults([
+      chunk([], [
+        { featureName: "登录功能", kind: "added" as const, description: "新增邮箱密码登录入口", userImpact: "", evidence: [] },
+        { featureName: "登录功能", kind: "removed" as const, description: "新增邮箱密码登录入口", userImpact: "", evidence: [] },
+      ]),
+    ]);
+    expect(conflict.changes).toHaveLength(2);
   });
 });

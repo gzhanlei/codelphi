@@ -108,20 +108,31 @@ export function mergeChunkResults(chunks: ExtractionChunk[], onStats?: (stats: {
 
   const changes: AnalysisResult["changes"] = [];
   const seenChanges = new Set<string>();
-  // 同 feature+kind 的条目列表：变体判定（措辞改写）在其内做贪心去重——精确命中走
-  // seenChanges 快通道，变体走 changeDescriptionVariantSimilar（release 224/225 实证：
-  // 「分析完整性账本」partial 披露被逐分区写成 7 个措辞变体全量落 changes 表）。
-  const changesByFeatureKind = new Map<string, AnalysisResult["changes"]>();
+  // 同 feature 的条目列表：变体判定（措辞改写）在其内做贪心去重——精确命中走 seenChanges
+  // 快通道，变体走 changeDescriptionVariantSimilar（release 224/225 实证：「分析完整性账本」
+  // partial 披露被逐分区写成 7 个措辞变体全量落 changes 表）。分组键只含 featureKey 不含
+  // kind：release 227 实证同一行为被标 changed 与 fixed 各一条（描述+userImpact 近同文），
+  // kind 是 AI 的呈现标签、不是行为边界——但 added↔removed 语义相反，禁止互折。
+  // 判定通道：description 为主，userImpact 为辅（release 227 实证描述措辞漂移过大时
+  // 影响文案仍近同文）。
+  const kindConflict = (a: string, b: string) => (a === "added" && b === "removed") || (a === "removed" && b === "added");
+  const changesByFeature = new Map<string, AnalysisResult["changes"]>();
   for (const { result } of chunks) {
     for (const change of result.changes) {
       const descriptionKey = `${specFeatureKey(change.featureName)}:${change.kind}:${normalizeSpecText(change.description)}`;
       if (seenChanges.has(descriptionKey)) continue;
-      const featureKindKey = `${specFeatureKey(change.featureName)}|${change.kind}`;
-      const siblings = changesByFeatureKind.get(featureKindKey);
-      if (siblings?.some((existing) => changeDescriptionVariantSimilar(existing.description, change.description))) continue;
+      const featureKey = specFeatureKey(change.featureName);
+      const siblings = changesByFeature.get(featureKey);
+      const duplicate = siblings?.some((existing) => {
+        if (kindConflict(existing.kind, change.kind)) return false;
+        if (changeDescriptionVariantSimilar(existing.description, change.description)) return true;
+        return Boolean(existing.userImpact) && Boolean(change.userImpact)
+          && changeDescriptionVariantSimilar(existing.userImpact, change.userImpact);
+      });
+      if (duplicate) continue;
       seenChanges.add(descriptionKey);
       if (siblings) siblings.push(change);
-      else changesByFeatureKind.set(featureKindKey, [change]);
+      else changesByFeature.set(featureKey, [change]);
       changes.push(change);
     }
   }
