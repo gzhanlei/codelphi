@@ -20,6 +20,8 @@ export interface FeedbackReport {
   githubIssueUrl: string | null;
   submissionError: string | null;
   reporterName: string | null;
+  /** 非空 = 分析失败自动记录（诊断面）；NULL = 账本不符主张（AI 裁决面）。 */
+  analysisRunId: number | null;
   /** AI 裁决（073）：confirmed_defect / false_alarm / needs_human；NULL = 待裁决。 */
   kind: string;
   verdict: string | null;
@@ -94,7 +96,7 @@ export async function listFeedbackReports(): Promise<FeedbackReport[]> {
             f.revision, f.error_message AS errorMessage, f.architecture_error AS architectureError,
             f.status, f.github_issue_url AS githubIssueUrl, f.submission_error AS submissionError,
             u.display_name AS reporterName, f.created_at AS createdAt,
-            f.kind, f.verdict, f.verdict_reason AS verdictReason, f.adjudicated_at AS adjudicatedAt, f.corrective_run_id AS correctiveRunId
+            f.analysis_run_id AS analysisRunId, f.kind, f.verdict, f.verdict_reason AS verdictReason, f.adjudicated_at AS adjudicatedAt, f.corrective_run_id AS correctiveRunId
      FROM feedback_reports f
      JOIN organizations o ON o.id = f.organization_id
      JOIN products p ON p.id = f.product_id
@@ -111,7 +113,7 @@ export async function getFeedbackReport(id: number): Promise<FeedbackReport | nu
             f.revision, f.error_message AS errorMessage, f.architecture_error AS architectureError,
             f.status, f.github_issue_url AS githubIssueUrl, f.submission_error AS submissionError,
             u.display_name AS reporterName, f.created_at AS createdAt,
-            f.kind, f.verdict, f.verdict_reason AS verdictReason, f.adjudicated_at AS adjudicatedAt, f.corrective_run_id AS correctiveRunId
+            f.analysis_run_id AS analysisRunId, f.kind, f.verdict, f.verdict_reason AS verdictReason, f.adjudicated_at AS adjudicatedAt, f.corrective_run_id AS correctiveRunId
      FROM feedback_reports f JOIN organizations o ON o.id = f.organization_id
      JOIN products p ON p.id = f.product_id
      LEFT JOIN users u ON u.id = f.reporter_user_id

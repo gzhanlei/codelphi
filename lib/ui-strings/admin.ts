@@ -28,6 +28,13 @@ export const ADMIN_FEEDBACK = {
   verdictFalseAlarm: { "zh-CN": "误报已驳回", en: "Dismissed as false alarm" },
   verdictNeedsHuman: { "zh-CN": "证据不足 · 转人工", en: "Insufficient evidence · escalated" },
   correctiveRunLabel: { "zh-CN": "修复 run", en: "Repair run" },
+  boardStats: { "zh-CN": "待人工 {needsHuman} · AI 已自动处置 {handled}（其中触发修复 {confirmed}） · 分析失败 {failures}", en: "Awaiting human {needsHuman} · AI-handled {handled} (repair triggered {confirmed}) · Analysis failures {failures}" },
+  sectionNeedsHuman: { "zh-CN": "需人工裁决", en: "Needs human adjudication" },
+  needsHumanNote: { "zh-CN": "AI 裁决管线证据不足或低置信的报告：核对主张与代码后可转 GitHub Issue 或忽略。", en: "Reports the pipeline could not verify on evidence: check the claim against code, then convert to a GitHub issue or dismiss." },
+  sectionAutoHandled: { "zh-CN": "AI 已自动处置（审计面）", en: "AI-handled (audit trail)" },
+  sectionRunFailures: { "zh-CN": "分析失败记录", en: "Analysis failure records" },
+  autoHandledNote: { "zh-CN": "确认缺陷已自动触发修复性全量重建；误报已驳回。默认折叠，供抽查 AI 裁决质量。", en: "Confirmed defects triggered corrective full rebuilds automatically; false alarms were dismissed. Collapsed by default for spot-checking AI verdict quality." },
+  emptyNeedsHuman: { "zh-CN": "没有需人工裁决的报告——AI 已全部处置。", en: "No reports awaiting human adjudication — AI handled everything." },
 } satisfies Record<string, LocaleEntry>;
 
 // ── admin/pay ──
