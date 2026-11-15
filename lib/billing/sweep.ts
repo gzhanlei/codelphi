@@ -11,6 +11,7 @@ import { deliverPendingBillingNotifications, enqueueBillingNotification, ownerEm
 import { runDailyReconcileOnce } from "./reconcile";
 import { runAnalysisTriggerSweepOnce } from "../analysis-trigger";
 import { runDigestSweepOnce } from "../digest-sweep";
+import { runFeedbackAdjudicationSweepOnce } from "../feedback-adjudication";
 import { DEADLOCK_RETRIES, FIRST_RUN_UNITS, HEARTBEAT_FRESH_WINDOW_MINUTES, RESERVATION_TTL_MINUTES, SWEEP_RESERVATION_INTERVAL_MS } from "./constants";
 
 /**
@@ -152,6 +153,12 @@ export async function runDigestWeeklyJob(): Promise<JobResult> {
   return { executed: true, detail: { ...outcome } };
 }
 
+/** Feedback AI 裁决作业（2026-11-15 用户裁定 AI 裁决优先）：10 分钟一轮，每轮至多 3 条。 */
+export async function runFeedbackAdjudicationJob(): Promise<JobResult> {
+  const outcome = await runFeedbackAdjudicationSweepOnce();
+  return { executed: true, detail: { ...outcome } };
+}
+
 /** 调度入口（instrumentation.ts 调用一次）：幂等启动，重复调用直接返回。 */
 export function startBillingSweeps() {
   if (process.env.BILLING_SWEEP_ENABLED === "false") return { started: false };
@@ -164,6 +171,7 @@ export function startBillingSweeps() {
   scheduleJob("queued-run-recovery", 60 * 1_000, runQueuedRunRecoveryOnce);
   scheduleJob("analysis-trigger", 60 * 60 * 1_000, runAnalysisTriggerSweepJob);
   scheduleJob("digest-weekly", 60 * 60 * 1_000, runDigestWeeklyJob);
+  scheduleJob("feedback-adjudication", 10 * 60 * 1_000, runFeedbackAdjudicationJob);
   return { started: true, jobs: [...startedJobs] };
 }
 
