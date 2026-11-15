@@ -137,3 +137,32 @@
 2. 反馈读取、健康指标、等待接口与 migration 076。
 3. 全量测试、独立审查、生产部署。
 4. 真实 release/feedback/health 对账，并记录任何剩余“只能提示、不能证明”的边界。
+
+---
+
+## 修订：v2 + 10 项冻结条件与阶段 0 结论
+
+采纳 v2 的详细契约，并增加以下不可放宽的实施约束：
+
+1. stableKey 只表示名称级匹配；direct identity 仅限真实数据库实体及其明确作用域。
+2. Scenario 没有跨版本稳定身份；无法证明时保留原始记录并返回 null/unresolved。
+3. 没有 feedback 到 verification 的显式关联时，验证状态只能为 unavailable。
+4. correctiveAnalysis 与 verification 完全分离，不使用 resolvedBySha 暗示代码已修复。
+5. Run status、persistence、SHA consistency、extraction/evidence/merge integrity 与 sourceCoverage 分开；sourceCoverage 仅披露。
+6. Evidence path 必须覆盖 feature 嵌套、独立 scenario、release_files 三种结构，并保留 before/after/release_file 来源。
+7. releaseHealth 必须限定 eligible release/change、返回分子分母与异常数；不可计算指标为 null。
+8. 分页继续使用 `{ release, changes }`，不得改成 items。
+9. 所有身份结论必须声明组织、产品、规格版本或 release 作用域。
+10. `pass` 仅表示当前预期与可读取证据范围内未发现契约异常，不表示整个 release 的全部行为均正确。
+
+阶段 0 已完成，实际 schema、生产数据、证据样本和可计算性记录见 `2026-11-16-mcp-phase0-data-model.md`。后续实现不得以本设计中的抽象名称替代该事实清单。
+
+### 阶段 0 对接口结构的最终修订
+
+- Intent 的 stableKey 只允许 `exact_name/name_only`；path-only intent 不能单独支持 pass。
+- `get_feedback` 使用 `correctiveAnalysis: { sha, status }`，不使用 `resolvedBySha`。
+- `verification.status` 没有显式反馈关联时固定为 `unavailable`。
+- `analysis.status` 由 run、persistence、SHA 和 extraction/evidence/merge integrity 决定；overall/sourceCoverage 仅披露。
+- `sourceLinkedRatio` 的分母只含 eligible release 中的 eligible change，孤立关联单独计数。
+- `duplicateFeatureClusterCount` 与跨版本 `duplicateScenarioClusterCount` 没有可靠算法时为 null。
+- `wait_for_release` 精确匹配 after_sha，按 created_at,id 选择最新尝试；只有 run succeeded 且同 SHA release 已持久化才 completed。
