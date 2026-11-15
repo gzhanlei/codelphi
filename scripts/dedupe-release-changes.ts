@@ -31,7 +31,7 @@ export interface ChangeDedupePlan {
 }
 
 export function assertLegacyDedupeApplyDisabled(apply: boolean) {
-  if (apply) throw new Error("模糊文本去重的 --apply 已停用；请只使用 dry-run 诊断，并从 spec_changes 重建发布投影。");
+  if (apply) throw new Error("模糊文本去重的 --apply 已停用；请使用 scripts/rebuild-release-change-projections.ts 的 dry-run、备份与恢复流程。");
 }
 
 /** added↔removed 语义相反，禁止互折（kind 是 AI 的呈现标签，其余标签可跨组比较）。 */
@@ -121,7 +121,7 @@ async function main() {
       for (const dropId of plan.dropIds) console.log(`  - 删除变体行 #${dropId}`);
     }
     console.log(`\n诊断提案：${plans.length} 组、${dropTotal} 条疑似变体行。`);
-    console.log("dry-run 未改动数据；模糊文本 --apply 已永久停用，请从 spec_changes 重建发布投影。");
+    console.log("dry-run 未改动数据；模糊文本 --apply 已永久停用，请使用 scripts/rebuild-release-change-projections.ts 重建发布投影。");
   } finally {
     await db.end();
   }
