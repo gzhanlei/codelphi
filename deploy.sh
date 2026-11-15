@@ -15,7 +15,7 @@ log "pull $IMAGE"
 dc pull app 2>/dev/null || true
 
 log "migrate（幂等）"
-CODELPHI_IMAGE="$IMAGE" dc --profile migrate up migrate
+CODELPHI_IMAGE="$IMAGE" dc --profile migrate up --exit-code-from migrate migrate
 
 log "restart app with $IMAGE"
 CODELPHI_IMAGE="$IMAGE" dc up -d app
