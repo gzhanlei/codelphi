@@ -2,6 +2,7 @@ import Link from "next/link";
 import { KnowledgeHealthPanel } from "./knowledge-health-panel";
 import { SpecAsk } from "./spec-ask";
 import { changeGroupLabel, type ProductOverviewData, type TimelineEntry } from "@/lib/product-overview";
+import { coverageExplainer } from "@/lib/coverage-display";
 
 function CapabilityList({ capabilities }: { capabilities: ProductOverviewData["capabilities"] }) {
   if (capabilities.length === 0) return <p className="overview-note">尚无功能规格。</p>;
@@ -118,7 +119,7 @@ function ReleaseTimeline({ data }: { data: ProductOverviewData }) {
 function TrustLine({ data }: { data: ProductOverviewData }) {
   const { trust, coverageByte, coverageFiles } = data;
   return (
-    <p className="overview-trust-line">{coverageByte ?? "源码装配覆盖率 —（无覆盖率回执）"}{coverageFiles ? ` · ${coverageFiles}` : ""} · 证据文件 {trust.evidencePathCount} 个 · 人工条目 {trust.manualFeatureCount + trust.manualScenarioCount} 条{trust.specVersionId !== null ? ` · Spec v${trust.specVersionId}` : ""}。覆盖率描述本次分析实际读取的源码范围，不代表结论正确率；规格未覆盖不等于产品不支持，采纳前应经人工核实。</p>
+    <p className="overview-trust-line">{coverageByte ?? "源码装配覆盖率 —（无覆盖率回执）"}{coverageFiles ? ` · ${coverageFiles}` : ""} · 证据文件 {trust.evidencePathCount} 个 · 人工条目 {trust.manualFeatureCount + trust.manualScenarioCount} 条{trust.specVersionId !== null ? ` · Spec v${trust.specVersionId}` : ""}。{coverageExplainer()}规格未覆盖不等于产品不支持，采纳前应经人工核实。</p>
   );
 }
 
