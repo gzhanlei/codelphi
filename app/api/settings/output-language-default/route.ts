@@ -1,3 +1,4 @@
+import { apiErrorBody } from "@/lib/api-errors";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireOrganization } from "@/lib/organizations";
@@ -8,7 +9,7 @@ export const runtime = "nodejs";
 
 const schema = z.object({ language: z.enum(["zh-CN", "en"]) });
 
-const FORBIDDEN = { error: "只有工作区成员可以修改此设置" };
+const FORBIDDEN = apiErrorBody("workspace_member_only");
 
 /** 工作区默认输出语言：新接入的产品注册时继承（已有产品在产品设置页单独管理）。 */
 export async function PATCH(request: NextRequest) {

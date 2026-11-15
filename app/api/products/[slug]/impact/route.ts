@@ -1,3 +1,4 @@
+import { apiErrorBody } from "@/lib/api-errors";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getDb } from "@/lib/db";
@@ -33,7 +34,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
 
   const [repoRows] = await getDb().execute("SELECT id FROM repositories WHERE product_id = ? LIMIT 1", [productId]);
   const repositoryId = Number((repoRows as Array<{ id: number }>)[0]?.id ?? 0);
-  if (!repositoryId) return NextResponse.json({ error: "产品不存在或不属于当前工作区" }, { status: 404 });
+  if (!repositoryId) return NextResponse.json(apiErrorBody("product_not_found"), { status: 404 });
 
   const raw = await loadAffectedScenarios(repositoryId, parsed.data.files);
   // stable_key → 工作台层 feature id（M3 稳定引用同源通道）：结果链接必须落在规格页真实可打开的功能上，

@@ -1,3 +1,4 @@
+import { apiErrorBody } from "@/lib/api-errors";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { deleteNotificationChannel, sendNotificationChannelTest, setNotificationChannelEnabled } from "@/lib/notifications";
@@ -18,14 +19,14 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ s
   const user = await requireSessionUser();
   const { slug } = await context.params;
   const access = await requireProductAccess(user, slug, "editor");
-  if (!access) return NextResponse.json({ error: "产品不存在或不属于当前工作区" }, { status: 404 });
+  if (!access) return NextResponse.json(apiErrorBody("product_not_found"), { status: 404 });
   const parsed = patchSchema.safeParse(await request.json());
-  if (!parsed.success) return NextResponse.json({ error: "参数无效" }, { status: 400 });
+  if (!parsed.success) return NextResponse.json(apiErrorBody("invalid_params"), { status: 400 });
   try {
     await setNotificationChannelEnabled(access.product.id, await channelId(context), parsed.data.enabled);
     return NextResponse.json({ status: "updated" });
   } catch {
-    return NextResponse.json({ error: "通知渠道不存在" }, { status: 404 });
+    return NextResponse.json(apiErrorBody("channel_not_found"), { status: 404 });
   }
 }
 
@@ -33,12 +34,12 @@ export async function DELETE(_request: NextRequest, context: { params: Promise<{
   const user = await requireSessionUser();
   const { slug } = await context.params;
   const access = await requireProductAccess(user, slug, "editor");
-  if (!access) return NextResponse.json({ error: "产品不存在或不属于当前工作区" }, { status: 404 });
+  if (!access) return NextResponse.json(apiErrorBody("product_not_found"), { status: 404 });
   try {
     await deleteNotificationChannel(access.product.id, await channelId(context));
     return NextResponse.json({ status: "deleted" });
   } catch {
-    return NextResponse.json({ error: "通知渠道不存在" }, { status: 404 });
+    return NextResponse.json(apiErrorBody("channel_not_found"), { status: 404 });
   }
 }
 
@@ -47,10 +48,10 @@ export async function POST(_request: NextRequest, context: { params: Promise<{ s
   const user = await requireSessionUser();
   const { slug } = await context.params;
   const access = await requireProductAccess(user, slug, "editor");
-  if (!access) return NextResponse.json({ error: "产品不存在或不属于当前工作区" }, { status: 404 });
+  if (!access) return NextResponse.json(apiErrorBody("product_not_found"), { status: 404 });
   try {
     const result = await sendNotificationChannelTest(await channelId(context), access.product.name);
-    if (result.productId !== access.product.id) return NextResponse.json({ error: "通知渠道不存在" }, { status: 404 });
+    if (result.productId !== access.product.id) return NextResponse.json(apiErrorBody("channel_not_found"), { status: 404 });
     return NextResponse.json({ status: "sent" });
   } catch (error) {
     const message = error instanceof Error ? error.message : "发送测试消息失败";

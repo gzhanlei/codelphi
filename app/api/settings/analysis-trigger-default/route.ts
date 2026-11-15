@@ -1,3 +1,4 @@
+import { apiErrorBody } from "@/lib/api-errors";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getDb } from "@/lib/db";
@@ -13,7 +14,7 @@ const schema = z.object({
   hour: z.number().int().min(0).max(23).optional(),
 });
 
-const FORBIDDEN = { error: "只有工作区成员可以修改此设置" };
+const FORBIDDEN = apiErrorBody("workspace_member_only");
 
 /** 工作区级分析触发默认：新接入的仓库继承（已有仓库不受影响）。 */
 export async function PATCH(request: NextRequest) {

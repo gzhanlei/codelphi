@@ -1,3 +1,4 @@
+import { apiErrorBody } from "@/lib/api-errors";
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/session";
 import { requireProductAccess } from "@/lib/product-access";
@@ -9,9 +10,9 @@ import { buildKnowledgeHealth } from "@/lib/knowledge-health";
 export async function GET(_request: NextRequest, context: { params: Promise<{ slug: string }> }) {
   const { slug } = await context.params;
   const user = await getSessionUser();
-  if (!user) return NextResponse.json({ error: "未登录" }, { status: 401 });
+  if (!user) return NextResponse.json(apiErrorBody("unauthorized"), { status: 401 });
   const access = await requireProductAccess(user, slug, "viewer");
-  if (!access) return NextResponse.json({ error: "产品不存在或无访问权限" }, { status: 404 });
+  if (!access) return NextResponse.json(apiErrorBody("product_forbidden"), { status: 404 });
   const db = getDb();
   const details = await getProductDetails(slug, access.product.organizationId);
   if (!details) return NextResponse.json({ error: "产品不存在" }, { status: 404 });

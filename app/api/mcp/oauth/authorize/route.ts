@@ -1,3 +1,4 @@
+import { apiErrorBody } from "@/lib/api-errors";
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/session";
 import { currentOrganization } from "@/lib/organizations";
@@ -25,7 +26,7 @@ export async function GET(request: NextRequest) {
   const client = await resolveClient({ execute: db.execute.bind(db) }, clientId, redirectUri);
   if (!client) return NextResponse.json({ error: "client 校验失败（未注册或回跳地址不匹配）" }, { status: 400 });
   const user = await getSessionUser();
-  if (!user) return NextResponse.json({ error: "未登录" }, { status: 401 });
+  if (!user) return NextResponse.json(apiErrorBody("unauthorized"), { status: 401 });
   const html = `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>连接授权 · CoDelphi</title><style>body{font-family:system-ui;max-width:480px;margin:10vh auto;padding:0 16px}button{padding:8px 20px;margin-right:8px}.app{font-weight:600}.uri{color:#666;word-break:break-all;font-size:13px}</style></head><body>
 <h1>授权连接</h1>
 <p>应用 <span class="app">${esc(client.clientName)}</span> 请求以只读方式访问你的 CoDelphi 工作区（产品规格、发布与证据链接）。</p>
@@ -50,7 +51,7 @@ export async function POST(request: NextRequest) {
   const state = String(form.get("state") ?? "");
   const codeChallenge = String(form.get("code_challenge") ?? "");
   const user = await getSessionUser();
-  if (!user) return NextResponse.json({ error: "未登录" }, { status: 401 });
+  if (!user) return NextResponse.json(apiErrorBody("unauthorized"), { status: 401 });
   if (!clientId || !redirectUri || !codeChallenge) return NextResponse.json({ error: "缺少 PKCE 参数" }, { status: 400 });
   if (decision !== "approve") {
     return NextResponse.redirect(new URL(`${redirectUri}${redirectUri.includes("?") ? "&" : "?"}error=access_denied${state ? `&state=${encodeURIComponent(state)}` : ""}`, request.url));

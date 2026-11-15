@@ -1,3 +1,4 @@
+import { apiErrorBody } from "@/lib/api-errors";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getProductDetails } from "@/lib/product-details";
@@ -29,7 +30,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
   if (!format.success) return NextResponse.json({ error: "format 仅支持 gherkin 或 markdown" }, { status: 400 });
 
   const details = await getProductDetails(slug, organizationId);
-  if (!details) return NextResponse.json({ error: "产品不存在或不属于当前工作区" }, { status: 404 });
+  if (!details) return NextResponse.json(apiErrorBody("product_not_found"), { status: 404 });
 
   const extension = format.data === "gherkin" ? "feature" : "md";
   const body = format.data === "gherkin"

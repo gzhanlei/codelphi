@@ -1,3 +1,4 @@
+import { apiErrorBody } from "@/lib/api-errors";
 import { NextRequest, NextResponse } from "next/server";
 import { getProductDetails } from "@/lib/product-details";
 import { productBasePath } from "@/lib/product-links";
@@ -26,7 +27,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
     organizationSlug = demo.organizationSlug;
   }
   const details = await getProductDetails(slug, organizationId);
-  if (!details) return NextResponse.json({ error: "产品不存在或不属于当前工作区" }, { status: 404 });
+  if (!details) return NextResponse.json(apiErrorBody("product_not_found"), { status: 404 });
 
   return NextResponse.json({
     product: { slug: details.product.slug, name: details.product.name, description: details.product.description, descriptionSource: details.product.descriptionSource },

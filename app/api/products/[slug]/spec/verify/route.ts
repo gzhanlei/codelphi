@@ -1,3 +1,4 @@
+import { apiErrorBody } from "@/lib/api-errors";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { verifySpecEntity } from "@/lib/spec-verification";
@@ -14,9 +15,9 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
   const user = await requireSessionUser();
   const { slug } = await context.params;
   const access = await requireProductAccess(user, slug, "editor");
-  if (!access) return NextResponse.json({ error: "产品不存在或不属于当前工作区" }, { status: 404 });
+  if (!access) return NextResponse.json(apiErrorBody("product_not_found"), { status: 404 });
   const parsed = verifySchema.safeParse(await request.json());
-  if (!parsed.success) return NextResponse.json({ error: "参数无效" }, { status: 400 });
+  if (!parsed.success) return NextResponse.json(apiErrorBody("invalid_params"), { status: 400 });
   try {
     await verifySpecEntity({
       productId: access.product.id,

@@ -47,7 +47,7 @@ describe("product description route", () => {
     vi.mocked(updateProductDescription).mockResolvedValue(null);
     const missing = await patchRequest("missing", { description: "概况" });
     expect(missing.status).toBe(404);
-    expect(await missing.json()).toEqual({ error: "产品不存在或不属于当前工作区" });
+    expect(await missing.json()).toEqual({ error: "产品不存在或不属于当前工作区", code: "product_not_found" });
   });
 });
 
@@ -70,7 +70,7 @@ describe("product rename route", () => {
     vi.mocked(updateProductIdentity).mockResolvedValue({ status: "slug_conflict" });
     const conflict = await patchRequest("salesbuddy", { slug: "taken" });
     expect(conflict.status).toBe(409);
-    expect(await conflict.json()).toEqual({ error: "该 Slug 已被同工作区其他产品使用" });
+    expect(await conflict.json()).toEqual({ error: "该 Slug 已被同工作区其他产品使用", code: "slug_conflict" });
     vi.mocked(updateProductIdentity).mockResolvedValue({ status: "not_found" });
     expect((await patchRequest("missing", { name: "新名" })).status).toBe(404);
   });

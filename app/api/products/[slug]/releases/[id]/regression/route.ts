@@ -1,3 +1,4 @@
+import { apiErrorBody } from "@/lib/api-errors";
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { loadRegressionTasks, renderRegressionTaskMarkdown } from "@/lib/regression-tasks";
@@ -24,7 +25,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
   }
 
   const releaseId = Number(id);
-  if (!Number.isInteger(releaseId) || releaseId <= 0) return NextResponse.json({ error: "发布不存在" }, { status: 404 });
+  if (!Number.isInteger(releaseId) || releaseId <= 0) return NextResponse.json(apiErrorBody("release_not_found"), { status: 404 });
 
   const db = getDb();
   const [releaseRows] = await db.execute(
@@ -32,7 +33,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
     [releaseId, product.id],
   );
   const release = (releaseRows as ReleaseRow[])[0];
-  if (!release) return NextResponse.json({ error: "发布不存在" }, { status: 404 });
+  if (!release) return NextResponse.json(apiErrorBody("release_not_found"), { status: 404 });
 
   const [changeRows] = await db.execute(
     `SELECT id, ? AS releaseId, kind, entity_type AS entityType, feature_name AS featureName,

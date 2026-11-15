@@ -1,3 +1,4 @@
+import { apiErrorBody } from "@/lib/api-errors";
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/session";
 import { requireProductAccess } from "@/lib/product-access";
@@ -11,11 +12,11 @@ import { enforceExportRateLimit } from "@/lib/rate-limit";
 export async function GET(request: NextRequest, context: { params: Promise<{ slug: string }> }) {
   const { slug } = await context.params;
   const user = await getSessionUser();
-  if (!user) return NextResponse.json({ error: "未登录" }, { status: 401 });
+  if (!user) return NextResponse.json(apiErrorBody("unauthorized"), { status: 401 });
   const limited = await enforceExportRateLimit(request, user.sub, { anonymous: 10, user: 60 });
   if (limited) return limited;
   const access = await requireProductAccess(user, slug, "viewer");
-  if (!access) return NextResponse.json({ error: "产品不存在或无访问权限" }, { status: 404 });
+  if (!access) return NextResponse.json(apiErrorBody("product_forbidden"), { status: 404 });
   const db = getDb();
   const result = await db.execute(
     `SELECT period_start AS periodStart, period_end AS periodEnd, content_json AS contentJson, created_at AS createdAt

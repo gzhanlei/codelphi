@@ -1,3 +1,4 @@
+import { apiErrorBody } from "@/lib/api-errors";
 import { NextRequest, NextResponse } from "next/server";
 import { createScenario } from "@/lib/spec-editor-service";
 import { editorAction, routeEntityId } from "@/lib/editor-route";
@@ -8,6 +9,6 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   const user = await requireSessionUser();
   const { id } = await context.params;
   const access = await requireFeatureProductAccess(user, routeEntityId(id), "editor");
-  if (!access) return NextResponse.json({ error: "产品不存在或不属于当前工作区" }, { status: 404 });
+  if (!access) return NextResponse.json(apiErrorBody("product_not_found"), { status: 404 });
   return editorAction(async () => createScenario(routeEntityId(id), await request.json(), access.product.organizationId, user.sub), 201);
 }

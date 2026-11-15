@@ -1,3 +1,4 @@
+import { apiErrorBody } from "@/lib/api-errors";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getDb } from "@/lib/db";
@@ -6,7 +7,7 @@ import { requireSessionUser } from "@/lib/session";
 
 export const runtime = "nodejs";
 
-const NOT_FOUND = { error: "产品不存在或不属于当前工作区" };
+const NOT_FOUND = apiErrorBody("product_not_found");
 
 const triggerSchema = z.object({
   trigger: z.enum(["push", "daily", "push_count"]),

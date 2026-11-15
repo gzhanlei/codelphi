@@ -1,3 +1,4 @@
+import { apiErrorBody } from "@/lib/api-errors";
 import { NextRequest, NextResponse } from "next/server";
 import { listProductMembers, inviteProductMember } from "@/lib/product-members";
 import { requireProductAccess } from "@/lib/product-access";
@@ -6,7 +7,7 @@ import { defaultExecute } from "@/lib/db";
 
 export const runtime = "nodejs";
 
-const NOT_FOUND = { error: "产品不存在或不属于当前工作区" };
+const NOT_FOUND = apiErrorBody("product_not_found");
 
 export async function GET(_request: NextRequest, context: { params: Promise<{ slug: string }> }) {
   const user = await requireSessionUser();

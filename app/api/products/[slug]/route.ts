@@ -1,3 +1,4 @@
+import { apiErrorBody } from "@/lib/api-errors";
 import { NextRequest, NextResponse } from "next/server";
 import { updateProductDescription } from "@/lib/product-description";
 import { updateProductIdentity } from "@/lib/product-rename";
@@ -9,7 +10,7 @@ import { requireSessionUser } from "@/lib/session";
 
 export const runtime = "nodejs";
 
-const NOT_FOUND = { error: "产品不存在或不属于当前工作区" };
+const NOT_FOUND = apiErrorBody("product_not_found");
 
 export async function PATCH(request: NextRequest, context: { params: Promise<{ slug: string }> }) {
   const user = await requireSessionUser();
@@ -29,7 +30,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ s
     }
     const renamed = await updateProductIdentity(slug, access.product.organizationId, { name, newSlug, isPublicDemo, outputLanguage });
     if (renamed.status === "not_found") return NextResponse.json(NOT_FOUND, { status: 404 });
-    if (renamed.status === "slug_conflict") return NextResponse.json({ error: "该 Slug 已被同工作区其他产品使用" }, { status: 409 });
+    if (renamed.status === "slug_conflict") return NextResponse.json(apiErrorBody("slug_conflict"), { status: 409 });
     currentSlug = renamed.slug;
     currentName = renamed.name;
   }

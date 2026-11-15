@@ -1,3 +1,4 @@
+import { apiErrorBody } from "@/lib/api-errors";
 import { NextRequest, NextResponse, after } from "next/server";
 import { getSessionUser } from "@/lib/session";
 import { requireProductAccess } from "@/lib/product-access";
@@ -21,14 +22,14 @@ import { appUrl } from "@/lib/env";
 export async function GET(_request: NextRequest, context: { params: Promise<{ slug: string; id: string }> }) {
   const { slug, id } = await context.params;
   const user = await getSessionUser();
-  if (!user) return NextResponse.json({ error: "未登录" }, { status: 401 });
+  if (!user) return NextResponse.json(apiErrorBody("unauthorized"), { status: 401 });
   const access = await requireProductAccess(user, slug, "viewer");
-  if (!access) return NextResponse.json({ error: "产品不存在或无访问权限" }, { status: 404 });
+  if (!access) return NextResponse.json(apiErrorBody("product_forbidden"), { status: 404 });
   const releaseId = Number(id);
-  if (!Number.isInteger(releaseId) || releaseId <= 0) return NextResponse.json({ error: "发布不存在" }, { status: 404 });
+  if (!Number.isInteger(releaseId) || releaseId <= 0) return NextResponse.json(apiErrorBody("release_not_found"), { status: 404 });
   const db = getDb();
   if (!(await releaseOwned(db.execute.bind(db), releaseId, access.product.id))) {
-    return NextResponse.json({ error: "发布不存在" }, { status: 404 });
+    return NextResponse.json(apiErrorBody("release_not_found"), { status: 404 });
   }
   const note = await loadNoteByRelease(db.execute.bind(db), releaseId);
   const candidates = publishOrder(await releaseChanges(db.execute.bind(db), releaseId));
@@ -54,16 +55,16 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ sl
 
 export async function POST(request: NextRequest) {
   const user = await getSessionUser();
-  if (!user) return NextResponse.json({ error: "未登录" }, { status: 401 });
+  if (!user) return NextResponse.json(apiErrorBody("unauthorized"), { status: 401 });
   const body = (await request.json().catch(() => ({}))) as { slug?: string; releaseId?: number; selectedIds?: number[]; features?: string[]; emphasis?: string; voiceId?: number | null };
   const slug = String(body.slug ?? "");
   const releaseId = Number(body.releaseId ?? 0);
   const access = await requireProductAccess(user, slug, "editor");
-  if (!access || !releaseId) return NextResponse.json({ error: "产品不存在或无编辑权限" }, { status: 404 });
+  if (!access || !releaseId) return NextResponse.json(apiErrorBody("product_edit_forbidden"), { status: 404 });
   const db = getDb();
   // 归属校验：release 必须属于该产品，防止把别的产品的发布挂进草稿。
   if (!(await releaseOwned(db.execute.bind(db), releaseId, access.product.id))) {
-    return NextResponse.json({ error: "发布不存在" }, { status: 404 });
+    return NextResponse.json(apiErrorBody("release_not_found"), { status: 404 });
   }
   const existing = await loadNoteByRelease(db.execute.bind(db), releaseId);
   // 已发布只读（R1）：重新生成会 DELETE+重建全部块、公开页随之变化，必须先下线。

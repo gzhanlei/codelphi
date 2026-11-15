@@ -1,3 +1,4 @@
+import { apiErrorBody } from "@/lib/api-errors";
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/session";
 import { requireProductAccess } from "@/lib/product-access";
@@ -19,15 +20,15 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
   const body = (await request.json().catch(() => ({}))) as { position?: number; instruction?: string };
   const position = Number(body.position ?? 0);
   const user = await getSessionUser();
-  if (!user) return NextResponse.json({ error: "未登录" }, { status: 401 });
+  if (!user) return NextResponse.json(apiErrorBody("unauthorized"), { status: 401 });
   const limited = await enforceExportRateLimit(request, user.sub, { anonymous: 10, user: 60 });
   if (limited) return limited;
   const access = await requireProductAccess(user, slug, "editor");
-  if (!access) return NextResponse.json({ error: "产品不存在或无编辑权限" }, { status: 404 });
+  if (!access) return NextResponse.json(apiErrorBody("product_edit_forbidden"), { status: 404 });
   const db = getDb();
   const note = await loadNoteById(db.execute.bind(db), noteId, access.product.id);
-  if (!note) return NextResponse.json({ error: "发布稿不存在" }, { status: 404 });
-  if (note.status === "published") return NextResponse.json({ error: "已发布只读：先下线才能改" }, { status: 409 });
+  if (!note) return NextResponse.json(apiErrorBody("note_not_found"), { status: 404 });
+  if (note.status === "published") return NextResponse.json(apiErrorBody("not_published_readonly"), { status: 409 });
   const blockResult = await db.execute(
     `SELECT b.emphasis, c.kind, c.feature_name AS featureName, c.scenario_reference AS scenarioReference,
             COALESCE(NULLIF(b.summary_override, ''), c.summary) AS summary, c.highlight_type AS highlightType

@@ -4,9 +4,14 @@ import type { productInputSchema } from "./product-input";
 type ProductInput = z.infer<typeof productInputSchema>;
 type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
 
-async function productResponse<T extends { error?: string }>(response: Response, fallback: string) {
+async function productResponse<T extends { error?: string; code?: string }>(response: Response, fallback: string) {
   const data = await response.json() as T;
-  if (!response.ok) throw new Error(data.error ?? fallback);
+  if (!response.ok) {
+    // Wave 4e：响应体带 code 时附到 Error 上，客户端 errorMessage 按 locale 映射
+    const error = new Error(data.error ?? fallback) as Error & { code?: string };
+    if (data.code) error.code = data.code;
+    throw error;
+  }
   return data;
 }
 
