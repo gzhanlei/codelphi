@@ -34,6 +34,19 @@ function projectionCopy(facts: ReleaseChangeFact[]): string {
   return [...new Set(facts.map((fact) => fact.summary.trim()).filter(Boolean))].join("；").slice(0, 4_000);
 }
 
+export function baselineReleaseChangeFacts(features: SpecFeature[]): ReleaseChangeFact[] {
+  return features.map((feature) => ({
+    id: 0,
+    kind: "added",
+    entityType: "feature",
+    featureName: feature.name,
+    scenarioReference: null,
+    summary: feature.summary,
+    before: null,
+    after: feature,
+  }));
+}
+
 export function buildReleaseChangeProjections(facts: ReleaseChangeFact[]): ReleaseChangeProjection[] {
   const groups = new Map<string, ReleaseChangeFact[]>();
   for (const fact of facts) {
@@ -58,7 +71,7 @@ export function buildReleaseChangeProjections(facts: ReleaseChangeFact[]): Relea
       description,
       userImpact: description,
       evidence: [...evidence.values()].slice(0, 5),
-      sourceSpecChangeIds: group.map((fact) => fact.id),
+      sourceSpecChangeIds: group.map((fact) => fact.id).filter((id) => id > 0),
       facts: group,
     };
   });
@@ -70,7 +83,7 @@ const rewriteSchema = z.object({
 });
 
 function rewritePrompt(projection: ReleaseChangeProjection, language: OutputLanguage): string {
-  const facts = projection.facts.map((fact) => `- spec_change #${fact.id} [${fact.kind}/${fact.entityType}] ${fact.featureName}${fact.scenarioReference ? ` · ${fact.scenarioReference}` : ""}: ${fact.summary}`).join("\n");
+  const facts = projection.facts.map((fact) => `- ${fact.id > 0 ? `spec_change #${fact.id}` : "baseline feature"} [${fact.kind}/${fact.entityType}] ${fact.featureName}${fact.scenarioReference ? ` · ${fact.scenarioReference}` : ""}: ${fact.summary}`).join("\n");
   if (language === "en") {
     return [
       "Rewrite one feature's canonical behavior changes into a concise engineering changelog entry. Write in English.",

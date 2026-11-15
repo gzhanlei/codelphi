@@ -76,6 +76,20 @@ describe("analysis persistence guards", () => {
     expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT IGNORE INTO release_reviewed_items"), expect.arrayContaining([10, "Auth", "内部实现已检查"]));
   });
 
+  it("builds added projections from canonical features for the first baseline release", async () => {
+    const connection = connectionWithCount(0);
+    const { projections } = await upsertRelease(connection, run, result, change, null, [], [
+      { name: "Auth", summary: "OAuth 登录", scenarios: [{ reference: "HP-1", context: "访客", action: "登录", outcome: "进入首页", category: "happy", evidence: [{ path: "lib/auth.ts", startLine: 8 }] }] },
+      { name: "Billing", summary: "账单", scenarios: [] },
+    ]);
+
+    expect(projections).toHaveLength(2);
+    expect(projections[0]).toMatchObject({ featureName: "Auth", kind: "added", sourceSpecChangeIds: [] });
+    expect(projections[0].description).toContain("OAuth 登录");
+    expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO changes"), expect.arrayContaining([10, "Auth", "added"]));
+    expect(connection.execute).not.toHaveBeenCalledWith(expect.stringContaining("INSERT INTO change_sources"), expect.anything());
+  });
+
   it("stores the release's changed files for evidence-path mapping", async () => {
     const connection = connectionWithCount(0);
     const files = [{ path: "components/login.tsx", status: "modified", patch: "" }, { path: "lib/token.ts", status: "added", patch: "" }];

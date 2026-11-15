@@ -28,7 +28,7 @@ import type { SpecAnchorFeature } from "./spec-versions";
 import { markSpecDrift } from "./spec-drift";
 import { deliverAnalysisNotifications } from "./notifications";
 import { rewriteReleaseNoteCopy } from "./release-notes-enhance";
-import { buildReleaseChangeProjections, rewriteReleaseChangeProjections, type ReleaseChangeFact, type ReleaseChangeProjection } from "./release-change-projection";
+import { baselineReleaseChangeFacts, buildReleaseChangeProjections, rewriteReleaseChangeProjections, type ReleaseChangeFact, type ReleaseChangeProjection } from "./release-change-projection";
 import { requestStructuredCompletion } from "./ai";
 import { loadNoteByRelease, loadBlockViews } from "./release-notes-service";
 import { ensureRegressionTasks } from "./regression-tasks";
@@ -195,7 +195,7 @@ export async function upsertGeneratedSpec(connection: PoolConnection, run: RunCo
   for (const feature of features) await upsertFeature(connection, run, feature);
 }
 
-export async function upsertRelease(connection: PoolConnection, run: RunContext, result: AnalysisResult, change: ChangeContext, specVersionId: number | null = null, specChanges: ReleaseChangeFact[] = []): Promise<{ releaseId: number; projections: ReleaseChangeProjection[] }> {
+export async function upsertRelease(connection: PoolConnection, run: RunContext, result: AnalysisResult, change: ChangeContext, specVersionId: number | null = null, specChanges: ReleaseChangeFact[] = [], baselineFeatures: SpecFeature[] | null = null): Promise<{ releaseId: number; projections: ReleaseChangeProjection[] }> {
   await connection.execute(
     `INSERT INTO releases
        (product_id, repository_id, analysis_run_id, spec_version_id, sha, title, summary, url, committed_at)
@@ -225,7 +225,7 @@ export async function upsertRelease(connection: PoolConnection, run: RunContext,
     return { releaseId, projections: [] };
   }
 
-  const projections = buildReleaseChangeProjections(specChanges);
+  const projections = buildReleaseChangeProjections(specChanges.length > 0 ? specChanges : baselineReleaseChangeFacts(baselineFeatures ?? []));
   for (const projection of projections) {
     const [insertResult] = await connection.execute(
       `INSERT INTO changes (release_id, feature_name, kind, description, user_impact, evidence)
@@ -264,7 +264,7 @@ async function saveResult(run: RunContext, result: AnalysisResult, change: Chang
       [result.product.description, JSON.stringify(result.product.evidence), run.productId],
     );
     const behavioralPaths = behavioralChangePaths(change.files);
-    const { specVersionId, specChanges, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds } = await insertSpecVersion(connection, run, result, { ...(affectedKeys ? { affectedKeys } : {}), behavioralChangePaths: behavioralPaths });
+    const { specVersionId, specChanges, baseline, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds } = await insertSpecVersion(connection, run, result, { ...(affectedKeys ? { affectedKeys } : {}), behavioralChangePaths: behavioralPaths });
     // BM-11 别名登记：变体名 → canonical 旧键，走 feature_aliases 显式归并通道
     // （migrations/030；progress-summary 的历史 spec_changes 归并已消费该表）。幂等 INSERT IGNORE。
     for (const fold of featureFolds) {
@@ -280,7 +280,7 @@ async function saveResult(run: RunContext, result: AnalysisResult, change: Chang
     // P0(I1):下线基准必须是 carry-forward 合并后的完整规格——用 AI 原始输出会让
     // 增量模式把未受影响的 generated 功能全部下线,工作台坍缩为本次触及的功能。
     await upsertGeneratedSpec(connection, run, mergedFeatures);
-    const { releaseId, projections: releaseChangeProjections } = await upsertRelease(connection, run, result, change, specVersionId, specChanges);
+    const { releaseId, projections: releaseChangeProjections } = await upsertRelease(connection, run, result, change, specVersionId, specChanges, baseline ? mergedFeatures : null);
     await connection.execute("UPDATE analysis_runs SET status = 'succeeded', finished_at = CURRENT_TIMESTAMP(3) WHERE id = ?", [run.id]);
     await connection.commit();
     return { specVersionId, releaseId, releaseChangeProjections, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds };

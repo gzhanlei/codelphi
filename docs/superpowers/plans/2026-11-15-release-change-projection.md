@@ -55,7 +55,7 @@
 
 **Interfaces:**
 - Consumes: Task 1 projection types/builder.
-- Produces: `insertSpecVersion` additionally returns persisted `specChanges` with database IDs; `upsertRelease` persists projections and `change_sources`, returning projection IDs for post-commit rewrite.
+- Produces: `insertSpecVersion` additionally returns persisted `specChanges` with database IDs and a baseline marker; `upsertRelease` persists projections and `change_sources`, returning projection IDs for post-commit rewrite. A first baseline derives added projections from canonical features without fabricating `spec_changes`.
 
 - [ ] Add failing persistence tests proving one row per canonical feature, one source link per `spec_change_id`, idempotent retry behavior, and reviewed candidates excluded from user-facing `changes`.
 - [ ] Run focused tests; expect failures because source persistence is absent.
