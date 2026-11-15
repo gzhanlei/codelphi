@@ -395,6 +395,8 @@ describe("mcp server (A1)", () => {
     const response = await handleMcpRpc(runtime, rpc("tools/call", { name: "wait_for_release", arguments: { slug: "radar", sha: "abc1234", timeoutSeconds: 0 } }));
     const result = (response?.result as { structuredContent: { status: string; releaseId: number; analysisRunId: number } }).structuredContent;
     expect(result).toMatchObject({ status: "completed", releaseId: 231, analysisRunId: 333 });
+    const runQuery = execute.mock.calls.find(([sql]) => String(sql).includes("after_sha = ?"))!;
+    expect(String(runQuery[0])).toContain("SELECT ar.id, ar.status, ar.error_message");
   });
 
   it("exposes scoped release health in the project summary", async () => {
