@@ -4,6 +4,7 @@ import { LoginError } from "@/components/login-error";
 import { loadPublicDemoProduct } from "@/lib/public-demo";
 import { getSessionUser } from "@/lib/session";
 import { pick, resolveUiLocaleValue } from "@/lib/ui-locale";
+import { LanguageSwitcher } from "@/components/language-switcher";
 import { resolveUiLocale } from "@/lib/ui-locale-server";
 import { LOGIN } from "@/lib/ui-strings/dashboard";
 
@@ -43,6 +44,9 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         <div className="auth-foot">SOURCE-BACKED RELEASE NOTES</div>
       </section>
       <section className="auth-panel">
+        <div style={{ display: "flex", justifyContent: "flex-end", padding: "12px 16px 0" }}>
+          <LanguageSwitcher locale={locale} />
+        </div>
         <div className="login-card">
           <span className="eyebrow">{pick(locale, LOGIN.panelEyebrow)}</span>
           <h2>{pick(locale, LOGIN.welcome)}</h2>

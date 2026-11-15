@@ -2,6 +2,7 @@ import Link from "next/link";
 import { pick } from "@/lib/ui-locale";
 import { resolveUiLocale } from "@/lib/ui-locale-server";
 import { termsSections, TERMS } from "@/lib/ui-strings/legal";
+import { LanguageSwitcher } from "@/components/language-switcher";
 
 export async function generateMetadata() {
   const locale = await resolveUiLocale();
@@ -22,6 +23,7 @@ export default async function TermsPage() {
     <main className="terms-page">
       <div className="page-heading">
         <div><span className="eyebrow">LEGAL</span><h1>{pick(locale, TERMS.title)}</h1><p>{pick(locale, TERMS.subtitle)}</p></div>
+        <div><LanguageSwitcher locale={locale} /></div>
       </div>
       <p className="sidebar-note">{pick(locale, TERMS.draftNote)}</p>
       {sections.map((section) => (
