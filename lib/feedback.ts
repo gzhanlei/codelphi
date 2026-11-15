@@ -93,7 +93,7 @@ export async function listFeedbackReports(): Promise<FeedbackReport[]> {
             f.product_id AS productId, p.name AS productName, f.repository_full_name AS repositoryFullName,
             f.revision, f.error_message AS errorMessage, f.architecture_error AS architectureError,
             f.status, f.github_issue_url AS githubIssueUrl, f.submission_error AS submissionError,
-            u.name AS reporterName, f.created_at AS createdAt,
+            u.display_name AS reporterName, f.created_at AS createdAt,
             f.kind, f.verdict, f.verdict_reason AS verdictReason, f.adjudicated_at AS adjudicatedAt, f.corrective_run_id AS correctiveRunId
      FROM feedback_reports f
      JOIN organizations o ON o.id = f.organization_id
@@ -110,7 +110,7 @@ export async function getFeedbackReport(id: number): Promise<FeedbackReport | nu
             f.product_id AS productId, p.name AS productName, f.repository_full_name AS repositoryFullName,
             f.revision, f.error_message AS errorMessage, f.architecture_error AS architectureError,
             f.status, f.github_issue_url AS githubIssueUrl, f.submission_error AS submissionError,
-            u.name AS reporterName, f.created_at AS createdAt,
+            u.display_name AS reporterName, f.created_at AS createdAt,
             f.kind, f.verdict, f.verdict_reason AS verdictReason, f.adjudicated_at AS adjudicatedAt, f.corrective_run_id AS correctiveRunId
      FROM feedback_reports f JOIN organizations o ON o.id = f.organization_id
      JOIN products p ON p.id = f.product_id
