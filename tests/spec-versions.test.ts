@@ -2,8 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { PoolConnection } from "mysql2/promise";
 import type { AnalysisResult } from "../lib/ai";
 import type { RunContext } from "../lib/analysis";
-import { detectFeatureCollapses, detectMisplacedScenarios, detectSpecCollapse, featureParentKey, insertSpecVersion, loadLatestSpecVersionLanguage, loadPreviousFeatureNames } from "../lib/spec-versions";
-
+import { detectFeatureCollapses, detectMisplacedScenarios, detectSpecCollapse, featureParentKey, foldVariantFeatures, insertSpecVersion, loadLatestSpecVersionLanguage, loadPreviousFeatureNames } from "../lib/spec-versions";
 const run: RunContext = { id: 8, repositoryId: 3, productId: 4, owner: "gzhanlei", name: "radar", beforeSha: "a", afterSha: "b", connectionId: null, provider: "github", organizationId: 1, productSlug: "radar", productName: "Radar" };
 const scenario = { reference: "HP-1", context: "Visitor", action: "Signs in", outcome: "Dashboard", category: "happy" as const, evidence: [] };
 const result: AnalysisResult = {
@@ -323,5 +322,75 @@ describe("output language stamping (072)", () => {
     await expect(loadLatestSpecVersionLanguage(4, execute)).resolves.toBe("zh-CN");
     execute.mockResolvedValueOnce([[]]);
     await expect(loadLatestSpecVersionLanguage(4, execute)).resolves.toBeNull();
+  });
+});
+
+describe("BM-11 功能级变体折叠 (foldVariantFeatures)", () => {
+  const previous = { name: "Authentication", summary: "OAuth", parentKey: null, source: "generated" as const, scenarios: [{ ...scenario }] };
+  const variant = { name: "Authentication flow", summary: "OAuth", parentKey: null, source: "generated" as const, scenarios: [{ ...scenario }] };
+  const unrelated = { name: "Billing panel", summary: "Invoices", parentKey: null, source: "generated" as const, scenarios: [{ ...scenario, outcome: "Charge fails" }] };
+  const emptyTombstones = { featureKeys: new Set<string>(), scenarioKeys: new Set<string>() };
+
+  it("renames a variant feature back to the previous identity when the old key disappeared (改名型)", () => {
+    const { features, folds } = foldVariantFeatures([previous], [unrelated, variant], emptyTombstones);
+    expect(folds).toEqual([{ fromName: "Authentication flow", fromKey: "authentication flow", intoName: "Authentication", intoKey: "authentication", mode: "renamed" }]);
+    expect(features.map((feature) => feature.name).sort()).toEqual(["Authentication", "Billing panel"]);
+  });
+
+  it("merges variant scenarios into the carried feature when the old key survives (并存型)", () => {
+    const carried = { ...previous, scenarios: [{ ...scenario }] };
+    const fresh = { ...variant, scenarios: [{ ...scenario }, { ...scenario, reference: "HP-2", outcome: "Onboarding" }] };
+    const { features, folds } = foldVariantFeatures([carried], [carried, fresh, unrelated], emptyTombstones);
+    expect(folds).toEqual([{ fromName: "Authentication flow", fromKey: "authentication flow", intoName: "Authentication", intoKey: "authentication", mode: "merged" }]);
+    const merged = features.find((feature) => feature.name === "Authentication");
+    expect(merged?.scenarios.map((item) => item.reference)).toEqual(["HP-1", "HP-2"]);
+    expect(features.some((feature) => feature.name === "Authentication flow")).toBe(false);
+  });
+
+  it("does not fold manual features or tombstoned keys (AGENTS.md 红线)", () => {
+    const manualPrevious = { ...previous, source: "manual" as const };
+    const { features, folds } = foldVariantFeatures([manualPrevious], [variant], emptyTombstones);
+    expect(folds).toEqual([]);
+    expect(features.map((feature) => feature.name)).toContain("Authentication flow");
+    const tombstoned = foldVariantFeatures([previous], [variant], { featureKeys: new Set(["authentication"]), scenarioKeys: new Set<string>() });
+    expect(tombstoned.folds).toEqual([]);
+  });
+});
+
+describe("insertSpecVersion BM-11 装配折叠集成", () => {
+  it("folds a rename variant in full mode: no removed+added pair, feature written under the old name", async () => {
+    const db = connection([{ id: 11 }]);
+    const rebuilt = {
+      ...result,
+      features: [
+        { name: "Authentication flow", summary: "Old", scenarios: [{ ...scenario }] },
+        result.features[1],
+      ],
+    };
+    const { features, featureFolds } = await insertSpecVersion(db, run, rebuilt);
+    expect(featureFolds).toHaveLength(1);
+    expect(featureFolds[0]).toMatchObject({ mode: "renamed", intoName: "Authentication" });
+    const removed = db.changes.find((change) => change[2] === "feature" && change[3] === "removed");
+    expect(removed?.[5]).not.toBe("Authentication");
+    expect(db.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO spec_features"), expect.arrayContaining(["Authentication"]));
+    expect(db.execute).not.toHaveBeenCalledWith(expect.stringContaining("INSERT INTO spec_features"), expect.arrayContaining(["Authentication flow"]));
+    expect(features.map((feature) => feature.name)).toEqual(expect.arrayContaining(["Authentication"]));
+  });
+
+  it("merges a variant into the carried feature in incremental mode (并存型)", async () => {
+    const db = connection([{ id: 11 }]);
+    const rebuilt = {
+      ...result,
+      features: [
+        { name: "Authentication flow", summary: "Old", scenarios: [{ ...scenario }, { ...scenario, reference: "HP-2", outcome: "Onboarding" }] },
+      ],
+    };
+    const { features, featureFolds } = await insertSpecVersion(db, run, rebuilt, { affectedKeys: new Set(["unrelated"]) });
+    expect(featureFolds).toHaveLength(1);
+    expect(featureFolds[0].mode).toBe("merged");
+    expect(features.some((feature) => feature.name === "Authentication flow")).toBe(false);
+    // 并入的新场景（HP-2）落快照（快照每版全量重写功能场景，carried 的 HP-1 本就随之落库）
+    const inserted = (db.execute as unknown as ReturnType<typeof vi.fn>).mock.calls.filter((call: unknown[]) => String(call[0]).includes("INSERT INTO spec_scenarios"));
+    expect(inserted.some((call: unknown[]) => (call[1] as unknown[])?.includes("HP-2"))).toBe(true);
   });
 });

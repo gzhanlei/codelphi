@@ -245,7 +245,15 @@ async function saveResult(run: RunContext, result: AnalysisResult, change: Chang
       [result.product.description, JSON.stringify(result.product.evidence), run.productId],
     );
     const behavioralPaths = behavioralChangePaths(change.files);
-    const { specVersionId, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped } = await insertSpecVersion(connection, run, result, { ...(affectedKeys ? { affectedKeys } : {}), behavioralChangePaths: behavioralPaths });
+    const { specVersionId, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds } = await insertSpecVersion(connection, run, result, { ...(affectedKeys ? { affectedKeys } : {}), behavioralChangePaths: behavioralPaths });
+    // BM-11 别名登记：变体名 → canonical 旧键，走 feature_aliases 显式归并通道
+    // （migrations/030；progress-summary 的历史 spec_changes 归并已消费该表）。幂等 INSERT IGNORE。
+    for (const fold of featureFolds) {
+      await connection.execute(
+        "INSERT IGNORE INTO feature_aliases (product_id, alias_key, canonical_key) VALUES (?, ?, ?)",
+        [run.productId, fold.fromKey, fold.intoKey],
+      );
+    }
     await rebuildSpecFileIndex(connection, run.repositoryId, specVersionId);
     await markSpecDrift(connection, run.productId, specVersionId);
     // B1：覆盖率回执与规格版本同事务落库（append-only，历史版本可回溯）
@@ -256,7 +264,7 @@ async function saveResult(run: RunContext, result: AnalysisResult, change: Chang
     const releaseId = await upsertRelease(connection, run, result, change, specVersionId);
     await connection.execute("UPDATE analysis_runs SET status = 'succeeded', finished_at = CURRENT_TIMESTAMP(3) WHERE id = ?", [run.id]);
     await connection.commit();
-    return { specVersionId, releaseId, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped };
+    return { specVersionId, releaseId, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds };
   } catch (error) {
     await connection.rollback();
     throw error;
@@ -424,7 +432,7 @@ async function runAnalysisBody(run: RunContext) {
   // W0-8 行为面枚举：patch-scan 行为文件清单（跨模式共享，RC2 与定向枚举共用）
   const chunks: ExtractionChunk[] = [];
   const passInfos: Array<{ retries: number; sanitize: EvidenceSanitizeSummary }> = [];
-  let mergeStats = { changesTruncated: 0, scenariosDeduped: 0 };
+  let mergeStats = { changesTruncated: 0, scenariosDeduped: 0, featuresFolded: 0 };
 
   const knownFeatureNames = new Set(previousFeatureNames);
   let coverage: AnalysisCoverageReceipt | null = null;
@@ -544,7 +552,7 @@ async function runAnalysisBody(run: RunContext) {
     console.log("[analysis] behavioral enumeration", { runId: run.id, ...enumerationMetrics });
   }
   } // else：提取分支结束（BM-10 零行为变更窗口不进入）
-  const { specVersionId, releaseId, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped } = await saveResult(run, result, change, affectedKeys, coverage);
+  const { specVersionId, releaseId, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds } = await saveResult(run, result, change, affectedKeys, coverage);
   try {
     const flowStats = await syncFeatureFlowsForVersion({
       specVersionId,
@@ -681,7 +689,7 @@ async function runAnalysisBody(run: RunContext) {
       }),
       extractionCompletion: deriveExtractionCompletion(partitions.length, passInfos.map((pass) => ({ retries: pass.retries, empty: pass.sanitize.empty }))),
       evidenceIntegrity: deriveEvidenceIntegrity(passInfos.map((pass) => pass.sanitize)),
-      mergeIntegrity: deriveMergeIntegrity({ changesTruncated: mergeStats.changesTruncated, scenariosDeduped: mergeStats.scenariosDeduped, identityHijacksDropped, featureCollapses: featureCollapses.length, misplacedScenarios: misplacedScenarios.length, outcomeConflicts: conflicts.length, collapse: Boolean(collapse) }),
+      mergeIntegrity: deriveMergeIntegrity({ changesTruncated: mergeStats.changesTruncated, scenariosDeduped: mergeStats.scenariosDeduped, featuresFolded: mergeStats.featuresFolded + featureFolds.length, identityHijacksDropped, featureCollapses: featureCollapses.length, misplacedScenarios: misplacedScenarios.length, outcomeConflicts: conflicts.length, collapse: Boolean(collapse) }),
       verification: deriveVerification({ outcomeConflicts: conflicts.length, shadowRan, shadowConsistent }),
     } as const;
     const overall = deriveOverallState([

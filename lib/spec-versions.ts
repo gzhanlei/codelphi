@@ -3,7 +3,8 @@ import type { AnalysisResult, SpecAnchorFeature } from "./ai";
 import type { RunContext } from "./analysis";
 import { defaultExecute, type Execute } from "./db";
 import { evidenceItems } from "./evidence";
-import { diffSpec, mergeSpecSources, scenarioBehaviorEqual, specFeatureKey, specScenarioKey, type SpecChange, type SpecFeature, type SpecScenario, type SpecTombstones } from "./spec-diff";
+import { nextReference } from "./extraction-merge";
+import { diffSpec, featureScenarioPairMatch, featureVariantSimilar, mergeSpecSources, scenarioBehaviorEqual, specFeatureKey, specScenarioKey, type SpecChange, type SpecFeature, type SpecScenario, type SpecTombstones } from "./spec-diff";
 import { classifySpecHighlight } from "./spec-highlights";
 
 interface FeatureRow {
@@ -213,7 +214,93 @@ async function insertChanges(connection: PoolConnection, versionId: number, base
   }
 }
 
-export async function insertSpecVersion(connection: PoolConnection, run: RunContext, result: AnalysisResult, options: { affectedKeys?: ReadonlySet<string>; behavioralChangePaths?: ReadonlySet<string> } = {}): Promise<{ specVersionId: number; features: ReturnType<typeof mergeSpecSources>; collapse: SpecVersionCollapse | null; featureCollapses: FeatureCollapse[]; misplacedScenarios: MisplacedScenario[]; identityHijacksDropped: number }> {
+/** BM-11 功能级折叠回执：变体名并入旧身份的审计记录（folded 不落库，走 mergeIntegrity + 日志）。 */
+export interface FeatureFold {
+  /** 被折叠的变体功能（本版合并输出中的名字）。 */
+  fromName: string;
+  fromKey: string;
+  /** 折叠目标（上一版既有身份；并存型=当前版内的 carried 特征，改名型=上一版被改名替代的特征）。 */
+  intoName: string;
+  intoKey: string;
+  /** renamed=旧键已从合并输出消失（AI 改名），变体特征重命名回旧名；merged=旧键仍在（carried），变体场景并入。 */
+  mode: "renamed" | "merged";
+}
+
+/**
+ * BM-11 功能级变体折叠（跨 run 装配）：功能 identity = specFeatureKey(name)，LLM 换一字
+ * 命名（「无壳页面语言切换」↔「无外壳页面语言切换」，f7b2d60/38d3c7e 两 run 各立）即
+ * 诞生新功能，旧功能并存永不收口——上一版功能 × 本版合并输出跑 featureVariantSimilar
+ * （键不同才配对），命中即「变体并入旧身份」：
+ * - 改名型（旧键已消失）：变体特征重命名回旧名——key 连续性保住，BM-4 门禁/锚/carry
+ *   全部受益，diff 不再出 removed↔added 对；
+ * - 并存型（旧键仍被 carry）：变体特征的非重复场景并入旧键特征（去重用
+ *   featureScenarioPairMatch——被大段改写的同行为场景也须收口），变体条目丢弃。
+ * 守卫（宁漏勿错合）：任一侧 manual 不折（AGENTS.md 红线：人工条目不得自动覆盖）；
+ * 旧键在 tombstones 中不折（防止复活用户下线功能）；parentKey 不一致不折（父子结构
+ * 冲突宁漏）。折叠不删历史 spec_changes（A4 审计口径），别名走 feature_aliases 显式登记。
+ */
+export function foldVariantFeatures(previousFeatures: SpecFeature[], features: SpecFeature[], tombstones: SpecTombstones): { features: SpecFeature[]; folds: FeatureFold[] } {
+  const folds: FeatureFold[] = [];
+  if (previousFeatures.length === 0 || features.length === 0) return { features, folds };
+  const currentByKey = new Map(features.map((feature) => [specFeatureKey(feature.name), feature] as const));
+  for (const previousFeature of previousFeatures) {
+    const previousKey = specFeatureKey(previousFeature.name);
+    if (tombstones.featureKeys.has(previousKey)) continue;
+    for (const feature of features) {
+      const key = specFeatureKey(feature.name);
+      if (key === previousKey) continue;
+      // 该变体条目已被此前折叠移除/重命名则跳过（对象同一性比对，Map 里的才是活条目）。
+      if (currentByKey.get(key) !== feature) continue;
+      if (previousFeature.source === "manual" || feature.source === "manual") continue;
+      if ((previousFeature.parentKey ?? null) !== (feature.parentKey ?? null)) continue;
+      if (!featureVariantSimilar(previousFeature, feature)) continue;
+      const existingAtPreviousKey = currentByKey.get(previousKey);
+      if (existingAtPreviousKey && existingAtPreviousKey !== feature) {
+        // 并存型：变体场景并入旧键特征（featureScenarioPairMatch 口径 + 引用冲突重编号）。
+        const references = existingAtPreviousKey.scenarios.map((scenario) => scenario.reference);
+        for (const scenario of feature.scenarios) {
+          if (existingAtPreviousKey.scenarios.some((existing) => featureScenarioPairMatch(existing, scenario))) continue;
+          const reference = references.includes(scenario.reference) ? nextReference(references, scenario.reference) : scenario.reference;
+          references.push(reference);
+          existingAtPreviousKey.scenarios.push({ ...scenario, reference });
+        }
+        currentByKey.delete(key);
+        folds.push({ fromName: feature.name, fromKey: key, intoName: existingAtPreviousKey.name, intoKey: previousKey, mode: "merged" });
+      } else if (!existingAtPreviousKey) {
+        // 改名型：变体特征重命名回旧名，key 连续性保住；后续变体经并存分支并入。
+        const renamed: SpecFeature = { ...feature, name: previousFeature.name };
+        currentByKey.delete(key);
+        currentByKey.set(previousKey, renamed);
+        folds.push({ fromName: feature.name, fromKey: key, intoName: previousFeature.name, intoKey: previousKey, mode: "renamed" });
+      }
+    }
+  }
+  // 保持原 features 相对顺序：被折叠条目按位置移除（改名型在其原位插回重命名条目，
+  // 直接 filter 会把重命名条目一起丢掉——它已不在 foldedNames 名下）。
+  const foldsByFromKey = new Map(folds.map((fold) => [fold.fromKey, fold] as const));
+  const emittedKeys = new Set<string>();
+  const result: SpecFeature[] = [];
+  for (const feature of features) {
+    const key = specFeatureKey(feature.name);
+    const fold = foldsByFromKey.get(key);
+    if (fold) {
+      if (fold.mode === "renamed" && !emittedKeys.has(fold.intoKey)) {
+        const renamed = currentByKey.get(fold.intoKey);
+        if (renamed) {
+          result.push(renamed);
+          emittedKeys.add(fold.intoKey);
+        }
+      }
+      continue;
+    }
+    if (emittedKeys.has(key)) continue;
+    result.push(currentByKey.get(key) ?? feature);
+    emittedKeys.add(key);
+  }
+  return { features: result, folds };
+}
+
+export async function insertSpecVersion(connection: PoolConnection, run: RunContext, result: AnalysisResult, options: { affectedKeys?: ReadonlySet<string>; behavioralChangePaths?: ReadonlySet<string> } = {}): Promise<{ specVersionId: number; features: ReturnType<typeof mergeSpecSources>; collapse: SpecVersionCollapse | null; featureCollapses: FeatureCollapse[]; misplacedScenarios: MisplacedScenario[]; identityHijacksDropped: number; featureFolds: FeatureFold[] }> {
   const [previous, manual, tombstones] = await Promise.all([loadPreviousSpec(connection, run), loadManualSpec(connection, run.productId), loadManualTombstones(connection, run.productId)]);
   // M9 增量模式：受影响集之外的 generated 条目原样沿用上一版（三分合并：carried 种子 < AI < manual）。
   const affectedKeys = options.affectedKeys;
@@ -245,26 +332,35 @@ export async function insertSpecVersion(connection: PoolConnection, run: RunCont
     }
   }
   const features = mergeSpecSources(generated, manual, tombstones, carried);
+  // BM-11 功能级变体折叠（跨 run）：变体命名并入上一版既有身份，改名型重命名回旧键、
+  // 并存型场景并入 carried 特征——快照/diff/工作台三个面共用这份折叠结果。
+  const { features: foldedFeatures, folds: featureFolds } = foldVariantFeatures(previous?.features ?? [], features, tombstones);
+  if (featureFolds.length > 0) {
+    console.error("[spec] feature variant folded (BM-11)", {
+      runId: run.id,
+      folds: featureFolds.map((fold) => `${fold.fromName}(${fold.mode}) -> ${fold.intoName}`),
+    });
+  }
   // 行为窗口只在增量/RC2-carry 模式下有语义：提取确实被窗口框定时，「证据全在窗口外」
   // 才能证伪一个新增功能（superset 盲评 #1009）。全量重建时整库重提取、窗口只覆盖本发布
   // 的几个文件——门禁会把所有新功能吞掉（生产 v201 实证：70 个新功能 0 条 added，
   // 118 个旧名记为移除）。语言与模式无关：确定性变化摘要按本版输出语言生成（072）。
-  const changes = diffSpec(previous === null ? null : previous.features, features, {
+  const changes = diffSpec(previous === null ? null : previous.features, foldedFeatures, {
     behavioralChangePaths: affectedKeys ? options.behavioralChangePaths : undefined,
     language: run.outputLanguage === "en" ? "en" : "zh-CN",
   });
-  const collapse = detectSpecCollapse(previous, features);
-  const featureCollapses = detectFeatureCollapses(previous, features);
-  const misplacedScenarios = detectMisplacedScenarios(previous, features);
+  const collapse = detectSpecCollapse(previous, foldedFeatures);
+  const featureCollapses = detectFeatureCollapses(previous, foldedFeatures);
+  const misplacedScenarios = detectMisplacedScenarios(previous, foldedFeatures);
   const [versionResult] = await connection.execute(
     "INSERT INTO spec_versions (product_id, repository_id, analysis_run_id, sha, output_language) VALUES (?, ?, ?, ?, ?)",
     [run.productId, run.repositoryId, run.id, run.afterSha, run.outputLanguage === "en" ? "en" : "zh-CN"],
   );
   const versionId = Number((versionResult as { insertId: number }).insertId);
-  await insertFeatures(connection, versionId, features);
+  await insertFeatures(connection, versionId, foldedFeatures);
   await insertChanges(connection, versionId, previous === null ? null : previous.id, changes);
   // 合并后的完整 spec 一并返回：M9 影子对比必须以 carry-forward 之后的规格为对象。
-  return { specVersionId: versionId, features, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped };
+  return { specVersionId: versionId, features: foldedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds };
 }
 
 /** 规格坍缩（护栏）：新版场景数较上一版骤降超过阈值。生产 v95（2026-11-08）178→83 即此形态。 */
