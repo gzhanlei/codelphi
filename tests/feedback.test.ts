@@ -166,6 +166,7 @@ describe("analysis failure feedback", () => {
       repositoryFullName: "gzhanlei/workmembership",
       revision: "abcdef1234567890",
       errorMessage: "No architecture components detected",
+      analysisRunId: null,
       architectureError: null, kind: "bug", verdict: null, verdictReason: null, adjudicatedAt: null, correctiveRunId: null,
       status: "new",
       githubIssueUrl: null,
