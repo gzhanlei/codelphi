@@ -166,3 +166,11 @@
 - `sourceLinkedRatio` 的分母只含 eligible release 中的 eligible change，孤立关联单独计数。
 - `duplicateFeatureClusterCount` 与跨版本 `duplicateScenarioClusterCount` 没有可靠算法时为 null。
 - `wait_for_release` 精确匹配 after_sha，按 created_at,id 选择最新尝试；只有 run succeeded 且同 SHA release 已持久化才 completed。
+
+### 审查修复补充
+
+- `duplicateClusters` 只覆盖数据库约束之外的异常记录（重复 change id 或版本内重复 scenario identity），不是常规语义重复检测；生产正常数据可以为空。
+- `unexpected` 同时返回 `beforePaths`、`afterPaths` 和 `releaseFilePaths`，保留证据来源。
+- stableKey + paths 的匹配必须同时落在同一变化记录上；release_files 只作为 path-only intent 的范围证据，不能替其他功能补足证据。
+- `analysis.status` 还要求 `run.after_sha === release.sha`，`legacySourceIssueCount` 使用 release 内失效关联计数。
+- `lookup_by_files?view=risk` 不使用 raw 的每功能 10 条截断，跨 path 同场景去重后计算总数和 canonical 数。

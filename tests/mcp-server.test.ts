@@ -30,6 +30,13 @@ describe("mcp server (A1)", () => {
     expect(tools.map((tool) => tool.name)).toEqual(["list_projects", "get_project_summary", "get_feature", "get_scenario", "search_scenarios", "lookup_by_files", "list_releases", "get_release", "reconcile_release", "get_feedback", "wait_for_release", "get_knowledge_health", "get_feature_connections", "get_release_notes", "get_digest", "send_feedback"]);
   });
 
+  it("declares canonical and risk view parameters in tool schemas", () => {
+    const feature = MCP_TOOLS.find((tool) => tool.name === "get_feature")!;
+    const files = MCP_TOOLS.find((tool) => tool.name === "lookup_by_files")!;
+    expect(feature.inputSchema.properties).toHaveProperty("view");
+    expect(files.inputSchema.properties).toHaveProperty("view");
+  });
+
   it("returns no response for notifications (no id)", async () => {
     expect(await handleMcpRpc(runtime, { jsonrpc: "2.0", method: "notifications/initialized" })).toBeNull();
   });
@@ -278,7 +285,7 @@ describe("mcp server (A1)", () => {
       if (String(sql).includes("FROM products WHERE organization_id")) return [[{ id: 9, slug: "radar", name: "Radar", description: "d" }]];
       if (String(sql).includes("FROM repositories")) return [[{ provider: "github", owner: "gzhanlei", name: "radar", defaultBranch: "main", sha: "abc123" }]];
       if (String(sql).includes("FROM releases WHERE id = ?")) return [[{ id: 229, title: "v", summary: "s", sha: "abc123", url: "u", committedAt: new Date(), specVersionId: 230, analysis_run_id: 333 }]];
-      if (String(sql).includes("FROM analysis_runs WHERE id = ?")) return [[{ id: 333, status: "succeeded", error_message: null }]];
+      if (String(sql).includes("FROM analysis_runs WHERE id = ?")) return [[{ id: 333, status: "succeeded", after_sha: "abc123", error_message: null }]];
       if (String(sql).includes("FROM release_files")) return [[{ path: "lib/a.ts" }]];
       if (String(sql).includes("FROM spec_changes c JOIN releases")) return [[{ id: 1, kind: "added", entityType: "scenario", featureName: "功能", scenarioReference: "EC-1", summary: "s", highlightType: null, beforeJson: null, afterJson: { reference: "EC-1", evidence: [{ path: "lib/a.ts" }] } }]];
       return [[]];
@@ -290,6 +297,22 @@ describe("mcp server (A1)", () => {
     expect(result.intentResults[0].status).toBe("matched");
     expect(result.unexpected).toEqual([]);
     expect(JSON.stringify(result)).not.toContain("beforeJson");
+  });
+
+  it("does not pass reconciliation when run SHA differs from release SHA", async () => {
+    execute.mockImplementation(async (sql: string) => {
+      if (String(sql).includes("FROM products WHERE organization_id")) return [[{ id: 9, slug: "radar", name: "Radar", description: "d" }]];
+      if (String(sql).includes("FROM repositories")) return [[{ provider: "github", owner: "gzhanlei", name: "radar", defaultBranch: "main", sha: "abc123" }]];
+      if (String(sql).includes("FROM releases WHERE id = ?")) return [[{ id: 229, title: "v", summary: "s", sha: "release-sha", url: "u", committedAt: new Date(), specVersionId: 230, analysis_run_id: 333 }]];
+      if (String(sql).includes("FROM analysis_runs WHERE id = ?")) return [[{ id: 333, status: "succeeded", after_sha: "different-run-sha", error_message: null }]];
+      if (String(sql).includes("FROM release_files")) return [[{ path: "lib/a.ts" }]];
+      if (String(sql).includes("FROM spec_changes c JOIN releases")) return [[{ id: 1, kind: "added", entityType: "scenario", featureName: "功能", scenarioReference: "EC-1", summary: "s", highlightType: null, beforeJson: null, afterJson: { reference: "EC-1", evidence: [{ path: "lib/a.ts" }] } }]];
+      return [[]];
+    });
+    const response = await handleMcpRpc(runtime, rpc("tools/call", { name: "reconcile_release", arguments: { slug: "radar", releaseId: 229, expectedIntents: [{ stableKey: "功能" }] } }));
+    const result = (response?.result as { structuredContent: { verdict: string; analysis: { status: string } } }).structuredContent;
+    expect(result.verdict).toBe("review");
+    expect(result.analysis.status).toBe("unknown");
   });
 
   it("paginates release changes with stable ids and compatible response fields", async () => {
@@ -332,6 +355,23 @@ describe("mcp server (A1)", () => {
     expect(result.risks[0].severity).toBe("high");
   });
 
+  it("deduplicates risk rows across requested paths without hiding the true total", async () => {
+    execute.mockImplementation(async (sql: string) => {
+      if (String(sql).includes("FROM products WHERE organization_id")) return [[{ id: 9, slug: "radar", name: "Radar", description: "d" }]];
+      if (String(sql).includes("FROM repositories")) return [[{ provider: "github", owner: "gzhanlei", name: "radar", defaultBranch: "main", sha: "abc123" }]];
+      if (String(sql).includes("s.evidence LIKE ?")) {
+        return [[{ id: 1, featureId: 1, featureName: "统一登录", reference: "HP-1", context: "c", action: "a", outcome: "o", source: "generated", evidence: [{ path: "lib/a.ts" }, { path: "lib/b.ts" }] }]];
+      }
+      return [[]];
+    });
+    const response = await handleMcpRpc(runtime, rpc("tools/call", { name: "lookup_by_files", arguments: { slug: "radar", paths: ["lib/a.ts", "lib/b.ts"], view: "risk" } }));
+    const result = (response?.result as { structuredContent: { rawScenarioCount: number; canonicalScenarioCount: number; totalCount: number; risks: unknown[] } }).structuredContent;
+    expect(result.rawScenarioCount).toBe(1);
+    expect(result.canonicalScenarioCount).toBe(1);
+    expect(result.totalCount).toBe(1);
+    expect(result.risks).toHaveLength(1);
+  });
+
   it("returns feedback lifecycle without inventing verification", async () => {
     execute.mockImplementation(async (sql: string) => {
       if (String(sql).includes("FROM products WHERE organization_id")) return [[{ id: 9, slug: "radar", name: "Radar", description: "d" }]];
@@ -372,6 +412,9 @@ describe("mcp server (A1)", () => {
     const response = await handleMcpRpc(runtime, rpc("tools/call", { name: "get_project_summary", arguments: { slug: "radar" } }));
     const health = (response?.result as { structuredContent: { releaseHealth: { sourceLinkedRatio: number; canonicalProjectionRatio: number; legacyReleaseCount: number } } }).structuredContent.releaseHealth;
     expect(health).toMatchObject({ sourceLinkedRatio: 1, canonicalProjectionRatio: 1, legacyReleaseCount: 0 });
+    const orphanQuery = execute.mock.calls.find(([sql]) => String(sql).includes("orphanLinkCount"))!;
+    expect(String(orphanQuery[0])).toContain("r.product_id = ? AND (c.id IS NULL OR r.id IS NULL OR sc.id IS NULL)");
+    expect(String(orphanQuery[0])).not.toContain("OR r.id IS NULL)");
   });
 
   it("validates and stores a name-level regression anchor", async () => {

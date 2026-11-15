@@ -145,11 +145,11 @@ export async function loadFeatureConnections(
 }
 
 /** 证据反查：文件 → 以该文件为证据的功能与场景（coding agent 改动前影响面检查）。 */
-export async function lookupFilesImpact(execute: Execute = defaultExecute, productId: number, paths: string[]): Promise<FileImpactEntry[]> {
+export async function lookupFilesImpact(execute: Execute = defaultExecute, productId: number, paths: string[], options: { scenarioCap?: number } = {}): Promise<FileImpactEntry[]> {
   const wanted = [...new Set(paths.map((path) => path.trim()).filter(Boolean))];
   if (wanted.length === 0) return [];
   const rows = await loadScenarioEvidenceRows(execute, productId, wanted);
-  return buildFileImpact(rows, wanted);
+  return buildFileImpact(rows, wanted, options.scenarioCap ?? FILE_IMPACT_SCENARIO_CAP);
 }
 
 function rowsOf(result: unknown): ScenarioEvidenceRow[] {
@@ -170,7 +170,7 @@ async function loadScenarioEvidenceRows(execute: Execute, productId: number, evi
 }
 
 /** 文件反查聚合（纯函数）：请求路径保序去重、证据路径精确匹配、每功能场景截前 N 条并披露真实总数。 */
-export function buildFileImpact(rows: ScenarioEvidenceRow[], paths: string[]): FileImpactEntry[] {
+export function buildFileImpact(rows: ScenarioEvidenceRow[], paths: string[], scenarioCap = FILE_IMPACT_SCENARIO_CAP): FileImpactEntry[] {
   const wanted = [...new Set(paths.map((path) => path.trim()).filter(Boolean))];
   if (wanted.length === 0) return [];
   const wantedSet = new Set(wanted);
@@ -191,7 +191,7 @@ export function buildFileImpact(rows: ScenarioEvidenceRow[], paths: string[]): F
         scenarioCount: 0,
         scenarios: [],
       };
-      if (feature.scenarios.length < FILE_IMPACT_SCENARIO_CAP) {
+      if (feature.scenarios.length < scenarioCap) {
         feature.scenarios.push({ id: row.id, reference: row.reference, context: row.context ?? "", action: row.action ?? "", outcome: row.outcome ?? "", source: row.source ?? "", evidence: row.evidence });
       }
       feature.scenarioCount += 1;

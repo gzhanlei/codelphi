@@ -1,5 +1,5 @@
 import { searchSpec } from "../spec-search";
-import { loadFeatureConnections, lookupFilesImpact } from "../feature-connections";
+import { loadFeatureConnections, lookupFilesImpact, FILE_IMPACT_SCENARIO_CAP } from "../feature-connections";
 import { buildKnowledgeHealth } from "../knowledge-health";
 import { loadRegressionTasks } from "../regression-tasks";
 import { loadCoverageReceipt } from "../analysis-coverage";
@@ -89,10 +89,10 @@ export const MCP_WORKFLOW_INSTRUCTIONS = [
 export const MCP_TOOLS: McpToolDef[] = [
   { name: "list_projects", description: "列出当前工作区（API key 所属组织）的全部产品。接入仓库的 agent 先用 git remote 的 owner/name 匹配产品取 slug", inputSchema: { type: "object", properties: {} } },
   { name: "get_project_summary", description: "产品概要：描述、功能/场景计数、最新证据覆盖率、最新发布", inputSchema: { type: "object", properties: { slug: { type: "string" } }, required: ["slug"] } },
-  { name: "get_feature", description: "按稳定键取功能及其场景（含证据链接）", inputSchema: { type: "object", properties: { slug: { type: "string" }, stableKey: { type: "string" } }, required: ["slug", "stableKey"] } },
+  { name: "get_feature", description: "按稳定键取功能及其场景（含证据链接）", inputSchema: { type: "object", properties: { slug: { type: "string" }, stableKey: { type: "string" }, view: { type: "string", enum: ["raw", "canonical"] } }, required: ["slug", "stableKey"] } },
   { name: "get_scenario", description: "按功能稳定键 + 场景引用取单个场景（含证据链接）", inputSchema: { type: "object", properties: { slug: { type: "string" }, stableKey: { type: "string" }, reference: { type: "string" } }, required: ["slug", "stableKey", "reference"] } },
   { name: "search_scenarios", description: "按关键词检索规格原文（命中条目 = 已过证据校验的原文，未覆盖时明确返回空）。理解既有行为优先用它，不要只靠读代码猜", inputSchema: { type: "object", properties: { slug: { type: "string" }, query: { type: "string" } }, required: ["slug", "query"] } },
-  { name: "lookup_by_files", description: "做计划或改文件前必查：按文件路径反查以该文件为证据的功能与场景（爆炸半径；paths 最多 20 个，每功能场景截前 10 条并附真实总数；账本未覆盖的文件返回空）", inputSchema: { type: "object", properties: { slug: { type: "string" }, paths: { type: "array", items: { type: "string" } } }, required: ["slug", "paths"] } },
+  { name: "lookup_by_files", description: "做计划或改文件前必查：按文件路径反查以该文件为证据的功能与场景（爆炸半径；paths 最多 20 个，每功能场景截前 10 条并附真实总数；账本未覆盖的文件返回空）", inputSchema: { type: "object", properties: { slug: { type: "string" }, paths: { type: "array", items: { type: "string" } }, view: { type: "string", enum: ["raw", "canonical", "risk"] } }, required: ["slug", "paths"] } },
   { name: "list_releases", description: "列产品的发布（per-push 一条，docs-only 也有零变化条目；时间倒序，默认 10 条）。push 后用本次 sha 找对应发布", inputSchema: { type: "object", properties: { slug: { type: "string" }, limit: { type: "number" } }, required: ["slug"] } },
   { name: "get_release", description: "单条发布的行为变化清单（含前后差异摘要与证据链接）。push 后对账：与本次提交意图核对，计划外变化要回查报告", inputSchema: { type: "object", properties: { slug: { type: "string" }, releaseId: { type: "number" }, view: { type: "string", enum: ["raw", "canonical"] }, offset: { type: "number" }, limit: { type: "number" } }, required: ["slug", "releaseId"] } },
   { name: "reconcile_release", description: "按 stableKey（名称级）与 evidence paths 对账发布意图，返回 missing/unexpected/重复信号与 verdict，不返回完整 before/after", inputSchema: { type: "object", properties: { slug: { type: "string" }, releaseId: { type: "number" }, expectedIntents: { type: "array", items: { type: "object", properties: { stableKey: { type: "string" }, paths: { type: "array", items: { type: "string" } }, note: { type: "string" } } } } }, required: ["slug", "releaseId"] } },
@@ -216,7 +216,7 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
          LEFT JOIN changes c ON c.id = s.change_id
          LEFT JOIN releases r ON r.id = c.release_id
          LEFT JOIN spec_changes sc ON sc.id = s.spec_change_id AND sc.spec_version_id = r.spec_version_id
-         WHERE r.product_id = ? OR r.id IS NULL`,
+         WHERE r.product_id = ? AND (c.id IS NULL OR r.id IS NULL OR sc.id IS NULL)`,
         [product.id],
       ),
     );
@@ -313,7 +313,7 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
     const paths = (Array.isArray(args.paths) ? args.paths : []).map((path) => String(path).trim()).filter(Boolean);
     if (paths.length === 0) throw new Error("paths must be a non-empty array of file paths");
     if (paths.length > 20) throw new Error("paths must contain at most 20 file paths");
-    const files = await lookupFilesImpact(execute, product.id, paths);
+    const files = await lookupFilesImpact(execute, product.id, paths, { scenarioCap: view === "risk" ? Number.MAX_SAFE_INTEGER : FILE_IMPACT_SCENARIO_CAP });
     if (view === "risk") {
       return projectFileRisks({
         requestedPaths: paths,
@@ -406,17 +406,27 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
     );
     const release = releases[0];
     if (!release) return {};
-    const runs = release.analysisRunId === null ? [] : await queryRows<{ id: number; status: string; error_message: string | null }>(
-      execute("SELECT id, status, error_message FROM analysis_runs WHERE id = ?", [release.analysisRunId]),
+    const runs = release.analysisRunId === null ? [] : await queryRows<{ id: number; status: string; after_sha: string | null; error_message: string | null }>(
+      execute("SELECT id, status, after_sha, error_message FROM analysis_runs WHERE id = ?", [release.analysisRunId]),
     );
     const run = runs[0];
     const releaseFiles = await queryRows<{ path: string }>(execute("SELECT path FROM release_files WHERE release_id = ? ORDER BY path", [release.id]));
-    const changes = await queryRows<{ id: number; kind: string; entityType: string; featureName: string; scenarioReference: string | null; beforeJson: unknown; afterJson: unknown }>(
+    const changes = await queryRows<{ id: number; kind: string; entityType: string; featureName: string; featureKey: string; scenarioReference: string | null; beforeJson: unknown; afterJson: unknown }>(
       execute(
-        `SELECT c.id, c.kind, c.entity_type AS entityType, c.feature_name AS featureName, c.scenario_reference AS scenarioReference,
+        `SELECT c.id, c.kind, c.entity_type AS entityType, c.feature_name AS featureName, c.feature_key AS featureKey, c.scenario_reference AS scenarioReference,
                 c.before_json AS beforeJson, c.after_json AS afterJson
          FROM spec_changes c JOIN releases r ON r.spec_version_id = c.spec_version_id
          WHERE r.id = ? AND c.wording_only = 0 ORDER BY c.id`,
+        [release.id],
+      ),
+    );
+    const legacyLinks = await queryRows<{ count: number }>(
+      execute(
+        `SELECT COUNT(*) AS count FROM change_sources s
+         JOIN changes c ON c.id = s.change_id
+         JOIN releases r ON r.id = c.release_id
+         LEFT JOIN spec_changes sc ON sc.id = s.spec_change_id AND sc.spec_version_id = r.spec_version_id
+         WHERE c.release_id = ? AND sc.id IS NULL`,
         [release.id],
       ),
     );
@@ -432,14 +442,15 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
       releaseId: release.id,
       slug: product.slug,
       sha: release.sha,
-      changes: changes.map((change) => ({ id: change.id, featureName: change.featureName, entityType: change.entityType, scenarioReference: change.scenarioReference, before: change.beforeJson, after: change.afterJson })),
+      changes: changes.map((change) => ({ id: change.id, featureName: change.featureName, featureKey: change.featureKey, entityType: change.entityType, scenarioReference: change.scenarioReference, before: change.beforeJson, after: change.afterJson })),
       releaseFilePaths: releaseFiles.map((file) => file.path),
       analysis: {
-        status: !run ? "unknown" : run.status === "succeeded" ? "complete" : run.status === "failed" ? "failed" : "partial",
+        status: !run || run.after_sha !== release.sha ? "unknown" : run.status === "succeeded" ? "complete" : run.status === "failed" ? "failed" : "partial",
         runId: run?.id ?? null,
         error: run?.error_message ?? null,
       },
       expectedIntents,
+      legacySourceIssueCount: Number(legacyLinks[0]?.count ?? 0),
     });
   }
 

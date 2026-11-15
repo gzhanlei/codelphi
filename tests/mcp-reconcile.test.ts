@@ -5,6 +5,7 @@ function change(id: number, featureName: string, reference: string, path = "lib/
   return {
     id,
     featureName,
+    featureKey: featureName.toLowerCase(),
     entityType: "scenario",
     scenarioReference: reference,
     before: null,
@@ -93,7 +94,7 @@ describe("reconcileRelease", () => {
     });
 
     expect(result.verdict).toBe("failed");
-    expect(result.unexpected).toEqual([{ changeId: 2, stableKey: "计划外功能", evidencePaths: ["lib/b.ts"], reasonCode: "not_covered_by_intents" }]);
+    expect(result.unexpected).toEqual([{ changeId: 2, stableKey: "计划外功能", evidencePaths: ["lib/b.ts"], beforePaths: [], afterPaths: ["lib/b.ts"], releaseFilePaths: ["lib/a.ts", "lib/b.ts"], reasonCode: "not_covered_by_intents" }]);
   });
 
   it("reports duplicate projections but only warns about shared evidence", () => {
@@ -128,6 +129,35 @@ describe("reconcileRelease", () => {
     });
 
     expect(result.duplicateClusters[0]).toMatchObject({ kind: "duplicate_scenario_identity", stableKey: "功能", scenarioIdentity: "EC-1", changeIds: [1, 2] });
+  });
+
+  it("uses persisted feature_key over a drifting display name", () => {
+    const result = reconcileRelease({
+      releaseId: 229,
+      slug: "codelphi",
+      sha: "abc",
+      changes: [{ ...change(1, "展示名漂移", "EC-1"), featureKey: "功能" }],
+      releaseFilePaths: ["lib/a.ts"],
+      analysis: completeAnalysis,
+      expectedIntents: [{ stableKey: "功能" }],
+    });
+    expect(result.intentResults[0].identityMatched).toBe(true);
+  });
+
+  it("does not mark an identity intent matched when its path belongs to another feature", () => {
+    const result = reconcileRelease({
+      releaseId: 229,
+      slug: "codelphi",
+      sha: "abc",
+      changes: [change(1, "功能 A", "EC-1", "lib/a.ts"), change(2, "功能 B", "EC-2", "lib/x.ts")],
+      releaseFilePaths: ["lib/a.ts", "lib/x.ts"],
+      analysis: completeAnalysis,
+      expectedIntents: [{ stableKey: "功能 A", paths: ["lib/x.ts"] }],
+    });
+
+    expect(result.intentResults[0]).toMatchObject({ identityMatched: true, pathMatched: false, matchedChangeIds: [], status: "partial" });
+    expect(result.unexpected.map((item) => item.changeId)).toEqual([1, 2]);
+    expect(result.unexpected[0]).toMatchObject({ beforePaths: [], afterPaths: ["lib/a.ts"], releaseFilePaths: ["lib/a.ts", "lib/x.ts"] });
   });
 
   it("never passes incomplete analysis even when intents match", () => {

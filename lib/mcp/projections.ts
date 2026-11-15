@@ -75,9 +75,21 @@ export function projectFileRisks(input: {
     evidencePaths: string[];
   }>;
 }) {
-  const covered = new Set(input.rows.flatMap((row) => row.evidencePaths));
+  const uniqueRows = new Map<string, (typeof input.rows)[number]>();
+  for (const row of input.rows) {
+    const key = row.changeIds.slice().sort((a, b) => a - b).join(",");
+    const existing = uniqueRows.get(key);
+    if (existing) {
+      existing.evidencePaths = [...new Set([...existing.evidencePaths, ...row.evidencePaths])].sort();
+      if (row.source === "manual") existing.source = "manual";
+    } else {
+      uniqueRows.set(key, { ...row, evidencePaths: [...row.evidencePaths] });
+    }
+  }
+  const rows = [...uniqueRows.values()];
+  const covered = new Set(rows.flatMap((row) => row.evidencePaths));
   const severityRank = { high: 0, medium: 1, low: 2 } as const;
-  const risks = input.rows.map((row) => ({
+  const risks = rows.map((row) => ({
     severity: row.source === "manual" ? "high" as const : "medium" as const,
     stableKey: row.stableKey,
     changeIds: row.changeIds,
@@ -92,8 +104,14 @@ export function projectFileRisks(input: {
   const limited = risks.slice(0, 10).map((risk, index) => ({ ...risk, rank: index + 1 }));
   return {
     snapshotSha: input.snapshotSha,
-    rawScenarioCount: input.rows.length,
-    canonicalScenarioCount: new Set(input.rows.map((row) => row.stableKey)).size,
+    rawScenarioCount: rows.length,
+    canonicalScenarioCount: canonicalizeScenarios(rows.map((row) => ({
+      id: row.changeIds[0],
+      featureName: row.stableKey,
+      reference: "",
+      specReference: input.snapshotSha ?? "unknown",
+      evidencePaths: row.evidencePaths,
+    }))).canonicalCount,
     coveredPaths: input.requestedPaths.filter((path) => covered.has(path)),
     uncoveredPaths: input.requestedPaths.filter((path) => !covered.has(path)),
     risks: limited,

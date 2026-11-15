@@ -1,6 +1,7 @@
 export interface ReconcileChange {
   id: number;
   featureName: string;
+  featureKey?: string;
   entityType: string;
   scenarioReference: string | null;
   before: unknown;
@@ -30,6 +31,10 @@ export interface ReconcileReleaseInput {
 
 function nameKey(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function featureKeyOf(change: ReconcileChange): string {
+  return change.featureKey ?? nameKey(change.featureName);
 }
 
 function normalizePath(value: string): string {
@@ -65,14 +70,17 @@ export function reconcileRelease(input: ReconcileReleaseInput) {
   const intentResults = (input.expectedIntents ?? []).map((intent, intentIndex) => {
     const stableKey = intent.stableKey ? nameKey(intent.stableKey) : null;
     const paths = [...new Set((intent.paths ?? []).map(normalizePath).filter(Boolean))];
-    const identityMatches = stableKey === null ? null : changes.some((change) => nameKey(change.featureName) === stableKey);
+    const identityMatches = stableKey === null ? null : changes.some((change) => featureKeyOf(change) === stableKey);
     const unmatchedPaths = paths.filter((path) => !coveredPaths.has(path));
-    const pathMatches = paths.length === 0 && intent.paths === undefined ? null : unmatchedPaths.length === 0;
-    const matchedChangeIds = changes.filter((change) => {
-      const identityMatchesChange = stableKey === null || nameKey(change.featureName) === stableKey;
-      const pathMatchesChange = paths.length === 0 || paths.every((path) => evidencePathsFromSubject(change.before).includes(path) || evidencePathsFromSubject(change.after).includes(path) || input.releaseFilePaths.map(normalizePath).includes(path));
-      return identityMatchesChange && pathMatchesChange;
-    }).map((change) => change.id);
+    const identityCandidates = stableKey === null ? changes : changes.filter((change) => featureKeyOf(change) === stableKey);
+    const releasePaths = input.releaseFilePaths.map(normalizePath);
+    const matchedChangeIds = identityCandidates.filter((change) => paths.every((path) => stableKey !== null
+      ? evidencePathsFromSubject(change.before).includes(path) || evidencePathsFromSubject(change.after).includes(path)
+      : releasePaths.includes(path))).map((change) => change.id);
+    const pathMatches = intent.paths === undefined ? null
+      : paths.length === 0 ? true
+      : stableKey !== null ? matchedChangeIds.length > 0 && matchedChangeIds.length === identityCandidates.length
+      : unmatchedPaths.length === 0;
     for (const id of matchedChangeIds) matchedIds.add(id);
     const reasonCodes = stableKey ? ["exact_name"] : [];
     const status = stableKey && !identityMatches ? "missing"
@@ -98,8 +106,11 @@ export function reconcileRelease(input: ReconcileReleaseInput) {
   }));
   const unexpected = !input.expectedIntents ? [] : changes.filter((change) => !matchedIds.has(change.id)).map((change) => ({
     changeId: change.id,
-    stableKey: nameKey(change.featureName),
+    stableKey: featureKeyOf(change),
     evidencePaths: [...new Set([...evidencePathsFromSubject(change.before), ...evidencePathsFromSubject(change.after)])],
+    beforePaths: evidencePathsFromSubject(change.before),
+    afterPaths: evidencePathsFromSubject(change.after),
+    releaseFilePaths: input.releaseFilePaths.map(normalizePath),
     reasonCode: "not_covered_by_intents",
   }));
 
@@ -110,7 +121,7 @@ export function reconcileRelease(input: ReconcileReleaseInput) {
     projection.push(change);
     projectionGroups.set(change.id, projection);
     if (change.entityType === "scenario" && change.scenarioReference) {
-      const key = `${nameKey(change.featureName)}|${change.scenarioReference}`;
+      const key = `${featureKeyOf(change)}|${change.scenarioReference}`;
       const group = scenarioGroups.get(key) ?? [];
       group.push(change);
       scenarioGroups.set(key, group);
@@ -151,7 +162,7 @@ export function reconcileRelease(input: ReconcileReleaseInput) {
   for (const change of changes) {
     for (const path of new Set([...evidencePathsFromSubject(change.before), ...evidencePathsFromSubject(change.after)])) {
       const group = evidenceGroups.get(path) ?? { stableKeys: new Set<string>(), changeIds: [] };
-      group.stableKeys.add(nameKey(change.featureName));
+      group.stableKeys.add(featureKeyOf(change));
       group.changeIds.push(change.id);
       evidenceGroups.set(path, group);
     }
