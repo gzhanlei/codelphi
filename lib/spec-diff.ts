@@ -305,12 +305,15 @@ export function changeDescriptionVariantSimilar(left: string, right: string): bo
   const r = specContent(right);
   if (l === r) return true;
   if (l === "" || r === "") return false;
-  // 数字守护剔除全部单位数 token：散文里的「大于 0」「≥1 对」「5 个」是措辞噪声不是语义值
-  // （release 225「折叠数大于 0」↔「被折叠时」、release 227「≥1 对」↔无数字都被原始签名
-  // 误杀）；404≠400 这类多位错误码不受影响。已知残余：删 3 条↔删 7 条这类计数差异也失去
-  // 守护——此类行通常伴随其他措辞差异，且 description 之外的上下文有限，接受。
-  const significantDigits = (text: string) => digitSignature([...text.matchAll(/[0-9]+/g)].filter((match) => !/^[0-9]$/.test(match[0])).map((match) => match[0]).join(","));
-  if (significantDigits(l) !== significantDigits(r)) return false;
+  // 数字守护：单位数 token（「大于 0」「≥1 对」「5 个」）是措辞噪声，直接剔除；多位 token
+  // （404/400/0.34/226）在**双侧都有且集合完全不相交**时才否决——release 228 实证：描述
+  // 正文引用「404≠400」作例子会让对侧（无此例子）被签名差误杀；一侧单方提及多位数只是
+  // 示例引用，交给词集相似度裁决。已知残余：删 3 条↔删 7 条这类计数差异失去守护（单位数
+  // 被剔除），此类行通常伴随其他措辞差异，接受。
+  const multiDigitTokens = (text: string) => new Set([...text.matchAll(/[0-9]+/g)].filter((match) => match[0].length >= 2).map((match) => match[0]));
+  const leftDigits = multiDigitTokens(l);
+  const rightDigits = multiDigitTokens(r);
+  if (leftDigits.size > 0 && rightDigits.size > 0 && ![...leftDigits].some((token) => rightDigits.has(token))) return false;
   if (negationCountOf(left) !== negationCountOf(right)) return false;
   if (specTextEquivalent(left, right)) return true;
   // 短串（<12 内容字符）不做变体近似：2-gram 证据太薄，「变更0」⊂「独立变更0」这类编号

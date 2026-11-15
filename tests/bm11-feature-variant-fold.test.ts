@@ -217,6 +217,12 @@ describe("changeDescriptionVariantSimilar (BM-11 changes 去重)", () => {
     expect(changeDescriptionVariantSimilar(variants[0], "新增 scripts/merge-variant-features.ts 存量清理脚本")).toBe(false);
     // 数字签名冲突：不同阈值/计数的变更不得互折
     expect(changeDescriptionVariantSimilar("错误响应携带 404 错误码", "错误响应携带 400 错误码")).toBe(false);
+    // release 228 实证：一侧正文引用「404≠400」作例子、另一侧只提「12」——单方示例提及
+    // 不是数字冲突，词集近似裁决折叠
+    expect(changeDescriptionVariantSimilar(
+      "数字签名守护由仅剔除独立「0」改为剔除全部单位数 token；新增短串（<12 内容字符）不做变体近似的限制，短串只走精确/等价通道。",
+      "数字签名守护从仅剔除独立「0」放宽为剔除全部单位数 token（如「≥1 对」「5 个」不再阻断判定），多位错误码 404≠400 仍受守护；内容字符少于 12 时只走精确/等价通道。",
+    )).toBe(true);
     // 跨语种拒绝
     expect(changeDescriptionVariantSimilar("合并完整性维度记为 partial", "Merge integrity marked as partial")).toBe(false);
   });
