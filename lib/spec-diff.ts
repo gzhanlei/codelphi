@@ -339,16 +339,18 @@ function isScenarioShape(value: unknown): value is SpecScenario {
  * 同一面板单 run 内 ×4）的根治判定器。scenarioVariantSimilar 只折叠同功能内场景对，功能
  * identity = specFeatureKey(name) 使任何一字之差都成为新功能——此判定器供两处接线：
  * mergeChunkResults 跨 group 折叠（run 内）与 insertSpecVersion 装配折叠（跨 run）。
- * 三重门禁全过才判同（宁漏勿错合，对齐 feature_aliases 的 C-lite 哲学）：
- * 1. 名门禁：specTextEquivalent（无壳↔无外壳编辑距离 0.889 命中）或名称 contentJaccard
- *    ≥ 0.5（管理端支付台账↔管理端支付订单台账 0.556 命中）；跨语种直接拒绝。
- * 2. 身门禁：证据路径交集 ≥1 / 名字编辑距离等价 / summary contentJaccard ≥ 0.34 三选一
- *    ——无壳/无外壳两功能证据不交（language-switcher.tsx vs 四个 page.tsx）且 summary
- *    实测仅 0.339，靠名字等价通道命中；支付台账组靠共享证据文件命中。
- * 3. 场景门禁：featureScenarioPairMatch 贪心配对（category+数字签名+outcome 否定计数
+ * 判定 = **身份信号 + 场景门禁**（宁漏勿错合由场景多数决承担，对齐 feature_aliases
+ * 的 C-lite 哲学）：
+ * 1. 身份信号：名字通道（specTextEquivalent——无壳↔无外壳编辑距离 0.889 命中，或名称
+ *    contentJaccard ≥ 0.5——管理端支付台账↔管理端支付订单台账 0.556 命中；跨语种直接
+ *    拒绝）**或双信号（证据路径交集 ≥1 AND summary contentJaccard ≥ 0.34）**。后者是
+ *    release 226 实证的补位：同一清理脚本被析成 5 个异名变体，名字差太远过不了名门禁，
+ *    但共享 scripts/dedupe-release-changes.ts + summary 高度重合。证据信号必须与 summary
+ *    叠加——同文件真不同功能的场景常共享情境/操作措辞，单证据信号旧回归集立即过合。
+ * 2. 场景门禁：featureScenarioPairMatch 贪心配对（category+数字签名+outcome 否定计数
  *    守护 + 合并文本 Jaccard ≥ 0.34，比 scenarioVariantSimilar 的逐字段地板宽——见该
  *    函数注释），命中数 ≥ max(2, ⌈0.6×min(nA,nB)⌉)（min=1 时 ≥1）——防「泛化名巧合」
- *    误合的关键护栏。
+ *    误合的关键护栏，也是真差异功能对（同文件不同行为）的主要隔离层。
  * 已知误拒（可接受）：功能名含否定字时一字之差会触发否定计数冲突（外壳↔无壳 0↔1），
  * 名门禁与场景门禁同时过不了即不折——宁漏勿错合口径下留待人工/别名通道。
  */
@@ -394,20 +396,20 @@ export function featureScenarioPairMatch(previous: SpecScenario, current: SpecSc
 
 export function featureVariantSimilar(previous: SpecFeature, current: SpecFeature): boolean {
   if (crossLanguageText(previous.name, current.name)) return false;
-  // 名门禁：specTextEquivalent 之外再开 Jaccard 通道——编辑距离对两字插入恰好过线
-  // （管理端支付台账↔管理端支付订单台账 0.778 < 0.85），2-gram（0.556）补位。
+  // 身份信号：名字等价/Jaccard 过线，或（证据交集 AND summary 近似）双信号——release 226
+  // 实证同一清理脚本被析成 5 个异名变体，名字差太远过不了名门禁，但共享证据文件 + 场景
+  // 高度重合；单靠证据信号不够（同文件真不同功能的场景常共享情境/操作措辞，旧回归集
+  // 立即过合），须叠加 summary 近似才是「同一组件的两种描述」的强信号。
   const nameEquivalent = specTextEquivalent(previous.name, current.name);
   const nameGate = nameEquivalent || contentJaccard(previous.name, current.name) >= FEATURE_NAME_JACCARD_THRESHOLD;
-  if (!nameGate) return false;
-  // 身门禁：证据路径交集、summary 近似、名字编辑距离等价（短串 0.85 阈值很紧，本身就是
-  // 强改名信号——无壳↔无外壳 0.889 命中且其 summary 实测仅 0.339、证据不交）三选一。
   const sharedPaths = [...featureEvidencePaths(previous)].filter((path) => featureEvidencePaths(current).has(path));
-  const identityGate = sharedPaths.length >= 1
-    || nameEquivalent
-    || (previous.summary !== "" && current.summary !== "" && contentJaccard(previous.summary, current.summary) >= FEATURE_SUMMARY_JACCARD_THRESHOLD);
-  if (!identityGate) return false;
-  // 场景门禁：贪心配对，两个特征里较小一方的多数场景能配上才算同行为；
-  // 单场景功能要求 1:1 命中，零场景功能直接拒绝（没有行为就没有身份可比）。
+  const summaryGate = previous.summary !== "" && current.summary !== "" && contentJaccard(previous.summary, current.summary) >= FEATURE_SUMMARY_JACCARD_THRESHOLD;
+  const identitySignal = nameGate || (sharedPaths.length >= 1 && summaryGate);
+  if (!identitySignal) return false;
+  // 场景门禁：贪心配对。名字通道（弱身份信号靠名字锚定）要求较小一方多数场景配上
+  // （≥max(2, ⌈0.6×min⌉)，min=1 时 ≥1）；证据+摘要双信号路径（release 226 实证）只要求
+  // ≥1——跨分区对同一脚本的场景分解与措辞完全不同（实测 3 场景仅 1 对能配上），多数决
+  // 会把真变体拒光，双身份信号已足够锚定组件身份。零场景功能直接拒绝。
   const smaller = previous.scenarios.length <= current.scenarios.length ? previous : current;
   const larger = smaller === previous ? current : previous;
   if (smaller.scenarios.length === 0) return false;
@@ -415,9 +417,9 @@ export function featureVariantSimilar(previous: SpecFeature, current: SpecFeatur
   for (const candidate of smaller.scenarios) {
     if (larger.scenarios.some((other) => featureScenarioPairMatch(candidate, other))) matched += 1;
   }
-  const required = smaller.scenarios.length === 1
-    ? 1
-    : Math.max(FEATURE_SCENARIO_MATCH_MIN, Math.ceil(FEATURE_SCENARIO_MATCH_RATIO * smaller.scenarios.length));
+  const required = nameGate
+    ? (smaller.scenarios.length === 1 ? 1 : Math.max(FEATURE_SCENARIO_MATCH_MIN, Math.ceil(FEATURE_SCENARIO_MATCH_RATIO * smaller.scenarios.length)))
+    : 1;
   return matched >= required;
 }
 

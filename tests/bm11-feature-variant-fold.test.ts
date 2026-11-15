@@ -134,6 +134,27 @@ const outcomeNegationFlip: [SpecFeature, SpecFeature] = [
   },
 ];
 
+const cleanupScriptVariants: [SpecFeature, SpecFeature] = [
+  {
+    name: "changes 表存量变体清理脚本",
+    summary: "按仓库（可选指定发布）读取 changes 行，以 changeDescriptionVariantSimilar 在同 release 同 featureKey+kind 分组内贪心去重，keeper 取 id 最小先落库者；默认 dry-run 打印保留与删除提案，--apply 才在事务内删除变体行。",
+    scenarios: [
+      { reference: "HP-1", category: "happy", context: "清理历史 changes 表中的措辞变体行", action: "运行 dedupe-release-changes 脚本", outcome: "dry-run 打印每组保留行与待删除变体行提案，不改动数据", evidence: [{ path: "scripts/dedupe-release-changes.ts" }] },
+      { reference: "HP-2", category: "happy", context: "人工审阅 dry-run 提案后确认执行", action: "追加 --apply 重新运行脚本", outcome: "事务内删除各组变体行并提交，keeper 为 id 最小的先落库行", evidence: [{ path: "scripts/dedupe-release-changes.ts" }] },
+      { reference: "EC-1", category: "edge", context: "两条变化行属于不同功能或不同类型", action: "planChangesDedupe 执行", outcome: "不跨 feature 或 kind 边界比较，返回空计划", evidence: [{ path: "scripts/dedupe-release-changes.ts" }] },
+    ],
+  },
+  {
+    name: "发布变化存量去重脚本",
+    summary: "按仓库与可选发布读取 changes 表行，以同一变体判定口径在同发布同功能同类型内规划去重（keeper 取 id 最小先落库者），默认 dry-run 打印提案，--apply 才在事务内删除变体行。",
+    scenarios: [
+      { reference: "HP-1", category: "happy", context: "某发布同一功能同一类型下存在多条措辞变体的变化行", action: "运行存量去重脚本", outcome: "输出合并计划，keepId 为 id 最小的行，其余 id 进入 dropIds", evidence: [{ path: "scripts/dedupe-release-changes.ts" }, { path: "tests/dedupe-release-changes.test.ts" }] },
+      { reference: "HP-2", category: "happy", context: "已人工审阅 dry-run 提案", action: "以 --apply 运行脚本", outcome: "事务内删除各组变体行并提交，打印删除条数", evidence: [{ path: "scripts/dedupe-release-changes.ts" }] },
+      { reference: "EC-1", category: "edge", context: "未加 --apply 运行脚本", action: "main 执行", outcome: "只打印提案与 dry-run 提示，不改动数据", evidence: [{ path: "scripts/dedupe-release-changes.ts" }] },
+    ],
+  },
+];
+
 describe("featureVariantSimilar (BM-11 功能级变体通道)", () => {
   it("folds the real shell-less switcher rename pair (13310 ↔ 13311)", () => {
     expect(featureVariantSimilar(...shellLessSwitcher)).toBe(true);
@@ -158,6 +179,24 @@ describe("featureVariantSimilar (BM-11 功能级变体通道)", () => {
 
   it("rejects outcome negation flips (可以重试 ↔ 不可以重试)", () => {
     expect(featureVariantSimilar(...outcomeNegationFlip)).toBe(false);
+  });
+
+  it("folds differently-named features sharing one evidence file with matching scenarios (release 226 ×5 pattern)", () => {
+    expect(featureVariantSimilar(...cleanupScriptVariants)).toBe(true);
+  });
+
+  it("still rejects same evidence file but genuinely different scenario sets", () => {
+    const differentBehavior: [SpecFeature, SpecFeature] = [
+      { name: "管理端支付台账", summary: "超管支付操作面板", scenarios: [
+        { reference: "HP-1", category: "happy", context: "超管需要验证支付链路", action: "点击创建测试单", outcome: "创建测试单并展示支付入口", evidence: [{ path: "components/admin-pay-orders.tsx" }] },
+        { reference: "HP-2", category: "happy", context: "台账中存在可退款订单", action: "点击退款按钮", outcome: "提交退款请求", evidence: [{ path: "components/admin-pay-orders.tsx" }] },
+      ] },
+      { name: "管理端退款流水", summary: "超管退款流水视图", scenarios: [
+        { reference: "HP-1", category: "happy", context: "超管查看退款流水", action: "打开退款台账页", outcome: "按订单维度展示退款请求与退款态", evidence: [{ path: "components/admin-pay-orders.tsx" }] },
+        { reference: "HP-2", category: "happy", context: "退款态更新", action: "刷新退款流水", outcome: "退款时间与退款态同步刷新", evidence: [{ path: "components/admin-pay-orders.tsx" }] },
+      ] },
+    ];
+    expect(featureVariantSimilar(...differentBehavior)).toBe(false);
   });
 });
 

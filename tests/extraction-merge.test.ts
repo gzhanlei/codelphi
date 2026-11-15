@@ -57,10 +57,10 @@ describe("mergeChunkResults", () => {
 
   it("merges features across chunks and sorts by name", () => {
     const merged = mergeChunkResults([
-      chunk([{ name: "规格导出", summary: "s", scenarios: [scenario("HP-1", "导出 Markdown")] }]),
+      chunk([{ name: "规格导出", summary: "导出 Markdown 与 JSON 规格", scenarios: [scenario("HP-1", "导出 Markdown")] }]),
       chunk([
-        { name: "统一登录", summary: "s", scenarios: [scenario("HP-1", "登录成功")] },
-        { name: "额度账务核心", summary: "s", scenarios: [scenario("HP-1", "预留扣减")] },
+        { name: "统一登录", summary: "邮箱密码与 OAuth 统一登录", scenarios: [scenario("HP-1", "登录成功")] },
+        { name: "额度账务核心", summary: "SAU 额度预留与扣减", scenarios: [scenario("HP-1", "预留扣减")] },
       ]),
     ]);
     expect(merged.features.map((feature) => feature.name)).toEqual(["统一登录", "规格导出", "额度账务核心"]);
