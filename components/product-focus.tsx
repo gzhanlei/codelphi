@@ -12,6 +12,7 @@ const COPY = {
   empty: { "zh-CN": "当前没有需要重点关注的变化", en: "No changes need attention right now" },
   all: { "zh-CN": "查看全部产品信息", en: "View all product information" },
   scenarios: { "zh-CN": "个场景", en: " scenarios" },
+  overview: { "zh-CN": "功能概述", en: "Overview" },
   noChanges: { "zh-CN": "暂无重要变化", en: "No important changes yet" },
   stale: { "zh-CN": "可能过时", en: "Possibly stale" },
   unverified: { "zh-CN": "待确认", en: "Unverified" },
@@ -26,7 +27,7 @@ export function ProductFocus({ data, locale = "zh-CN" }: { data: ReturnType<type
         <div className="overview-panel-heading"><h2>{pick(locale, COPY.mapTitle)}</h2></div>
         {data.map.length === 0 ? <p className="overview-note">No feature specifications yet</p> : data.map.map((feature) => (
           <details className="impact-item" key={feature.id}>
-            <summary><strong>{feature.name}</strong> · {feature.scenarioCount}{pick(locale, COPY.scenarios)} · {feature.source === "manual" ? pick(locale, SPEC_EDITOR.sourceManual) : pick(locale, SPEC_EDITOR.sourceGenerated)}</summary>
+            <summary><strong>{feature.name}</strong> · {feature.scenarioCount > 0 ? `${feature.scenarioCount}${pick(locale, COPY.scenarios)}` : pick(locale, COPY.overview)} · {feature.source === "manual" ? pick(locale, SPEC_EDITOR.sourceManual) : pick(locale, SPEC_EDITOR.sourceGenerated)}</summary>
             <p>{feature.summary}</p>
             {feature.scenarios.map((scenario) => <p key={scenario.reference}>{scenario.reference}：{scenario.context} → {scenario.action} → {scenario.outcome}</p>)}
             <Link className="overview-text-link" href={feature.href}>查看功能与证据</Link>

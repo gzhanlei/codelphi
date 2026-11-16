@@ -90,6 +90,8 @@ describe("product focus rendering", () => {
     expect(html).toContain("<details");
     expect(html).toContain("当前没有需要重点关注的变化");
     expect(html).toContain("AI 提取的候选变化，需人工确认");
+    expect(html).toContain("功能概述");
+    expect(html).not.toContain("0个场景");
     expect(html).toContain("查看全部产品信息");
   });
 });
