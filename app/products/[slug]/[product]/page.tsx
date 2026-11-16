@@ -10,6 +10,7 @@ import { DemoShell } from "@/components/demo-shell";
 import { NotificationSettings } from "@/components/notification-settings";
 import { ProductIdentitySettings } from "@/components/product-identity-settings";
 import { ProductOutputLanguageSettings } from "@/components/product-output-language-settings";
+import { DomainCandidateReview } from "@/components/domain-candidate-review";
 import { resolveUiLocale } from "@/lib/ui-locale-server";
 import { pick, type UiLocale } from "@/lib/ui-locale";
 import { PRODUCT_PAGE } from "@/lib/ui-strings/product";
@@ -144,6 +145,8 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
         current={details.product.outputLanguage === "en" ? "en" : "zh-CN"}
         canEdit={access.role !== "viewer"}
       />
+
+      <DomainCandidateReview slug={details.product.slug} canEdit={access.role !== "viewer"} />
     </>
   ) : null;
 
