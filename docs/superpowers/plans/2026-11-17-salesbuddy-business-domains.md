@@ -341,3 +341,16 @@ Run: `npx tsx scripts/salesbuddy-business-domain-migration.ts --product salesbud
 
 - 纯版本号变化导致回归推荐噪声：另立确定性过滤任务，不与业务分组混合。
 - 业务对象关系图、AI 质量评分、五类角色首页、项目上下文 Agent 交接、完整 QA 生命周期：均不进入本轮。
+
+---
+
+## 通用化（2026-11-17 追加，用户拍板）
+
+SalesBuddy 落地后，其他项目按同套机制接入业务域。读取层（Task 1/2）本就通用；本节把落地通道从 SalesBuddy 专用扩展为任意产品可用：
+
+- 引擎参数化：`planBusinessDomainMigration(features, domains, { ungroupedIds?, incremental? })` / `runBusinessDomainMigration({ productSlug, domains, ... })`；`planSalesBuddyBusinessDomainMigration` 等价于固定清单 + 严格语义的特例包装，原测试语义不变。
+- 映射来源：设置页「业务分组候选（AI 提案）→ 全部接受」输出的 JSON（数组或 `{ domains, ungroupedIds }`），`parseDomainsDocument` 校验（名称唯一、featureIds 非空整数数组、≤12 域）。
+- 通用 CLI：`npx tsx scripts/business-domain-migration.ts --product <slug> --domains <candidates.json> [--incremental] [--apply] [--restore <backup> --apply] [--backupDir <dir>]`。
+- 增量模式（`--incremental`）：已归属目标域的子功能保持不动（kept，不发 UPDATE），只移动新增/未分组功能；跨域归属仍中止。用于 push 分析产生新功能后的再次归入。
+- 父节点创建改为幂等（`ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id), active = 1`，唯一键 product_id+name）：重复执行与回滚后再应用安全，回滚软下线的父节点会被重新激活。
+- 边界：AI 分析管线 upsert 功能时从不写 `parent_id`（`lib/analysis.ts` upsertFeature），manual 父节点也不在停用范围（只停 `source='generated'` 且无子级）——新功能不会自动归入任何业务域，落地始终走「候选生成 → 人工审核 → 通用脚本（增量）」，符合「未经人工审核不得激活分类」全局约束。

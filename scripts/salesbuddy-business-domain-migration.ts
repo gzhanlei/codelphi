@@ -64,18 +64,24 @@ export interface MigrationMove {
 export interface MigrationPlan {
   parents: Array<{ key: string; name: string; summary: string }>;
   moves: MigrationMove[];
+  /** 增量模式：已归属目标域、无需移动的子功能。 */
+  kept: Array<{ featureId: number; featureName: string; targetDomainKey: string }>;
   ungrouped: Array<{ id: number; name: string }>;
   /** 每个子功能的当前值快照（回滚依据）。 */
   snapshot: Record<number, { parentId: number | null; source: string; verifiedAt: unknown; verifiedBy: string | null; lastEditedAt: unknown; lastEditedBy: string | null }>;
   errors: string[];
 }
 
-/** 校验映射并在任何冲突时中止（未知 ID/重复/已有父级/目标冲突）。 */
-export function planSalesBuddyBusinessDomainMigration(
-  features: MigrationFeatureRow[],
-  domains: SalesBuddyDomain[] = SALESBUDDY_DOMAINS,
-  ungroupedIds: number[] = SALESBUDDY_UNGROUPED_IDS,
-): MigrationPlan {
+export interface MigrationPlanOptions {
+  ungroupedIds?: number[];
+  /** 增量模式：已归属目标域的子功能保持不动（no-op），跨域归属仍中止。 */
+  incremental?: boolean;
+}
+
+/** 通用规划（SalesBuddy 清单是它的一个特例）。增量模式供 push 后把新增功能并入既有业务域。 */
+export function planBusinessDomainMigration(features: MigrationFeatureRow[], domains: SalesBuddyDomain[], options: MigrationPlanOptions = {}): MigrationPlan {
+  const ungroupedIds = options.ungroupedIds ?? [];
+  const incremental = options.incremental ?? false;
   const errors: string[] = [];
   const byId = new Map(features.map((feature) => [feature.id, feature]));
   const claimed = new Map<number, string[]>();
@@ -85,33 +91,56 @@ export function planSalesBuddyBusinessDomainMigration(
       seen.push(domain.key);
       claimed.set(id, seen);
       if (!byId.has(id)) errors.push(`未知功能 ID ${id}（域 ${domain.key}）；整个迁移中止`);
-      else if (byId.get(id)!.parentId !== null) errors.push(`功能 ${id} 已有父级 ${byId.get(id)!.parentId}；整个迁移中止`);
     }
-  }
-  for (const id of ungroupedIds) {
-    if (!byId.has(id)) errors.push(`未分组清单引用未知功能 ID ${id}；整个迁移中止`);
   }
   for (const [id, keys] of claimed) {
     if (keys.length > 1) errors.push(`功能 ${id} 被多个域引用（${keys.join("、")}）：目标父级冲突，整个迁移中止`);
   }
-  if (errors.length > 0) return { parents: [], moves: [], ungrouped: [], snapshot: {}, errors };
+  for (const id of ungroupedIds) {
+    if (!byId.has(id)) errors.push(`未分组清单引用未知功能 ID ${id}；整个迁移中止`);
+  }
+  if (errors.length > 0) return { parents: [], moves: [], kept: [], ungrouped: [], snapshot: {}, errors };
+  const moves: MigrationMove[] = [];
+  const kept: MigrationPlan["kept"] = [];
+  for (const domain of domains) {
+    for (const id of domain.featureIds) {
+      const featureRow = byId.get(id)!;
+      if (featureRow.parentId === null) {
+        moves.push({ featureId: id, featureName: featureRow.name, targetDomainKey: domain.key, fromParentId: null, source: featureRow.source });
+        continue;
+      }
+      if (!incremental) errors.push(`功能 ${id} 已有父级 ${featureRow.parentId}；整个迁移中止`);
+      else {
+        const currentParent = byId.get(featureRow.parentId);
+        if (!currentParent) errors.push(`功能 ${id} 的当前父级 ${featureRow.parentId} 不存在或已下线；整个迁移中止`);
+        else if (currentParent.name !== domain.name) errors.push(`功能 ${id} 当前父级「${currentParent.name}」与目标域「${domain.name}」冲突；整个迁移中止`);
+        else kept.push({ featureId: id, featureName: featureRow.name, targetDomainKey: domain.key });
+      }
+    }
+  }
+  if (errors.length > 0) return { parents: [], moves: [], kept: [], ungrouped: [], snapshot: {}, errors };
   return {
     parents: domains.map((domain) => ({ key: domain.key, name: domain.name, summary: domain.summary })),
-    moves: domains.flatMap((domain) =>
-      domain.featureIds.map((id) => {
-        const feature = byId.get(id)!;
-        return { featureId: id, featureName: feature.name, targetDomainKey: domain.key, fromParentId: feature.parentId, source: feature.source };
-      }),
-    ),
+    moves,
+    kept,
     ungrouped: ungroupedIds.map((id) => ({ id, name: byId.get(id)!.name })),
     snapshot: Object.fromEntries(
       domains.flatMap((domain) => domain.featureIds).concat(ungroupedIds).map((id) => {
-        const feature = byId.get(id)!;
-        return [id, { parentId: feature.parentId, source: feature.source, verifiedAt: feature.verifiedAt ?? null, verifiedBy: feature.verifiedBy ?? null, lastEditedAt: feature.lastEditedAt ?? null, lastEditedBy: feature.lastEditedBy ?? null }];
+        const featureRow = byId.get(id)!;
+        return [id, { parentId: featureRow.parentId, source: featureRow.source, verifiedAt: featureRow.verifiedAt ?? null, verifiedBy: featureRow.verifiedBy ?? null, lastEditedAt: featureRow.lastEditedAt ?? null, lastEditedBy: featureRow.lastEditedBy ?? null }];
       }),
     ),
     errors: [],
   };
+}
+
+/** SalesBuddy 一次性清单（计划文档 2026-11-17）的严格语义包装。 */
+export function planSalesBuddyBusinessDomainMigration(
+  features: MigrationFeatureRow[],
+  domains: SalesBuddyDomain[] = SALESBUDDY_DOMAINS,
+  ungroupedIds: number[] = SALESBUDDY_UNGROUPED_IDS,
+): MigrationPlan {
+  return planBusinessDomainMigration(features, domains, { ungroupedIds, incremental: false });
 }
 
 /** 测试/生产可注入的连接面：生产走 mysql2 事务连接。 */
@@ -167,6 +196,10 @@ export interface MigrationRunOptions {
   /** 回滚路径：--restore <backup.json> --apply。 */
   restoreFrom?: string;
   connection?: MigrationConnection;
+  /** 通用化：审核后的业务域映射（缺省走 SalesBuddy 一次性清单）。 */
+  domains?: SalesBuddyDomain[];
+  ungroupedIds?: number[];
+  incremental?: boolean;
 }
 
 export interface MigrationRunResult {
@@ -178,8 +211,62 @@ export interface MigrationRunResult {
   backupPath?: string;
 }
 
+const MAX_GENERIC_DOMAINS = 12;
+
+/** 解析审核后的候选 JSON（设置页「全部接受」输出的形态，也接受 { domains, ungroupedIds }）。 */
+export function parseDomainsDocument(content: string): { domains: SalesBuddyDomain[]; ungroupedIds: number[]; errors: string[] } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return { domains: [], ungroupedIds: [], errors: ["业务域映射不是合法 JSON"] };
+  }
+  const rawList = Array.isArray(parsed)
+    ? parsed
+    : parsed !== null && typeof parsed === "object" && Array.isArray((parsed as { domains?: unknown }).domains)
+      ? (parsed as { domains: unknown[] }).domains
+      : null;
+  if (!rawList || rawList.length === 0) return { domains: [], ungroupedIds: [], errors: ["业务域映射为空：需要非空数组或 { domains: [...] }"] };
+  if (rawList.length > MAX_GENERIC_DOMAINS) return { domains: [], ungroupedIds: [], errors: [`业务域数量 ${rawList.length} 超过上限 ${MAX_GENERIC_DOMAINS}`] };
+  const errors: string[] = [];
+  const domains: SalesBuddyDomain[] = [];
+  const seenNames = new Set<string>();
+  rawList.forEach((item, index) => {
+    if (item === null || typeof item !== "object" || typeof (item as { name?: unknown }).name !== "string" || (item as { name: string }).name.trim() === "") {
+      errors.push(`第 ${index + 1} 个业务域缺少名称`);
+      return;
+    }
+    const name = ((item as { name: string }).name).trim();
+    const key = typeof (item as { key?: unknown }).key === "string" && (item as { key: string }).key.trim() !== "" ? (item as { key: string }).key.trim() : name;
+    if (seenNames.has(name) || domains.some((domain) => domain.key === key)) {
+      errors.push(`业务域「${name}」名称/键重复`);
+      return;
+    }
+    seenNames.add(name);
+    const rawIds = (item as { featureIds?: unknown }).featureIds;
+    if (!Array.isArray(rawIds) || rawIds.length === 0 || !rawIds.every((id) => typeof id === "number" && Number.isInteger(id))) {
+      errors.push(`业务域「${name}」的 featureIds 必须是非空整数数组`);
+      return;
+    }
+    const featureIds = [...new Set(rawIds as number[])];
+    domains.push({ key, name, summary: typeof (item as { summary?: unknown }).summary === "string" ? (item as { summary: string }).summary : "", featureIds });
+  });
+  let ungroupedIds: number[] = [];
+  if (!Array.isArray(parsed) && parsed !== null && typeof parsed === "object") {
+    const rawUngrouped = (parsed as { ungroupedIds?: unknown }).ungroupedIds;
+    if (rawUngrouped !== undefined) {
+      if (!Array.isArray(rawUngrouped) || !rawUngrouped.every((id) => typeof id === "number")) errors.push("ungroupedIds 必须是数字数组");
+      else ungroupedIds = rawUngrouped as number[];
+    }
+  }
+  if (errors.length > 0) return { domains: [], ungroupedIds: [], errors };
+  return { domains, ungroupedIds, errors: [] };
+}
+
 const BACKUP_KIND = "salesbuddy-business-domain-migration";
-const INSERT_PARENT_SQL = "INSERT INTO features (product_id, name, display_name, summary, parent_id, source, active) VALUES (?, ?, ?, ?, NULL, 'manual', 1)";
+const INSERT_PARENT_SQL =
+  "INSERT INTO features (product_id, name, display_name, summary, parent_id, source, active) VALUES (?, ?, ?, ?, NULL, 'manual', 1) " +
+  "ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id), active = 1";
 const MOVE_CHILD_SQL = "UPDATE features SET parent_id = ? WHERE id = ?";
 const SOFT_DISABLE_SQL = "UPDATE features SET active = 0 WHERE product_id = ? AND name = ? AND source = 'manual' AND parent_id IS NULL";
 
@@ -192,7 +279,7 @@ interface BackupFile {
 }
 
 function fail(productSlug: string, errors: string[]): MigrationRunResult {
-  return { ok: false, applied: false, productName: productSlug, plan: { parents: [], moves: [], ungrouped: [], snapshot: {}, errors }, errors };
+  return { ok: false, applied: false, productName: productSlug, plan: { parents: [], moves: [], kept: [], ungrouped: [], snapshot: {}, errors }, errors };
 }
 
 /** 事务写入：备份先落盘（事务外），随后单事务创建父节点并移动子功能；任何一步失败整体回滚。 */
@@ -258,11 +345,11 @@ async function restoreFromBackup(connection: MigrationConnection, productId: num
     await connection.rollback();
     return fail(options.productSlug, [error instanceof Error ? error.message : "回滚写入失败"]);
   }
-  return { ok: true, applied: true, productName: options.productSlug, plan: { parents: [], moves: [], ungrouped: [], snapshot: {}, errors: [] }, errors: [] };
+  return { ok: true, applied: true, productName: options.productSlug, plan: { parents: [], moves: [], kept: [], ungrouped: [], snapshot: {}, errors: [] }, errors: [] };
 }
 
-/** 入口：默认 dry-run（只读查询 + 计划输出）；显式 --apply 才写入，--restore + --apply 为回滚路径。 */
-export async function runSalesBuddyBusinessDomainMigration(options: MigrationRunOptions): Promise<MigrationRunResult> {
+/** 通用入口：显式提供 domains 映射；restoreFrom 回滚路径不需要映射。 */
+export async function runBusinessDomainMigration(options: MigrationRunOptions): Promise<MigrationRunResult> {
   const connection = options.connection ?? (await connectMigration());
   try {
     const productId = await loadProductId(connection, options.productSlug);
@@ -281,14 +368,21 @@ export async function runSalesBuddyBusinessDomainMigration(options: MigrationRun
       }
       return await restoreFromBackup(connection, productId, options, backup);
     }
+    const domains = options.domains;
+    if (!domains || domains.length === 0) return fail(options.productSlug, ["缺少业务域映射（--domains 候选JSON 或 runBusinessDomainMigration({ domains })）"]);
     const features = await loadFeatures(connection, productId);
-    const plan = planSalesBuddyBusinessDomainMigration(features);
+    const plan = planBusinessDomainMigration(features, domains, { ungroupedIds: options.ungroupedIds ?? [], incremental: options.incremental ?? false });
     if (plan.errors.length > 0) return { ok: false, applied: false, productName: options.productSlug, plan, errors: plan.errors };
     if (!options.apply) return { ok: true, applied: false, productName: options.productSlug, plan, errors: [] };
-    return await applyMigration(connection, productId, options, plan, SALESBUDDY_DOMAINS);
+    return await applyMigration(connection, productId, options, plan, domains);
   } finally {
     connection.release();
   }
+}
+
+/** SalesBuddy 一次性迁移入口（计划文档 2026-11-17）：固定清单、严格语义（已有父级即中止）。 */
+export async function runSalesBuddyBusinessDomainMigration(options: Omit<MigrationRunOptions, "domains" | "ungroupedIds" | "incremental">): Promise<MigrationRunResult> {
+  return runBusinessDomainMigration({ ...options, domains: SALESBUDDY_DOMAINS, ungroupedIds: SALESBUDDY_UNGROUPED_IDS, incremental: false });
 }
 
 // ── CLI ──
