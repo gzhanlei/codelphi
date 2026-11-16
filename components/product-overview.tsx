@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ProductFocus } from "./product-focus";
 import type { UiLocale } from "@/lib/ui-locale";
 import { pick } from "@/lib/ui-locale";
 import { KNOWLEDGE_HEALTH, PRODUCT_OVERVIEW, SPEC_EDITOR } from "@/lib/ui-strings/product";
@@ -129,6 +130,7 @@ function TrustLine({ data, locale = "zh-CN" }: { data: ProductOverviewData; loca
 export function ProductOverview({ data, canEdit = false, locale = "zh-CN" }: { data: ProductOverviewData; canEdit?: boolean; locale?: UiLocale }) {
   return (
     <div className="product-overview">
+      <ProductFocus data={data.focus} locale={locale} />
       <UserImpactPanel data={data} locale={locale} />
       <div className="overview-ask">
         <section className="overview-panel">
@@ -142,11 +144,14 @@ export function ProductOverview({ data, canEdit = false, locale = "zh-CN" }: { d
           />
         </section>
       </div>
-      <TaskEntriesPanel data={data} locale={locale} />
-      <ReleaseTimeline data={data} locale={locale} />
-      <CapabilitiesPanel data={data} locale={locale} />
-      <TrustLine data={data} locale={locale} />
-      <KnowledgeHealthPanel slug={data.slug} locale={locale} />
+      <details className="overview-secondary">
+        <summary>展开完整产品信息</summary>
+        <TaskEntriesPanel data={data} locale={locale} />
+        <ReleaseTimeline data={data} locale={locale} />
+        <CapabilitiesPanel data={data} locale={locale} />
+        <TrustLine data={data} locale={locale} />
+        <KnowledgeHealthPanel slug={data.slug} locale={locale} />
+      </details>
     </div>
   );
 }

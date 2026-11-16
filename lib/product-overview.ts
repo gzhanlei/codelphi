@@ -1,4 +1,5 @@
 import { formatDateIn } from "./format";
+import { buildProductFocus } from "./product-focus";
 import { pick, type UiLocale } from "./ui-locale";
 import { OVERVIEW_DATA } from "./ui-strings/product";
 import { evidenceItems, isTestOnlyEvidence } from "./evidence";
@@ -231,6 +232,7 @@ export function buildProductOverview(input: ProductOverviewInput, locale: "zh-CN
   const userImpact = buildUserImpact(input, latestRelease, latestChanges, changeStats, locale);
 
   return {
+    focus: buildProductFocus(input),
     slug: input.product.slug,
     productBase: input.productBase,
     description: input.product.description,

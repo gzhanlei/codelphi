@@ -1,0 +1,57 @@
+import Link from "next/link";
+import { pick, type UiLocale } from "@/lib/ui-locale";
+import { SPEC_EDITOR } from "@/lib/ui-strings/product";
+import type { buildProductFocus } from "@/lib/product-focus";
+
+const COPY = {
+  mapTitle: { "zh-CN": "产品现在能做什么", en: "What the product does" },
+  changesTitle: { "zh-CN": "最近重要变化", en: "Important recent changes" },
+  attentionTitle: { "zh-CN": "需要关注", en: "Needs attention" },
+  confirmationTitle: { "zh-CN": "需要确认", en: "Needs confirmation" },
+  empty: { "zh-CN": "当前没有需要重点关注的变化", en: "No changes need attention right now" },
+  all: { "zh-CN": "查看全部产品信息", en: "View all product information" },
+  scenarios: { "zh-CN": "个场景", en: " scenarios" },
+  noChanges: { "zh-CN": "暂无重要变化", en: "No important changes yet" },
+  stale: { "zh-CN": "可能过时", en: "Possibly stale" },
+  unverified: { "zh-CN": "待确认", en: "Unverified" },
+  verified: { "zh-CN": "已确认", en: "Verified" },
+  manual: { "zh-CN": "人工维护", en: "Manual" },
+} as const;
+
+export function ProductFocus({ data, locale = "zh-CN" }: { data: ReturnType<typeof buildProductFocus>; locale?: UiLocale }) {
+  return (
+    <div className="product-focus">
+      <section className="overview-panel">
+        <div className="overview-panel-heading"><h2>{pick(locale, COPY.mapTitle)}</h2></div>
+        {data.map.length === 0 ? <p className="overview-note">No feature specifications yet</p> : data.map.map((feature) => (
+          <details className="impact-item" key={feature.id}>
+            <summary><strong>{feature.name}</strong> · {feature.scenarioCount}{pick(locale, COPY.scenarios)} · {feature.source === "manual" ? pick(locale, SPEC_EDITOR.sourceManual) : pick(locale, SPEC_EDITOR.sourceGenerated)}</summary>
+            <p>{feature.summary}</p>
+            {feature.scenarios.map((scenario) => <p key={scenario.reference}>{scenario.reference}：{scenario.context} → {scenario.action} → {scenario.outcome}</p>)}
+            <Link className="overview-text-link" href={feature.href}>查看功能与证据</Link>
+          </details>
+        ))}
+      </section>
+
+      <section className="overview-panel">
+        <div className="overview-panel-heading"><h2>{pick(locale, COPY.changesTitle)}</h2></div>
+        {data.changes.length === 0 ? <p className="overview-note">{pick(locale, COPY.noChanges)}</p> : data.changes.map((change) => (
+          <details className="impact-item" key={change.id}>
+            <summary><strong>{change.featureName}</strong> · {change.groupLabel}</summary>
+            <p>{change.summary}</p>
+            {change.evidencePaths.length > 0 ? <p>证据：{[...new Set(change.evidencePaths)].join("、")}</p> : null}
+          </details>
+        ))}
+      </section>
+
+      <section className="overview-panel">
+        <div className="overview-panel-heading"><h2>{pick(locale, COPY.attentionTitle)}</h2></div>
+        {data.emptyAttention ? <p className="overview-note">{pick(locale, COPY.empty)}</p> : data.attention.map((item) => (
+          <div className="impact-item" key={item.featureName}><strong>{item.featureName}</strong><p>{item.reason}</p></div>
+        ))}
+        {data.confirmations.length > 0 ? <details className="overview-note"><summary>{pick(locale, COPY.confirmationTitle)}（{data.confirmations.length}）</summary><p>{data.confirmations.map((item) => item.featureName).join("、")}</p></details> : null}
+      </section>
+      <details className="overview-note"><summary>{pick(locale, COPY.all)}</summary><p>完整时间线、能力列表和健康统计在下方展开。</p></details>
+    </div>
+  );
+}
