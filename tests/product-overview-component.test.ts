@@ -5,6 +5,7 @@ import { ProductOverview } from "../components/product-overview";
 import { buildProductOverview } from "../lib/product-overview";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+vi.mock("../components/knowledge-health-panel", () => ({ KnowledgeHealthPanel: () => createElement("section", null, "知识健康") }));
 
 function completeOverview() {
   return buildProductOverview({
@@ -39,6 +40,7 @@ describe("product overview rendering (Specsight 原则版式)", () => {
     expect(html).toContain("首个公开版本");
     expect(html).not.toContain(">首版</a>");
     expect(html).toContain("overview-trust-line");
+    expect(html).not.toContain("知识健康");
     // 覆盖率统一字节口径（设计 §9.1）：字节比例与文件数量是两个并排事实，不合成第二个百分比
     expect(html).toContain("源码装配覆盖率（按文件字节）42.1%");
     expect(html).toContain("已装配实现文件 12/28 个");

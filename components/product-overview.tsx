@@ -2,8 +2,7 @@ import Link from "next/link";
 import { ProductFocus } from "./product-focus";
 import type { UiLocale } from "@/lib/ui-locale";
 import { pick } from "@/lib/ui-locale";
-import { KNOWLEDGE_HEALTH, PRODUCT_OVERVIEW, SPEC_EDITOR } from "@/lib/ui-strings/product";
-import { KnowledgeHealthPanel } from "./knowledge-health-panel";
+import { PRODUCT_OVERVIEW, SPEC_EDITOR } from "@/lib/ui-strings/product";
 import { SpecAsk } from "./spec-ask";
 import { changeGroupLabel, type ProductOverviewData, type TimelineEntry } from "@/lib/product-overview";
 import { coverageExplainer } from "@/lib/coverage-display";
@@ -150,7 +149,6 @@ export function ProductOverview({ data, canEdit = false, locale = "zh-CN" }: { d
         <UserImpactPanel data={data} locale={locale} />
         <ReleaseTimeline data={data} locale={locale} />
         <TrustLine data={data} locale={locale} />
-        <KnowledgeHealthPanel slug={data.slug} locale={locale} />
       </details>
     </div>
   );
