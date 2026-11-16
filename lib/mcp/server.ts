@@ -196,9 +196,11 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
         [product.id],
       ),
     );
-    const changeCounts = await queryRows<{ eligibleChangeCount: number; sourceLinkedChangeCount: number; sourceLinkCount: number }>(
+    const changeCounts = await queryRows<{ totalChangeCount: number; eligibleChangeCount: number; reviewedExcludedCount: number; sourceLinkedChangeCount: number; sourceLinkCount: number }>(
       execute(
-        `SELECT COUNT(DISTINCT c.id) AS eligibleChangeCount,
+        `SELECT COUNT(DISTINCT c.id) AS totalChangeCount,
+          COUNT(DISTINCT CASE WHEN c.kind <> 'reviewed' THEN c.id END) AS eligibleChangeCount,
+          COUNT(DISTINCT CASE WHEN c.kind = 'reviewed' THEN c.id END) AS reviewedExcludedCount,
           COUNT(DISTINCT s.change_id) AS sourceLinkedChangeCount,
           COUNT(s.spec_change_id) AS sourceLinkCount
          FROM changes c
@@ -226,6 +228,8 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
     );
     const releaseHealth = buildReleaseHealth({
       totalReleaseCount: Number(releaseCounts[0]?.totalReleaseCount ?? 0),
+      totalChangeCount: Number(changeCounts[0]?.totalChangeCount ?? 0),
+      reviewedExcludedCount: Number(changeCounts[0]?.reviewedExcludedCount ?? 0),
       eligibleReleaseCount: Number(releaseCounts[0]?.eligibleReleaseCount ?? 0),
       linkedReleaseCount: Number(releaseCounts[0]?.linkedReleaseCount ?? 0),
       legacyReleaseCount: Number(releaseCounts[0]?.legacyReleaseCount ?? 0),
@@ -374,19 +378,20 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
         [release.id],
       ),
     );
+    const page = paginateById(changes, { offset: args.offset === undefined ? undefined : Number(args.offset), limit: args.limit === undefined ? undefined : Number(args.limit) });
     if (view === "canonical") {
       return {
         release,
-        ...canonicalizeScenarios(changes.map((change) => ({
+        ...canonicalizeScenarios(page.changes.map((change) => ({
           id: change.id,
           featureName: change.featureName,
           reference: change.scenarioReference,
           specReference: String(release.specVersionId ?? "unknown"),
           evidencePaths: [...evidencePathsForReconcile(change.beforeJson), ...evidencePathsForReconcile(change.afterJson)],
         }))),
+        ...(args.limit === undefined ? {} : { offset: page.offset, limit: page.limit, total: page.total, hasMore: page.hasMore }),
       };
     }
-    const page = paginateById(changes, { offset: args.offset === undefined ? undefined : Number(args.offset), limit: args.limit === undefined ? undefined : Number(args.limit) });
     const paginated = page.changes.map((change) => ({
       ...change,
       before: change.beforeJson,
@@ -490,14 +495,18 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
       pollSeconds: args.pollSeconds === undefined ? undefined : Number(args.pollSeconds),
       loadAttempt: async () => {
         const runs = await queryRows<{ id: number; status: string; error_message: string | null }>(
-          execute("SELECT ar.id, ar.status, ar.error_message FROM analysis_runs ar JOIN repositories repo ON repo.id = ar.repository_id WHERE ar.after_sha = ? AND repo.product_id = ? ORDER BY ar.created_at DESC, ar.id DESC LIMIT 1", [sha, product.id]),
+          execute("SELECT ar.id, ar.status, ar.error_message FROM analysis_runs ar JOIN repositories repo ON repo.id = ar.repository_id WHERE ar.after_sha LIKE ? AND repo.product_id = ? ORDER BY ar.created_at DESC, ar.id DESC LIMIT 1", [`${sha}%`, product.id]),
         );
-        const releases = await queryRows<{ id: number }>(execute("SELECT id FROM releases WHERE product_id = ? AND sha = ?", [product.id, sha]));
+        const releases = await queryRows<{ id: number }>(execute("SELECT id FROM releases WHERE product_id = ? AND sha LIKE ? ORDER BY committed_at DESC, id DESC LIMIT 1", [product.id, `${sha}%`]));
+        const candidates = await queryRows<{ candidateCount: number }>(
+          execute("SELECT COUNT(*) AS candidateCount FROM analysis_runs ar JOIN repositories repo ON repo.id = ar.repository_id WHERE ar.after_sha LIKE ? AND repo.product_id = ?", [`${sha}%`, product.id]),
+        );
         return {
           analysisRunId: runs[0]?.id ?? null,
           analysisStatus: runs[0]?.status ?? null,
           analysisError: runs[0]?.error_message ?? null,
           releaseId: releases[0]?.id ?? null,
+          candidateCount: Number(candidates[0]?.candidateCount ?? 0),
         };
       },
     });
@@ -553,8 +562,8 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
         overridden: Boolean((block.summaryOverride ?? "").trim()),
         highlightType: block.highlightType,
         evidencePaths: [
-          ...evidencePathsFromSubject(block.beforeJson),
-          ...evidencePathsFromSubject(block.afterJson),
+          ...evidencePathsForReconcile(block.beforeJson),
+          ...evidencePathsForReconcile(block.afterJson),
         ],
       })),
     };
@@ -678,7 +687,7 @@ export async function handleMcpRpc(runtime: McpRuntime, request: RpcRequest): Pr
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       // 参数类错误与内部错误区分码；消息不含密钥与内部路径
-      const code = /required|invalid|must/i.test(message) ? INVALID_PARAMS : INTERNAL_ERROR;
+      const code = /required|invalid|must|requires/i.test(message) ? INVALID_PARAMS : INTERNAL_ERROR;
       return rpcError(request.id, code, message.slice(0, 300));
     }
   }

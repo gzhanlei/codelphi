@@ -36,7 +36,9 @@ describe("buildReleaseHealth", () => {
       eligibleReleaseCount: 167,
       linkedReleaseCount: 167,
       legacyReleaseCount: 0,
+      totalChangeCount: 2260,
       eligibleChangeCount: 2239,
+      reviewedExcludedCount: 21,
       sourceLinkedChangeCount: 2239,
       sourceLinkCount: 13699,
       orphanLinkCount: 0,
@@ -47,6 +49,8 @@ describe("buildReleaseHealth", () => {
     expect(result.sourceLinkedRatio).toBe(1);
     expect(result.canonicalProjectionRatio).toBe(1);
     expect(result.eligibleChangeCount).toBe(2239);
+    expect(result.totalChangeCount).toBe(2260);
+    expect(result.reviewedExcludedCount).toBe(21);
     expect(result.orphanLinkCount).toBe(0);
     expect(result.duplicateFeatureClusterCount).toBeNull();
     expect(result.duplicateScenarioClusterCount).toBeNull();
@@ -101,14 +105,42 @@ describe("waitForRelease", () => {
     expect(result.error).toBe("boom");
   });
 
+  it("returns review for an ambiguous short SHA prefix", async () => {
+    const result = await waitForRelease({
+      sha: "abc1234",
+      timeoutSeconds: 1,
+      pollSeconds: 1,
+      loadAttempt: vi.fn(async () => ({ analysisRunId: 333, analysisStatus: "succeeded", analysisError: null, releaseId: 231, candidateCount: 2 })),
+      sleep: vi.fn(),
+    });
+    expect(result).toMatchObject({ status: "review", releaseId: null, analysisRunId: 333 });
+  });
+
   it("returns timeout without treating a missing run as success", async () => {
     const result = await waitForRelease({
       sha: "abc1234",
       timeoutSeconds: 0,
       pollSeconds: 1,
-      loadAttempt: vi.fn(async () => ({ analysisRunId: null, analysisStatus: null, analysisError: null, releaseId: null })),
+      loadAttempt: vi.fn(async () => ({ analysisRunId: null, analysisStatus: null, analysisError: null, releaseId: 231 })),
       sleep: vi.fn(),
     });
-    expect(result).toEqual({ status: "timeout", releaseId: null, sha: "abc1234", analysisRunId: null, analysisStatus: null, error: null });
+    expect(result).toEqual({ status: "timeout", releaseId: 231, sha: "abc1234", analysisRunId: null, analysisStatus: null, error: null });
+  });
+
+  it("returns unknown for a corrective run that no longer exists", () => {
+    const result = buildFeedbackLifecycle({
+      id: 14,
+      kind: "bug",
+      status: "new",
+      verdict: "needs_human",
+      verdictReason: null,
+      adjudicatedAt: null,
+      githubIssueUrl: null,
+      correctiveRunId: 999,
+      correctiveRunStatus: null,
+      correctiveSha: null,
+      regressionStableKey: null,
+    });
+    expect(result.correctiveAnalysis.status).toBe("unknown");
   });
 });

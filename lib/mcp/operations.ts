@@ -21,7 +21,7 @@ export function buildFeedbackLifecycle(input: {
     githubIssueUrl: input.githubIssueUrl,
     correctiveAnalysis: {
       sha: input.correctiveSha,
-      status: input.correctiveRunId === null ? "not_run" : input.correctiveRunStatus === "succeeded" ? "succeeded" : input.correctiveRunStatus === "failed" ? "failed" : "running",
+      status: input.correctiveRunId === null ? "not_run" : input.correctiveRunStatus === null ? "unknown" : input.correctiveRunStatus === "succeeded" ? "succeeded" : input.correctiveRunStatus === "failed" ? "failed" : "running",
     },
     regressionStableKey: input.regressionStableKey,
     verification: {
@@ -37,12 +37,14 @@ export function buildFeedbackLifecycle(input: {
 
 export function buildReleaseHealth(input: {
   totalReleaseCount: number;
+  totalChangeCount?: number;
   eligibleReleaseCount: number;
   linkedReleaseCount: number;
   legacyReleaseCount: number;
   eligibleChangeCount: number;
   sourceLinkedChangeCount: number;
   sourceLinkCount: number;
+  reviewedExcludedCount?: number;
   orphanLinkCount: number;
   lastAppliedMigration: { name: string; appliedAt: string } | null;
   lastAnalysisStatus: { runId: number; status: string; afterSha: string | null; errorMessage: string | null } | null;
@@ -51,7 +53,8 @@ export function buildReleaseHealth(input: {
     totalReleaseCount: input.totalReleaseCount,
     eligibleChangeCount: input.eligibleChangeCount,
     sourceLinkedChangeCount: input.sourceLinkedChangeCount,
-    totalChangeCount: input.eligibleChangeCount,
+    totalChangeCount: input.totalChangeCount ?? input.eligibleChangeCount,
+    reviewedExcludedCount: input.reviewedExcludedCount ?? 0,
     sourceLinkedRatio: input.eligibleChangeCount === 0 ? null : input.sourceLinkedChangeCount / input.eligibleChangeCount,
     eligibleReleaseCount: input.eligibleReleaseCount,
     linkedReleaseCount: input.linkedReleaseCount,
@@ -77,6 +80,7 @@ export async function waitForRelease(input: {
     analysisStatus: string | null;
     analysisError: string | null;
     releaseId: number | null;
+    candidateCount?: number;
   }>;
   sleep?: (milliseconds: number) => Promise<void>;
 }) {
@@ -89,6 +93,9 @@ export async function waitForRelease(input: {
   const sleep = input.sleep ?? ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
   for (;;) {
     const attempt = await input.loadAttempt();
+    if ((attempt.candidateCount ?? 1) > 1) {
+      return { status: "review" as const, releaseId: null, sha: input.sha, analysisRunId: attempt.analysisRunId, analysisStatus: attempt.analysisStatus, error: null };
+    }
     if (attempt.analysisStatus === "failed") {
       return { status: "failed" as const, releaseId: attempt.releaseId, sha: input.sha, analysisRunId: attempt.analysisRunId, analysisStatus: attempt.analysisStatus, error: attempt.analysisError };
     }
@@ -96,7 +103,7 @@ export async function waitForRelease(input: {
       return { status: "completed" as const, releaseId: attempt.releaseId, sha: input.sha, analysisRunId: attempt.analysisRunId, analysisStatus: attempt.analysisStatus, error: null };
     }
     if (Date.now() >= deadline) {
-      return { status: "timeout" as const, releaseId: null, sha: input.sha, analysisRunId: attempt.analysisRunId, analysisStatus: attempt.analysisStatus, error: null };
+      return { status: "timeout" as const, releaseId: attempt.releaseId, sha: input.sha, analysisRunId: attempt.analysisRunId, analysisStatus: attempt.analysisStatus, error: null };
     }
     await sleep(pollSeconds * 1_000);
   }
