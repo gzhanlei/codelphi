@@ -10,7 +10,7 @@ function completeOverview() {
   return buildProductOverview({
     productBase: "/products/default/radar",
     product: { id: 1, slug: "radar", name: "Radar", description: "代码驱动的产品知识中心", descriptionSource: "generated", descriptionEvidence: [{ path: "lib/analysis.ts", startLine: 185 }] },
-    features: [{ id: 1, name: "产品分析", summary: "从代码生成规格", parentId: null, source: "generated" }],
+    features: [{ id: 1, name: "产品分析", displayName: "产品能力总览", summary: "从代码生成规格", parentId: null, source: "generated" }],
     scenarios: [{ id: 2, featureId: 1, reference: "HP-1", context: "用户", action: "分析", outcome: "规格", category: "happy", source: "generated", evidence: [] }],
     releases: [{ id: 8, title: "首版", summary: "Summary", sha: "abcdef123456", url: "", committedAt: new Date("2026-11-01"), specVersionId: 8 }],
     behaviorChanges: [{ id: 3, releaseId: 8, kind: "added", entityType: "feature", featureName: "产品分析", scenarioReference: "", summary: "新增分析能力", before: null, after: {} }],
@@ -27,6 +27,11 @@ describe("product overview rendering (Specsight 原则版式)", () => {
     expect(html).toContain("代码生成 · 1 个证据文件");
     // 建议问法从产品能力名生成（检索必命中自己）
     expect(html).toContain("产品分析 是怎么工作的？");
+    expect(html).toContain("产品能力总览");
+    expect(html).toContain("当前核心能力");
+    expect(html).toContain("完整能力（规格）");
+    expect(html.match(/当前核心能力/g)).toHaveLength(1);
+    expect(html.indexOf("当前核心能力")).toBeLessThan(html.indexOf("最近重要变化"));
     expect(html).toContain("发布时间线");
     expect(html).toContain('href="?view=changes#release-8"');
     expect(html).toContain("产品分析");
@@ -56,7 +61,7 @@ describe("product overview rendering (Specsight 原则版式)", () => {
       latestRun: { status: "succeeded" },
     });
     const html = renderToStaticMarkup(createElement(ProductOverview, { data }));
-    const timeline = html.slice(html.indexOf("overview-timeline"), html.indexOf("当前核心能力"));
+    const timeline = html.slice(html.indexOf("overview-timeline"), html.indexOf("overview-trust-line"));
     expect(timeline).toContain("一次推送中的全部提交都会进入发布说明。");
     // 时间线是一句话投影：不逐条罗列场景级变化
     expect(timeline).not.toContain("场景更新一");

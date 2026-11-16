@@ -243,7 +243,8 @@ export function buildProductOverview(input: ProductOverviewInput, locale: "zh-CN
     analysisLabel: analysisLabel(input.latestRun ? input.latestRun.status : undefined, locale),
     capabilities: input.features.map((feature) => ({
       id: feature.id,
-      name: feature.name,
+      canonicalName: feature.name,
+      name: feature.displayName || feature.name,
       summary: feature.summary,
       source: feature.source,
       scenarioCount: input.scenarios.filter((scenario) => scenario.featureId === feature.id).length,

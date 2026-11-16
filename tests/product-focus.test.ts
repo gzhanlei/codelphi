@@ -16,7 +16,7 @@ function feature(id: number, name: string, options: Record<string, unknown> = {}
 }
 
 describe("product focus projection", () => {
-  it("limits the default map and separates substantive attention from routine confirmation", () => {
+  it("separates substantive attention from routine confirmation", () => {
     const result = buildProductFocus({
       ...base,
       features: [
@@ -24,35 +24,13 @@ describe("product focus projection", () => {
         feature(2, "普通描述"),
         feature(3, "功能三"),
         feature(4, "功能四"),
-        feature(5, "功能五"),
-        feature(6, "功能六"),
       ],
       scenarios: [{ id: 20, featureId: 2, reference: "HP-1", context: "用户", action: "使用", outcome: "完成", category: "happy", source: "generated", evidence: [] }],
       behaviorChanges: [],
     });
-    expect(result.map).toHaveLength(5);
-    expect(result.map[0].name).toBe("支付权限");
     expect(result.attention.map((item) => item.featureName)).toEqual(["支付权限"]);
     expect(result.confirmations.map((item) => item.featureName)).toEqual(["普通描述", "功能三", "功能四"]);
     expect(result.emptyAttention).toBe(false);
-  });
-
-  it("does not let manual status outweigh scenario coverage when selecting a partial capability map", () => {
-    const result = buildProductFocus({
-      ...base,
-      features: [
-        feature(1, "人工低覆盖", { source: "manual" }),
-        feature(2, "生成高覆盖"),
-        feature(3, "生成中覆盖"),
-        feature(4, "另一能力"),
-        feature(5, "更多能力"),
-        feature(6, "其他能力"),
-      ],
-      scenarios: Array.from({ length: 10 }, (_, index) => ({ id: 100 + index, featureId: 2, reference: `HP-${index + 1}`, context: "用户", action: "使用", outcome: "完成", category: "happy", source: "generated", evidence: [] })),
-      behaviorChanges: [],
-    });
-    expect(result.map[0].name).toBe("生成高覆盖");
-    expect(result.featureTotal).toBe(6);
   });
 
   it("uses canonical names for risk filtering while rendering curated names", () => {
@@ -128,14 +106,13 @@ describe("product focus projection", () => {
       scenarios: [],
       behaviorChanges: [{ id: 31, releaseId: 8, kind: "changed", entityType: "scenario", featureName: "technical_name", scenarioReference: "HP-1", summary: "更新产品进展", before: {}, after: { evidence: [] } }],
     });
-    expect(result.map[0].name).toBe("最近 30 天产品进展");
     expect(result.changes[0].featureName).toBe("最近 30 天产品进展");
     expect(result.confirmations[0].featureName).toBe("最近 30 天产品进展");
   });
 });
 
 describe("product focus rendering", () => {
-  it("uses native details for progressive evidence and shows the empty attention state", () => {
+  it("uses native details for progressive evidence and leaves core capabilities to the shared card panel", () => {
     const result = buildProductFocus({
       ...base,
       features: [feature(1, "普通功能")],
@@ -146,15 +123,8 @@ describe("product focus rendering", () => {
     expect(html).toContain("<details");
     expect(html).toContain("当前没有需要重点关注的变化");
     expect(html).toContain("含 AI 提取的候选变化；全部内容需人工确认");
-    expect(html).toContain("部分产品能力");
-    expect(html).toContain("共 1 项");
-    expect(html).toContain('href="/products/default/radar?view=spec"');
-    expect(html).not.toContain("产品现在能做什么");
-    expect(html).toContain("功能概述");
-    expect(html).toContain("普通功能说明");
-    expect(html).toContain("AI 提取");
-    expect(html).toContain("查看行为规格与证据");
-    expect(html).not.toContain("0个场景");
+    expect(html).not.toContain("部分产品能力");
+    expect(html).not.toContain("当前核心能力");
     expect(html).toContain("查看全部产品信息");
   });
 });

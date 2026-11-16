@@ -13,11 +13,11 @@ function CapabilityList({ capabilities, locale = "zh-CN" }: { capabilities: Prod
   return <div className="capability-list">{capabilities.map((feature) => <Link href={feature.href} className="capability-item" key={feature.id}><strong>{feature.name}</strong><span>{feature.scenarioCount}{pick(locale, PRODUCT_OVERVIEW.capabilityScenarios)}{feature.source === "manual" ? pick(locale, SPEC_EDITOR.sourceManual) : pick(locale, SPEC_EDITOR.sourceGenerated)}</span><p>{feature.summary}</p></Link>)}</div>;
 }
 
-function CapabilitiesPanel({ data, locale = "zh-CN" }: { data: ProductOverviewData; locale?: UiLocale }) {
+export function CapabilitiesPanel({ data, locale = "zh-CN" }: { data: ProductOverviewData; locale?: UiLocale }) {
   if (data.capabilities.length === 0) return <p className="overview-note">{pick(locale, PRODUCT_OVERVIEW.emptyCapabilities)}</p>;
   return (
     <section className="overview-panel">
-      <div className="overview-panel-heading"><h2>{pick(locale, PRODUCT_OVERVIEW.capabilitiesHeading)}</h2><p>{pick(locale, PRODUCT_OVERVIEW.capabilitiesNote)}</p></div>
+      <div className="overview-panel-heading"><h2>{pick(locale, PRODUCT_OVERVIEW.capabilitiesHeading)}</h2><p>{pick(locale, PRODUCT_OVERVIEW.capabilitiesNote)}</p><Link className="overview-text-link" href={`${data.productBase}?view=spec`}>完整能力（规格） →</Link></div>
       <CapabilityList capabilities={data.capabilities} locale={locale} />
     </section>
   );
@@ -130,6 +130,7 @@ function TrustLine({ data, locale = "zh-CN" }: { data: ProductOverviewData; loca
 export function ProductOverview({ data, canEdit = false, locale = "zh-CN" }: { data: ProductOverviewData; canEdit?: boolean; locale?: UiLocale }) {
   return (
     <div className="product-overview">
+      <CapabilitiesPanel data={data} locale={locale} />
       <ProductFocus data={data.focus} locale={locale} />
       <TaskEntriesPanel data={data} locale={locale} />
       <div className="overview-ask">
@@ -140,7 +141,7 @@ export function ProductOverview({ data, canEdit = false, locale = "zh-CN" }: { d
             productBase={data.productBase}
             locale={locale}
             // 建议问法从产品自己的能力名生成：检索必命中自己，避免推荐了却答「未覆盖」
-            suggestions={data.capabilities.slice(0, 3).map((capability) => pick(locale, PRODUCT_OVERVIEW.askSuggestion).replace("{name}", capability.name))}
+            suggestions={data.capabilities.slice(0, 3).map((capability) => pick(locale, PRODUCT_OVERVIEW.askSuggestion).replace("{name}", capability.canonicalName))}
           />
         </section>
       </div>
@@ -148,7 +149,6 @@ export function ProductOverview({ data, canEdit = false, locale = "zh-CN" }: { d
         <summary>展开完整产品信息</summary>
         <UserImpactPanel data={data} locale={locale} />
         <ReleaseTimeline data={data} locale={locale} />
-        <CapabilitiesPanel data={data} locale={locale} />
         <TrustLine data={data} locale={locale} />
         <KnowledgeHealthPanel slug={data.slug} locale={locale} />
       </details>

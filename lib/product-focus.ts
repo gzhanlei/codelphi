@@ -1,28 +1,9 @@
 import { evidenceItems } from "./evidence";
-import { featureHref } from "./spec-editor-ui";
 import { changeGroupLabel } from "./product-overview";
 import type { buildProductOverview } from "./product-overview";
 
 type Input = Parameters<typeof buildProductOverview>[0];
-type Feature = Input["features"][number];
-type Scenario = Input["scenarios"][number];
-
 const HIGH_RISK = /支付|权限|隐私|数据|组织|登录|安全|许可|许可证|计费|订单|退款|邀请|身份|隔离/i;
-
-function verification(feature: Feature) {
-  if (!feature.verifiedAt) return "unverified" as const;
-  return feature.staleSince ? "stale-verified" as const : "verified" as const;
-}
-
-function scenariosOf(feature: Feature, scenarios: Scenario[]) {
-  return scenarios.filter((scenario) => scenario.featureId === feature.id).slice(0, 3).map((scenario) => ({
-    reference: scenario.reference,
-    context: scenario.context,
-    action: scenario.action,
-    outcome: scenario.outcome,
-    source: scenario.source,
-  }));
-}
 
 function evidenceFromSubject(value: unknown): string[] {
   if (typeof value !== "object" || value === null) return [];
@@ -33,20 +14,6 @@ function evidenceFromSubject(value: unknown): string[] {
 export function buildProductFocus(input: Input) {
   const displayNames = new Map(input.features.map((feature) => [feature.name, feature.displayName || feature.name]));
   const displayName = (name: string) => displayNames.get(name) ?? name;
-  const map = input.features.map((feature) => ({
-    id: feature.id,
-    canonicalName: feature.name,
-    name: displayName(feature.name),
-    summary: feature.summary,
-    source: feature.source,
-    verification: verification(feature),
-    scenarioCount: input.scenarios.filter((scenario) => scenario.featureId === feature.id).length,
-    scenarios: scenariosOf(feature, input.scenarios),
-    href: `${input.productBase}${featureHref(feature.id)}`,
-  })).sort((a, b) => Number(b.verification === "stale-verified") - Number(a.verification === "stale-verified")
-    || b.scenarioCount - a.scenarioCount
-    || a.canonicalName.localeCompare(b.canonicalName) || a.name.localeCompare(b.name)).slice(0, 5);
-
   const latestRelease = input.releases[0];
   const behaviorChanges = latestRelease ? input.behaviorChanges.filter((change) => change.releaseId === latestRelease.id) : [];
   const changeGroups = new Map<string, {
@@ -106,5 +73,5 @@ export function buildProductFocus(input: Input) {
   const attention = attentionCandidates.filter((item) => item.source === "manual" || HIGH_RISK.test(item.featureName)).slice(0, 3).map((item) => ({ featureName: item.label, reason: item.reason }));
   const confirmations = [...input.features.filter((feature) => !feature.verifiedAt).map((feature) => ({ featureName: displayName(feature.name), reason: "尚未人工确认" })), ...input.scenarios.filter((scenario) => !scenario.verifiedAt).map((scenario) => ({ featureName: displayName(input.features.find((feature) => feature.id === scenario.featureId)?.name ?? ""), reason: "尚未人工确认" }))].filter((item) => item.featureName).slice(0, 3);
 
-  return { map, featureTotal: input.features.length, allFeaturesHref: `${input.productBase}?view=spec`, changes, attention, confirmations, emptyAttention: attention.length === 0 };
+  return { changes, attention, confirmations, emptyAttention: attention.length === 0 };
 }
