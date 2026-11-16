@@ -59,7 +59,7 @@ P0 的价值假设是：在陌生、跨功能或验证证据不足的真实任�
 | `proposedConstraint` | Agent 根据任务和已观察行为提出的本次修改约束 | 未经确认不得标成验收标准 |
 | `confirmedConstraint` | 开发者或产品负责人在计划/评审中明确确认的约束 | CoDelphi 不从 generated/manual source 自动推导 |
 | `specVerification` | live scenario 的 verified/stale 状态及 `spec_verifications` 历史记录 | 不等于自动化测试通过 |
-| `regressionHistory` | release 下 regression task 的状态、检查和失败记录 | 名称级关联不等于跨版本同一场景身份 |
+| `regressionAlerts` | release 下 regression task 的状态、检查和失败记录 | 名称级关联不等于跨版本同一场景身份 |
 | `testExecution` | Agent 在项目中实际运行的测试命令和结果 | MCP 未观察到时不得声明存在或通过 |
 
 当前 schema 的事实边界已经核实：
@@ -74,18 +74,22 @@ P0 的价值假设是：在陌生、跨功能或验证证据不足的真实任�
 
 ## 5. P0：行级影响与决策投影
 
-### 5.1 输入扩展
+### 5.1 输入扩展与版本坐标
 
-`lookup_by_files` 保留 `paths`，新增可选 `hunks`：
+`lookup_by_files` 保留 `paths`，新增可选 diff 坐标：
 
 ```ts
 {
   slug: string;
   paths?: string[];
+  diffBaseSha?: string;
+  diffTargetSha?: string | null;
   hunks?: Array<{
     path: string;
-    startLine: number;
-    endLine: number;
+    oldStartLine: number | null;
+    oldEndLine: number | null;
+    newStartLine: number | null;
+    newEndLine: number | null;
   }>;
   view?: "raw" | "canonical" | "risk";
 }
@@ -93,36 +97,47 @@ P0 的价值假设是：在陌生、跨功能或验证证据不足的真实任�
 
 约束：
 
-- `paths` 与 `hunks` 至少一个非空；合并去重后最多 20 个路径。
-- 行号为从 1 开始的闭区间，`1 <= startLine <= endLine`。
-- 路径使用规范化的相对仓库路径，禁止绝对路径与 `..`。
-- 不提供 hunks 时保持现有文件级行为。
-- raw/canonical 视图不因 hunks 改变；行级投影只在 `view=risk` 启用。
+- `paths` 与 `hunks` 至少一个非空；hunk 路径自动并入 paths，不要求重复提供。
+- 路径规范化、去重后最多 20 个；禁止绝对路径与 `..`。
+- hunks 中的路径执行锚点评估；只在 paths 中出现的路径执行文件级匹配。
+- 行号为从 1 开始的闭区间；同一侧满足 `startLine <= endLine`。新增文件允许 old 侧为 null，删除文件允许 new 侧为 null，每个 hunk 至少保留一侧范围。
+- 同一路径的重叠区间分别按 old/new 侧合并用于匹配，原始输入仍逐项校验。
+- `diffTargetSha=null` 表示当前工作区；不提供 hunks 时保持现有文件级行为。
+- raw/canonical 视图不因 diff 参数改变；锚点投影只在 `view=risk` 启用。
 
-### 5.2 确定性命中规则
+证据锚点使用账本 `snapshotSha` 坐标，diff 同时具有 old/new 两套坐标，不能一律用新行号比较：
+
+- `diffBaseSha === snapshotSha`：使用 old-side hunk 范围。
+- `diffTargetSha === snapshotSha`：使用 new-side hunk 范围。
+- 两者都命中时优先 old-side，并返回实际使用的坐标侧；两者都未命中或 snapshot SHA 缺失时，`coordinateStatus="unavailable"`，全部降级为文件级匹配。
+
+响应返回 `snapshotSha`、`diffBaseSha`、`diffTargetSha`、`coordinateStatus` 和 `coordinateSide`。无法证明坐标一致时不得产生 line 命中。
+
+### 5.2 证据锚点重合规则
 
 每条场景证据保留 `path`、`startLine` 和来源场景：
 
-- 证据路径等于 hunk 路径，且证据 `startLine` 落在任一 hunk 闭区间内：`matchType="line"`。
-- 场景只共享路径、证据没有行号、或行号不在 hunks 内：`matchType="file"`。
-- 同一场景有任一直接证据时，该场景整体为 `line`，不因其他文件证据重复计算。
+- 坐标一致、证据路径等于 hunk 路径，且证据 `startLine` 落在所选坐标侧的任一 hunk 闭区间内：`matchType="line"`、`evidencePrecision="line_anchor"`。
+- 只确认同文件、证据没有行号、锚点不在 hunks 内或坐标不可用：`matchType="file"`。
+- 有可用行锚点但未重合时 `evidencePrecision="line_anchor"`；没有行号或坐标不可用时为 `file_only`。
+- 同一场景有任一锚点重合时，该场景整体为 `line`，不因其他文件证据重复计算。
 - 未提供 hunks 的路径全部为 `file`。
-- 没有直接命中不能解释为没有影响，必须分别返回 `directScenarioCount` 与 `fileOnlyScenarioCount`。
 
-行级命中只表示代码证据位置与变更范围重合，不表示完整依赖覆盖。本阶段不实现符号、调用、接口、数据库状态或外部客户端依赖分析。
+`line` 只表示**变更范围与证据锚点重合**，不表示命中完整实现范围或行为依赖。没有锚点重合也不能解释为没有影响。
+
+计数均按 scenario ID 去重：`directScenarioCount` 为锚点重合场景数，`fileOnlyScenarioCount` 为仅文件级场景数，`totalCount` 为两者之和。证据条数不得作为场景数量。本阶段不实现符号、调用、接口、数据库状态或外部客户端依赖分析。
 
 ### 5.3 已观察行为与证据输出
 
 现有 `risks` 字段保留并增加：
 
-- `matchType` 与 `matchedEvidence: Array<{ path: string; startLine: number | null }>`；
+- `matchType`、`evidencePrecision` 与 `matchedEvidence: Array<{ path: string; startLine: number | null }>`；
 - `observedBehavior: { scenarioId: number; reference: string; context: string; action: string; outcome: string; source: string }`；
-- `specVerification`；
-- `regressionHistory`。
+- `specVerification`。
 
 不再使用未分级的 `contract` 字段。`manual` 只表示人工维护来源，不自动表示 confirmed constraint。
 
-排序为：直接命中优先、`stale-verified` 或失败回归优先、manual 优先、stableKey、scenario ID、证据路径。默认仍返回前 10 条，并保留 `totalCount/hasMore`。
+场景排序为：锚点重合优先、`stale-verified` 优先、manual 优先、stableKey、scenario ID、证据路径。`stale-verified` 与历史失败回归不混为同一风险等级。场景默认仍返回前 10 条并保留 `totalCount/hasMore`；历史回归提示独立返回，不会被场景分页挤掉。
 
 ### 5.4 当前人工核实证据
 
@@ -144,44 +159,70 @@ specVerification: {
 
 `state` 复用 live scenario 的 `verified_at × stale_since` 规则；`latestRecord` 取该 live scenario 在产品内最新一条 `spec_verifications`。二者分别表示当前核实状态与历史核实依据，不相互替代。
 
-没有历史记录时 `latestRecord=null`，但 `state` 仍按 live 字段独立计算；只有 live 状态为 `unverified` 且没有历史记录时，才表达“没有人工核实证据”。任何情况都不表达“没有测试”。
+已核实的生命周期规则：
 
-### 5.5 名称级历史回归提示
+- 人工规格变更会设置或刷新 `stale_since`；已核实内容之后失效为 `stale-verified`。
+- 核实动作在同一事务中更新 `verified_at/verified_by`、清除 `stale_since/stale_change_id` 并追加 `spec_verifications`。
+- 再次变更会重新设置 stale，再次核实会再次清除，因此不依赖“第一次过期时间”推断当前状态。
+- generated 内容变化或人工编辑会清除当前 `verified_at/verified_by`，状态为 `unverified`；这不表示从未核实，历史记录仍可证明过去发生过核实。
 
-按命中功能的 stableKey 对 `loadRegressionTasks` 返回的 `featureName` 做同样的名称归一化，返回最近最多 5 条非 passed 任务：
+`latestRecord` 按 `verified_at` 的数据库时间值和 `id` 依次倒序选择，DATETIME(3) 保留毫秒，ID 处理并列；响应序列化为 ISO 8601，不对序列化后的日期字符串做排序。live 与历史记录是不同证据链，legacy 数据或后续状态变化造成的差异不自动判为 inconsistent。`verified_at` 有无与 `stale_since` 有无形成的四种组合均有明确的现有语义，因此本阶段不新增 unknown/inconsistent 状态。
+
+没有历史记录时 `latestRecord=null`，但 `state` 仍按 live 字段独立计算。`unverified` 只表示当前内容未核实，`latestRecord=null` 只表示没有历史核实记录；二者均不表示“没有测试”，历史记录存在也不表示当前内容已核实。
+
+### 5.5 独立的名称级历史回归提示
+
+历史提示使用顶层 `regressionAlerts`，不嵌入前 10 条场景，也不依赖场景是否进入当前页。按全部命中功能的 stableKey 对回归投影的 `featureName` 做同样的名称归一化，返回最近最多 5 条非 passed 任务：
 
 ```ts
-regressionHistory: Array<{
+regressionAlerts: Array<{
   taskId: number;
   releaseId: number;
+  releaseCommittedAt: string;
+  featureName: string;
+  normalizedFeatureName: string;
   reference: string | null;
   status: "pending" | "failed" | "skipped";
   checkedAt: string | null;
   checkedBy: string | null;
   failureNote: string | null;
-  matchBasis: "exact_feature_name";
+  matchBasis: "normalized_feature_name";
 }>
 ```
 
-关联只发生在产品内部，按 release 时间和 task ID 稳定倒序。该列表是功能名称级历史提示，不宣称任务中的 reference 与当前场景是同一跨版本身份，也不把 skipped 当成失败。
+关联只发生在产品内部，按 `releaseCommittedAt DESC, taskId DESC` 稳定排序。返回原始功能名与归一化名称，调用方可以判断名称关联是否合理。pending、failed、skipped 保持各自语义，release 时间用于识别陈旧记录，不把 skipped 当成失败。
 
-没有历史任务返回空数组，不推断没有历史缺陷。
+该列表是名称级历史线索，不宣称任务中的 reference 与当前场景是同一跨版本身份。`regressionAlertTotal` 表示已扫描范围内的命中数，`regressionHistoryComplete` 表示是否扫描了产品全部符合条件的任务；因批量上限截断时为 false，此时空数组也不表示没有历史缺陷。
 
-### 5.6 候选意图，而非自动契约
+### 5.6 候选分组，而非推荐意图或自动契约
 
 风险投影新增：
 
 ```ts
-recommendedIntents: Array<{
+candidateIntentGroups: Array<{
   stableKey: string;
   paths: string[];
-  scenarios: Array<{ id: number; reference: string }>;
+  scenarios: Array<{
+    id: number;
+    reference: string;
+    matchType: "line" | "file";
+    matchedEvidence: Array<{ path: string; startLine: number | null }>;
+  }>;
 }>
 ```
 
-它按 stableKey 确定性分组，只是后续计划候选。Agent 必须根据任务删除无关项，并将需要保持的行为写成 `proposedConstraint`；只有经过开发者或产品负责人确认后，才能在本地计划中标记为 `confirmedConstraint`。
+它只把全部命中场景按 stableKey 确定性分组，并保留每个场景的命中依据；不表示 CoDelphi 已推荐本次完整开发意图。Agent 必须根据任务删除无关项，并将需要保持的行为写成 `proposedConstraint`；只有经过开发者或产品负责人确认后，才能在本地计划中标记为 `confirmedConstraint`。
 
-P0 不新增服务端意图存储，不让 MCP 自动把候选意图当成开发者的真实意图。
+P0 不新增服务端意图存储，不让 MCP 自动把候选分组当成开发者的真实意图。
+
+### 5.7 批量读取与性能边界
+
+- 只有 `view=risk` 加载新增验证和历史数据；raw/canonical 不增加查询或改变响应。
+- live scenario 按 product 批量读取；`spec_verifications` 按 product、`entity_type="scenario"` 和命中 scenario IDs 一次批量读取，在内存中取每个场景最新记录。
+- 回归任务按 product 批量读取，按 `releaseCommittedAt DESC, taskId DESC` 最多扫描 1000 条非 passed 任务，再按 normalized feature name 归组；达到上限时 `regressionHistoryComplete=false`。
+- 禁止按场景逐条查询 verification 或 regression，禁止用无上限历史读取支撑前 10 条场景。
+- 所有查询继续使用 organization 解析出的 productId，不能以 scenario ID、stableKey 或 release ID 跨产品取数。
+- P0 不新增索引或缓存。实施时用生产数据规模和查询计划验证现有索引；出现实测问题再单独设计，而不是预先扩张 schema。
 
 ## 6. P0：低噪声验收结果
 
@@ -226,18 +267,26 @@ P0 不新增服务端意图存储，不让 MCP 自动把候选意图当成开发
 
 ## 9. 价值试点与停止条件
 
-建立无自动遥测的试点记录，连续记录至少 20 个真实任务，优先选择陌生模块、跨功能修改或验证证据不足的任务：
+建立无自动遥测的试点记录，连续记录至少 20 个真实任务，优先选择陌生模块、跨功能修改或验证证据不足的任务。查看 CoDelphi 输出前先记录开发者的初始影响判断、拟修改方案和验证计划，作为事后比较基线。
 
-- 任务、熟悉程度、风险等级；
+每次任务分别记录：
+
+- 任务类型、熟悉程度、风险等级；
+- 初始判断与初始验证计划；
 - 反查与对账耗时、手工修正参数次数；
-- 直接/间接命中数量；
-- 独立发现率：CoDelphi 发现而原代码审查和测试尚未发现的问题比例；
-- 决策改善率：因 CoDelphi 信息而改变实现、验证范围或发布决定的比例，并记录具体决定；
+- 锚点重合/文件级命中数量；
+- **独立发现**：CoDelphi 提供了此前未被开发者、代码审查、测试或其他工具发现的重要事实，并注明独立证据；
+- **决策促成**：事实可能已知，但 CoDelphi 促使开发者采取了原本不会采取的行动；
+- **重复确认**：只是再次确认已有结论，不计为独立发现或决策促成；
+- 具体决策变化及其证据；
 - 净时间收益：节省时间与额外使用成本之差；
 - 无效打扰率：无需行动却需要解释的 warning/提示比例；
+- 错误关联造成的额外工作量；
 - 不用 CoDelphi 是否大概率得到相同结果及理由。
 
-不采集代码正文、密钥或用户隐私。不能用调用次数或对账成功次数证明价值。若试点没有独立发现、没有决策改善且净时间收益为负，应降低强制程度或停止相应流程，而不是继续增加自动化。
+“增加了测试”本身不等于决策改善。只有具备具体 CoDelphi 证据、发生明确决策变化，并且变化后经代码、测试或人工核实为合理，才计为改善；核实前保持 pending。若关联错误导致无关测试、扩大回归或返工，应记录为负收益，不得计入改善。
+
+按任务类型与风险分层报告，不用 20 个任务推断普遍有效，也不把不同发现类别混为一个比例。不采集代码正文、密钥或用户隐私。不能用调用次数或对账成功次数证明价值。若试点没有独立发现、没有经验证的决策改善且净时间收益为负，应降低强制程度或停止相应流程，而不是继续增加自动化。
 
 P0 自身的开发与对账只证明功能可用，不作为价值假设已经成立的证据。没有合适的真实试点任务时，首条样本保持 pending，不虚构试点结果。
 
@@ -245,19 +294,21 @@ P0 自身的开发与对账只证明功能可用，不作为价值假设已经�
 
 单元与集成测试至少覆盖：
 
-- hunk 边界、跨 hunk 命中、无行号证据、同场景多证据去重和稳定排序；
-- 无直接命中、超过 20 个合并路径、非法行号和非法路径；
-- observed behavior、三种 specVerification 状态和 latestRecord 的产品/场景隔离；
-- regressionHistory 的名称级关联、非 passed 过滤、最多 5 条、稳定排序和跨版本身份免责声明；
-- recommendedIntents 分组，且不自动升级为 confirmed constraint；
+- old/new 坐标选择、base/target/workspace 情况、坐标不一致降级、hunk 边界、区间合并和无行号证据；
+- 同场景多证据去重、direct/fileOnly/total 计数一致性和稳定排序；
+- paths/hunks 混合输入、超过 20 个规范化去重路径、非法行号和非法路径；
+- observed behavior、三种 specVerification 状态、重复核实/再次失效，以及 latestRecord 的时间与 ID 排序和产品/场景隔离；
+- regressionAlerts 独立于场景分页、原始/归一化名称、非 passed 过滤、最多 5 条、时间排序和截断披露；
+- candidateIntentGroups 保留命中依据，且不自动升级为 confirmed constraint；
+- 批量查询次数、1000 条历史上限、raw/canonical 零新增查询和组织/product 隔离；
 - 共享证据只产生 informational signal，缺失、计划外变化和重复簇仍保持原 verdict；
 - 旧工具 raw 响应、组织防枚举与现有 reconcile 输入兼容。
 
 生产验收：
 
-1. 用本次真实提交的 hunks 调用风险投影，确认直接命中优先，行为、核实和历史回归均可追溯。
-2. 检查没有人工核实记录时不会被描述为测试缺失，名称级历史回归不会被描述为跨版本同一场景。
+1. 用本次真实提交的双侧 hunks 和 base/target SHA 调用风险投影，确认只有同坐标锚点重合才返回 line，其他情况正确降级。
+2. 确认行为、核实和历史回归均可追溯，历史提示独立于场景分页；没有人工核实记录时不会被描述为测试缺失。
 3. 若 reconcile 只有共享证据，确认不再产生 warning；若存在真实异常，如实报告，不调整意图追求 pass。
-4. 建立价值试点记录；本次只填功能验证与耗时，不虚构独立发现或决策改善。
+4. 建立带输出前初始判断的价值试点记录；本次只填功能验证与耗时，不虚构独立发现或决策改善。
 
 交付前运行 `npm run typecheck`、`npm test`、`npm run build`，随后完成独立代码审查、生产部署和 CoDelphi 对账。
