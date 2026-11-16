@@ -70,6 +70,25 @@ describe("product overview rendering (Specsight 原则版式)", () => {
     expect(html).not.toContain("不应显示");
   });
 
+  it("uses original feature names for ask suggestions even when business domains replace the capability cards (Task 2)", () => {
+    const grouped = buildProductOverview({
+      productBase: "/products/o/salesbuddy",
+      product: { id: 1, slug: "salesbuddy", name: "SalesBuddy", description: "" },
+      features: [
+        { id: 20, name: "客户沟通", summary: "沟通域", parentId: null, source: "manual" },
+        { id: 71, name: "多源沟通录入与录音", summary: "录入", parentId: 20, source: "generated" },
+      ],
+      scenarios: [{ id: 1, featureId: 71, reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy", source: "generated", evidence: [] }],
+      releases: [], behaviorChanges: [], latestRun: { status: "succeeded" },
+    });
+    const html = renderToStaticMarkup(createElement(ProductOverview, { data: grouped }));
+    // 业务卡片出现，未分组/子级原始功能不作为卡片
+    expect(html).toContain("客户沟通");
+    // 问答建议仍用有实际场景的原始功能 canonicalName，不用父级名称
+    expect(html).toContain("多源沟通录入与录音 是怎么工作的？");
+    expect(html).not.toContain("客户沟通 是怎么工作的？");
+  });
+
   it("renders an empty product without crash", () => {
     const data = buildProductOverview({
       productBase: "/products/default/radar",

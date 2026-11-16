@@ -92,8 +92,8 @@ export function ProductOverview({ data, canEdit = false, locale = "zh-CN" }: { d
             slug={data.slug}
             productBase={data.productBase}
             locale={locale}
-            // 建议问法从产品自己的能力名生成：检索必命中自己，避免推荐了却答「未覆盖」
-            suggestions={data.capabilities.slice(0, 3).map((capability) => pick(locale, PRODUCT_OVERVIEW.askSuggestion).replace("{name}", capability.canonicalName))}
+            // 建议问法从有实际场景的原始功能名生成（业务分组时不用父级名称）：检索必命中自己
+            suggestions={data.questionCapabilities.slice(0, 3).map((capability) => pick(locale, PRODUCT_OVERVIEW.askSuggestion).replace("{name}", capability.canonicalName))}
           />
         </section>
       </div>

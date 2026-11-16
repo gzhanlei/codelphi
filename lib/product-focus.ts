@@ -71,7 +71,9 @@ export function buildProductFocus(input: Input) {
     ...input.scenarios.filter((scenario) => scenario.staleSince).map((scenario) => ({ featureName: input.features.find((feature) => feature.id === scenario.featureId)?.name ?? "", label: displayName(input.features.find((feature) => feature.id === scenario.featureId)?.name ?? ""), source: scenario.source, reason: "相关场景或证据发生变化，需要重新评估" })),
   ];
   const attention = attentionCandidates.filter((item) => item.source === "manual" || HIGH_RISK.test(item.featureName)).slice(0, 3).map((item) => ({ featureName: item.label, reason: item.reason }));
-  const confirmations = [...input.features.filter((feature) => !feature.verifiedAt).map((feature) => ({ featureName: displayName(feature.name), reason: "尚未人工确认" })), ...input.scenarios.filter((scenario) => !scenario.verifiedAt).map((scenario) => ({ featureName: displayName(input.features.find((feature) => feature.id === scenario.featureId)?.name ?? ""), reason: "尚未人工确认" }))].filter((item) => item.featureName).slice(0, 3);
+  // 组织用父节点（有子级的功能）是业务域容器，不进入普通「需要确认」列表；原始功能和场景仍按原规则处理。
+  const parentIdSet = new Set(input.features.filter((feature) => feature.parentId !== null && input.features.some((parent) => parent.id === feature.parentId)).map((feature) => feature.parentId));
+  const confirmations = [...input.features.filter((feature) => !feature.verifiedAt && !parentIdSet.has(feature.id)).map((feature) => ({ featureName: displayName(feature.name), reason: "尚未人工确认" })), ...input.scenarios.filter((scenario) => !scenario.verifiedAt).map((scenario) => ({ featureName: displayName(input.features.find((feature) => feature.id === scenario.featureId)?.name ?? ""), reason: "尚未人工确认" }))].filter((item) => item.featureName).slice(0, 3);
 
   return { changes, attention, confirmations, emptyAttention: attention.length === 0 && confirmations.length === 0 };
 }

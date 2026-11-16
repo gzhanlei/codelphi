@@ -4,6 +4,7 @@ import { pick, type UiLocale } from "./ui-locale";
 import { OVERVIEW_DATA } from "./ui-strings/product";
 import { evidenceItems, isTestOnlyEvidence } from "./evidence";
 import { coverageByteLabel, coverageFilesLabel } from "./coverage-display";
+import { buildBusinessDomainCards } from "./business-domains";
 import type { RegressionTaskView } from "./regression-task-view";
 import { featureHref } from "./spec-editor-ui";
 import type { BehaviorChangeRow, ChangeRow, FeatureRow, ReleaseRow, ScenarioRow } from "./types";
@@ -230,6 +231,19 @@ export function buildProductOverview(input: ProductOverviewInput, locale: "zh-CN
   const coverageByte = input.coverage ? coverageByteLabel(input.coverage, locale) : null;
   const coverageFiles = input.coverage ? coverageFilesLabel(input.coverage, locale) : null;
   const userImpact = buildUserImpact(input, latestRelease, latestChanges, changeStats, locale);
+  // 业务分组（Task 2）：有人工确认的「父节点 + 子级」树时，首页能力卡聚合为业务域卡片；
+  // 没有分组的产品保持现有平铺卡片。组织用父节点不进入问答建议——检索身份始终是原始功能。
+  const businessDomains = buildBusinessDomainCards(input.features, input.scenarios, input.productBase);
+  const capabilityCard = (feature: FeatureRow) => ({
+    id: feature.id,
+    canonicalName: feature.name,
+    name: feature.displayName || feature.name,
+    summary: feature.summary,
+    source: feature.source,
+    scenarioCount: input.scenarios.filter((scenario) => scenario.featureId === feature.id).length,
+    href: `${input.productBase}${featureHref(feature.id)}`,
+  });
+  const parentIdSet = new Set(input.features.filter((feature) => feature.parentId !== null && input.features.some((parent) => parent.id === feature.parentId)).map((feature) => feature.parentId));
 
   return {
     focus: buildProductFocus(input),
@@ -241,15 +255,8 @@ export function buildProductOverview(input: ProductOverviewInput, locale: "zh-CN
     headlineEvidence: evidenceItems(input.product.descriptionEvidence),
     freshness: specLabel(specVersionId, revision, latestRelease?.committedAt, locale),
     analysisLabel: analysisLabel(input.latestRun ? input.latestRun.status : undefined, locale),
-    capabilities: input.features.map((feature) => ({
-      id: feature.id,
-      canonicalName: feature.name,
-      name: feature.displayName || feature.name,
-      summary: feature.summary,
-      source: feature.source,
-      scenarioCount: input.scenarios.filter((scenario) => scenario.featureId === feature.id).length,
-      href: `${input.productBase}${featureHref(feature.id)}`,
-    })).sort(compareCapabilities).slice(0, 6),
+    capabilities: businessDomains.length > 0 ? businessDomains : input.features.map(capabilityCard).sort(compareCapabilities).slice(0, 6),
+    questionCapabilities: input.features.filter((feature) => !parentIdSet.has(feature.id)).map(capabilityCard).filter((card) => card.scenarioCount > 0).sort(compareCapabilities),
     changes: [...latestChanges]
       .sort((a, b) => (changeKindPriority[a.kind] ?? 9) - (changeKindPriority[b.kind] ?? 9) || a.id - b.id)
       .slice(0, 3),

@@ -123,7 +123,7 @@ export const FEATURE_DETAIL = {
   lastEditedAtTitle: { "zh-CN": "最后编辑于 {time}", en: "Last edited {time}" },
   stableLinkTitle: { "zh-CN": "始终解析到最新规格的稳定链接", en: "Stable link that always resolves to the latest spec" },
   stableLink: { "zh-CN": "稳定链接", en: "Stable link" },
-  implementationFiles: { "zh-CN": "实现分布 · {count} 个文件", en: "Implementation spread · {count} files" },
+  implementationFiles: { "zh-CN": "已发现证据（不代表完整实现）· {count} 个文件", en: "Evidence found (not proof of full implementation) · {count} files" },
   implementationLines: { "zh-CN": "{count} 行", en: "{count} lines" },
   addChild: { "zh-CN": "＋ 子功能", en: "＋ Child feature" },
   edit: { "zh-CN": "编辑", en: "Edit" },

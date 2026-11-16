@@ -213,6 +213,68 @@ describe("product overview user impact projection", () => {
   });
 });
 
+describe("product overview business domain grouping (Task 2)", () => {
+  const domainFeatures: FeatureRow[] = [
+    { id: 10, name: "客户认知", summary: "认知域", parentId: null, source: "manual" },
+    { id: 20, name: "客户沟通", summary: "沟通域", parentId: null, source: "manual" },
+    { id: 71, name: "多源沟通录入与录音", summary: "录入", parentId: 20, source: "generated" },
+    { id: 72, name: "转写与 AI 复盘", summary: "转写", parentId: 10, source: "generated" },
+    { id: 30, name: "备份归档", summary: "技术功能", parentId: null, source: "generated" },
+  ];
+  const domainScenarios: ScenarioRow[] = [
+    { id: 1, featureId: 71, reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy", source: "generated", evidence: [] },
+    { id: 2, featureId: 71, reference: "HP-2", context: "c", action: "a", outcome: "o", category: "happy", source: "generated", evidence: [] },
+    { id: 3, featureId: 30, reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy", source: "generated", evidence: [] },
+  ];
+  const groupedOverview = () => buildProductOverview({
+    productBase: "/products/o/salesbuddy",
+    product: { id: 1, slug: "salesbuddy", name: "SalesBuddy", description: "" },
+    features: domainFeatures, scenarios: domainScenarios,
+    releases: [], behaviorChanges: [], latestRun: { status: "succeeded" },
+  });
+
+  it("replaces capabilities with business domain cards and keeps ungrouped technical features out", () => {
+    const overview = groupedOverview();
+    expect(overview.capabilities.map((card) => card.id)).toEqual([20, 10]);
+    expect(overview.capabilities.map((card) => card.canonicalName)).toEqual(["客户沟通", "客户认知"]);
+    expect(overview.capabilities.some((card) => card.id === 30)).toBe(false);
+    // 完整规格输入不变：trust 统计仍含未分组功能
+    expect(overview.trust.featureCount).toBe(5);
+  });
+
+  it("always derives question capabilities from original features with real scenarios, never organizational parents", () => {
+    const overview = groupedOverview();
+    expect(overview.questionCapabilities.map((card) => card.id)).toEqual([71, 30]);
+    expect(overview.questionCapabilities.some((card) => card.canonicalName === "客户认知" || card.canonicalName === "客户沟通")).toBe(false);
+    expect(overview.questionCapabilities[0].href).toBe("/products/o/salesbuddy?view=spec&feature=71");
+  });
+
+  it("keeps the flat legacy capabilities and question capabilities unchanged when no grouping exists", () => {
+    const overview = buildProductOverview({
+      productBase: "/products/default/radar",
+      product: { id: 1, slug: "radar", name: "Radar", description: "" },
+      features, scenarios, releases, behaviorChanges: [], latestRun: { status: "succeeded" },
+    });
+    // 无分组：capabilities 保持现有平铺逻辑
+    expect(overview.capabilities.map((feature) => feature.id)).toEqual([1, 2, 3]);
+    // questionCapabilities = 有实际场景的原始功能（登录 2 场景、规格 1 场景）
+    expect(overview.questionCapabilities.map((feature) => feature.id)).toEqual([1, 2]);
+  });
+
+  it("keeps organizational parents out of the ordinary confirmations list while original entries keep their rules", () => {
+    const unverifiedParents = domainFeatures.map((feature) => ({ ...feature, verifiedAt: null, verifiedBy: null }));
+    const overview = buildProductOverview({
+      productBase: "/products/o/salesbuddy",
+      product: { id: 1, slug: "salesbuddy", name: "SalesBuddy", description: "" },
+      features: unverifiedParents, scenarios: domainScenarios,
+      releases: [], behaviorChanges: [], latestRun: { status: "succeeded" },
+    });
+    const confirmationNames = overview.focus.confirmations.map((item) => item.featureName);
+    expect(confirmationNames).not.toContain("客户认知");
+    expect(confirmationNames).not.toContain("客户沟通");
+  });
+});
+
 describe("product overview quiet-release grouping", () => {
   const release = (id: number, days: number): ReleaseRow => ({ id, title: `发布${id}`, summary: `发布${id}摘要`, sha: `sha${id}abcdef`, url: "", committedAt: new Date(`2026-11-${String(days).padStart(2, "0")}`), specVersionId: id });
   const change = (id: number, releaseId: number): BehaviorChangeRow => ({ id, releaseId, kind: "changed", entityType: "scenario", featureName: "功能", scenarioReference: "HP-1", summary: "变化", before: {}, after: {} });
