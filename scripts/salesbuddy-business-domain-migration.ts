@@ -294,14 +294,22 @@ export async function runSalesBuddyBusinessDomainMigration(options: MigrationRun
 // ── CLI ──
 const isCli = process.argv[1]?.endsWith("salesbuddy-business-domain-migration.ts");
 if (isCli) {
-  const args = process.argv.slice(2);
-  const productSlug = args.includes("--product") ? args[args.indexOf("--product") + 1] : null;
-  const apply = args.includes("--apply");
-  if (!productSlug) {
-    console.error("用法：npx tsx scripts/salesbuddy-business-domain-migration.ts --product salesbuddy [--apply]");
-    process.exit(1);
+  async function main() {
+    const args = process.argv.slice(2);
+    const productSlug = args.includes("--product") ? args[args.indexOf("--product") + 1] : null;
+    const apply = args.includes("--apply");
+    const restoreFrom = args.includes("--restore") ? args[args.indexOf("--restore") + 1] : undefined;
+    const backupDir = args.includes("--backupDir") ? args[args.indexOf("--backupDir") + 1] : undefined;
+    if (!productSlug) {
+      console.error("用法：npx tsx scripts/salesbuddy-business-domain-migration.ts --product salesbuddy [--apply] [--restore <backup.json> --apply] [--backupDir <dir>]");
+      process.exit(1);
+    }
+    const result = await runSalesBuddyBusinessDomainMigration({ productSlug, apply, restoreFrom, backupDir });
+    console.log(JSON.stringify(result, null, 2));
+    if (!result.ok) process.exit(2);
   }
-  const result = await runSalesBuddyBusinessDomainMigration({ productSlug, apply });
-  console.log(JSON.stringify(result, null, 2));
-  if (!result.ok) process.exit(2);
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
 }
