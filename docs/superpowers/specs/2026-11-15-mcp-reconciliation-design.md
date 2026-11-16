@@ -182,3 +182,11 @@
 - 短 SHA 使用产品内前缀匹配；歧义前缀返回 `review`，完整 SHA 仍精确关联最新 run 与同 SHA release。
 - `totalChangeCount` 表示全部 changes，`eligibleChangeCount` 只表示健康比例分母；`reviewedExcludedCount` 单独披露。
 - `wait_for_release` 的 timeout 保留已持久化 releaseId；corrective run 不存在时状态为 `unknown`。
+
+### 第二轮审查补充
+
+- SHA 歧义按 `COUNT(DISTINCT after_sha/sha)` 判定，不按 run 行数；同一 SHA 多次尝试仍取最新有效 run。
+- completed 还要求 run.after_sha 与命中 release.sha 一致，防止把不同 SHA 的 run 和 release 拼接。
+- reviewed 的 kind 条件下推到条件聚合，total/eligible/reviewedExcluded 分别统计，source links 也只统计非 reviewed 投影。
+- canonical 先对完整变化集合合并，再按 canonical 组的首个 rawRecordId 分页；total/hasMore 以 canonical 组数计算。
+- scenario duplicate key 与 canonical key 全部使用 JSON 元组序列化，功能名包含 `|` 不影响还原。

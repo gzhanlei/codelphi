@@ -121,7 +121,7 @@ export function reconcileRelease(input: ReconcileReleaseInput) {
     projection.push(change);
     projectionGroups.set(change.id, projection);
     if (change.entityType === "scenario" && change.scenarioReference) {
-      const key = `${featureKeyOf(change)}|${change.scenarioReference}`;
+      const key = JSON.stringify([featureKeyOf(change), change.scenarioReference]);
       const group = scenarioGroups.get(key) ?? [];
       group.push(change);
       scenarioGroups.set(key, group);
@@ -144,7 +144,7 @@ export function reconcileRelease(input: ReconcileReleaseInput) {
   }
   for (const [key, group] of scenarioGroups) {
     if (group.length < 2 || new Set(group.map((change) => change.id)).size === 1) continue;
-    const [stableKey, scenarioIdentity] = key.split("|");
+    const [stableKey, scenarioIdentity] = JSON.parse(key) as [string, string];
     duplicateClusters.push({
       clusterKey: `scenario:${key}`,
       kind: "duplicate_scenario_identity",

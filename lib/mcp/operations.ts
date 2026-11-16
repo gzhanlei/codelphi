@@ -80,6 +80,8 @@ export async function waitForRelease(input: {
     analysisStatus: string | null;
     analysisError: string | null;
     releaseId: number | null;
+    runAfterSha?: string | null;
+    releaseSha?: string | null;
     candidateCount?: number;
   }>;
   sleep?: (milliseconds: number) => Promise<void>;
@@ -98,6 +100,10 @@ export async function waitForRelease(input: {
     }
     if (attempt.analysisStatus === "failed") {
       return { status: "failed" as const, releaseId: attempt.releaseId, sha: input.sha, analysisRunId: attempt.analysisRunId, analysisStatus: attempt.analysisStatus, error: attempt.analysisError };
+    }
+    const identityMatches = attempt.runAfterSha === undefined || attempt.releaseSha === undefined ? true : attempt.runAfterSha === attempt.releaseSha;
+    if (!identityMatches) {
+      return { status: "review" as const, releaseId: attempt.releaseId, sha: input.sha, analysisRunId: attempt.analysisRunId, analysisStatus: attempt.analysisStatus, error: null };
     }
     if (attempt.analysisStatus === "succeeded" && attempt.releaseId !== null) {
       return { status: "completed" as const, releaseId: attempt.releaseId, sha: input.sha, analysisRunId: attempt.analysisRunId, analysisStatus: attempt.analysisStatus, error: null };

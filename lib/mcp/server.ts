@@ -201,14 +201,13 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
         `SELECT COUNT(DISTINCT c.id) AS totalChangeCount,
           COUNT(DISTINCT CASE WHEN c.kind <> 'reviewed' THEN c.id END) AS eligibleChangeCount,
           COUNT(DISTINCT CASE WHEN c.kind = 'reviewed' THEN c.id END) AS reviewedExcludedCount,
-          COUNT(DISTINCT s.change_id) AS sourceLinkedChangeCount,
-          COUNT(s.spec_change_id) AS sourceLinkCount
+          COUNT(DISTINCT CASE WHEN c.kind <> 'reviewed' THEN s.change_id END) AS sourceLinkedChangeCount,
+          COUNT(CASE WHEN c.kind <> 'reviewed' THEN s.spec_change_id END) AS sourceLinkCount
          FROM changes c
          JOIN releases r ON r.id = c.release_id AND r.product_id = ?
            AND EXISTS (SELECT 1 FROM spec_changes sc WHERE sc.spec_version_id = r.spec_version_id)
          LEFT JOIN change_sources s ON s.change_id = c.id
-           AND EXISTS (SELECT 1 FROM spec_changes ss WHERE ss.id = s.spec_change_id AND ss.spec_version_id = r.spec_version_id)
-         WHERE c.kind <> 'reviewed'`,
+           AND EXISTS (SELECT 1 FROM spec_changes ss WHERE ss.id = s.spec_change_id AND ss.spec_version_id = r.spec_version_id)`,
         [product.id],
       ),
     );
@@ -378,20 +377,25 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
         [release.id],
       ),
     );
-    const page = paginateById(changes, { offset: args.offset === undefined ? undefined : Number(args.offset), limit: args.limit === undefined ? undefined : Number(args.limit) });
     if (view === "canonical") {
+      const canonical = canonicalizeScenarios(changes.map((change) => ({
+        id: change.id,
+        featureName: change.featureName,
+        reference: change.scenarioReference,
+        specReference: String(release.specVersionId ?? "unknown"),
+        evidencePaths: [...evidencePathsForReconcile(change.beforeJson), ...evidencePathsForReconcile(change.afterJson)],
+      })));
+      const scenarioPage = paginateById(canonical.scenarios.map((scenario) => ({ ...scenario, id: scenario.rawRecordIds[0] })), { offset: args.offset === undefined ? undefined : Number(args.offset), limit: args.limit === undefined ? undefined : Number(args.limit) });
       return {
         release,
-        ...canonicalizeScenarios(page.changes.map((change) => ({
-          id: change.id,
-          featureName: change.featureName,
-          reference: change.scenarioReference,
-          specReference: String(release.specVersionId ?? "unknown"),
-          evidencePaths: [...evidencePathsForReconcile(change.beforeJson), ...evidencePathsForReconcile(change.afterJson)],
-        }))),
-        ...(args.limit === undefined ? {} : { offset: page.offset, limit: page.limit, total: page.total, hasMore: page.hasMore }),
+        rawCount: canonical.rawCount,
+        canonicalCount: canonical.canonicalCount,
+        collapsedCount: canonical.collapsedCount,
+        scenarios: scenarioPage.changes.map(({ id, ...scenario }) => scenario),
+        ...(args.limit === undefined ? {} : { offset: scenarioPage.offset, limit: scenarioPage.limit, total: scenarioPage.total, hasMore: scenarioPage.hasMore }),
       };
     }
+    const page = paginateById(changes, { offset: args.offset === undefined ? undefined : Number(args.offset), limit: args.limit === undefined ? undefined : Number(args.limit) });
     const paginated = page.changes.map((change) => ({
       ...change,
       before: change.beforeJson,
@@ -494,19 +498,24 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
       timeoutSeconds: args.timeoutSeconds === undefined ? undefined : Number(args.timeoutSeconds),
       pollSeconds: args.pollSeconds === undefined ? undefined : Number(args.pollSeconds),
       loadAttempt: async () => {
-        const runs = await queryRows<{ id: number; status: string; error_message: string | null }>(
-          execute("SELECT ar.id, ar.status, ar.error_message FROM analysis_runs ar JOIN repositories repo ON repo.id = ar.repository_id WHERE ar.after_sha LIKE ? AND repo.product_id = ? ORDER BY ar.created_at DESC, ar.id DESC LIMIT 1", [`${sha}%`, product.id]),
+        const runs = await queryRows<{ id: number; status: string; after_sha: string | null; error_message: string | null }>(
+          execute("SELECT ar.id, ar.status, ar.after_sha, ar.error_message FROM analysis_runs ar JOIN repositories repo ON repo.id = ar.repository_id WHERE ar.after_sha LIKE ? AND repo.product_id = ? ORDER BY ar.created_at DESC, ar.id DESC LIMIT 1", [`${sha}%`, product.id]),
         );
-        const releases = await queryRows<{ id: number }>(execute("SELECT id FROM releases WHERE product_id = ? AND sha LIKE ? ORDER BY committed_at DESC, id DESC LIMIT 1", [product.id, `${sha}%`]));
+        const releases = await queryRows<{ id: number; sha: string }>(execute("SELECT id, sha FROM releases WHERE product_id = ? AND sha LIKE ? ORDER BY committed_at DESC, id DESC LIMIT 1", [product.id, `${sha}%`]));
+        const releaseCandidates = await queryRows<{ candidateCount: number }>(
+          execute("SELECT COUNT(DISTINCT sha) AS candidateCount FROM releases WHERE product_id = ? AND sha LIKE ?", [product.id, `${sha}%`]),
+        );
         const candidates = await queryRows<{ candidateCount: number }>(
-          execute("SELECT COUNT(*) AS candidateCount FROM analysis_runs ar JOIN repositories repo ON repo.id = ar.repository_id WHERE ar.after_sha LIKE ? AND repo.product_id = ?", [`${sha}%`, product.id]),
+          execute("SELECT COUNT(DISTINCT ar.after_sha) AS candidateCount FROM analysis_runs ar JOIN repositories repo ON repo.id = ar.repository_id WHERE ar.after_sha LIKE ? AND repo.product_id = ?", [`${sha}%`, product.id]),
         );
         return {
           analysisRunId: runs[0]?.id ?? null,
           analysisStatus: runs[0]?.status ?? null,
           analysisError: runs[0]?.error_message ?? null,
           releaseId: releases[0]?.id ?? null,
-          candidateCount: Number(candidates[0]?.candidateCount ?? 0),
+          runAfterSha: runs[0]?.after_sha ?? null,
+          releaseSha: releases[0]?.sha ?? null,
+          candidateCount: Math.max(Number(candidates[0]?.candidateCount ?? 0), Number(releaseCandidates[0]?.candidateCount ?? 0)),
         };
       },
     });
@@ -627,18 +636,6 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
 const METHOD_NOT_FOUND = -32601;
 const INVALID_PARAMS = -32602;
 const INTERNAL_ERROR = -32603;
-
-/** 从 before/after JSON 的场景 evidence 抽证据路径（与 release notes 生成路由同口径）。 */
-function evidencePathsFromSubject(subject: unknown): string[] {
-  if (typeof subject !== "object" || subject === null) return [];
-  const scenarios = (subject as { scenarios?: unknown }).scenarios;
-  if (!Array.isArray(scenarios)) return [];
-  return scenarios.flatMap((scenario) => {
-    const evidence = (scenario as { evidence?: unknown }).evidence;
-    if (!Array.isArray(evidence)) return [];
-    return evidence.map((item) => String((item as { path?: string }).path ?? "")).filter(Boolean);
-  });
-}
 
 /** 取行辅助：Execute 返回 unknown（mysql2 元组 [rows, fields]；测试 mock 可能直接给行数组）。 */
 async function queryRows<T>(promise: Promise<unknown>): Promise<T[]> {

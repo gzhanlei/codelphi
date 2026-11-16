@@ -160,6 +160,19 @@ describe("reconcileRelease", () => {
     expect(result.unexpected[0]).toMatchObject({ beforePaths: [], afterPaths: ["lib/a.ts"], releaseFilePaths: ["lib/a.ts", "lib/x.ts"] });
   });
 
+  it("keeps scenario duplicate keys collision-safe for feature names containing pipes", () => {
+    const result = reconcileRelease({
+      releaseId: 229,
+      slug: "codelphi",
+      sha: "abc",
+      changes: [{ ...change(1, "功能|子功能", "EC-1"), featureKey: "功能|子功能" }, { ...change(2, "功能|子功能", "EC-1"), featureKey: "功能|子功能" }],
+      releaseFilePaths: ["lib/a.ts"],
+      analysis: completeAnalysis,
+      expectedIntents: [],
+    });
+    expect(result.duplicateClusters[0]).toMatchObject({ stableKey: "功能|子功能", scenarioIdentity: "EC-1" });
+  });
+
   it("never passes incomplete analysis even when intents match", () => {
     const result = reconcileRelease({
       releaseId: 229,

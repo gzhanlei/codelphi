@@ -420,15 +420,16 @@ describe("mcp server (A1)", () => {
   it("waits for the exact SHA only when the run and release are both complete", async () => {
     execute.mockImplementation(async (sql: string) => {
       if (String(sql).includes("FROM products WHERE organization_id")) return [[{ id: 9, slug: "radar", name: "Radar", description: "d" }]];
-      if (String(sql).includes("after_sha LIKE ?")) return [[{ id: 333, status: "succeeded", error_message: null }]];
-      if (String(sql).includes("FROM releases WHERE product_id = ? AND sha LIKE ?")) return [[{ id: 231 }]];
+      if (String(sql).includes("candidateCount")) return [[{ candidateCount: 1 }]];
+      if (String(sql).includes("after_sha LIKE ?")) return [[{ id: 333, status: "succeeded", after_sha: "abc1234", error_message: null }]];
+      if (String(sql).includes("FROM releases WHERE product_id = ? AND sha LIKE ?")) return [[{ id: 231, sha: "abc1234" }]];
       return [[]];
     });
     const response = await handleMcpRpc(runtime, rpc("tools/call", { name: "wait_for_release", arguments: { slug: "radar", sha: "abc1234", timeoutSeconds: 0 } }));
     const result = (response?.result as { structuredContent: { status: string; releaseId: number; analysisRunId: number } }).structuredContent;
     expect(result).toMatchObject({ status: "completed", releaseId: 231, analysisRunId: 333 });
     const runQuery = execute.mock.calls.find(([sql]) => String(sql).includes("after_sha LIKE ?"))!;
-    expect(String(runQuery[0])).toContain("SELECT ar.id, ar.status, ar.error_message");
+    expect(String(runQuery[0])).toContain("SELECT ar.id, ar.status, ar.after_sha, ar.error_message");
     expect(String(runQuery[0])).toContain("ORDER BY ar.created_at DESC, ar.id DESC");
   });
 
@@ -436,8 +437,8 @@ describe("mcp server (A1)", () => {
     execute.mockImplementation(async (sql: string) => {
       if (String(sql).includes("FROM products WHERE organization_id")) return [[{ id: 9, slug: "radar", name: "Radar", description: "d" }]];
       if (String(sql).includes("candidateCount")) return [[{ candidateCount: 1 }]];
-      if (String(sql).includes("after_sha LIKE ?")) return [[{ id: 333, status: "succeeded", error_message: null }]];
-      if (String(sql).includes("FROM releases WHERE product_id = ? AND sha LIKE ?")) return [[{ id: 231 }]];
+      if (String(sql).includes("after_sha LIKE ?")) return [[{ id: 333, status: "succeeded", after_sha: "abc1234", error_message: null }]];
+      if (String(sql).includes("FROM releases WHERE product_id = ? AND sha LIKE ?")) return [[{ id: 231, sha: "abc1234" }]];
       return [[]];
     });
     const response = await handleMcpRpc(runtime, rpc("tools/call", { name: "wait_for_release", arguments: { slug: "radar", sha: "abc1234", timeoutSeconds: 0 } }));
@@ -454,14 +455,14 @@ describe("mcp server (A1)", () => {
       if (String(sql).includes("COUNT(*) AS count FROM features")) return [[{ count: 14 }]];
       if (String(sql).includes("FROM releases WHERE product_id = ? ORDER BY committed_at DESC")) return [[{ id: 231, title: "v1", sha: "abc", committedAt: new Date(), specVersionId: 230 }]];
       if (String(sql).includes("totalReleaseCount")) return [[{ totalReleaseCount: 223, eligibleReleaseCount: 167, linkedReleaseCount: 167, legacyReleaseCount: 0 }]];
-      if (String(sql).includes("eligibleChangeCount")) return [[{ eligibleChangeCount: 2239, sourceLinkedChangeCount: 2239, sourceLinkCount: 13699, orphanLinkCount: 0 }]];
+      if (String(sql).includes("eligibleChangeCount")) return [[{ totalChangeCount: 2260, eligibleChangeCount: 2239, reviewedExcludedCount: 21, sourceLinkedChangeCount: 2239, sourceLinkCount: 13699, orphanLinkCount: 0 }]];
       if (String(sql).includes("FROM schema_migrations")) return [[{ name: "075.sql", appliedAt: "2026-11-15T19:00:00Z" }]];
       if (String(sql).includes("FROM analysis_runs")) return [[{ id: 333, status: "succeeded", after_sha: "abc", error_message: null }]];
       return [[]];
     });
     const response = await handleMcpRpc(runtime, rpc("tools/call", { name: "get_project_summary", arguments: { slug: "radar" } }));
     const health = (response?.result as { structuredContent: { releaseHealth: { sourceLinkedRatio: number; canonicalProjectionRatio: number; legacyReleaseCount: number } } }).structuredContent.releaseHealth;
-    expect(health).toMatchObject({ sourceLinkedRatio: 1, canonicalProjectionRatio: 1, legacyReleaseCount: 0 });
+    expect(health).toMatchObject({ sourceLinkedRatio: 1, canonicalProjectionRatio: 1, legacyReleaseCount: 0, totalChangeCount: 2260, eligibleChangeCount: 2239, reviewedExcludedCount: 21 });
     const orphanQuery = execute.mock.calls.find(([sql]) => String(sql).includes("orphanLinkCount"))!;
     expect(String(orphanQuery[0])).toContain("r.product_id = ? AND (c.id IS NULL OR r.id IS NULL OR sc.id IS NULL)");
     expect(String(orphanQuery[0])).not.toContain("OR r.id IS NULL)");

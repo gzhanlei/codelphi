@@ -105,6 +105,17 @@ describe("waitForRelease", () => {
     expect(result.error).toBe("boom");
   });
 
+  it("returns review when run and release SHA identities differ", async () => {
+    const result = await waitForRelease({
+      sha: "abc1234",
+      timeoutSeconds: 1,
+      pollSeconds: 1,
+      loadAttempt: vi.fn(async () => ({ analysisRunId: 333, analysisStatus: "succeeded", analysisError: null, releaseId: 231, releaseSha: "different", runAfterSha: "abc1234", candidateCount: 1 })),
+      sleep: vi.fn(),
+    });
+    expect(result).toMatchObject({ status: "review", releaseId: 231, analysisRunId: 333 });
+  });
+
   it("returns review for an ambiguous short SHA prefix", async () => {
     const result = await waitForRelease({
       sha: "abc1234",
