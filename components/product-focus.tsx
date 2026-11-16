@@ -38,7 +38,7 @@ export function ProductFocus({ data, locale = "zh-CN" }: { data: ReturnType<type
         {data.changes.length === 0 ? <p className="overview-note">{pick(locale, COPY.noChanges)}</p> : data.changes.map((change) => (
           <details className="impact-item" key={change.id}>
             <summary><strong>{change.featureName}</strong> · {change.groupLabel}</summary>
-            <p>{change.summary}</p>
+            {change.summaries.map((summary) => <p key={summary}>{summary}</p>)}
             {change.evidencePaths.length > 0 ? <p>证据：{[...new Set(change.evidencePaths)].join("、")}</p> : null}
           </details>
         ))}

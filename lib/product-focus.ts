@@ -46,28 +46,51 @@ export function buildProductFocus(input: Input) {
 
   const latestRelease = input.releases[0];
   const behaviorChanges = latestRelease ? input.behaviorChanges.filter((change) => change.releaseId === latestRelease.id) : [];
-  const changeGroups = new Map<string, { added: number; removed: number; changed: number }>();
+  const changeGroups = new Map<string, {
+    releaseId: number;
+    featureName: string;
+    counts: { added: number; removed: number; changed: number };
+    userImpacts: string[];
+    fallbackSummaries: string[];
+    evidencePaths: string[];
+  }>();
   for (const change of behaviorChanges) {
-    const group = changeGroups.get(change.featureName) ?? { added: 0, removed: 0, changed: 0 };
-    group[change.kind] += 1;
+    const group = changeGroups.get(change.featureName) ?? {
+      releaseId: change.releaseId,
+      featureName: change.featureName,
+      counts: { added: 0, removed: 0, changed: 0 },
+      userImpacts: [],
+      fallbackSummaries: [],
+      evidencePaths: [],
+    };
+    group.counts[change.kind] += 1;
+    const userImpact = (input.changes ?? []).find((item) => item.releaseId === change.releaseId && item.featureName === change.featureName && item.userImpact.trim())?.userImpact.trim();
+    if (userImpact) group.userImpacts.push(userImpact);
+    else if (change.summary.trim()) group.fallbackSummaries.push(change.summary);
+    group.evidencePaths.push(...evidenceFromSubject(change.kind === "removed" ? change.before : change.after));
     changeGroups.set(change.featureName, group);
   }
-  const releaseChanges = behaviorChanges.map((change) => ({
-    id: `release-${change.id}`,
-    releaseId: change.releaseId,
-    featureName: change.featureName,
-    kind: change.kind,
-    summary: (input.changes ?? []).find((item) => item.releaseId === change.releaseId && item.featureName === change.featureName && item.userImpact.trim())?.userImpact || change.summary,
-    evidencePaths: evidenceFromSubject(change.kind === "removed" ? change.before : change.after),
-    groupLabel: changeGroupLabel(changeGroups.get(change.featureName) ?? { added: 0, removed: 0, changed: 0 }),
-  }));
+  const releaseChanges = [...changeGroups.values()].map((group) => {
+    const summaries = [...new Set(group.userImpacts.length > 0 ? group.userImpacts : group.fallbackSummaries)];
+    return {
+      id: `release-${group.releaseId}-${group.featureName}`,
+      releaseId: group.releaseId,
+      featureName: group.featureName,
+      kind: "changed" as const,
+      summary: summaries[0] ?? "",
+      summaries,
+      evidencePaths: [...new Set(group.evidencePaths)],
+      groupLabel: changeGroupLabel(group.counts),
+    };
+  });
   const manualChanges = latestRelease ? input.features.filter((feature) => feature.lastEditedAt && new Date(feature.lastEditedAt) >= latestRelease.committedAt).map((feature) => ({
     id: `manual-${feature.id}`,
     releaseId: latestRelease.id,
     featureName: feature.name,
     kind: "changed" as const,
     summary: feature.summary,
-    evidencePaths: input.scenarios.filter((scenario) => scenario.featureId === feature.id).flatMap((scenario) => evidenceItems(scenario.evidence).map((item) => item.path)),
+    summaries: [feature.summary],
+    evidencePaths: [...new Set(input.scenarios.filter((scenario) => scenario.featureId === feature.id).flatMap((scenario) => evidenceItems(scenario.evidence).map((item) => item.path)))],
     groupLabel: "人工维护",
   })) : [];
   const changes = [...manualChanges, ...releaseChanges].slice(0, 5);

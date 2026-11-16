@@ -50,6 +50,27 @@ describe("product focus projection", () => {
     expect(result.changes[0].evidencePaths).toEqual(["lib/export.ts"]);
   });
 
+  it("groups scenario changes into one card per feature without losing their summaries or evidence", () => {
+    const result = buildProductFocus({
+      ...base,
+      features: [feature(1, "导出"), feature(2, "搜索")],
+      scenarios: [],
+      behaviorChanges: [
+        { id: 31, releaseId: 8, kind: "changed", entityType: "scenario", featureName: "导出", scenarioReference: "HP-1", summary: "更新导出", before: {}, after: { evidence: [{ path: "lib/export.ts", startLine: 9 }] } },
+        { id: 32, releaseId: 8, kind: "added", entityType: "scenario", featureName: "导出", scenarioReference: "HP-2", summary: "新增批量导出", before: null, after: { evidence: [{ path: "lib/export.ts", startLine: 9 }, { path: "lib/batch.ts", startLine: 12 }] } },
+        { id: 33, releaseId: 8, kind: "added", entityType: "scenario", featureName: "搜索", scenarioReference: "HP-1", summary: "新增搜索", before: null, after: { evidence: [{ path: "lib/search.ts", startLine: 4 }] } },
+      ],
+    });
+    expect(result.changes).toHaveLength(2);
+    expect(result.changes[0]).toMatchObject({
+      featureName: "导出",
+      groupLabel: "新增 1 · 更新 1",
+      summaries: ["更新导出", "新增批量导出"],
+      evidencePaths: ["lib/export.ts", "lib/batch.ts"],
+    });
+    expect(result.changes[1].featureName).toBe("搜索");
+  });
+
   it("uses an honest empty state when there is no substantive attention", () => {
     const result = buildProductFocus({ ...base, features: [feature(1, "普通功能")], scenarios: [], behaviorChanges: [] });
     expect(result.attention).toEqual([]);
