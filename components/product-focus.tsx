@@ -6,6 +6,7 @@ import type { buildProductFocus } from "@/lib/product-focus";
 const COPY = {
   mapTitle: { "zh-CN": "产品现在能做什么", en: "What the product does" },
   changesTitle: { "zh-CN": "最近重要变化", en: "Important recent changes" },
+  changesNotice: { "zh-CN": "AI 提取的候选变化，需人工确认", en: "AI-extracted candidate changes; confirmation required" },
   attentionTitle: { "zh-CN": "需要关注", en: "Needs attention" },
   confirmationTitle: { "zh-CN": "需要确认", en: "Needs confirmation" },
   empty: { "zh-CN": "当前没有需要重点关注的变化", en: "No changes need attention right now" },
@@ -35,6 +36,7 @@ export function ProductFocus({ data, locale = "zh-CN" }: { data: ReturnType<type
 
       <section className="overview-panel">
         <div className="overview-panel-heading"><h2>{pick(locale, COPY.changesTitle)}</h2></div>
+        {data.changes.length > 0 ? <p className="overview-note">{pick(locale, COPY.changesNotice)}</p> : null}
         {data.changes.length === 0 ? <p className="overview-note">{pick(locale, COPY.noChanges)}</p> : data.changes.map((change) => (
           <details className="impact-item" key={change.id}>
             <summary><strong>{change.featureName}</strong> · {change.groupLabel}</summary>

@@ -80,10 +80,16 @@ describe("product focus projection", () => {
 
 describe("product focus rendering", () => {
   it("uses native details for progressive evidence and shows the empty attention state", () => {
-    const result = buildProductFocus({ ...base, features: [feature(1, "普通功能")], scenarios: [], behaviorChanges: [] });
+    const result = buildProductFocus({
+      ...base,
+      features: [feature(1, "普通功能")],
+      scenarios: [],
+      behaviorChanges: [{ id: 31, releaseId: 8, kind: "changed", entityType: "feature", featureName: "普通功能", scenarioReference: "", summary: "更新普通功能", before: {}, after: { evidence: [] } }],
+    });
     const html = renderToStaticMarkup(createElement(ProductFocus, { data: result }));
     expect(html).toContain("<details");
     expect(html).toContain("当前没有需要重点关注的变化");
+    expect(html).toContain("AI 提取的候选变化，需人工确认");
     expect(html).toContain("查看全部产品信息");
   });
 });
