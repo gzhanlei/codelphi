@@ -5,6 +5,7 @@ import type { RunContext } from "../lib/analysis";
 import { detectFeatureCollapses, detectMisplacedScenarios, detectSpecCollapse, featureParentKey, foldVariantFeatures, insertSpecVersion, loadLatestSpecVersionLanguage, loadPreviousFeatureNames } from "../lib/spec-versions";
 const run: RunContext = { id: 8, repositoryId: 3, productId: 4, owner: "gzhanlei", name: "radar", beforeSha: "a", afterSha: "b", connectionId: null, provider: "github", organizationId: 1, productSlug: "radar", productName: "Radar" };
 const scenario = { reference: "HP-1", context: "Visitor", action: "Signs in", outcome: "Dashboard", category: "happy" as const, evidence: [] };
+const previousScenario = (reference: string, path: string) => ({ featureId: 1, reference, context: "User", action: "Uses links", outcome: "Links work", category: "happy", source: "generated", evidence: JSON.stringify([{ path, startLine: 1 }]) });
 const result: AnalysisResult = {
   product: { description: "Versioned product", evidence: [{ path: "lib/spec-versions.ts", startLine: 1 }] },
   release: { title: "Title", summary: "Summary" },
@@ -15,7 +16,7 @@ const result: AnalysisResult = {
   ],
 };
 
-function connection(previousVersions: Array<{ id: number }>, manual = false, tombstones: { feature?: string; scenario?: string } = {}) {
+function connection(previousVersions: Array<{ id: number }>, manual = false, tombstones: { feature?: string; scenario?: string } = {}, previousScenarios: Array<Record<string, unknown>> = [{ featureId: 1, reference: "HP-1", context: "Visitor", action: "Signs in", outcome: "Dashboard", category: "happy", source: "generated", evidence: "[]" }]) {
   const changes: unknown[][] = [];
   let featureId = 100;
   let changeId = 500;
@@ -28,7 +29,7 @@ function connection(previousVersions: Array<{ id: number }>, manual = false, tom
           { id: 2, name: "Legacy", summary: "Removed", parentKey: null, source: "generated" },
         ]];
       }
-      if (sql.includes("FROM spec_scenarios WHERE spec_feature_id")) return [[{ featureId: 1, reference: "HP-1", context: "Visitor", action: "Signs in", outcome: "Dashboard", category: "happy", source: "generated", evidence: "[]" }]];
+      if (sql.includes("FROM spec_scenarios WHERE spec_feature_id")) return [previousScenarios];
       if (sql.includes("SELECT name FROM features WHERE product_id")) return [tombstones.feature ? [{ name: tombstones.feature }] : []];
       if (sql.includes("SELECT f.name AS featureName")) return [tombstones.scenario ? [{ featureName: "Authentication", reference: tombstones.scenario }] : []];
       if (sql.includes("FROM features LEFT JOIN features parents")) return [manual ? [{ id: 5, name: "Manual feature", summary: "Curated", parentId: 42, parentKey: "Generated parent", source: "manual" }] : []];
@@ -99,6 +100,39 @@ describe("spec version persistence", () => {
     // 返回值是合并后的完整规格：AI 提取的受影响功能 + 沿用的未受影响功能，
     // M9 影子对比以此（而非 AI 原始输出）为对比对象。
     expect(features.map((feature) => feature.name)).toEqual(expect.arrayContaining(["Legacy", result.features[0].name]));
+  });
+
+  it("preserves an omitted scenario when its evidence did not change", async () => {
+    const db = connection([{ id: 11 }], false, {}, [previousScenario("HP-1", "server/web/src/utils/linkify.ts")]);
+    const { features } = await insertSpecVersion(
+      db,
+      run,
+      { ...result, features: [{ name: "Authentication", summary: "Fresh", scenarios: [] }] },
+      { affectedKeys: new Set(["authentication"]), behavioralChangePaths: new Set(["docs/unrelated.md"]) },
+    );
+    expect(features.find((feature) => feature.name === "Authentication")?.scenarios.map((scenario) => scenario.reference)).toContain("HP-1");
+  });
+
+  it("allows an omitted scenario to be removed when its evidence changed", async () => {
+    const db = connection([{ id: 11 }], false, {}, [previousScenario("HP-1", "server/web/src/utils/linkify.ts")]);
+    const { features } = await insertSpecVersion(
+      db,
+      run,
+      { ...result, features: [{ name: "Authentication", summary: "Fresh", scenarios: [] }] },
+      { affectedKeys: new Set(["authentication"]), behavioralChangePaths: new Set(["server/web/src/utils/linkify.ts"]) },
+    );
+    expect(features.find((feature) => feature.name === "Authentication")?.scenarios.map((scenario) => scenario.reference)).not.toContain("HP-1");
+  });
+
+  it("preserves a completely omitted feature when all of its evidence is unchanged", async () => {
+    const db = connection([{ id: 11 }], false, {}, [previousScenario("HP-1", "server/web/src/utils/linkify.ts")]);
+    const { features } = await insertSpecVersion(
+      db,
+      run,
+      { ...result, features: [] },
+      { affectedKeys: new Set(["authentication"]), behavioralChangePaths: new Set(["docs/unrelated.md"]) },
+    );
+    expect(features.find((feature) => feature.name === "Authentication")?.scenarios.map((scenario) => scenario.reference)).toContain("HP-1");
   });
 
   it("keeps full-mode semantics when no affected keys are given", async () => {

@@ -37,6 +37,23 @@ describe("mcp server (A1)", () => {
     expect(files.inputSchema.properties).toHaveProperty("view");
   });
 
+  it("falls back to release evidence when current scenario search is empty", async () => {
+    const search = MCP_TOOLS.find((tool) => tool.name === "search_scenarios")!;
+    expect(search.inputSchema.properties).toHaveProperty("scope");
+    execute.mockImplementation(async (sql: string) => {
+      if (String(sql).includes("FROM products WHERE organization_id")) return [[{ id: 9, slug: "radar", name: "Radar", description: "d" }]];
+      if (String(sql).includes("FROM spec_changes")) return [[{
+        releaseId: 35, sha: "abc123", committedAt: new Date(), specChangeId: 1069, kind: "added",
+        featureName: "Web 管理后台", scenarioReference: "ER-1", summary: "非 HTTP(S) 保持纯文本",
+        after: { context: "c", action: "a", outcome: "o", evidence: [] },
+      }]];
+      return [[]];
+    });
+    const response = await handleMcpRpc(runtime, rpc("tools/call", { name: "search_scenarios", arguments: { slug: "radar", query: "链接", scope: "fallback" } }));
+    const content = (response?.result as { structuredContent: { history: Array<{ source: string; releaseId: number }> } }).structuredContent;
+    expect(content.history).toEqual([expect.objectContaining({ source: "release", releaseId: 35 })]);
+  });
+
   it("returns no response for notifications (no id)", async () => {
     expect(await handleMcpRpc(runtime, { jsonrpc: "2.0", method: "notifications/initialized" })).toBeNull();
   });

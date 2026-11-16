@@ -638,3 +638,25 @@ export function mergeSpecSources(generated: SpecFeature[], manual: SpecFeature[]
   }
   return [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
+
+/** 增量提取未覆盖的旧证据不等于行为已移除：只有证据进入本次行为变更集，才允许旧场景退出。 */
+export function preserveUnchangedEvidence(previousFeatures: SpecFeature[], generated: SpecFeature[], behavioralChangePaths: ReadonlySet<string>): SpecFeature[] {
+  const result = generated.map((feature) => ({ ...feature, scenarios: [...feature.scenarios] }));
+  const byKey = new Map(result.map((feature) => [specFeatureKey(feature.name), feature] as const));
+  for (const previousFeature of previousFeatures) {
+    if (previousFeature.source === "manual") continue;
+    const unchanged = previousFeature.scenarios.filter((scenario) => scenario.source !== "manual"
+      && scenario.evidence.every((item) => !behavioralChangePaths.has(item.path)));
+    if (unchanged.length === 0) continue;
+    const current = byKey.get(specFeatureKey(previousFeature.name));
+    if (!current) {
+      const restored = { ...previousFeature, scenarios: unchanged };
+      result.push(restored);
+      byKey.set(specFeatureKey(restored.name), restored);
+      continue;
+    }
+    const references = new Set(current.scenarios.map((scenario) => scenario.reference));
+    current.scenarios.push(...unchanged.filter((scenario) => !references.has(scenario.reference)));
+  }
+  return result;
+}

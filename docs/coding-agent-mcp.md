@@ -18,6 +18,8 @@ search_scenarios(slug, query) → features[].stableKey → get_feature(slug, sta
 
 搜索结果自带 `stableKey`（功能名归一化），可直接寻址 `get_feature` / `get_scenario`。
 
+`search_scenarios` 默认使用 `scope=fallback`：当前场景为空时查询发布历史。可用 `current`、`history`、`fallback`、`all` 控制范围。历史结果带 `source="release"`、releaseId 和 SHA，只能作为历史线索，不能证明当前行为仍存在。查询支持「助手/助理」及 i18n/localization/国际化的基本变体，但这些变体只用于召回，不用于身份判定。
+
 ## 2. 改动前影响面（Edit 之前）
 
 改哪个文件，先反查谁以它为证据：
@@ -33,6 +35,26 @@ get_feature_connections(slug, path: "lib/xxx.ts") → 共享该文件的功能�
 ```
 
 两者都是确定性计算，零 AI 成本。共同修改同一文件的连接是廉价的爆炸半径信号。
+
+### 2.1 本地验证依赖影响分析
+
+当修改引入新的源码依赖时，可用本地只读 CLI 检查真实验证命令或静态 import 是否会遗漏它：
+
+```bash
+# Tingfeng / swiftc 命令适配器
+npx tsx scripts/validation-impact.ts \
+  --repo /path/to/tingfeng \
+  --target ios/Tingfeng/DSP/SoundEventTracker.swift \
+  --require ios/Tingfeng/Localization.swift
+
+# TypeScript / Vue 相对 import 适配器（repo 指向 Web 根目录）
+npx tsx scripts/validation-impact.ts \
+  --repo /path/to/AIRecord/server/web \
+  --target src/utils/linkify.ts \
+  --require src/utils/NewDependency.ts
+```
+
+返回受影响命令或测试文件、依赖链和证据位置。`swiftc_readme` 只解析 `ios/Tests/README.md` 中实际命令；`typescript_relative_imports` 只分析相对 import。动态 import、外部包和完整构建语义不在当前证明范围内。该工具是验证影响提示，不替代实际测试和构建。
 
 ## 3. 契约对齐（编码中）
 

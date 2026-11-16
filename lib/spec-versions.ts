@@ -5,7 +5,7 @@ import { defaultExecute, type Execute } from "./db";
 import { evidenceItems } from "./evidence";
 import { nextReference } from "./extraction-merge";
 import type { ReleaseChangeFact } from "./release-change-projection";
-import { diffSpec, featureScenarioPairMatch, featureVariantSimilar, mergeSpecSources, scenarioBehaviorEqual, specFeatureKey, specScenarioKey, type SpecChange, type SpecFeature, type SpecScenario, type SpecTombstones } from "./spec-diff";
+import { diffSpec, featureScenarioPairMatch, featureVariantSimilar, mergeSpecSources, preserveUnchangedEvidence, scenarioBehaviorEqual, specFeatureKey, specScenarioKey, type SpecChange, type SpecFeature, type SpecScenario, type SpecTombstones } from "./spec-diff";
 import { classifySpecHighlight } from "./spec-highlights";
 
 interface FeatureRow {
@@ -334,6 +334,9 @@ export async function insertSpecVersion(connection: PoolConnection, run: RunCont
         keys: hijackedNames.map((name) => specFeatureKey(name)),
       });
     }
+  }
+  if (affectedKeys) {
+    generated = preserveUnchangedEvidence(previous?.features ?? [], generated, options.behavioralChangePaths ?? new Set<string>());
   }
   const features = mergeSpecSources(generated, manual, tombstones, carried);
   // BM-11 功能级变体折叠（跨 run）：变体命名并入上一版既有身份，改名型重命名回旧键、
