@@ -37,6 +37,24 @@ describe("product focus projection", () => {
     expect(result.emptyAttention).toBe(false);
   });
 
+  it("does not let manual status outweigh scenario coverage when selecting a partial capability map", () => {
+    const result = buildProductFocus({
+      ...base,
+      features: [
+        feature(1, "人工低覆盖", { source: "manual" }),
+        feature(2, "生成高覆盖"),
+        feature(3, "生成中覆盖"),
+        feature(4, "另一能力"),
+        feature(5, "更多能力"),
+        feature(6, "其他能力"),
+      ],
+      scenarios: Array.from({ length: 10 }, (_, index) => ({ id: 100 + index, featureId: 2, reference: `HP-${index + 1}`, context: "用户", action: "使用", outcome: "完成", category: "happy", source: "generated", evidence: [] })),
+      behaviorChanges: [],
+    });
+    expect(result.map[0].name).toBe("生成高覆盖");
+    expect(result.featureTotal).toBe(6);
+  });
+
   it("uses canonical names for risk filtering while rendering curated names", () => {
     const result = buildProductFocus({
       ...base,
@@ -128,6 +146,10 @@ describe("product focus rendering", () => {
     expect(html).toContain("<details");
     expect(html).toContain("当前没有需要重点关注的变化");
     expect(html).toContain("含 AI 提取的候选变化；全部内容需人工确认");
+    expect(html).toContain("部分产品能力");
+    expect(html).toContain("共 1 项");
+    expect(html).toContain('href="/products/default/radar?view=spec"');
+    expect(html).not.toContain("产品现在能做什么");
     expect(html).toContain("功能概述");
     expect(html).toContain("普通功能说明");
     expect(html).toContain("AI 提取");

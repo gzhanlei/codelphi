@@ -44,7 +44,7 @@ export function buildProductFocus(input: Input) {
     scenarios: scenariosOf(feature, input.scenarios),
     href: `${input.productBase}${featureHref(feature.id)}`,
   })).sort((a, b) => Number(b.verification === "stale-verified") - Number(a.verification === "stale-verified")
-    || Number(b.source === "manual") - Number(a.source === "manual")
+    || b.scenarioCount - a.scenarioCount
     || a.canonicalName.localeCompare(b.canonicalName) || a.name.localeCompare(b.name)).slice(0, 5);
 
   const latestRelease = input.releases[0];
@@ -106,5 +106,5 @@ export function buildProductFocus(input: Input) {
   const attention = attentionCandidates.filter((item) => item.source === "manual" || HIGH_RISK.test(item.featureName)).slice(0, 3).map((item) => ({ featureName: item.label, reason: item.reason }));
   const confirmations = [...input.features.filter((feature) => !feature.verifiedAt).map((feature) => ({ featureName: displayName(feature.name), reason: "尚未人工确认" })), ...input.scenarios.filter((scenario) => !scenario.verifiedAt).map((scenario) => ({ featureName: displayName(input.features.find((feature) => feature.id === scenario.featureId)?.name ?? ""), reason: "尚未人工确认" }))].filter((item) => item.featureName).slice(0, 3);
 
-  return { map, changes, attention, confirmations, emptyAttention: attention.length === 0 };
+  return { map, featureTotal: input.features.length, allFeaturesHref: `${input.productBase}?view=spec`, changes, attention, confirmations, emptyAttention: attention.length === 0 };
 }

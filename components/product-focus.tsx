@@ -4,7 +4,7 @@ import { verificationLabel } from "@/lib/spec-editor-ui";
 import type { buildProductFocus } from "@/lib/product-focus";
 
 const COPY = {
-  mapTitle: { "zh-CN": "产品现在能做什么", en: "What the product does" },
+  mapTitle: { "zh-CN": "部分产品能力", en: "Selected product capabilities" },
   changesTitle: { "zh-CN": "最近重要变化", en: "Important recent changes" },
   changesNotice: { "zh-CN": "含 AI 提取的候选变化；全部内容需人工确认", en: "Includes AI-extracted candidates; all content requires confirmation" },
   attentionTitle: { "zh-CN": "需要关注", en: "Needs attention" },
@@ -20,13 +20,14 @@ const COPY = {
   manual: { "zh-CN": "人工维护", en: "Manual" },
   generated: { "zh-CN": "AI 提取", en: "AI extracted" },
   behaviorDetails: { "zh-CN": "查看行为规格与证据", en: "View behavior spec and evidence" },
+  allCapabilities: { "zh-CN": "查看全部", en: "View all" },
 } as const;
 
 export function ProductFocus({ data, locale = "zh-CN" }: { data: ReturnType<typeof buildProductFocus>; locale?: UiLocale }) {
   return (
     <div className="product-focus">
       <section className="overview-panel">
-        <div className="overview-panel-heading"><h2>{pick(locale, COPY.mapTitle)}</h2></div>
+        <div className="overview-panel-heading"><h2>{pick(locale, COPY.mapTitle)}</h2><Link className="overview-text-link" href={data.allFeaturesHref}>共 {data.featureTotal} 项 · {pick(locale, COPY.allCapabilities)}</Link></div>
         {data.map.length === 0 ? <p className="overview-note">No feature specifications yet</p> : data.map.map((feature) => (
           <article className="impact-item" key={feature.id}>
             <strong>{feature.name}</strong><span className="overview-meta-inline"> · {feature.scenarioCount > 0 ? `${feature.scenarioCount}${pick(locale, COPY.scenarios)}` : pick(locale, COPY.overview)} · {feature.source === "manual" ? pick(locale, COPY.manual) : pick(locale, COPY.generated)} · {verificationLabel(feature.verification, locale)}</span>
