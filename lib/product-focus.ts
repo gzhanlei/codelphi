@@ -73,5 +73,5 @@ export function buildProductFocus(input: Input) {
   const attention = attentionCandidates.filter((item) => item.source === "manual" || HIGH_RISK.test(item.featureName)).slice(0, 3).map((item) => ({ featureName: item.label, reason: item.reason }));
   const confirmations = [...input.features.filter((feature) => !feature.verifiedAt).map((feature) => ({ featureName: displayName(feature.name), reason: "尚未人工确认" })), ...input.scenarios.filter((scenario) => !scenario.verifiedAt).map((scenario) => ({ featureName: displayName(input.features.find((feature) => feature.id === scenario.featureId)?.name ?? ""), reason: "尚未人工确认" }))].filter((item) => item.featureName).slice(0, 3);
 
-  return { changes, attention, confirmations, emptyAttention: attention.length === 0 };
+  return { changes, attention, confirmations, emptyAttention: attention.length === 0 && confirmations.length === 0 };
 }

@@ -93,10 +93,14 @@ describe("product focus projection", () => {
     expect(result.changes[1].featureName).toBe("功能丙");
   });
 
-  it("uses an honest empty state when there is no substantive attention", () => {
-    const result = buildProductFocus({ ...base, features: [feature(1, "普通功能")], scenarios: [], behaviorChanges: [] });
-    expect(result.attention).toEqual([]);
-    expect(result.emptyAttention).toBe(true);
+  it("shows the empty state only when there is no attention or confirmation", () => {
+    const empty = buildProductFocus({ ...base, features: [feature(1, "普通功能", { verifiedAt: new Date("2026-11-01") })], scenarios: [], behaviorChanges: [] });
+    expect(empty.attention).toEqual([]);
+    expect(empty.emptyAttention).toBe(true);
+    const pending = buildProductFocus({ ...base, features: [feature(1, "普通功能")], scenarios: [], behaviorChanges: [] });
+    expect(pending.attention).toEqual([]);
+    expect(pending.confirmations).toHaveLength(1);
+    expect(pending.emptyAttention).toBe(false);
   });
 
   it("uses curated display names without changing analysis identities", () => {
@@ -121,10 +125,19 @@ describe("product focus rendering", () => {
     });
     const html = renderToStaticMarkup(createElement(ProductFocus, { data: result }));
     expect(html).toContain("<details");
-    expect(html).toContain("当前没有需要重点关注的变化");
+    expect(html).toContain("需要处理");
+    expect(html).toContain("需要确认（1）");
+    expect(html).not.toContain("当前没有需要处理的事项");
     expect(html).toContain("含 AI 提取的候选变化；全部内容需人工确认");
     expect(html).not.toContain("部分产品能力");
     expect(html).not.toContain("当前核心能力");
     expect(html).not.toContain("查看全部产品信息");
+  });
+
+  it("shows an empty state only when both attention and confirmations are empty", () => {
+    const result = buildProductFocus({ ...base, features: [feature(1, "普通功能", { verifiedAt: new Date("2026-11-01") })], scenarios: [], behaviorChanges: [] });
+    const html = renderToStaticMarkup(createElement(ProductFocus, { data: result }));
+    expect(html).toContain("当前没有需要处理的事项");
+    expect(html).not.toContain("需要确认（");
   });
 });
