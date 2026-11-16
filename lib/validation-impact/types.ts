@@ -9,6 +9,7 @@ export interface ValidationImpactItem {
   evidencePath: string;
   sourceLine: number | null;
   dependencyChain: string[];
+  command?: string;
 }
 
 export interface ValidationImpactResult {

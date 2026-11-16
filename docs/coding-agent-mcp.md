@@ -56,6 +56,16 @@ npx tsx scripts/validation-impact.ts \
 
 返回受影响命令或测试文件、依赖链和证据位置。`swiftc_readme` 只解析 `ios/Tests/README.md` 中实际命令；`typescript_relative_imports` 只分析相对 import。动态 import、外部包和完整构建语义不在当前证明范围内。该工具是验证影响提示，不替代实际测试和构建。
 
+修改完成后可用 `validation:run` 执行预测命中的验证并比较实际失败集合：
+
+```bash
+npx tsx scripts/validation-run.ts \
+  --repo /path/to/tingfeng \
+  --change ios/Tingfeng/DSP/SimpleModeLogic.swift:ios/Tingfeng/DSP/LocalizedCountFormatter.swift
+```
+
+`--change` 可重复传入多个目标，冒号后为可选的逗号分隔新增依赖。仅传目标而不传依赖时，会执行所有包含该目标的验证命令，适合修改后的定向回归。`--expect-failures` 仅用于缺失依赖回放，计算误报；正常修复后不应把测试通过误记为工具误报。Swift 命令在 `ios/` 下执行，Vitest 在 Web 根目录执行。
+
 ## 3. 契约对齐（编码中）
 
 账本是**快照**：`get_project_summary.specSnapshot`（`sha` + `committedAt` + `specVersionId`）告诉你它对应哪个 commit。工作区领先于账本的部分不在账本里，证据行号以快照 commit 为准。

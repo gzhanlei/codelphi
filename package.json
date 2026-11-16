@@ -18,6 +18,7 @@
     "archify:prototype": "tsx scripts/architecture-prototype.ts",
     "stack:corpus": "tsx scripts/stack-corpus.ts",
     "validation:impact": "tsx scripts/validation-impact.ts",
+    "validation:run": "tsx scripts/validation-run.ts",
     "coverage": "vitest run --coverage"
   },
   "dependencies": {
