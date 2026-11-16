@@ -81,6 +81,22 @@ describe("product focus projection", () => {
     expect(result.changes[1].featureName).toBe("搜索");
   });
 
+  it("groups a batch of manual copy edits into one item so release changes remain visible", () => {
+    const result = buildProductFocus({
+      ...base,
+      features: [
+        feature(1, "功能甲", { displayName: "能力甲", lastEditedAt: new Date("2026-11-09") }),
+        feature(2, "功能乙", { displayName: "能力乙", lastEditedAt: new Date("2026-11-09") }),
+        feature(3, "功能丙"),
+      ],
+      scenarios: [],
+      behaviorChanges: [{ id: 31, releaseId: 8, kind: "changed", entityType: "scenario", featureName: "功能丙", scenarioReference: "HP-1", summary: "更新功能丙", before: {}, after: { evidence: [] } }],
+    });
+    expect(result.changes).toHaveLength(2);
+    expect(result.changes[0]).toMatchObject({ featureName: "2 项产品知识维护", summaries: ["能力甲：功能甲说明", "能力乙：功能乙说明"] });
+    expect(result.changes[1].featureName).toBe("功能丙");
+  });
+
   it("uses an honest empty state when there is no substantive attention", () => {
     const result = buildProductFocus({ ...base, features: [feature(1, "普通功能")], scenarios: [], behaviorChanges: [] });
     expect(result.attention).toEqual([]);
@@ -111,7 +127,7 @@ describe("product focus rendering", () => {
     const html = renderToStaticMarkup(createElement(ProductFocus, { data: result }));
     expect(html).toContain("<details");
     expect(html).toContain("当前没有需要重点关注的变化");
-    expect(html).toContain("AI 提取的候选变化，需人工确认");
+    expect(html).toContain("含 AI 提取的候选变化；全部内容需人工确认");
     expect(html).toContain("功能概述");
     expect(html).toContain("普通功能说明");
     expect(html).toContain("AI 提取");

@@ -6,7 +6,7 @@ import type { buildProductFocus } from "@/lib/product-focus";
 const COPY = {
   mapTitle: { "zh-CN": "产品现在能做什么", en: "What the product does" },
   changesTitle: { "zh-CN": "最近重要变化", en: "Important recent changes" },
-  changesNotice: { "zh-CN": "AI 提取的候选变化，需人工确认", en: "AI-extracted candidate changes; confirmation required" },
+  changesNotice: { "zh-CN": "含 AI 提取的候选变化；全部内容需人工确认", en: "Includes AI-extracted candidates; all content requires confirmation" },
   attentionTitle: { "zh-CN": "需要关注", en: "Needs attention" },
   confirmationTitle: { "zh-CN": "需要确认", en: "Needs confirmation" },
   empty: { "zh-CN": "当前没有需要重点关注的变化", en: "No changes need attention right now" },

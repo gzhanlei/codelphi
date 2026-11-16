@@ -86,16 +86,17 @@ export function buildProductFocus(input: Input) {
       groupLabel: changeGroupLabel(group.counts),
     };
   });
-  const manualChanges = latestRelease ? input.features.filter((feature) => feature.lastEditedAt && new Date(feature.lastEditedAt) >= latestRelease.committedAt).map((feature) => ({
-    id: `manual-${feature.id}`,
+  const manualFeatures = latestRelease ? input.features.filter((feature) => feature.lastEditedAt && new Date(feature.lastEditedAt) >= latestRelease.committedAt) : [];
+  const manualChanges = latestRelease && manualFeatures.length > 0 ? [{
+    id: `manual-${latestRelease.id}`,
     releaseId: latestRelease.id,
-    featureName: displayName(feature.name),
+    featureName: `${manualFeatures.length} 项产品知识维护`,
     kind: "changed" as const,
-    summary: feature.summary,
-    summaries: [feature.summary],
-    evidencePaths: [...new Set(input.scenarios.filter((scenario) => scenario.featureId === feature.id).flatMap((scenario) => evidenceItems(scenario.evidence).map((item) => item.path)))],
+    summary: manualFeatures.map((feature) => `${displayName(feature.name)}：${feature.summary}`).join("；"),
+    summaries: manualFeatures.map((feature) => `${displayName(feature.name)}：${feature.summary}`),
+    evidencePaths: [...new Set(manualFeatures.flatMap((feature) => input.scenarios.filter((scenario) => scenario.featureId === feature.id).flatMap((scenario) => evidenceItems(scenario.evidence).map((item) => item.path))))],
     groupLabel: "人工维护",
-  })) : [];
+  }] : [];
   const changes = [...manualChanges, ...releaseChanges].slice(0, 5);
 
   const attentionCandidates = [
