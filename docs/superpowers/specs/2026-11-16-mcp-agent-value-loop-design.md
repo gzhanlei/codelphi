@@ -1,23 +1,20 @@
-# CoDelphi Agent 价值闭环设计
+# CoDelphi 修改前决策增强设计
 
-## 1. 目标与评价标准
+## 1. 产品问题与价值假设
 
-把 CoDelphi 从“改前返回大量文件级场景、改后手工拼接对账参数”改为一条可重复的开发闭环：
+CoDelphi 当前已经能参与开发流程，但尚未证明能改变开发结果。下一阶段首先要回答：
 
-1. 改前按实际变更行区分直接命中与文件级间接风险，并给出可转为测试的行为约束。
-2. 计划阶段形成本地意图清单，自动携带 stableKey、路径、场景约束和回归测试，不再从 release 标题手工猜测 stableKey。
-3. push 后用一次 `verify_push` 完成等待与对账。
-4. 只有需要行动的异常才产生 `warning`；共享证据只作为信息信号。
-5. 按风险决定流程深度，并用真实任务记录独立发现、时间成本和误报，而不是以流程执行次数衡量价值。
+> 能否让开发者发现原本不知道需要检查的行为、历史回归或验证证据，并因此做出更好的实现、测试或发布决定？
 
-首个交付版本的成功标准：
+首个交付版本不以增加 MCP 工具数量或自动完成验收为目标，而以**修改前决策增强**为目标：
 
-- 对同一组文件与 hunks，风险投影稳定地区分 `line` 与 `file` 命中，直接命中优先排序。
-- `lookup_by_files?view=risk` 返回确定性 `recommendedIntents` 和原始场景约束；调用方可以直接形成意图清单。
-- `verify_push(slug, sha, expectedIntents)` 复用现有等待和 reconcile 语义，不返回完整 before/after 文本。
-- 仅存在共享证据时，reconcile 不再降为 `warning`，可以返回带信息信号的 `pass`。
-- 低风险、明确零行为变化的提交可用空意图数组验收；缺少意图与明确零变化严格区分。
-- 在 CoDelphi 仓库完成一次真实全流程，并记录第一条价值度量样本。
+1. 将行级直接证据与文件级间接证据分开，避免把共享文件当成精确影响面。
+2. 将已观察行为、人工核实状态和历史回归记录分开，不把账本现状自动当成已确认契约。
+3. 只返回可追溯的验证证据；没有测试映射时，不宣称发现了具体测试盲区。
+4. 共享证据不再制造低价值 warning。
+5. 用真实任务衡量独立发现、决策改善、净时间收益和无效打扰。
+
+P0 的价值假设是：在陌生、跨功能或验证证据不足的真实任务中，上述信息至少能促成一项原本不会发生的正确决策，例如调整实现方案、增加必要回归验证或推迟发布。一次成功对账、一次工具调用或一份很长风险清单都不算价值证明。
 
 ## 2. 已确认问题与影响面
 
@@ -34,52 +31,48 @@
 - run、release 与请求 SHA 必须一致；短 SHA 歧义返回 review。
 - path-only intent 不能独立证明行为身份；没有意图不能默认 pass。
 - 共享证据不是重复证明；canonical 仍只合并可证明的重复投影。
-- 没有显式 feedback verification 关联时，verification 继续为 unavailable。
+- 没有显式 feedback verification 关联时，feedback verification 继续为 unavailable。
 
 ## 3. 方案比较
 
-### 方案 A：本地意图清单 + 确定性 MCP 组合工具（采纳）
+### 方案 A：确定性修改前决策投影（P0 采纳）
 
-新增行级影响面参数、风险候选意图和 `verify_push` 组合读取工具。意图清单保存在调用方工作区，由 Agent 在计划阶段生成并补充回归测试；MCP 不保存计划、不执行本地测试。
+扩展现有 `lookup_by_files?view=risk`，加入行级证据、已观察行为、人工核实状态和名称级历史回归提示；同时降低共享证据的告警等级。
 
-优点是没有第二套事实数据库，不改变 MCP 只读边界，能直接消除手工等待、查找 release 和拼接对账参数。限制是本地测试是否通过仍由 Agent 的测试命令证明，CoDelphi 不伪造测试执行事实。
+优点是直接改善开发者修改前的判断，复用现有规格、证据和验证事实，不需要新事实数据库或 AI 判官。限制是不能证明完整调用依赖，也不能从没有验证记录推断没有自动化测试。
 
-### 方案 B：服务端持久化开发计划与断言
+### 方案 B：优先建设自动验收闭环
 
-新增计划、意图、断言及执行记录表，由 MCP 写入并在 push 后读取。自动化程度较高，但引入组织权限、生命周期、并发修改、历史清理和第二套验收事实，且仍需解决本地测试执行问题。本阶段不采纳。
+先实现本地意图文件和 `verify_push`，再提高影响面质量。它能减少操作步骤，但可能只是更高效地执行低价值流程，因此推迟到 P2。
 
-### 方案 C：AI 阅读 diff 并判断影响与验收
+### 方案 C：AI 阅读 diff 并生成行为契约与影响结论
 
-覆盖看似更广，但行为身份和验收结论会变得不可重复，也会把推测包装成事实。本阶段不采纳。AI 只能帮助 Agent 将已返回的场景约束映射为测试，不能改变确定性 verdict。
+覆盖看似更广，但会把推测升级为契约，且结论不可重复，本设计不采纳。Agent 可以提出待确认约束，但不能改变 CoDelphi 的确定性事实等级与 verdict。
 
-## 4. 总体架构与边界
+## 4. 事实等级与验证语义
 
-闭环分为两个责任面：
+所有新增输出严格区分以下概念：
 
-- **CoDelphi MCP**：读取规格与证据，计算直接/间接影响，提供候选意图，等待 release，执行确定性对账。
-- **Coding Agent**：提供实际 hunks，选择与本任务有关的候选意图，补充回归测试，运行项目测试，处理 failed/warning/review。
+| 概念 | 来源与含义 | 不得推断 |
+|---|---|---|
+| `observedBehavior` | 当前 active scenario 的 context/action/outcome 与代码证据 | 不等于团队确认的永久契约 |
+| `proposedConstraint` | Agent 根据任务和已观察行为提出的本次修改约束 | 未经确认不得标成验收标准 |
+| `confirmedConstraint` | 开发者或产品负责人在计划/评审中明确确认的约束 | CoDelphi 不从 generated/manual source 自动推导 |
+| `specVerification` | live scenario 的 verified/stale 状态及 `spec_verifications` 历史记录 | 不等于自动化测试通过 |
+| `regressionHistory` | release 下 regression task 的状态、检查和失败记录 | 名称级关联不等于跨版本同一场景身份 |
+| `testExecution` | Agent 在项目中实际运行的测试命令和结果 | MCP 未观察到时不得声明存在或通过 |
 
-本地意图文件建议命名为 `.codelphi/change-intent.json`，属于调用方临时工作产物，不进入 CoDelphi 数据库，也不作为产品事实。其最小结构为：
+当前 schema 的事实边界已经核实：
 
-```json
-{
-  "version": 1,
-  "expectedIntents": [
-    {
-      "stableKey": "mcp 按 sha 等待发布",
-      "paths": ["lib/mcp/operations.ts"],
-      "note": "保留同 SHA 最新重试与 run/release 一致性",
-      "regressionTests": ["tests/mcp-operations.test.ts"]
-    }
-  ]
-}
-```
+- `scenarios.verified_at/verified_by/stale_since` 可推导 `unverified`、`verified`、`stale-verified`。
+- `spec_verifications` 通过 `product_id + entity_type + entity_id` 关联 live scenario，并记录 specVersion、commit、验证人和时间。
+- `regression_tasks` 关联 release、版本内 scenario、状态、检查人、时间和失败备注。
+- `feedback_reports.regression_stable_key` 仅是名称级锚点，不能证明历史反馈属于当前场景。
+- 当前没有 scenario 到测试文件/测试用例的完整映射，也没有 feedback 到 verification 的显式归属链。
 
-`ExpectedIntent` 增加可选 `regressionTests: string[]`，并在对应 `intentResults` 中原样返回。它只是 Agent 的测试交接信息，不参与身份、路径或 verdict 计算，也不表示测试已经存在或通过。`verify_push` 的 release verdict 与项目测试结果必须分别报告。
+因此“没有验证记录”只能表示**验证证据缺口**，不能表示“没有测试”或“测试未覆盖”。“名称相同的历史回归”只能作为复核提示，不能合并跨版本场景身份。
 
-本阶段不实现符号级调用图、不执行任意本地命令、不新增遥测数据库、不自动合并行为、不声称证明完整产品正确性。
-
-## 5. 行级影响面与候选意图
+## 5. P0：行级影响与决策投影
 
 ### 5.1 输入扩展
 
@@ -102,7 +95,7 @@
 
 - `paths` 与 `hunks` 至少一个非空；合并去重后最多 20 个路径。
 - 行号为从 1 开始的闭区间，`1 <= startLine <= endLine`。
-- 路径继续使用规范化的相对仓库路径，禁止绝对路径与 `..`。
+- 路径使用规范化的相对仓库路径，禁止绝对路径与 `..`。
 - 不提供 hunks 时保持现有文件级行为。
 - raw/canonical 视图不因 hunks 改变；行级投影只在 `view=risk` 启用。
 
@@ -112,55 +105,85 @@
 
 - 证据路径等于 hunk 路径，且证据 `startLine` 落在任一 hunk 闭区间内：`matchType="line"`。
 - 场景只共享路径、证据没有行号、或行号不在 hunks 内：`matchType="file"`。
-- 同一场景有任一直接证据时，该场景整体为 `line`，不再因其他文件证据重复计算。
+- 同一场景有任一直接证据时，该场景整体为 `line`，不因其他文件证据重复计算。
 - 未提供 hunks 的路径全部为 `file`。
-- 没有直接命中不能解释为没有影响，必须返回 `directScenarioCount` 与 `fileOnlyScenarioCount`。
+- 没有直接命中不能解释为没有影响，必须分别返回 `directScenarioCount` 与 `fileOnlyScenarioCount`。
 
-### 5.3 风险与约束输出
+行级命中只表示代码证据位置与变更范围重合，不表示完整依赖覆盖。本阶段不实现符号、调用、接口、数据库状态或外部客户端依赖分析。
 
-现有 `risks` 字段保留，新增：
+### 5.3 已观察行为与证据输出
 
-- `matchType`、`matchedEvidence`；
-- `directScenarioCount`、`fileOnlyScenarioCount`；
-- `recommendedIntents`；
-- 每条风险的 `contract`，包含原始 `scenarioId`、`reference`、`context`、`action`、`outcome`。
+现有 `risks` 字段保留并增加：
 
-排序为：直接命中优先、manual 优先、stableKey、scenario ID、证据路径。默认仍返回前 10 条，并保留 `totalCount/hasMore`。
+- `matchType` 与 `matchedEvidence: Array<{ path: string; startLine: number | null }>`；
+- `observedBehavior: { scenarioId: number; reference: string; context: string; action: string; outcome: string; source: string }`；
+- `specVerification`；
+- `regressionHistory`。
 
-`recommendedIntents` 按 stableKey 确定性分组，结构为 `Array<{ stableKey: string; paths: string[]; scenarios: Array<{ id: number; reference: string }> }>`。它是候选，不替 Agent 判断哪些场景与开发意图相关；Agent 必须删除无关项并补充 `note/regressionTests`。
+不再使用未分级的 `contract` 字段。`manual` 只表示人工维护来源，不自动表示 confirmed constraint。
 
-## 6. 一键 `verify_push`
+排序为：直接命中优先、`stale-verified` 或失败回归优先、manual 优先、stableKey、scenario ID、证据路径。默认仍返回前 10 条，并保留 `totalCount/hasMore`。
 
-新增只读 MCP 工具：
+### 5.4 当前人工核实证据
+
+每条命中场景返回：
 
 ```ts
-{
-  slug: string;
-  sha: string;
-  expectedIntents?: ExpectedIntent[];
-  timeoutSeconds?: number;
-  pollSeconds?: number;
+specVerification: {
+  state: "unverified" | "verified" | "stale-verified";
+  verifiedAt: string | null;
+  verifiedBy: string | null;
+  latestRecord: {
+    specVersionId: number | null;
+    commitSha: string | null;
+    verifiedAt: string;
+    verifiedBy: string;
+  } | null;
 }
 ```
 
-执行顺序：
+`state` 复用 live scenario 的 `verified_at × stale_since` 规则；`latestRecord` 取该 live scenario 在产品内最新一条 `spec_verifications`。二者分别表示当前核实状态与历史核实依据，不相互替代。
 
-1. 复用 `wait_for_release` 的 SHA 匹配、最新重试、歧义与超时规则。
-2. `completed` 且存在 releaseId 时，复用 `reconcile_release` 的数据加载与纯函数。
-3. 返回 `{ wait, reconciliation, summary }`。
+没有历史记录时 `latestRecord=null`，但 `state` 仍按 live 字段独立计算；只有 live 状态为 `unverified` 且没有历史记录时，才表达“没有人工核实证据”。任何情况都不表达“没有测试”。
 
-状态规则：
+### 5.5 名称级历史回归提示
 
-- 等待失败：`wait.status="failed"`，不继续对账，整体为 failed。
-- 超时、SHA 歧义、run/release 不一致或 release 尚不可读：整体为 review，不能当成 failed 或 pass。
-- completed 后，整体 verdict 完全来自 reconcile。
-- 未提供 `expectedIntents` 继续为 review；显式空数组表示“预期零行为变化”，只在没有任何变化时可能 pass。
+按命中功能的 stableKey 对 `loadRegressionTasks` 返回的 `featureName` 做同样的名称归一化，返回最近最多 5 条非 passed 任务：
 
-`summary` 只包含 verdict、各类异常数量、信息信号数量与稳定排序的 `nextActions`。详细 ID 仍在 reconciliation 中，不返回完整 before/after。
+```ts
+regressionHistory: Array<{
+  taskId: number;
+  releaseId: number;
+  reference: string | null;
+  status: "pending" | "failed" | "skipped";
+  checkedAt: string | null;
+  checkedBy: string | null;
+  failureNote: string | null;
+  matchBasis: "exact_feature_name";
+}>
+```
 
-`verify_push` 不触发分析，不执行测试，不创建服务端计划，最长等待仍为 60 秒。
+关联只发生在产品内部，按 release 时间和 task ID 稳定倒序。该列表是功能名称级历史提示，不宣称任务中的 reference 与当前场景是同一跨版本身份，也不把 skipped 当成失败。
 
-## 7. 低噪声 verdict 与信息信号
+没有历史任务返回空数组，不推断没有历史缺陷。
+
+### 5.6 候选意图，而非自动契约
+
+风险投影新增：
+
+```ts
+recommendedIntents: Array<{
+  stableKey: string;
+  paths: string[];
+  scenarios: Array<{ id: number; reference: string }>;
+}>
+```
+
+它按 stableKey 确定性分组，只是后续计划候选。Agent 必须根据任务删除无关项，并将需要保持的行为写成 `proposedConstraint`；只有经过开发者或产品负责人确认后，才能在本地计划中标记为 `confirmedConstraint`。
+
+P0 不新增服务端意图存储，不让 MCP 自动把候选意图当成开发者的真实意图。
+
+## 6. P0：低噪声验收结果
 
 `reconcile_release` 继续返回 `sharedEvidenceWarnings` 以兼容旧调用方，同时新增 `informationalSignals`。共享证据只进入信息信号：
 
@@ -170,36 +193,53 @@
 - `failed`、`review` 的既有优先级不变。
 - `pass` 仍只表示所提供意图和可读取证据范围内通过，不表示所有行为正确或测试完整。
 
-这是对 verdict 噪声语义的有意修正，不改变原始变化、证据和共享证据数据。
+这是对 verdict 噪声语义的有意修正，不改变原始变化、证据和共享证据数据。本阶段不引入另一套状态枚举；现有 pass/warning/failed/review 的含义保持不变。
 
-## 8. 风险触发工作流
+## 7. 风险触发工作流
 
-更新 MCP initialize instructions、`docs/coding-agent-mcp.md` 与仓库工作流说明：
+更新 MCP initialize instructions 与工作流文档。完整修改前决策投影用于至少满足一项的修改：
 
-完整闭环用于至少满足一项的修改：
-
-- 行级直接命中或 manual 行为证据；
+- 行级直接命中、人工维护行为、待重新核实或失败回归；
 - 多功能共享文件、身份/权限/版本/数据关联语义；
-- 测试覆盖不足或历史回归区域；
+- 验证证据不足或历史回归区域；
 - 跨模块、大范围或调用方难以枚举影响的修改。
 
-轻量流程用于明确低风险修改：Agent 仍需声明零行为变化或提供意图，并在 push 后使用 `verify_push`；没有证据覆盖时必须明说影响面未知，不能跳过验证或宣称无风险。
+轻量流程用于明确低风险修改。没有证据覆盖时必须明说影响面未知，不能跳过项目验证或宣称无风险。
 
-计划阶段由 Agent 创建本地意图文件；编码前将约束转成测试；push 前运行项目标准测试；push 后读取同一文件调用 `verify_push`。计划外变化必须回查，不允许通过修改意图掩盖异常。
+修改前由 Agent 记录任务意图及 proposed constraints，并注明其来源；确认后的约束才能作为验收标准。Agent 负责选择验证方法和执行项目测试，CoDelphi 负责提供行为、历史和验证证据。计划外变化必须回查，不允许通过事后修改意图掩盖异常。
 
-## 9. 价值度量
+## 8. 后续阶段，不属于 P0 实施范围
 
-新增一份无自动遥测的试点记录规范，连续记录至少 20 个真实任务：
+### P1：意图交接与历史缺陷提示
 
-- 任务与风险等级；
-- 反查耗时、对账耗时、手工修正参数次数；
+- 本地意图文件关联 proposed/confirmed constraints、验证方法和回归测试。
+- 使用 `feedback_reports.regression_stable_key` 提供名称级历史缺陷提示，明确不代表完整回归范围。
+- 没有显式关联时仍不建立 feedback → verification 或 scenario → test 的推断关系。
+
+### P2：自动验收与更完整的依赖分析
+
+- `verify_push` 组合现有 `wait_for_release` 与 `reconcile_release`，复用修改前已记录的意图，不能事后从 diff 反向编造意图。
+- 显式空意图可表示预期零行为变化；未提供意图仍为 review。
+- 根据真实误判案例再决定是否建设调用、接口、数据和状态依赖分析。
+
+这些后续项只有在 P0 试点证明决策改善后才进入各自的设计与实施计划，不与 P0 捆绑交付。
+
+## 9. 价值试点与停止条件
+
+建立无自动遥测的试点记录，连续记录至少 20 个真实任务，优先选择陌生模块、跨功能修改或验证证据不足的任务：
+
+- 任务、熟悉程度、风险等级；
+- 反查与对账耗时、手工修正参数次数；
 - 直接/间接命中数量；
-- 转化为回归测试的约束数量；
-- CoDelphi 独立发现的问题数，即测试与代码审查尚未发现的问题；
-- warning 是否需要行动；
+- 独立发现率：CoDelphi 发现而原代码审查和测试尚未发现的问题比例；
+- 决策改善率：因 CoDelphi 信息而改变实现、验证范围或发布决定的比例，并记录具体决定；
+- 净时间收益：节省时间与额外使用成本之差；
+- 无效打扰率：无需行动却需要解释的 warning/提示比例；
 - 不用 CoDelphi 是否大概率得到相同结果及理由。
 
-不采集代码正文、密钥或用户隐私。试点结束后按独立发现、节省时间、误报率决定保留、调整或取消强制流程；不能用调用次数证明价值。
+不采集代码正文、密钥或用户隐私。不能用调用次数或对账成功次数证明价值。若试点没有独立发现、没有决策改善且净时间收益为负，应降低强制程度或停止相应流程，而不是继续增加自动化。
+
+P0 自身的开发与对账只证明功能可用，不作为价值假设已经成立的证据。没有合适的真实试点任务时，首条样本保持 pending，不虚构试点结果。
 
 ## 10. 测试与生产验收
 
@@ -207,16 +247,17 @@
 
 - hunk 边界、跨 hunk 命中、无行号证据、同场景多证据去重和稳定排序；
 - 无直接命中、超过 20 个合并路径、非法行号和非法路径；
-- `recommendedIntents` 分组与原始约束完整性；
-- verify 的 completed/failed/timeout/review、短 SHA 歧义、releaseId 缺失与零变化意图；
+- observed behavior、三种 specVerification 状态和 latestRecord 的产品/场景隔离；
+- regressionHistory 的名称级关联、非 passed 过滤、最多 5 条、稳定排序和跨版本身份免责声明；
+- recommendedIntents 分组，且不自动升级为 confirmed constraint；
 - 共享证据只产生 informational signal，缺失、计划外变化和重复簇仍保持原 verdict；
 - 旧工具 raw 响应、组织防枚举与现有 reconcile 输入兼容。
 
 生产验收：
 
-1. 用本次真实提交的 hunks 调用风险投影，确认直接命中优先且候选意图可用。
-2. 从计划阶段的意图清单调用 `verify_push`，核对等待、release 和所有异常。
-3. 若只有共享证据，确认不再产生 warning；若存在真实异常，如实报告，不调整意图追求 pass。
-4. 记录第一条价值试点样本，包括 CoDelphi 是否独立发现了问题及实际时间成本。
+1. 用本次真实提交的 hunks 调用风险投影，确认直接命中优先，行为、核实和历史回归均可追溯。
+2. 检查没有人工核实记录时不会被描述为测试缺失，名称级历史回归不会被描述为跨版本同一场景。
+3. 若 reconcile 只有共享证据，确认不再产生 warning；若存在真实异常，如实报告，不调整意图追求 pass。
+4. 建立价值试点记录；本次只填功能验证与耗时，不虚构独立发现或决策改善。
 
 交付前运行 `npm run typecheck`、`npm test`、`npm run build`，随后完成独立代码审查、生产部署和 CoDelphi 对账。
