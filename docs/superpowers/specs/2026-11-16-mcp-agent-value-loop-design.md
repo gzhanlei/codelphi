@@ -8,7 +8,7 @@ CoDelphi 当前已经能参与开发流程，但尚未证明能改变开发结�
 
 首个交付版本不以增加 MCP 工具数量或自动完成验收为目标，而以**修改前决策增强**为目标：
 
-1. 将行级直接证据与文件级间接证据分开，避免把共享文件当成精确影响面。
+1. 将证据锚点重合与文件级关联分开，避免把共享文件当成精确影响面。
 2. 将已观察行为、人工核实状态和历史回归记录分开，不把账本现状自动当成已确认契约。
 3. 只返回可追溯的验证证据；没有测试映射时，不宣称发现了具体测试盲区。
 4. 共享证据不再制造低价值 warning。
@@ -37,7 +37,7 @@ P0 的价值假设是：在陌生、跨功能或验证证据不足的真实任�
 
 ### 方案 A：确定性修改前决策投影（P0 采纳）
 
-扩展现有 `lookup_by_files?view=risk`，加入行级证据、已观察行为、人工核实状态和名称级历史回归提示；同时降低共享证据的告警等级。
+扩展现有 `lookup_by_files?view=risk`，加入证据锚点评估、已观察行为、人工核实状态和名称级历史回归提示；同时降低共享证据的告警等级。
 
 优点是直接改善开发者修改前的判断，复用现有规格、证据和验证事实，不需要新事实数据库或 AI 判官。限制是不能证明完整调用依赖，也不能从没有验证记录推断没有自动化测试。
 
@@ -50,6 +50,8 @@ P0 的价值假设是：在陌生、跨功能或验证证据不足的真实任�
 覆盖看似更广，但会把推测升级为契约，且结论不可重复，本设计不采纳。Agent 可以提出待确认约束，但不能改变 CoDelphi 的确定性事实等级与 verdict。
 
 ## 4. 事实等级与验证语义
+
+长期责任边界固定为三层：CoDelphi 负责可追溯事实，Agent 负责基于事实提出推理与验证建议，开发者负责确认约束、实现方案、测试范围与发布决定。Agent 接受建议不会把建议升级为事实，事后修改计划也不能消除已经发现的意图偏差。
 
 所有新增输出严格区分以下概念：
 
@@ -72,7 +74,7 @@ P0 的价值假设是：在陌生、跨功能或验证证据不足的真实任�
 
 因此“没有验证记录”只能表示**验证证据缺口**，不能表示“没有测试”或“测试未覆盖”。“名称相同的历史回归”只能作为复核提示，不能合并跨版本场景身份。
 
-## 5. P0：行级影响与决策投影
+## 5. P0：证据锚点与决策投影
 
 ### 5.1 输入扩展与版本坐标
 
@@ -100,26 +102,28 @@ P0 的价值假设是：在陌生、跨功能或验证证据不足的真实任�
 - `paths` 与 `hunks` 至少一个非空；hunk 路径自动并入 paths，不要求重复提供。
 - 路径规范化、去重后最多 20 个；禁止绝对路径与 `..`。
 - hunks 中的路径执行锚点评估；只在 paths 中出现的路径执行文件级匹配。
-- 行号为从 1 开始的闭区间；同一侧满足 `startLine <= endLine`。新增文件允许 old 侧为 null，删除文件允许 new 侧为 null，每个 hunk 至少保留一侧范围。
+- 行号与 Git unified diff 对齐：某侧行数为 0 时该侧范围为 null；非空范围从 1 开始并满足 `endLine = startLine + lineCount - 1`。新增文件通常为 old=null，删除文件通常为 new=null，每个 hunk 至少保留一侧非空范围。
 - 同一路径的重叠区间分别按 old/new 侧合并用于匹配，原始输入仍逐项校验。
 - `diffTargetSha=null` 表示当前工作区；不提供 hunks 时保持现有文件级行为。
 - raw/canonical 视图不因 diff 参数改变；锚点投影只在 `view=risk` 启用。
 
-证据锚点使用账本 `snapshotSha` 坐标，diff 同时具有 old/new 两套坐标，不能一律用新行号比较：
+证据锚点使用账本 `snapshotSha` 坐标，diff 同时具有 old/new 两套坐标，按以下优先级确定 `coordinateStatus`：
 
-- `diffBaseSha === snapshotSha`：使用 old-side hunk 范围。
-- `diffTargetSha === snapshotSha`：使用 new-side hunk 范围。
-- 两者都命中时优先 old-side，并返回实际使用的坐标侧；两者都未命中或 snapshot SHA 缺失时，`coordinateStatus="unavailable"`，全部降级为文件级匹配。
+1. base 与 target 均非空且相等：`same_revision`，不存在提交变化，不做锚点影响判断。
+2. `diffBaseSha === snapshotSha` 且 target 不同：`matched_base`，使用 old-side。target 可以是另一提交或工作区；old-side 坐标锚定 base，不假设工作区新行号与 base 相同。
+3. target 非空、`diffTargetSha === snapshotSha` 且 base 不同：`matched_target`，使用 new-side。
+4. target 为工作区且 base 未命中：`workspace_unresolved`，无法证明工作区与证据快照的坐标关系。
+5. 其余情况或 snapshot 缺失：`unavailable`。
 
-响应返回 `snapshotSha`、`diffBaseSha`、`diffTargetSha`、`coordinateStatus` 和 `coordinateSide`。无法证明坐标一致时不得产生 line 命中。
+`same_revision`、`workspace_unresolved` 和 `unavailable` 均降级为文件级匹配。响应返回 `snapshotSha`、`diffBaseSha`、`diffTargetSha`、`coordinateStatus`；匹配时另返回 `coordinateSide="old"|"new"`，否则为 null。无法证明坐标一致时不得产生 line 命中。
 
 ### 5.2 证据锚点重合规则
 
 每条场景证据保留 `path`、`startLine` 和来源场景：
 
-- 坐标一致、证据路径等于 hunk 路径，且证据 `startLine` 落在所选坐标侧的任一 hunk 闭区间内：`matchType="line"`、`evidencePrecision="line_anchor"`。
-- 只确认同文件、证据没有行号、锚点不在 hunks 内或坐标不可用：`matchType="file"`。
-- 有可用行锚点但未重合时 `evidencePrecision="line_anchor"`；没有行号或坐标不可用时为 `file_only`。
+- 证据自身含有效 `startLine`：`evidenceGranularity="line_anchor"`，否则为 `file_only`。该字段只描述证据粒度，与本次坐标是否可用无关。
+- 坐标一致、证据路径等于 hunk 路径，且行锚点落在所选坐标侧的任一 hunk 闭区间内：`matchType="line"`。
+- 只确认同文件、锚点未重合、没有行号或坐标不可用：`matchType="file"`。因此 `line_anchor + file` 可以表示有行锚点但未重合或无法比较。
 - 同一场景有任一锚点重合时，该场景整体为 `line`，不因其他文件证据重复计算。
 - 未提供 hunks 的路径全部为 `file`。
 
@@ -131,11 +135,11 @@ P0 的价值假设是：在陌生、跨功能或验证证据不足的真实任�
 
 现有 `risks` 字段保留并增加：
 
-- `matchType`、`evidencePrecision` 与 `matchedEvidence: Array<{ path: string; startLine: number | null }>`；
+- `matchType`、`evidenceGranularity` 与 `consideredEvidence: Array<{ path: string; startLine: number | null }>`；
 - `observedBehavior: { scenarioId: number; reference: string; context: string; action: string; outcome: string; source: string }`；
 - `specVerification`。
 
-不再使用未分级的 `contract` 字段。`manual` 只表示人工维护来源，不自动表示 confirmed constraint。
+`consideredEvidence` 包含本次请求路径下被评估的证据，包括重合与未重合项，不表示每条都匹配成功。不再使用未分级的 `contract` 字段。`manual` 只表示人工维护来源，不自动表示 confirmed constraint。
 
 场景排序为：锚点重合优先、`stale-verified` 优先、manual 优先、stableKey、scenario ID、证据路径。`stale-verified` 与历史失败回归不混为同一风险等级。场景默认仍返回前 10 条并保留 `totalCount/hasMore`；历史回归提示独立返回，不会被场景分页挤掉。
 
@@ -166,13 +170,22 @@ specVerification: {
 - 再次变更会重新设置 stale，再次核实会再次清除，因此不依赖“第一次过期时间”推断当前状态。
 - generated 内容变化或人工编辑会清除当前 `verified_at/verified_by`，状态为 `unverified`；这不表示从未核实，历史记录仍可证明过去发生过核实。
 
+状态真值表与现有 `verificationState` 完全一致：
+
+| verified_at | stale_since | state | 含义 |
+|---|---|---|---|
+| null | null | `unverified` | 当前内容未核实，无失效标记 |
+| 有值 | null | `verified` | 当前内容已核实，之后未标记失效 |
+| 有值 | 有值 | `stale-verified` | 曾核实，之后内容被标记失效 |
+| null | 有值 | `unverified` | 当前内容未核实，同时保留失效标记；可发生于核实后再次编辑或生成内容变化 |
+
 `latestRecord` 按 `verified_at` 的数据库时间值和 `id` 依次倒序选择，DATETIME(3) 保留毫秒，ID 处理并列；响应序列化为 ISO 8601，不对序列化后的日期字符串做排序。live 与历史记录是不同证据链，legacy 数据或后续状态变化造成的差异不自动判为 inconsistent。`verified_at` 有无与 `stale_since` 有无形成的四种组合均有明确的现有语义，因此本阶段不新增 unknown/inconsistent 状态。
 
 没有历史记录时 `latestRecord=null`，但 `state` 仍按 live 字段独立计算。`unverified` 只表示当前内容未核实，`latestRecord=null` 只表示没有历史核实记录；二者均不表示“没有测试”，历史记录存在也不表示当前内容已核实。
 
 ### 5.5 独立的名称级历史回归提示
 
-历史提示使用顶层 `regressionAlerts`，不嵌入前 10 条场景，也不依赖场景是否进入当前页。按全部命中功能的 stableKey 对回归投影的 `featureName` 做同样的名称归一化，返回最近最多 5 条非 passed 任务：
+历史提示使用顶层 `regressionAlerts`，不嵌入前 10 条场景，也不依赖场景是否进入当前页。先取得全部命中功能的 stableKey 集合，再用回归来源已有的 `COALESCE(spec_features.stable_key, spec_changes.feature_key)` 在产品内过滤，避免全产品扫描后遗漏目标功能：
 
 ```ts
 regressionAlerts: Array<{
@@ -190,9 +203,11 @@ regressionAlerts: Array<{
 }>
 ```
 
-关联只发生在产品内部，按 `releaseCommittedAt DESC, taskId DESC` 稳定排序。返回原始功能名与归一化名称，调用方可以判断名称关联是否合理。pending、failed、skipped 保持各自语义，release 时间用于识别陈旧记录，不把 skipped 当成失败。
+关联只发生在产品内部，只查询候选 stableKey 集合和 `pending/failed/skipped` 任务。按 `releaseCommittedAt DESC, taskId DESC` 稳定排序，**每个 normalized feature name 最多返回 5 条**，不是整个请求共享 5 条。返回原始功能名与归一化名称，调用方可以判断名称关联是否合理；release 时间用于识别陈旧记录，skipped 不被当成失败。
 
-该列表是名称级历史线索，不宣称任务中的 reference 与当前场景是同一跨版本身份。`regressionAlertTotal` 表示已扫描范围内的命中数，`regressionHistoryComplete` 表示是否扫描了产品全部符合条件的任务；因批量上限截断时为 false，此时空数组也不表示没有历史缺陷。
+`regressionAlertCount` 是这些候选功能在完整过滤查询中的非 passed 任务总数，不是已返回条数，也不是全产品扫描样本数。过滤集合完整时 `regressionHistoryComplete=true`；若未来增加时间窗口或扫描上限，必须返回 false 并披露范围。空数组只表示当前候选功能在完整查询范围内没有非 passed 任务，不表示没有历史缺陷。
+
+该列表是名称级历史线索，不宣称任务中的 reference 与当前场景是同一跨版本身份。
 
 ### 5.6 候选分组，而非推荐意图或自动契约
 
@@ -206,12 +221,14 @@ candidateIntentGroups: Array<{
     id: number;
     reference: string;
     matchType: "line" | "file";
-    matchedEvidence: Array<{ path: string; startLine: number | null }>;
+    consideredEvidence: Array<{ path: string; startLine: number | null }>;
   }>;
 }>
 ```
 
-它只把全部命中场景按 stableKey 确定性分组，并保留每个场景的命中依据；不表示 CoDelphi 已推荐本次完整开发意图。Agent 必须根据任务删除无关项，并将需要保持的行为写成 `proposedConstraint`；只有经过开发者或产品负责人确认后，才能在本地计划中标记为 `confirmedConstraint`。
+它只把全部命中场景按 stableKey 确定性分组，并保留每个场景的命中依据；不表示 CoDelphi 已推荐本次完整开发意图。每组 `paths` 仅取该组命中场景的 `consideredEvidence` 中实际属于本次请求的证据路径，不扩展为该功能在账本中的全部路径。
+
+Agent 必须根据任务删除无关项，不需要为组内所有场景逐一建立验收断言。需要保持的行为先写成 `proposedConstraint`；只有经过开发者或产品负责人确认后，才能在本地计划中标记为 `confirmedConstraint`。
 
 P0 不新增服务端意图存储，不让 MCP 自动把候选分组当成开发者的真实意图。
 
@@ -219,8 +236,8 @@ P0 不新增服务端意图存储，不让 MCP 自动把候选分组当成开发
 
 - 只有 `view=risk` 加载新增验证和历史数据；raw/canonical 不增加查询或改变响应。
 - live scenario 按 product 批量读取；`spec_verifications` 按 product、`entity_type="scenario"` 和命中 scenario IDs 一次批量读取，在内存中取每个场景最新记录。
-- 回归任务按 product 批量读取，按 `releaseCommittedAt DESC, taskId DESC` 最多扫描 1000 条非 passed 任务，再按 normalized feature name 归组；达到上限时 `regressionHistoryComplete=false`。
-- 禁止按场景逐条查询 verification 或 regression，禁止用无上限历史读取支撑前 10 条场景。
+- 回归任务按 product 与候选 stableKey 集合批量过滤，使用 MySQL 8 窗口查询或等价的单次查询按功能各取最新 5 条，并在限制返回前计算完整 `regressionAlertCount`；不得先取全产品固定条数再做目标功能过滤。
+- 禁止按场景或功能逐条查询 verification 或 regression，禁止用无上限全产品历史读取支撑风险投影。返回量以候选功能数 × 5 为上限。
 - 所有查询继续使用 organization 解析出的 productId，不能以 scenario ID、stableKey 或 release ID 跨产品取数。
 - P0 不新增索引或缓存。实施时用生产数据规模和查询计划验证现有索引；出现实测问题再单独设计，而不是预先扩张 schema。
 
@@ -234,13 +251,15 @@ P0 不新增服务端意图存储，不让 MCP 自动把候选分组当成开发
 - `failed`、`review` 的既有优先级不变。
 - `pass` 仍只表示所提供意图和可读取证据范围内通过，不表示所有行为正确或测试完整。
 
+`sharedEvidenceWarnings` 仅为响应结构兼容而保留并标记 deprecated，不再具有 verdict 降级语义；新调用方使用 `informationalSignals`。MCP instructions 和工作流文档必须同步说明，避免旧客户端继续把该字段解释为待处理异常。后续版本再制定字段移除计划，本阶段不破坏旧响应结构。
+
 这是对 verdict 噪声语义的有意修正，不改变原始变化、证据和共享证据数据。本阶段不引入另一套状态枚举；现有 pass/warning/failed/review 的含义保持不变。
 
 ## 7. 风险触发工作流
 
 更新 MCP initialize instructions 与工作流文档。完整修改前决策投影用于至少满足一项的修改：
 
-- 行级直接命中、人工维护行为、待重新核实或失败回归；
+- 证据锚点重合、人工维护行为、待重新核实或失败回归；
 - 多功能共享文件、身份/权限/版本/数据关联语义；
 - 验证证据不足或历史回归区域；
 - 跨模块、大范围或调用方难以枚举影响的修改。
@@ -294,14 +313,14 @@ P0 自身的开发与对账只证明功能可用，不作为价值假设已经�
 
 单元与集成测试至少覆盖：
 
-- old/new 坐标选择、base/target/workspace 情况、坐标不一致降级、hunk 边界、区间合并和无行号证据；
-- 同场景多证据去重、direct/fileOnly/total 计数一致性和稳定排序；
+- matched_base/matched_target/same_revision/workspace_unresolved/unavailable、零长度 Git 范围、hunk 边界、区间合并和无行号证据；
+- evidenceGranularity 与 matchType 独立、同场景多证据去重、direct/fileOnly/total 计数一致性和稳定排序；
 - paths/hunks 混合输入、超过 20 个规范化去重路径、非法行号和非法路径；
-- observed behavior、三种 specVerification 状态、重复核实/再次失效，以及 latestRecord 的时间与 ID 排序和产品/场景隔离；
-- regressionAlerts 独立于场景分页、原始/归一化名称、非 passed 过滤、最多 5 条、时间排序和截断披露；
-- candidateIntentGroups 保留命中依据，且不自动升级为 confirmed constraint；
-- 批量查询次数、1000 条历史上限、raw/canonical 零新增查询和组织/product 隔离；
-- 共享证据只产生 informational signal，缺失、计划外变化和重复簇仍保持原 verdict；
+- observed behavior、specVerification 四种真值组合、重复核实/再次失效，以及 latestRecord 的时间与 ID 排序和产品/场景隔离；
+- regressionAlerts 独立于场景分页、候选 stableKey 预过滤、原始/归一化名称、非 passed 过滤、每功能最多 5 条、完整计数和时间排序；
+- candidateIntentGroups 保留命中依据、paths 仅来自实际命中证据，且不自动升级为 confirmed constraint；
+- 批量查询次数、按功能限制返回、raw/canonical 零新增查询和组织/product 隔离；
+- deprecated sharedEvidenceWarnings 保留结构但不进入 reasons/verdict，informationalSignals 与缺失、计划外变化和重复簇的既有语义；
 - 旧工具 raw 响应、组织防枚举与现有 reconcile 输入兼容。
 
 生产验收：
