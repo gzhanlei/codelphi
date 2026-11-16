@@ -37,6 +37,16 @@ describe("product focus projection", () => {
     expect(result.emptyAttention).toBe(false);
   });
 
+  it("uses canonical names for risk filtering while rendering curated names", () => {
+    const result = buildProductFocus({
+      ...base,
+      features: [feature(1, "组织隔离与权限", { displayName: "团队空间", staleSince: new Date("2026-11-01") })],
+      scenarios: [],
+      behaviorChanges: [],
+    });
+    expect(result.attention.map((item) => item.featureName)).toEqual(["团队空间"]);
+  });
+
   it("limits important changes and preserves evidence for progressive disclosure", () => {
     const result = buildProductFocus({
       ...base,
@@ -76,6 +86,18 @@ describe("product focus projection", () => {
     expect(result.attention).toEqual([]);
     expect(result.emptyAttention).toBe(true);
   });
+
+  it("uses curated display names without changing analysis identities", () => {
+    const result = buildProductFocus({
+      ...base,
+      features: [feature(1, "technical_name", { displayName: "最近 30 天产品进展", summary: "查看产品最近新增和改变的能力。" })],
+      scenarios: [],
+      behaviorChanges: [{ id: 31, releaseId: 8, kind: "changed", entityType: "scenario", featureName: "technical_name", scenarioReference: "HP-1", summary: "更新产品进展", before: {}, after: { evidence: [] } }],
+    });
+    expect(result.map[0].name).toBe("最近 30 天产品进展");
+    expect(result.changes[0].featureName).toBe("最近 30 天产品进展");
+    expect(result.confirmations[0].featureName).toBe("最近 30 天产品进展");
+  });
 });
 
 describe("product focus rendering", () => {
@@ -91,6 +113,9 @@ describe("product focus rendering", () => {
     expect(html).toContain("当前没有需要重点关注的变化");
     expect(html).toContain("AI 提取的候选变化，需人工确认");
     expect(html).toContain("功能概述");
+    expect(html).toContain("普通功能说明");
+    expect(html).toContain("AI 提取");
+    expect(html).toContain("查看行为规格与证据");
     expect(html).not.toContain("0个场景");
     expect(html).toContain("查看全部产品信息");
   });

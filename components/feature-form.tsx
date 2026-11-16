@@ -14,6 +14,7 @@ export function FeatureForm({ slug, feature, parentId, onSaved, onClose }: { slu
   const guard = useDemoGuard();
   const initial = featureFormState(feature);
   const [name, setName] = useState(initial.name);
+  const [displayName, setDisplayName] = useState(initial.displayName);
   const [summary, setSummary] = useState(initial.summary);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
@@ -24,7 +25,7 @@ export function FeatureForm({ slug, feature, parentId, onSaved, onClose }: { slu
     setPending(true);
     setError("");
     try {
-      const result = await saveFeature(slug, { name, summary, parentId }, entityId(feature));
+      const result = await saveFeature(slug, { name, displayName: displayName || null, summary, parentId }, entityId(feature));
       onSaved(result.id as number);
     } catch (cause) {
       setError(errorMessage(cause, "保存功能失败"));
@@ -35,7 +36,7 @@ export function FeatureForm({ slug, feature, parentId, onSaved, onClose }: { slu
   return (
     <form className="editor-panel" onSubmit={submit}>
       <h3>{featureFormTitle(feature, parentId)}</h3>
-      <FeatureFields name={name} summary={summary} locked={featureNameLocked(feature)} onNameChange={setName} onSummaryChange={setSummary} />
+      <FeatureFields name={name} displayName={displayName} summary={summary} locked={featureNameLocked(feature)} onNameChange={setName} onDisplayNameChange={setDisplayName} onSummaryChange={setSummary} />
       <FormError message={error} />
       <EditorActions pending={pending} label="保存功能" onCancel={onClose} />
     </form>

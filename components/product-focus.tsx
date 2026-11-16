@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { pick, type UiLocale } from "@/lib/ui-locale";
-import { SPEC_EDITOR } from "@/lib/ui-strings/product";
+import { verificationLabel } from "@/lib/spec-editor-ui";
 import type { buildProductFocus } from "@/lib/product-focus";
 
 const COPY = {
@@ -18,6 +18,8 @@ const COPY = {
   unverified: { "zh-CN": "待确认", en: "Unverified" },
   verified: { "zh-CN": "已确认", en: "Verified" },
   manual: { "zh-CN": "人工维护", en: "Manual" },
+  generated: { "zh-CN": "AI 提取", en: "AI extracted" },
+  behaviorDetails: { "zh-CN": "查看行为规格与证据", en: "View behavior spec and evidence" },
 } as const;
 
 export function ProductFocus({ data, locale = "zh-CN" }: { data: ReturnType<typeof buildProductFocus>; locale?: UiLocale }) {
@@ -26,12 +28,15 @@ export function ProductFocus({ data, locale = "zh-CN" }: { data: ReturnType<type
       <section className="overview-panel">
         <div className="overview-panel-heading"><h2>{pick(locale, COPY.mapTitle)}</h2></div>
         {data.map.length === 0 ? <p className="overview-note">No feature specifications yet</p> : data.map.map((feature) => (
-          <details className="impact-item" key={feature.id}>
-            <summary><strong>{feature.name}</strong> · {feature.scenarioCount > 0 ? `${feature.scenarioCount}${pick(locale, COPY.scenarios)}` : pick(locale, COPY.overview)} · {feature.source === "manual" ? pick(locale, SPEC_EDITOR.sourceManual) : pick(locale, SPEC_EDITOR.sourceGenerated)}</summary>
+          <article className="impact-item" key={feature.id}>
+            <strong>{feature.name}</strong><span className="overview-meta-inline"> · {feature.scenarioCount > 0 ? `${feature.scenarioCount}${pick(locale, COPY.scenarios)}` : pick(locale, COPY.overview)} · {feature.source === "manual" ? pick(locale, COPY.manual) : pick(locale, COPY.generated)} · {verificationLabel(feature.verification, locale)}</span>
             <p>{feature.summary}</p>
-            {feature.scenarios.map((scenario) => <p key={scenario.reference}>{scenario.reference}：{scenario.context} → {scenario.action} → {scenario.outcome}</p>)}
-            <Link className="overview-text-link" href={feature.href}>查看功能与证据</Link>
-          </details>
+            <details>
+              <summary>{pick(locale, COPY.behaviorDetails)}</summary>
+              {feature.scenarios.map((scenario) => <p key={scenario.reference}>{scenario.reference}：{scenario.context} → {scenario.action} → {scenario.outcome}</p>)}
+              <Link className="overview-text-link" href={feature.href}>查看功能与证据</Link>
+            </details>
+          </article>
         ))}
       </section>
 

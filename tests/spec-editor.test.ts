@@ -28,6 +28,12 @@ describe("spec editor rules", () => {
     expect(nextScenarioReference("error", [])).toBe("ER-1");
   });
 
+  it("keeps a curated display name optional and independent from the stable feature name", () => {
+    expect(featureInputSchema.parse({ name: "technical_name", displayName: " 产品能力总览 ", summary: "", parentId: null })).toMatchObject({ name: "technical_name", displayName: "产品能力总览" });
+    expect(featureInputSchema.parse({ name: "technical_name", displayName: " ", summary: "", parentId: null }).displayName).toBeNull();
+    expect(featureInputSchema.parse({ name: "technical_name", summary: "", parentId: null }).displayName).toBeUndefined();
+  });
+
   it("validates feature and scenario input at the boundary", () => {
     expect(featureInputSchema.parse({ name: "Authentication", summary: "OAuth", parentId: null }).name).toBe("Authentication");
     expect(() => featureInputSchema.parse({ name: "", summary: "Missing", parentId: null })).toThrow();

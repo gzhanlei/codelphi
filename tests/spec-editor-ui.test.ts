@@ -10,8 +10,9 @@ describe("spec editor presentation", () => {
     expect(scenarioFormState(undefined)).toEqual({ context: "", action: "", outcome: "", category: "happy" });
     expect(scenarioFormTitle(scenario)).toBe("编辑场景 HP-1");
     expect(scenarioFormTitle(undefined)).toBe("新建场景");
-    expect(featureFormState(feature)).toEqual({ name: "Authentication", summary: "OAuth" });
-    expect(featureFormState(undefined)).toEqual({ name: "", summary: "" });
+    expect(featureFormState(feature)).toEqual({ name: "Authentication", displayName: "", summary: "OAuth" });
+    expect(featureFormState(undefined)).toEqual({ name: "", displayName: "", summary: "" });
+    expect(featureFormState({ ...feature, displayName: "登录" }).displayName).toBe("登录");
     expect(featureFormTitle(feature, 1)).toBe("编辑功能");
     expect(featureFormTitle(undefined, 1)).toBe("新建子功能");
     expect(featureFormTitle(undefined, null)).toBe("新建顶级功能");

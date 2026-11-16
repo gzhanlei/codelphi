@@ -69,11 +69,11 @@ async function featureProductId(id: number, db: Executor, organizationId?: numbe
 async function requireFeature(id: number, db: Executor, organizationId?: number) {
   const [rows] = await db.execute(
     organizationId === undefined
-      ? "SELECT id, product_id AS productId, name, source FROM features WHERE id = ? AND active = 1"
-      : "SELECT id, product_id AS productId, name, source FROM features WHERE id = ? AND active = 1 AND product_id IN (SELECT id FROM products WHERE organization_id = ?)",
+      ? "SELECT id, product_id AS productId, name, display_name AS displayName, summary, parent_id AS parentId, source FROM features WHERE id = ? AND active = 1"
+      : "SELECT id, product_id AS productId, name, display_name AS displayName, summary, parent_id AS parentId, source FROM features WHERE id = ? AND active = 1 AND product_id IN (SELECT id FROM products WHERE organization_id = ?)",
     organizationId === undefined ? [id] : [id, organizationId],
   );
-  const feature = (rows as Array<{ id: number; productId: number; name: string; source: "generated" | "manual" }>)[0];
+  const feature = (rows as Array<{ id: number; productId: number; name: string; displayName: string | null; summary: string; parentId: number | null; source: "generated" | "manual" }>)[0];
   if (!feature) throw new SpecEditorError(404, "功能不存在或已删除");
   return feature;
 }
@@ -91,10 +91,10 @@ export async function createFeature(slug: string, value: unknown, organizationId
     const features = await activeFeatures(product.id, connection, true);
     assertFeatureParent(features, null, input.parentId);
     const [result] = await connection.execute(
-      "INSERT INTO features (product_id, name, summary, parent_id, source, active, last_edited_by, last_edited_at) VALUES (?, ?, ?, ?, 'manual', 1, ?, NOW(3))",
-      [product.id, input.name, input.summary, input.parentId, editorSub ?? null],
+      "INSERT INTO features (product_id, name, display_name, summary, parent_id, source, active, last_edited_by, last_edited_at) VALUES (?, ?, ?, ?, ?, 'manual', 1, ?, NOW(3))",
+      [product.id, input.name, input.displayName ?? null, input.summary, input.parentId, editorSub ?? null],
     );
-    return { id: Number((result as { insertId: number }).insertId), name: input.name, summary: input.summary, parentId: input.parentId, source: "manual" };
+    return { id: Number((result as { insertId: number }).insertId), name: input.name, displayName: input.displayName ?? null, summary: input.summary, parentId: input.parentId, source: "manual" };
   });
 }
 
@@ -106,14 +106,21 @@ export async function updateFeature(id: number, value: unknown, organizationId?:
     const feature = await requireFeature(id, connection, organizationId);
     assertNameChangeAllowed(feature, input.name);
     assertFeatureParent(features, id, input.parentId);
-    const [result] = await connection.execute(
-      // P1：修订 ≠ 核实——编辑只清确认状态（产生新内容），不再清除漂移标记；
-      // stale 只能由核实动作或重新分析合并清除（见 docs/spec-verification-lifecycle-design.md 转换 3）。
-      "UPDATE features SET name = ?, summary = ?, parent_id = ?, source = 'manual', verified_at = NULL, verified_by = NULL, last_edited_by = ?, last_edited_at = NOW(3) WHERE id = ? AND active = 1",
-      [input.name, input.summary, input.parentId, editorSub ?? null, id],
-    );
+    const presentationOnly = feature.name === input.name && feature.summary === input.summary && feature.parentId === input.parentId;
+    const nextDisplayName = (input.displayName === undefined ? feature.displayName : input.displayName) ?? null;
+    const [result] = presentationOnly
+      ? await connection.execute(
+          "UPDATE features SET display_name = ? WHERE id = ? AND active = 1",
+          [nextDisplayName, id],
+        )
+      : await connection.execute(
+          // P1：修订 ≠ 核实——编辑只清确认状态（产生新内容），不再清除漂移标记；
+          // stale 只能由核实动作或重新分析合并清除（见 docs/spec-verification-lifecycle-design.md 转换 3）。
+          "UPDATE features SET name = ?, display_name = ?, summary = ?, parent_id = ?, source = 'manual', verified_at = NULL, verified_by = NULL, last_edited_by = ?, last_edited_at = NOW(3) WHERE id = ? AND active = 1",
+          [input.name, nextDisplayName, input.summary, input.parentId, editorSub ?? null, id],
+        );
     if ((result as { affectedRows: number }).affectedRows === 0) throw new SpecEditorError(404, "功能不存在或已删除");
-    return { id, name: input.name, summary: input.summary, parentId: input.parentId, source: "manual" };
+    return { id, name: input.name, displayName: nextDisplayName, summary: input.summary, parentId: input.parentId, source: presentationOnly ? feature.source : "manual" };
   });
 }
 

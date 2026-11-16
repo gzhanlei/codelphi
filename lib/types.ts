@@ -31,6 +31,7 @@ export interface RepositoryRecord {
 export interface FeatureRow {
   id: number;
   name: string;
+  displayName?: string | null;
   summary: string;
   parentId: number | null;
   source: "generated" | "manual";

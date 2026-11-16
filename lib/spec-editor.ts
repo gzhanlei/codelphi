@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const featureInputSchema = z.object({
   name: z.string().trim().min(1, "请输入功能名称").max(191),
+  displayName: z.preprocess((value) => typeof value === "string" && value.trim() === "" ? null : value, z.string().trim().max(191).nullish()),
   summary: z.string().trim().max(4_000).default(""),
   parentId: z.number().int().positive().nullable().default(null),
 });

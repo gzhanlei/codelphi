@@ -48,7 +48,7 @@ export const PRODUCT_OVERVIEW = {
   askHeading: { "zh-CN": "规格问答", en: "Ask the spec" },
   askNote: { "zh-CN": "用一句话问产品行为，答案附源码证据。", en: "Ask about product behavior in one sentence; answers cite source evidence." },
   askSuggestion: { "zh-CN": "{name} 是怎么工作的？", en: "How does {name} work?" },
-  tasksHeading: { "zh-CN": "快速导航", en: "Quick navigation" },
+  tasksHeading: { "zh-CN": "你想了解什么？", en: "What do you want to know?" },
   tasksNote: { "zh-CN": "按你想回答的问题进入对应视图。", en: "Jump to the view that answers your question." },
   taskOpen: { "zh-CN": "查看 →", en: "Open →" },
   timelineHeading: { "zh-CN": "发布时间线", en: "Release timeline" },

@@ -38,7 +38,7 @@ describe("spec editor persistence", () => {
       return [{}];
     });
     await expect(updateFeature(1, { name: "Root", summary: "Updated", parentId: 4 })).resolves.toMatchObject({ id: 1, parentId: 4, source: "manual" });
-    expect(execute).toHaveBeenCalledWith("UPDATE features SET name = ?, summary = ?, parent_id = ?, source = 'manual', verified_at = NULL, verified_by = NULL, last_edited_by = ?, last_edited_at = NOW(3) WHERE id = ? AND active = 1", ["Root", "Updated", 4, null, 1]);
+    expect(execute).toHaveBeenCalledWith("UPDATE features SET name = ?, display_name = ?, summary = ?, parent_id = ?, source = 'manual', verified_at = NULL, verified_by = NULL, last_edited_by = ?, last_edited_at = NOW(3) WHERE id = ? AND active = 1", ["Root", null, "Updated", 4, null, 1]);
     expect(execute).toHaveBeenCalledWith("SELECT id, parent_id AS parentId FROM features WHERE product_id = ? AND active = 1 FOR UPDATE", [2]);
     expect(connection.commit).toHaveBeenCalledOnce();
   });
@@ -64,6 +64,31 @@ describe("spec editor persistence", () => {
       return [{}];
     });
     await expect(updateFeature(1, { name: "Authentication", summary: "Curated", parentId: null })).resolves.toMatchObject({ name: "Authentication", summary: "Curated" });
+  });
+
+  it("changes only presentation when a display name is edited without changing behavioral content", async () => {
+    execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("SELECT product_id AS productId")) return [[{ productId: 2 }]];
+      if (sql.includes("SELECT id, parent_id")) return [[{ id: 1, parentId: null }]];
+      if (sql.includes("SELECT id, product_id")) return [[{ id: 1, productId: 2, name: "technical_name", displayName: null, summary: "Curated", parentId: null, source: "generated" }]];
+      if (sql.includes("UPDATE features")) return [{ affectedRows: 1 }];
+      return [{}];
+    });
+    await expect(updateFeature(1, { name: "technical_name", displayName: "产品能力总览", summary: "Curated", parentId: null })).resolves.toMatchObject({ displayName: "产品能力总览", source: "generated" });
+    expect(execute).toHaveBeenCalledWith("UPDATE features SET display_name = ? WHERE id = ? AND active = 1", ["产品能力总览", 1]);
+    expect(execute).not.toHaveBeenCalledWith(expect.stringContaining("verified_at = NULL"), expect.anything());
+  });
+
+  it("preserves a curated display name when an older client omits the field", async () => {
+    execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("SELECT product_id AS productId")) return [[{ productId: 2 }]];
+      if (sql.includes("SELECT id, parent_id")) return [[{ id: 1, parentId: null }]];
+      if (sql.includes("SELECT id, product_id")) return [[{ id: 1, productId: 2, name: "technical_name", displayName: "产品能力总览", summary: "Curated", parentId: null, source: "generated" }]];
+      if (sql.includes("UPDATE features")) return [{ affectedRows: 1 }];
+      return [{}];
+    });
+    await updateFeature(1, { name: "technical_name", summary: "Updated", parentId: null });
+    expect(execute).toHaveBeenCalledWith("UPDATE features SET name = ?, display_name = ?, summary = ?, parent_id = ?, source = 'manual', verified_at = NULL, verified_by = NULL, last_edited_by = ?, last_edited_at = NOW(3) WHERE id = ? AND active = 1", ["technical_name", "产品能力总览", "Updated", null, null, 1]);
   });
 
   it("does not rename a generated feature and break its analysis identity", async () => {

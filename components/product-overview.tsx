@@ -131,7 +131,7 @@ export function ProductOverview({ data, canEdit = false, locale = "zh-CN" }: { d
   return (
     <div className="product-overview">
       <ProductFocus data={data.focus} locale={locale} />
-      <UserImpactPanel data={data} locale={locale} />
+      <TaskEntriesPanel data={data} locale={locale} />
       <div className="overview-ask">
         <section className="overview-panel">
           <div className="overview-panel-heading"><h2>{pick(locale, PRODUCT_OVERVIEW.askHeading)}</h2><p>{pick(locale, PRODUCT_OVERVIEW.askNote)}</p></div>
@@ -146,7 +146,7 @@ export function ProductOverview({ data, canEdit = false, locale = "zh-CN" }: { d
       </div>
       <details className="overview-secondary">
         <summary>展开完整产品信息</summary>
-        <TaskEntriesPanel data={data} locale={locale} />
+        <UserImpactPanel data={data} locale={locale} />
         <ReleaseTimeline data={data} locale={locale} />
         <CapabilitiesPanel data={data} locale={locale} />
         <TrustLine data={data} locale={locale} />

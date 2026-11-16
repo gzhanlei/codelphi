@@ -201,13 +201,15 @@ describe("product overview task-oriented panels (设计 §4-§7)", () => {
     expect(html).not.toContain("这次建议重新验证什么？</a>");
   });
 
-  it("orders user impact before ask and timeline (设计 §4 信息顺序)", () => {
+  it("puts task entries before ask and keeps detailed impact in secondary information", () => {
     const html = renderToStaticMarkup(createElement(ProductOverview, { data: quiet }));
-    const impactAt = html.indexOf("本次发布");
+    const taskAt = html.indexOf("你想了解什么？");
     const askAt = html.indexOf("规格问答");
+    const impactAt = html.indexOf("本次发布");
     const timelineAt = html.indexOf("发布时间线");
-    expect(impactAt).toBeGreaterThan(-1);
-    expect(askAt).toBeGreaterThan(impactAt);
-    expect(timelineAt).toBeGreaterThan(askAt);
+    expect(taskAt).toBeGreaterThan(-1);
+    expect(askAt).toBeGreaterThan(taskAt);
+    expect(impactAt).toBeGreaterThan(askAt);
+    expect(timelineAt).toBeGreaterThan(impactAt);
   });
 });

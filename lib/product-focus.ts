@@ -31,9 +31,12 @@ function evidenceFromSubject(value: unknown): string[] {
 }
 
 export function buildProductFocus(input: Input) {
+  const displayNames = new Map(input.features.map((feature) => [feature.name, feature.displayName || feature.name]));
+  const displayName = (name: string) => displayNames.get(name) ?? name;
   const map = input.features.map((feature) => ({
     id: feature.id,
-    name: feature.name,
+    canonicalName: feature.name,
+    name: displayName(feature.name),
     summary: feature.summary,
     source: feature.source,
     verification: verification(feature),
@@ -42,7 +45,7 @@ export function buildProductFocus(input: Input) {
     href: `${input.productBase}${featureHref(feature.id)}`,
   })).sort((a, b) => Number(b.verification === "stale-verified") - Number(a.verification === "stale-verified")
     || Number(b.source === "manual") - Number(a.source === "manual")
-    || a.name.localeCompare(b.name)).slice(0, 5);
+    || a.canonicalName.localeCompare(b.canonicalName) || a.name.localeCompare(b.name)).slice(0, 5);
 
   const latestRelease = input.releases[0];
   const behaviorChanges = latestRelease ? input.behaviorChanges.filter((change) => change.releaseId === latestRelease.id) : [];
@@ -75,7 +78,7 @@ export function buildProductFocus(input: Input) {
     return {
       id: `release-${group.releaseId}-${group.featureName}`,
       releaseId: group.releaseId,
-      featureName: group.featureName,
+      featureName: displayName(group.featureName),
       kind: "changed" as const,
       summary: summaries[0] ?? "",
       summaries,
@@ -86,7 +89,7 @@ export function buildProductFocus(input: Input) {
   const manualChanges = latestRelease ? input.features.filter((feature) => feature.lastEditedAt && new Date(feature.lastEditedAt) >= latestRelease.committedAt).map((feature) => ({
     id: `manual-${feature.id}`,
     releaseId: latestRelease.id,
-    featureName: feature.name,
+    featureName: displayName(feature.name),
     kind: "changed" as const,
     summary: feature.summary,
     summaries: [feature.summary],
@@ -96,11 +99,11 @@ export function buildProductFocus(input: Input) {
   const changes = [...manualChanges, ...releaseChanges].slice(0, 5);
 
   const attentionCandidates = [
-    ...input.features.filter((feature) => feature.staleSince).map((feature) => ({ featureName: feature.name, source: feature.source, reason: "相关功能或证据发生变化，需要重新评估" })),
-    ...input.scenarios.filter((scenario) => scenario.staleSince).map((scenario) => ({ featureName: input.features.find((feature) => feature.id === scenario.featureId)?.name ?? "", source: scenario.source, reason: "相关场景或证据发生变化，需要重新评估" })),
+    ...input.features.filter((feature) => feature.staleSince).map((feature) => ({ featureName: feature.name, label: displayName(feature.name), source: feature.source, reason: "相关功能或证据发生变化，需要重新评估" })),
+    ...input.scenarios.filter((scenario) => scenario.staleSince).map((scenario) => ({ featureName: input.features.find((feature) => feature.id === scenario.featureId)?.name ?? "", label: displayName(input.features.find((feature) => feature.id === scenario.featureId)?.name ?? ""), source: scenario.source, reason: "相关场景或证据发生变化，需要重新评估" })),
   ];
-  const attention = attentionCandidates.filter((item) => item.source === "manual" || HIGH_RISK.test(item.featureName)).slice(0, 3);
-  const confirmations = [...input.features.filter((feature) => !feature.verifiedAt).map((feature) => ({ featureName: feature.name, reason: "尚未人工确认" })), ...input.scenarios.filter((scenario) => !scenario.verifiedAt).map((scenario) => ({ featureName: input.features.find((feature) => feature.id === scenario.featureId)?.name ?? "", reason: "尚未人工确认" }))].filter((item) => item.featureName).slice(0, 3);
+  const attention = attentionCandidates.filter((item) => item.source === "manual" || HIGH_RISK.test(item.featureName)).slice(0, 3).map((item) => ({ featureName: item.label, reason: item.reason }));
+  const confirmations = [...input.features.filter((feature) => !feature.verifiedAt).map((feature) => ({ featureName: displayName(feature.name), reason: "尚未人工确认" })), ...input.scenarios.filter((scenario) => !scenario.verifiedAt).map((scenario) => ({ featureName: displayName(input.features.find((feature) => feature.id === scenario.featureId)?.name ?? ""), reason: "尚未人工确认" }))].filter((item) => item.featureName).slice(0, 3);
 
   return { map, changes, attention, confirmations, emptyAttention: attention.length === 0 };
 }

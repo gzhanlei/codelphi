@@ -21,7 +21,7 @@ export function scenarioFormTitle(scenario: ScenarioRow | undefined, locale: UiL
 }
 
 export function featureFormState(feature?: FeatureRow) {
-  return { name: textOrEmpty(feature?.name), summary: textOrEmpty(feature?.summary) };
+  return { name: textOrEmpty(feature?.name), displayName: textOrEmpty(feature?.displayName ?? undefined), summary: textOrEmpty(feature?.summary) };
 }
 
 export function featureFormTitle(feature: FeatureRow | undefined, parentId: number | null, locale: UiLocale = "zh-CN") {

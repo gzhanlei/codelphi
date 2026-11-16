@@ -171,7 +171,7 @@ export async function getProductDetails(slug: string, organizationId?: number) {
      JOIN repositories repo ON repo.id = r.repository_id WHERE repo.product_id = ? ORDER BY r.created_at DESC LIMIT 1`,
     [product.id],
   );
-  const [featureRows] = await db.execute("SELECT id, name, summary, parent_id AS parentId, source, stale_since AS staleSince, stale_change_id AS staleChangeId, verified_at AS verifiedAt, verified_by AS verifiedBy, last_edited_by AS lastEditedBy, last_edited_at AS lastEditedAt FROM features WHERE product_id = ? AND active = 1 ORDER BY name", [product.id]);
+  const [featureRows] = await db.execute("SELECT id, name, display_name AS displayName, summary, parent_id AS parentId, source, stale_since AS staleSince, stale_change_id AS staleChangeId, verified_at AS verifiedAt, verified_by AS verifiedBy, last_edited_by AS lastEditedBy, last_edited_at AS lastEditedAt FROM features WHERE product_id = ? AND active = 1 ORDER BY name", [product.id]);
   const [releaseRows, countRows] = await Promise.all([
     db.execute("SELECT id, title, summary, sha, url, committed_at AS committedAt, spec_version_id AS specVersionId FROM releases WHERE product_id = ? ORDER BY committed_at DESC LIMIT ?", [product.id, RELEASE_PAGE_SIZE]),
     db.execute("SELECT COUNT(*) AS total FROM releases WHERE product_id = ?", [product.id]),
