@@ -120,7 +120,7 @@ incremental 请求 → 全部满足才走增量：
 
 ## 7. 落库、结算与观测
 
-- `insertSpecVersion`（append-only）：工作台 upsert 集 == 版本层合并集（W0-3 常驻回归锁定）；坍缩护栏（场景数骤降 >30%）只告警不阻断
+- `insertSpecVersion`（append-only）：工作台 upsert 集 == 版本层合并集（W0-3 常驻回归锁定）；坍缩护栏（场景数骤降 >30%）拒绝激活并回滚，不将不完整规格覆盖到工作台
 - 回归任务：从行为变化自动生成场景级回归任务（P0）
 - 结算：`capture` 每 run 1 SAU；结算失败只告警，sweep 恢复（D15：结算不改写分析状态）
 - 通知：分析完成 / 坍缩告警 / 额度事件，best-effort 投递

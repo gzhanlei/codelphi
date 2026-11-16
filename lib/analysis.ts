@@ -277,6 +277,10 @@ async function saveResult(run: RunContext, result: AnalysisResult, change: Chang
     await markSpecDrift(connection, run.productId, specVersionId);
     // B1：覆盖率回执与规格版本同事务落库（append-only，历史版本可回溯）
     if (coverage) await saveCoverageReceipt(connection, specVersionId, coverage);
+    if (collapse) {
+      console.error("[spec] suspected spec collapse", { runId: run.id, specVersionId, previousScenarios: collapse.previousScenarios, currentScenarios: collapse.currentScenarios });
+      throw new Error(`spec_collapse_rejected:${collapse.previousScenarios}->${collapse.currentScenarios}`);
+    }
     // P0(I1):下线基准必须是 carry-forward 合并后的完整规格——用 AI 原始输出会让
     // 增量模式把未受影响的 generated 功能全部下线,工作台坍缩为本次触及的功能。
     await upsertGeneratedSpec(connection, run, mergedFeatures);
@@ -607,10 +611,7 @@ async function runAnalysisBody(run: RunContext) {
     });
   }
 
-  // 坍缩护栏：新版场景数骤降只告警不阻断（版本 append-only，可回溯）；通知带警告供人工核实。
-  if (collapse) {
-    console.error("[spec] suspected spec collapse", { runId: run.id, specVersionId, ...collapse });
-  }
+  // 坍缩护栏：拒绝激活不完整版本（版本 append-only，可回溯）；通知带警告供人工核实。
   // BM-7 单功能坍缩护栏：受影响功能被窗口内容顶掉（总量增量掩盖下的局部坍缩），逐功能告警。
   if (featureCollapses.length > 0) {
     console.error("[spec] feature-level collapse detected", { runId: run.id, specVersionId, featureCollapses });

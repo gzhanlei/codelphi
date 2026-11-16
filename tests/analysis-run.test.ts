@@ -592,6 +592,24 @@ describe("analysis orchestration", () => {
     expect(String(ledgerParams[7])).toMatch(/complete|partial|failed|not_applicable/);
   });
 
+  it("rejects a collapsed spec before activating it on the workbench", async () => {
+    vi.mocked(insertSpecVersion).mockResolvedValueOnce({
+      specVersionId: 44,
+      specChanges: [],
+      features: [{ name: "统一登录", summary: "s", scenarios: [] }],
+      collapse: { previousScenarios: 489, currentScenarios: 211 },
+      featureCollapses: [],
+      misplacedScenarios: [],
+      identityHijacksDropped: 0,
+      featureFolds: [],
+    });
+    await runAnalysis(8);
+    expect(connection.rollback).toHaveBeenCalled();
+    expect(connection.commit).not.toHaveBeenCalled();
+    expect(connection.execute.mock.calls.some(([sql]) => String(sql).includes("INSERT INTO scenarios"))).toBe(false);
+    expect(execute.mock.calls.some(([sql]) => String(sql).includes("status = 'failed'"))).toBe(true);
+  });
+
   it("accepts a sanitized-empty pass as a no-change window (collapse detection downstream)", async () => {
     // 文档-only 窗口 + 全幻觉引用 → 清洗后为空：按「无行为变化」接受（既有契约：空版本
     // 由坍缩护栏下游告警），run 不失败、不结算。
