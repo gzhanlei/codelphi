@@ -17,6 +17,7 @@ describe("canonicalizeScenarios", () => {
       rawRecordIds: [1, 2],
       specReferences: ["v230"],
       identityStatus: "proven",
+      identityScope: "v230",
     });
     expect(result.scenarios[1]).toMatchObject({ scenarioIdentity: "EC-2", rawRecordIds: [3], identityStatus: "proven" });
     expect(result.rawCount).toBe(result.canonicalCount + result.collapsedCount);
@@ -31,7 +32,17 @@ describe("canonicalizeScenarios", () => {
 
     expect(result.canonicalCount).toBe(3);
     expect(result.collapsedCount).toBe(0);
-    expect(result.scenarios.every((item) => item.identityStatus === "unresolved")).toBe(true);
+    expect(result.scenarios.every((item) => item.identityStatus === "unresolved" && item.identityScope === "unresolved")).toBe(true);
+  });
+
+  it("uses collision-safe keys for feature names containing pipes", () => {
+    const result = canonicalizeScenarios([
+      { ...scenario(1), featureName: "功能|子功能" },
+      { ...scenario(2), featureName: "功能|子功能" },
+    ]);
+    expect(result.canonicalCount).toBe(1);
+    expect(result.collapsedCount).toBe(1);
+    expect(result.scenarios[0]).toMatchObject({ identityStatus: "proven", identityScope: "v230", rawRecordIds: [1, 2] });
   });
 });
 

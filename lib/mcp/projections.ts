@@ -13,21 +13,22 @@ function nameKey(value: string): string {
 export function canonicalizeScenarios(rows: CanonicalScenarioInput[]) {
   const groups = new Map<string, CanonicalScenarioInput[]>();
   for (const row of [...rows].sort((a, b) => a.id - b.id)) {
-    const key = `${nameKey(row.featureName)}|${row.reference ?? ""}|${row.specReference}|${[...row.evidencePaths].sort().join(",")}`;
+    const key = JSON.stringify([nameKey(row.featureName), row.reference ?? "", row.specReference, [...row.evidencePaths].sort()]);
     const group = groups.get(key) ?? [];
     group.push(row);
     groups.set(key, group);
   }
   const identities = new Map<string, Set<string>>();
-  for (const key of groups.keys()) {
-    const [feature, reference] = key.split("|");
-    const groupKeys = identities.get(`${feature}|${reference}`) ?? new Set<string>();
+  for (const [key, group] of groups) {
+    const first = group[0];
+    const identityKey = JSON.stringify([nameKey(first.featureName), first.reference ?? ""]);
+    const groupKeys = identities.get(identityKey) ?? new Set<string>();
     groupKeys.add(key);
-    identities.set(`${feature}|${reference}`, groupKeys);
+    identities.set(identityKey, groupKeys);
   }
   const scenarios = [...groups.entries()].map(([, group]) => {
     const first = group[0];
-    const identityKey = `${nameKey(first.featureName)}|${first.reference ?? ""}`;
+    const identityKey = JSON.stringify([nameKey(first.featureName), first.reference ?? ""]);
     const unresolved = (identities.get(identityKey)?.size ?? 0) > 1;
     return {
       stableKey: nameKey(first.featureName),
@@ -38,6 +39,7 @@ export function canonicalizeScenarios(rows: CanonicalScenarioInput[]) {
       specReferences: [...new Set(group.map((row) => row.specReference))].sort(),
       evidencePaths: [...new Set(group.flatMap((row) => row.evidencePaths))].sort(),
       identityStatus: unresolved ? "unresolved" as const : "proven" as const,
+      identityScope: unresolved ? "unresolved" as const : first.specReference,
     };
   });
   return {

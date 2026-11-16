@@ -296,7 +296,7 @@ describe("mcp server (A1)", () => {
     execute.mockImplementation(async (sql: string) => {
       if (String(sql).includes("FROM products WHERE organization_id")) return [[{ id: 9, slug: "radar", name: "Radar", description: "d" }]];
       if (String(sql).includes("FROM repositories")) return [[{ provider: "github", owner: "gzhanlei", name: "radar", defaultBranch: "main", sha: "abc123" }]];
-      if (String(sql).includes("FROM releases WHERE id = ?")) return [[{ id: 229, title: "v", summary: "s", sha: "abc123", url: "u", committedAt: new Date(), specVersionId: 230, analysis_run_id: 333 }]];
+      if (String(sql).includes("FROM releases WHERE id = ?")) return [[{ id: 229, title: "v", summary: "s", sha: "abc123", url: "u", committedAt: new Date(), specVersionId: 230, analysisRunId: 333 }]];
       if (String(sql).includes("FROM analysis_runs WHERE id = ?")) return [[{ id: 333, status: "succeeded", after_sha: "abc123", error_message: null }]];
       if (String(sql).includes("FROM release_files")) return [[{ path: "lib/a.ts" }]];
       if (String(sql).includes("FROM spec_changes c JOIN releases")) return [[{ id: 1, kind: "added", entityType: "scenario", featureName: "功能", scenarioReference: "EC-1", summary: "s", highlightType: null, beforeJson: null, afterJson: { reference: "EC-1", evidence: [{ path: "lib/a.ts" }] } }]];
@@ -315,7 +315,7 @@ describe("mcp server (A1)", () => {
     execute.mockImplementation(async (sql: string) => {
       if (String(sql).includes("FROM products WHERE organization_id")) return [[{ id: 9, slug: "radar", name: "Radar", description: "d" }]];
       if (String(sql).includes("FROM repositories")) return [[{ provider: "github", owner: "gzhanlei", name: "radar", defaultBranch: "main", sha: "abc123" }]];
-      if (String(sql).includes("FROM releases WHERE id = ?")) return [[{ id: 229, title: "v", summary: "s", sha: "release-sha", url: "u", committedAt: new Date(), specVersionId: 230, analysis_run_id: 333 }]];
+      if (String(sql).includes("FROM releases WHERE id = ?")) return [[{ id: 229, title: "v", summary: "s", sha: "release-sha", url: "u", committedAt: new Date(), specVersionId: 230, analysisRunId: 333 }]];
       if (String(sql).includes("FROM analysis_runs WHERE id = ?")) return [[{ id: 333, status: "succeeded", after_sha: "different-run-sha", error_message: null }]];
       if (String(sql).includes("FROM release_files")) return [[{ path: "lib/a.ts" }]];
       if (String(sql).includes("FROM spec_changes c JOIN releases")) return [[{ id: 1, kind: "added", entityType: "scenario", featureName: "功能", scenarioReference: "EC-1", summary: "s", highlightType: null, beforeJson: null, afterJson: { reference: "EC-1", evidence: [{ path: "lib/a.ts" }] } }]];
@@ -429,6 +429,7 @@ describe("mcp server (A1)", () => {
     expect(result).toMatchObject({ status: "completed", releaseId: 231, analysisRunId: 333 });
     const runQuery = execute.mock.calls.find(([sql]) => String(sql).includes("after_sha LIKE ?"))!;
     expect(String(runQuery[0])).toContain("SELECT ar.id, ar.status, ar.error_message");
+    expect(String(runQuery[0])).toContain("ORDER BY ar.created_at DESC, ar.id DESC");
   });
 
   it("supports an unambiguous short SHA prefix", async () => {

@@ -174,3 +174,11 @@
 - stableKey + paths 的匹配必须同时落在同一变化记录上；release_files 只作为 path-only intent 的范围证据，不能替其他功能补足证据。
 - `analysis.status` 还要求 `run.after_sha === release.sha`，`legacySourceIssueCount` 使用 release 内失效关联计数。
 - `lookup_by_files?view=risk` 不使用 raw 的每功能 10 条截断，跨 path 同场景去重后计算总数和 canonical 数。
+
+### 后续兼容性补充
+
+- `identityStatus` 只表示 canonical 合并的确定性置信度；`identityScope` 另外声明 live、specVersionId 或 release SHA，未决时为 `unresolved`。
+- canonical 分组键使用 JSON 元组序列化，功能名包含 `|` 不影响身份解析。
+- 短 SHA 使用产品内前缀匹配；歧义前缀返回 `review`，完整 SHA 仍精确关联最新 run 与同 SHA release。
+- `totalChangeCount` 表示全部 changes，`eligibleChangeCount` 只表示健康比例分母；`reviewedExcludedCount` 单独披露。
+- `wait_for_release` 的 timeout 保留已持久化 releaseId；corrective run 不存在时状态为 `unknown`。
