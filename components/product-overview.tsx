@@ -4,7 +4,7 @@ import type { UiLocale } from "@/lib/ui-locale";
 import { pick } from "@/lib/ui-locale";
 import { PRODUCT_OVERVIEW, SPEC_EDITOR } from "@/lib/ui-strings/product";
 import { SpecAsk } from "./spec-ask";
-import { changeGroupLabel, type ProductOverviewData, type TimelineEntry } from "@/lib/product-overview";
+import type { ProductOverviewData, TimelineEntry } from "@/lib/product-overview";
 import { coverageExplainer } from "@/lib/coverage-display";
 
 function CapabilityList({ capabilities, locale = "zh-CN" }: { capabilities: ProductOverviewData["capabilities"]; locale?: UiLocale }) {
@@ -18,49 +18,6 @@ export function CapabilitiesPanel({ data, locale = "zh-CN" }: { data: ProductOve
     <section className="overview-panel">
       <div className="overview-panel-heading"><h2>{pick(locale, PRODUCT_OVERVIEW.capabilitiesHeading)}</h2><p>{pick(locale, PRODUCT_OVERVIEW.capabilitiesNote)}</p><Link className="overview-text-link" href={`${data.productBase}?view=spec`}>完整能力（规格） →</Link></div>
       <CapabilityList capabilities={data.capabilities} locale={locale} />
-    </section>
-  );
-}
-
-/**
- * 本次发布的用户影响（设计 §6）：只复用已落库 changes.user_impact，
- * 回退态按确定性数据展示，不用更早发布冒充最新发布；历史导航显式带日期与发布身份。
- */
-function UserImpactPanel({ data, locale = "zh-CN" }: { data: ProductOverviewData; locale?: UiLocale }) {
-  const { userImpact, latestRelease } = data;
-  if (userImpact.state === "none" || !latestRelease) return null;
-  const deepLink = `?view=changes#release-${latestRelease.id}`;
-  return (
-    <section className="overview-panel">
-      <div className="overview-panel-heading"><h2>{pick(locale, PRODUCT_OVERVIEW.impactHeading)}</h2><span className="overview-meta-inline">{latestRelease.title} · {dayLabel(latestRelease.committedAt, locale)}</span><Link className="overview-text-link" href={deepLink}>{pick(locale, PRODUCT_OVERVIEW.allDiffs)}</Link></div>
-      {userImpact.state === "impacts" ? (
-        <div className="impact-list">
-          {userImpact.items.map((item) => (
-            <div className="impact-item" key={`${item.releaseId}-${item.featureName}`}>
-              <strong>{item.featureName}</strong>
-              {item.userImpacts.map((text) => <p key={text.slice(0, 16)}>{text}</p>)}
-              {item.moreCount > 0 ? <p className="impact-more">{pick(locale, PRODUCT_OVERVIEW.impactMore).replace("{count}", String(item.moreCount))}</p> : null}
-              <Link className="overview-text-link" href={deepLink}>{pick(locale, PRODUCT_OVERVIEW.viewDiffs)}</Link>
-            </div>
-          ))}
-        </div>
-      ) : null}
-      {userImpact.state === "changes" ? (
-        <div className="impact-list">
-          <p className="overview-note">{pick(locale, PRODUCT_OVERVIEW.impactFallback).replace("{count}", String(userImpact.changeStats.added + userImpact.changeStats.removed + userImpact.changeStats.changed))}</p>
-          {data.changeGroups.slice(0, 3).map((group) => (
-            <div className="impact-item" key={group.featureName}>
-              <strong>{group.featureName}</strong>
-              <p>{changeGroupLabel(group, locale)}</p>
-            </div>
-          ))}
-          <Link className="overview-text-link" href={deepLink}>{pick(locale, PRODUCT_OVERVIEW.viewDiffs)}</Link>
-        </div>
-      ) : null}
-      {userImpact.state === "quiet" ? <p className="overview-note">{pick(locale, PRODUCT_OVERVIEW.quietNote)}</p> : null}
-      {userImpact.priorBehavioralRelease ? (
-        <p className="impact-prior"><Link className="overview-text-link" href={`?view=changes#release-${userImpact.priorBehavioralRelease.id}`}>{pick(locale, PRODUCT_OVERVIEW.priorRelease).replace("{title}", userImpact.priorBehavioralRelease.title).replace("{date}", userImpact.priorBehavioralRelease.dateLabel)}</Link></p>
-      ) : null}
     </section>
   );
 }
@@ -84,10 +41,6 @@ const STATUS_CHIPS: Record<string, { entry: typeof PRODUCT_OVERVIEW.chipDraft; c
   published: { entry: PRODUCT_OVERVIEW.chipPublished, className: "tl-chip-published" },
   unpublished: { entry: PRODUCT_OVERVIEW.chipUnpublished, className: "tl-chip-unpublished" },
 };
-
-function dayLabel(date: Date | string, locale: UiLocale = "zh-CN") {
-  return new Intl.DateTimeFormat(locale, { month: "long", day: "numeric" }).format(new Date(date));
-}
 
 /** 发布时间线：行为账本的发布点投影（日期 + 发布稿状态徽章 + 一句话），条目点击进入发布卡详情。连续零变化发布折叠为一组（details 展开，无 JS 依赖）。 */
 function ReleaseTimeline({ data, locale = "zh-CN" }: { data: ProductOverviewData; locale?: UiLocale }) {
@@ -144,12 +97,10 @@ export function ProductOverview({ data, canEdit = false, locale = "zh-CN" }: { d
           />
         </section>
       </div>
-      <details className="overview-secondary">
-        <summary>展开完整产品信息</summary>
-        <UserImpactPanel data={data} locale={locale} />
+      <div className="overview-secondary">
         <ReleaseTimeline data={data} locale={locale} />
         <TrustLine data={data} locale={locale} />
-      </details>
+      </div>
     </div>
   );
 }

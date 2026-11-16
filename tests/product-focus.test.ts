@@ -125,6 +125,6 @@ describe("product focus rendering", () => {
     expect(html).toContain("含 AI 提取的候选变化；全部内容需人工确认");
     expect(html).not.toContain("部分产品能力");
     expect(html).not.toContain("当前核心能力");
-    expect(html).toContain("查看全部产品信息");
+    expect(html).not.toContain("查看全部产品信息");
   });
 });

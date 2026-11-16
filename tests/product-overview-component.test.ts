@@ -165,7 +165,7 @@ describe("product overview task-oriented panels (设计 §4-§7)", () => {
     latestRun: { status: "succeeded" },
   });
 
-  it("renders latest-release user impacts with the release identity and deep links", () => {
+  it("keeps release details in the timeline without a separate user impact panel", () => {
     const impacts = buildProductOverview({
       productBase: "/products/default/radar",
       product: { id: 1, slug: "radar", name: "Radar", description: "" },
@@ -179,20 +179,15 @@ describe("product overview task-oriented panels (设计 §4-§7)", () => {
       latestRun: { status: "succeeded" },
     });
     const html = renderToStaticMarkup(createElement(ProductOverview, { data: impacts }));
-    expect(html).toContain("本次发布对用户的影响");
-    // 同功能多条影响合并为一张卡片：功能名只出现一次，全部文本保留
-    expect((html.match(/<strong>导出<\/strong>/g) ?? []).length).toBe(1);
-    expect(html).toContain("导出文件新增可选字段，旧脚本不受影响。");
-    expect(html).toContain("字段缺失时保留旧行为并记录 omission。");
+    expect(html).not.toContain("本次发布对用户的影响");
+    expect(html).toContain("导出功能增强");
     expect(html).toContain('href="?view=changes#release-12"');
   });
 
-  it("renders the deterministic fallback for a quiet release and never borrows earlier impacts", () => {
+  it("shows quiet and earlier releases directly in the timeline without an impact fallback", () => {
     const html = renderToStaticMarkup(createElement(ProductOverview, { data: quiet }));
-    expect(html).toContain("本次未发现规格行为变化");
+    expect(html).not.toContain("本次发布对用户的影响");
     expect(html).not.toContain("导出文件新增可选字段");
-    // 历史发布导航必须显式带日期与发布身份，不与「本次发布」混称
-    expect(html).toContain("最近一次有行为变化的发布");
     expect(html).toContain("导出功能增强");
     expect(html).toContain("11月5日");
     expect(html).toContain('href="?view=changes#release-9"');
@@ -208,15 +203,15 @@ describe("product overview task-oriented panels (设计 §4-§7)", () => {
     expect(html).not.toContain("这次建议重新验证什么？</a>");
   });
 
-  it("puts task entries before ask and keeps detailed impact in secondary information", () => {
+  it("puts task entries before ask and shows the release timeline without a disclosure toggle", () => {
     const html = renderToStaticMarkup(createElement(ProductOverview, { data: quiet }));
     const taskAt = html.indexOf("你想了解什么？");
     const askAt = html.indexOf("规格问答");
-    const impactAt = html.indexOf("本次发布");
     const timelineAt = html.indexOf("发布时间线");
     expect(taskAt).toBeGreaterThan(-1);
     expect(askAt).toBeGreaterThan(taskAt);
-    expect(impactAt).toBeGreaterThan(askAt);
-    expect(timelineAt).toBeGreaterThan(impactAt);
+    expect(timelineAt).toBeGreaterThan(askAt);
+    expect(html).not.toContain("本次发布对用户的影响");
+    expect(html).not.toContain("展开完整产品信息");
   });
 });

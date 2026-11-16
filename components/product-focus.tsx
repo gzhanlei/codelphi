@@ -7,7 +7,6 @@ const COPY = {
   attentionTitle: { "zh-CN": "需要关注", en: "Needs attention" },
   confirmationTitle: { "zh-CN": "需要确认", en: "Needs confirmation" },
   empty: { "zh-CN": "当前没有需要重点关注的变化", en: "No changes need attention right now" },
-  all: { "zh-CN": "查看全部产品信息", en: "View all product information" },
   noChanges: { "zh-CN": "暂无重要变化", en: "No important changes yet" },
 } as const;
 
@@ -33,7 +32,6 @@ export function ProductFocus({ data, locale = "zh-CN" }: { data: ReturnType<type
         ))}
         {data.confirmations.length > 0 ? <details className="overview-note"><summary>{pick(locale, COPY.confirmationTitle)}（{data.confirmations.length}）</summary><p>{data.confirmations.map((item) => item.featureName).join("、")}</p></details> : null}
       </section>
-      <details className="overview-note"><summary>{pick(locale, COPY.all)}</summary><p>完整时间线、能力列表和健康统计在下方展开。</p></details>
     </div>
   );
 }
