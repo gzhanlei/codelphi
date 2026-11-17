@@ -118,8 +118,10 @@ export function renderSnapshotHtml(report: SnapshotReportData) {
   const features = report.features.map((feature, featureIndex) => {
     const search = `${feature.name} ${feature.summary}`.toLowerCase();
     return `<article class="feature-card" id="spec-feature-${featureIndex}" data-feature data-feature-search="${escapeHtml(search)}">
-  <header class="feature-header"><h3>${escapeHtml(feature.name)}</h3><p>${escapeHtml(feature.summary)}</p></header>
-  <div>${feature.scenarios.map((scenario, scenarioIndex) => renderScenario(scenario, copy, snippets, featureIndex, scenarioIndex)).join("")}</div>
+  <details class="feature-body">
+    <summary class="feature-header"><h3>${escapeHtml(feature.name)}</h3><p>${escapeHtml(feature.summary)}</p></summary>
+    <div>${feature.scenarios.map((scenario, scenarioIndex) => renderScenario(scenario, copy, snippets, featureIndex, scenarioIndex)).join("")}</div>
+  </details>
 </article>`;
   }).join("");
   const warnings = report.warnings.length > 0 ? `<section class="boundary-notices" aria-labelledby="warnings-heading"><div class="section-heading"><h2 id="warnings-heading">${escapeHtml(copy.warnings)}</h2><span>${report.warnings.length}</span></div><ul class="notice-list">${report.warnings.map((warning) => `<li>${escapeHtml(warningText(copy, warning))}</li>`).join("")}</ul></section>` : "";

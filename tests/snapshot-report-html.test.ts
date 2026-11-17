@@ -43,6 +43,19 @@ describe("single-file snapshot HTML", () => {
     expect(html).toContain('<details class="evidence-drawer report-section" id="evidence">');
   });
 
+  it("folds each feature specification behind a details/summary while keeping the name visible", () => {
+    const html = renderSnapshotHtml(report());
+    expect(html).toContain('<details class="feature-body">');
+    expect(html).toContain('<summary class="feature-header"><h3>');
+    // 每个 feature-card 的场景都收进折叠体；无 JS 时依赖原生 details 交互，内容仍可读。
+    const cards = html.match(/<article class="feature-card"[\s\S]*?<\/article>/g) ?? [];
+    expect(cards.length).toBeGreaterThan(0);
+    for (const card of cards) {
+      expect(card).toContain('<details class="feature-body">');
+      expect(card).toContain("</summary>");
+    }
+  });
+
   it("uses relevant file counts rather than bytes or unrelated data files for effective coverage", () => {
     const input = report();
     input.effectiveCoverage = { filesAssembled: 1, filesTotal: 4, ratio: 0.25, dataFilesAssembled: 0, excludedDataFiles: 206, excludedOtherFiles: 0, rawFilesTotal: 210 };
