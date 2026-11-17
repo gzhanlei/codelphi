@@ -29,8 +29,8 @@ Preparation does not require a model API, completion CLI, bridge, token, adapter
 
 For every `work-orders/<partition-id>.json`:
 
-1. Read its `messages`, `sources`, `change`, and `allowPaths` fields.
-2. Execute the system and user messages using the current host model and its normal reasoning capability.
+1. Run `node "<skill-directory>/scripts/snapshot.cjs" show --workdir <work-directory> --partition <partition-id>` and use the returned work order. This refreshes feature-name continuity from completed results.
+2. Execute the returned system and user messages using the current host model and its normal reasoning capability.
 3. Write only the resulting JSON object to `results/<partition-id>.json`, using UTF-8 and the exact filename.
 4. Keep the work order's `contractVersion` semantics: product/release/changes/features are required, release title and summary must be non-empty, and every factual item must cite an allowed source path with a valid line number.
 

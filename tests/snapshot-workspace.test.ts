@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
-import { finalizeSnapshotWorkspace, prepareSnapshotWorkspace, writeSnapshotResult } from "../lib/snapshot/workspace";
+import { finalizeSnapshotWorkspace, prepareSnapshotWorkspace, readSnapshotWorkOrder, writeSnapshotResult } from "../lib/snapshot/workspace";
 import { main } from "../scripts/snapshot";
 
 const exec = promisify(execFile);
@@ -101,5 +101,50 @@ describe("host-native snapshot workspace", () => {
 
     await prepareSnapshotWorkspace({ directory, target, outputLanguage: "en" });
     expect(await readFile(resultPath, "utf8")).toBe(validResult);
+  });
+
+  it("keeps the repository after a failed finalization and cleans it only after success", async () => {
+    const directory = await workspace();
+    const target = await repository();
+    const prepared = await prepareSnapshotWorkspace({ directory, target, outputLanguage: "en" });
+    const manifestPath = join(directory, "manifest.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    manifest.cleanupRoot = manifest.repositoryRoot;
+    await writeFile(manifestPath, JSON.stringify(manifest));
+    const id = prepared.manifest.workOrderIds[0];
+    const invalid = JSON.parse(validResult);
+    invalid.features[0].scenarios[0].evidence[0].path = "missing.ts";
+    await writeSnapshotResult(directory, id, JSON.stringify(invalid));
+
+    await expect(finalizeSnapshotWorkspace(directory)).rejects.toMatchObject({ code: "no_valid_spec" });
+    expect(await readFile(manifestPath, "utf8")).toContain(manifest.repositoryRoot);
+    await rm(join(directory, "results", `${id}.json`), { force: true });
+    await writeSnapshotResult(directory, id, validResult);
+    await finalizeSnapshotWorkspace(directory);
+    await expect(readFile(join(manifest.repositoryRoot, ".git", "HEAD"), "utf8")).rejects.toThrow();
+  });
+
+  it("rejects preparing a different target in the same workspace", async () => {
+    const directory = await workspace();
+    await prepareSnapshotWorkspace({ directory, target: await repository(), outputLanguage: "en" });
+    await expect(prepareSnapshotWorkspace({ directory, target: await repository(), outputLanguage: "en" })).rejects.toThrow("workspace_target_mismatch");
+  });
+
+  it("adds completed feature names to later work-order messages", async () => {
+    const directory = await workspace();
+    const prepared = await prepareSnapshotWorkspace({ directory, target: await repository(), outputLanguage: "en" });
+    const firstId = prepared.manifest.workOrderIds[0];
+    const secondId = "partition-002";
+    const first = await readFile(join(directory, "work-orders", `${firstId}.json`), "utf8");
+    await writeFile(join(directory, "work-orders", `${secondId}.json`), first);
+    const manifestPath = join(directory, "manifest.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    manifest.workOrderIds.push(secondId);
+    await writeFile(manifestPath, JSON.stringify(manifest));
+    await writeSnapshotResult(directory, firstId, validResult);
+
+    const second = await readSnapshotWorkOrder(directory, secondId);
+    expect(second.messages[1].content).toContain("Feature list from the previous spec");
+    expect(second.messages[1].content).toContain("Packaged feature");
   });
 });

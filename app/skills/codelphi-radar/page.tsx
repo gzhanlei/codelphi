@@ -1,7 +1,7 @@
 import { PublicShell } from "@/components/public-shell";
 import { resolveUiLocale } from "@/lib/ui-locale-server";
 
-const DOWNLOAD_URL = "https://github.com/gzhanlei/codelphi/releases/latest/download/codelphi-radar.zip";
+const BUILD_URL = "https://github.com/gzhanlei/codelphi#codelphi-radar";
 
 export async function generateMetadata() {
   const locale = await resolveUiLocale();
@@ -22,9 +22,13 @@ export default async function RadarInstallPage() {
       </div>
 
       <section className="overview-panel">
-        <h2>{t("下载独立 Skill 包", "Download the standalone skill bundle")}</h2>
-        <p>{t("包内包含 SKILL.md、prepare/finalize CLI、共享提取契约和 standalone 驱动。不需要 CoDelphi 源码、Next.js、MySQL 或根 node_modules。", "The bundle includes SKILL.md, the prepare/finalize CLI, the shared extraction contract, and the standalone driver. No CoDelphi checkout, Next.js, MySQL, or root node_modules is required.")}</p>
-        <p><a className="primary-button" href={DOWNLOAD_URL} target="_blank" rel="noreferrer">{t("下载 codelphi-radar.zip", "Download codelphi-radar.zip")}</a></p>
+        <h2>{t("构建独立 Skill 包", "Build the standalone skill bundle")}</h2>
+        <p>{t("在主仓库运行 npm run radar:package，会依次构建 dist/codelphi-radar 和 dist/codelphi-radar.zip。包内包含 SKILL.md、prepare/finalize CLI、共享提取契约和 standalone 驱动，不需要目标环境存在 CoDelphi 源码、Next.js、MySQL 或根 node_modules。", "Run npm run radar:package in the main repository to build dist/codelphi-radar and dist/codelphi-radar.zip. The bundle includes SKILL.md, the prepare/finalize CLI, the shared extraction contract, and the standalone driver. No CoDelphi checkout, Next.js, MySQL, or root node_modules is required in the target environment.")}</p>
+        <pre><code>{`git clone --depth 1 https://github.com/gzhanlei/codelphi.git
+cd codelphi
+npm ci
+npm run radar:package`}</code></pre>
+        <p><a href={BUILD_URL} target="_blank" rel="noreferrer">{t("查看主仓库与构建说明", "View the repository and build instructions")}</a></p>
         <p>{t("解压后会得到 codelphi-radar 目录。宿主原生模式不需要模型 API、桥接、token 或 AI 环境变量。", "After extraction you will have a codelphi-radar directory. Host-native mode requires no model API, bridge, token, or AI environment variables.")}</p>
       </section>
 

@@ -29,7 +29,7 @@ node codelphi-radar/scripts/snapshot.cjs prepare /path/to/repo --scope apps/web 
 - `work-orders/<partition-id>.json`：消息、源码、变更上下文和证据允许集；
 - `results/`：由宿主写入结果。
 
-宿主逐个执行工作单中的 system/user messages，把结构化 JSON 写入 `results/<partition-id>.json`，然后执行：
+宿主通过 `show --workdir <目录> --partition <id>` 读取每个工作单；该命令会把已完成结果中的功能名注入后续 prompt，保持跨分区命名连续。宿主执行返回的 system/user messages，把结构化 JSON 写入 `results/<partition-id>.json`，然后执行：
 
 ```bash
 node codelphi-radar/scripts/snapshot.cjs finalize --workdir .radar-work
@@ -78,7 +78,7 @@ npm run radar:skill
 
 `dist/` 不提交到 Git。生成的 bundle 包含 CLI、共享分析核心、工作单协议和 standalone 驱动，不需要目标目录存在 CoDelphi 源码、根 `node_modules`、Next.js 或 MySQL。
 
-主产品安装页 `/skills/codelphi-radar` 提供独立 ZIP 下载和 prepare/finalize 用法。Skill 的职责只有识别目标与语言、准备和完成工作单、返回 HTML，不在 Skill 内复制提取 prompt，也不要求 agent 先读取整仓再自行总结。
+主产品安装页 `/skills/codelphi-radar` 提供构建与安装说明。运行 `npm run radar:package` 会同时生成 `dist/codelphi-radar/` 和 `dist/codelphi-radar.zip`，不预先假设存在某个 Release 资产。Skill 的职责只有识别目标与语言、准备和完成工作单、返回 HTML，不在 Skill 内复制提取 prompt，也不要求 agent 先读取整仓再自行总结。
 
 ### 中英文规则
 

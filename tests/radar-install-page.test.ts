@@ -11,7 +11,8 @@ describe("codelphi radar installation page", () => {
     const html = renderToStaticMarkup(await RadarInstallPage());
 
     expect(html).toContain("codelphi-radar");
-    expect(html).toContain("https://github.com/gzhanlei/codelphi/releases/latest/download/codelphi-radar.zip");
+    expect(html).toContain("npm run radar:package");
+    expect(html).not.toContain("releases/latest/download");
     expect(html).toContain("prepare");
     expect(html).toContain("finalize");
     expect(html).toContain("--scope");

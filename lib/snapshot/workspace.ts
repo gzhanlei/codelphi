@@ -1,7 +1,7 @@
 import { link, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { parseAnalysisContent } from "../ai";
+import { buildAnalysisMessages, parseAnalysisContent } from "../ai";
 import { CONTRACT_VERSION, type ExtractionWorkOrder } from "../extraction-contract";
 import { sanitizeEvidence } from "../extraction-pass";
 import type { AnalysisPartition } from "../remote-analysis";
@@ -49,10 +49,26 @@ async function readManifest(directory: string): Promise<SnapshotManifest> {
 
 export async function prepareSnapshotWorkspace(options: PrepareSnapshotWorkspaceOptions): Promise<{ manifest: SnapshotManifest }> {
   const manifestPath = join(options.directory, "manifest.json");
+  let existing: SnapshotManifest | null = null;
   try {
-    return { manifest: await readManifest(options.directory) };
+    existing = await readManifest(options.directory);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  if (existing) {
+    const target = await resolveSnapshotTarget(options.target, options.ref);
+    if (existing.identity.target !== target.identity.target || existing.identity.revision !== target.identity.revision || existing.outputLanguage !== options.outputLanguage) {
+      await target.cleanup();
+      throw new Error("workspace_target_mismatch");
+    }
+    if (existing.repositoryRoot !== target.repositoryRoot) {
+      const previousCleanupRoot = existing.cleanupRoot;
+      existing.repositoryRoot = target.repositoryRoot;
+      existing.cleanupRoot = target.identity.source === "github" ? dirname(target.repositoryRoot) : null;
+      await writeAtomically(manifestPath, JSON.stringify(existing, null, 2), true);
+      if (previousCleanupRoot && previousCleanupRoot !== existing.cleanupRoot) await rm(previousCleanupRoot, { recursive: true, force: true }).catch(() => undefined);
+    }
+    return { manifest: existing };
   }
 
   const target = await resolveSnapshotTarget(options.target, options.ref);
@@ -127,20 +143,31 @@ export async function finalizeSnapshotWorkspace(directory: string) {
     }
   }
   if (missing.length > 0) throw new Error(`Missing snapshot results: ${missing.join(", ")}`);
-  try {
-    const analysis = await finalizeSnapshotAnalysis(prepared, executions, { modelName: manifest.modelName });
-    const report = buildSnapshotReportData(analysis);
-    const html = renderSnapshotHtml(report);
-    const outputPath = join(directory, "radar.html");
-    await writeAtomically(outputPath, html, true);
-    return { analysis, report, html, outputPath };
-  } finally {
-    if (manifest.cleanupRoot) await rm(manifest.cleanupRoot, { recursive: true, force: true }).catch(() => undefined);
-  }
+  const analysis = await finalizeSnapshotAnalysis(prepared, executions, { modelName: manifest.modelName });
+  const report = buildSnapshotReportData(analysis);
+  const html = renderSnapshotHtml(report);
+  const outputPath = join(directory, "radar.html");
+  await writeAtomically(outputPath, html, true);
+  if (manifest.cleanupRoot) await rm(manifest.cleanupRoot, { recursive: true, force: true }).catch(() => undefined);
+  return { analysis, report, html, outputPath };
 }
 
 export async function readSnapshotWorkOrder(directory: string, workOrderId: string) {
   const manifest = await readManifest(directory);
   if (!manifest.workOrderIds.includes(workOrderId)) throw new Error(`Unknown work order: ${workOrderId}`);
-  return JSON.parse(await readFile(join(directory, "work-orders", `${workOrderId}.json`), "utf8")) as ExtractionWorkOrder;
+  const workOrder = JSON.parse(await readFile(join(directory, "work-orders", `${workOrderId}.json`), "utf8")) as ExtractionWorkOrder;
+  const previousFeatureNames: string[] = [];
+  for (const id of manifest.workOrderIds) {
+    if (id === workOrderId) break;
+    try {
+      const result = JSON.parse(await readFile(join(directory, "results", `${id}.json`), "utf8"));
+      for (const feature of result.features ?? []) previousFeatureNames.push(String(feature.name));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+  return {
+    ...workOrder,
+    messages: buildAnalysisMessages(workOrder.sources, workOrder.change, { ...workOrder.context, previousFeatureNames }),
+  };
 }

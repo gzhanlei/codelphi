@@ -3,7 +3,7 @@ import { link, lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/pro
 import { basename, dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { runSnapshot, type SnapshotRunOptions, type SnapshotRunResult } from "../lib/snapshot/run";
-import { finalizeSnapshotWorkspace, prepareSnapshotWorkspace } from "../lib/snapshot/workspace";
+import { finalizeSnapshotWorkspace, prepareSnapshotWorkspace, readSnapshotWorkOrder } from "../lib/snapshot/workspace";
 import { standaloneGatewayHost } from "../lib/llm-client";
 import type { SnapshotProgressEvent } from "../lib/snapshot/types";
 
@@ -173,8 +173,9 @@ async function workspaceMain(argv: string[], dependencies: CliDependencies) {
         scope: { type: "string", multiple: true },
         language: { type: "string" },
         workdir: { type: "string" },
+        partition: { type: "string" },
       },
-    }) as { values: CliValues & { workdir?: string }; positionals: string[] };
+    }) as { values: CliValues & { workdir?: string; partition?: string }; positionals: string[] };
     if (!values.workdir) {
       stderr(language === "en" ? "Missing --workdir" : "缺少 --workdir");
       return 2;
@@ -183,6 +184,11 @@ async function workspaceMain(argv: string[], dependencies: CliDependencies) {
     if (command === "prepare" && positionals.length === 1) {
       const { manifest } = await prepareSnapshotWorkspace({ directory, target: positionals[0], ref: values.ref, scopeRoots: scopeRoots(values.scope), outputLanguage: language });
       stdout(language === "en" ? `Workspace prepared: ${directory} (${manifest.workOrderIds.length} work orders)` : `工作目录已准备：${directory}（${manifest.workOrderIds.length} 个工作单）`);
+      return 0;
+    }
+    if (command === "show" && positionals.length === 0 && values.partition) {
+      const workOrder = await readSnapshotWorkOrder(directory, values.partition);
+      stdout(JSON.stringify(workOrder, null, 2));
       return 0;
     }
     if (command === "finalize" && positionals.length === 0) {
@@ -199,7 +205,7 @@ async function workspaceMain(argv: string[], dependencies: CliDependencies) {
 }
 
 export async function main(argv = process.argv.slice(2), dependencies: CliDependencies = {}) {
-  if (argv[0] === "prepare" || argv[0] === "finalize") return workspaceMain(argv, dependencies);
+  if (argv[0] === "prepare" || argv[0] === "finalize" || argv[0] === "show") return workspaceMain(argv, dependencies);
   const language = languageFromArgv(argv);
   const stdout = dependencies.stdout ?? ((message: string) => console.log(message));
   const stderr = dependencies.stderr ?? ((message: string) => console.error(message));
