@@ -117,3 +117,70 @@ export async function generateDomainCandidates(product: DomainCandidateInput, op
     return { candidates: [], error: error instanceof Error ? error.message : "候选生成失败" };
   }
 }
+
+// ── 分批生成 + 全局合成（2026-11-17：codelphi 153 功能超单次生成规模，单次只出 2 巨域） ──
+// 合成步 AI 只输出「哪些子候选合成一组」（引用索引）；featureIds 由程序拼接，
+// 功能 ID 全程不经过 AI，防键漂移。未进任何组的子候选保持独立成域（不丢归属）。
+
+export interface MergedDomain {
+  name: string;
+  summary: string;
+  featureIds: number[];
+}
+
+export function buildDomainMergePrompt(productName: string, subCandidates: DomainCandidate[]): Array<{ role: "system" | "user"; content: string }> {
+  const listing = subCandidates
+    .map((candidate, index) => `- [${index}] ${candidate.name}（${candidate.featureIds.length} 个功能）：${candidate.summary}`)
+    .join("\n");
+  return [
+    {
+      role: "system",
+      content:
+        "你是产品规格整理助手。下面是对某产品分批提取出的业务域子候选。请把它们合并成面向用户价值的最终业务域：把属于同一用户价值的子候选合成一组，已经是独立价值的保持独立。只输出 JSON 数组，每项形如 {\"name\":\"最终域名\",\"summary\":\"一句话用户价值\",\"groups\":[子候选索引]}；groups 只能引用给出的索引，每个索引最多出现一次，允许某些子候选不出现在任何 groups 里（它们将保持独立成域）。不要输出 JSON 之外的任何文字。",
+    },
+    { role: "user", content: `产品：${productName}\n子候选清单：\n${listing}` },
+  ];
+}
+
+export function parseDomainMerge(content: string, subCandidates: DomainCandidate[]): { domains: MergedDomain[]; errors: string[] } {
+  let parsed: unknown;
+  try {
+    const start = content.indexOf("[");
+    const end = content.lastIndexOf("]");
+    if (start < 0 || end <= start) throw new Error("no JSON array");
+    parsed = JSON.parse(content.slice(start, end + 1));
+  } catch {
+    return { domains: [], errors: ["合成输出无法解析为 JSON 数组"] };
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) return { domains: [], errors: ["合成输出为空"] };
+  const errors: string[] = [];
+  const used = new Set<number>();
+  const seenNames = new Set<string>();
+  const domains: MergedDomain[] = [];
+  for (const item of parsed) {
+    if (item === null || typeof item !== "object" || typeof (item as { name?: unknown }).name !== "string" || (item as { name: string }).name.trim() === "") {
+      errors.push("合成项缺少名称");
+      continue;
+    }
+    const name = ((item as { name: string }).name).trim();
+    if (seenNames.has(name)) errors.push(`最终域名「${name}」重复`);
+    seenNames.add(name);
+    const groups = (item as { groups?: unknown }).groups;
+    if (!Array.isArray(groups) || groups.length === 0 || !groups.every((index) => typeof index === "number" && Number.isInteger(index) && index >= 0 && index < subCandidates.length)) {
+      errors.push(`「${name}」的 groups 必须是非空且在范围内的整数索引数组`);
+      continue;
+    }
+    for (const index of groups as number[]) {
+      if (used.has(index)) errors.push(`子候选 [${index}] 被多个最终域引用`);
+      used.add(index);
+    }
+    const featureIds = [...new Set((groups as number[]).flatMap((index) => subCandidates[index].featureIds))];
+    domains.push({ name, summary: typeof (item as { summary?: unknown }).summary === "string" ? ((item as { summary: string }).summary).trim() : "", featureIds });
+  }
+  if (errors.length > 0) return { domains: [], errors };
+  // 未被合并的子候选独立成域（保留原归属，不静默丢弃）
+  for (const [index, candidate] of subCandidates.entries()) {
+    if (!used.has(index) && !seenNames.has(candidate.name)) domains.push({ name: candidate.name, summary: candidate.summary, featureIds: candidate.featureIds });
+  }
+  return { domains, errors: [] };
+}
