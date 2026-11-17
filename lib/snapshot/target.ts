@@ -41,6 +41,7 @@ export function parseGitHubRepository(target: string): GitHubRepositoryTarget {
 
 export interface ResolvedSnapshotTarget {
   identity: SnapshotIdentity;
+  repositoryRoot: string;
   backend: RemoteSourceBackend;
   cleanup: () => Promise<void>;
 }
@@ -54,6 +55,7 @@ export async function resolveSnapshotTarget(target: string, ref?: string, option
   if (!looksRemote) {
     const snapshot = await resolveGitSnapshot(target, ref);
     return {
+      repositoryRoot: snapshot.repoRoot,
       identity: {
         source: "local",
         name: basename(snapshot.repoRoot),
@@ -94,6 +96,7 @@ export async function resolveSnapshotTarget(target: string, ref?: string, option
     }
     const snapshot = await resolveGitSnapshot(cloneRoot, ref ? "FETCH_HEAD" : "HEAD", { checkDirty: false, allowLazyFetch: true, requireExactRoot: true });
     return {
+      repositoryRoot: snapshot.repoRoot,
       identity: {
         source: "github",
         name: repository.name,

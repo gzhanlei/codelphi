@@ -3,6 +3,7 @@ import { link, lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/pro
 import { basename, dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { runSnapshot, type SnapshotRunOptions, type SnapshotRunResult } from "../lib/snapshot/run";
+import { finalizeSnapshotWorkspace, prepareSnapshotWorkspace } from "../lib/snapshot/workspace";
 import { standaloneGatewayHost } from "../lib/llm-client";
 import type { SnapshotProgressEvent } from "../lib/snapshot/types";
 
@@ -158,7 +159,47 @@ function errorText(error: unknown, language: "zh-CN" | "en") {
   return language === "en" ? `Snapshot failed: ${detail}` : `快照分析失败：${detail}`;
 }
 
+async function workspaceMain(argv: string[], dependencies: CliDependencies) {
+  const [command, ...args] = argv;
+  const language = languageFromArgv(args);
+  const stdout = dependencies.stdout ?? ((message: string) => console.log(message));
+  const stderr = dependencies.stderr ?? ((message: string) => console.error(message));
+  try {
+    const { values, positionals } = parseArgs({
+      args,
+      allowPositionals: true,
+      options: {
+        ref: { type: "string" },
+        scope: { type: "string", multiple: true },
+        language: { type: "string" },
+        workdir: { type: "string" },
+      },
+    }) as { values: CliValues & { workdir?: string }; positionals: string[] };
+    if (!values.workdir) {
+      stderr(language === "en" ? "Missing --workdir" : "缺少 --workdir");
+      return 2;
+    }
+    const directory = resolve(values.workdir);
+    if (command === "prepare" && positionals.length === 1) {
+      const { manifest } = await prepareSnapshotWorkspace({ directory, target: positionals[0], ref: values.ref, scopeRoots: scopeRoots(values.scope), outputLanguage: language });
+      stdout(language === "en" ? `Workspace prepared: ${directory} (${manifest.workOrderIds.length} work orders)` : `工作目录已准备：${directory}（${manifest.workOrderIds.length} 个工作单）`);
+      return 0;
+    }
+    if (command === "finalize" && positionals.length === 0) {
+      const result = await finalizeSnapshotWorkspace(directory);
+      stdout(language === "en" ? `Radar report written to ${result.outputPath}` : `Radar 报告已生成：${result.outputPath}`);
+      return 0;
+    }
+    stderr(language === "en" ? "Usage: prepare <target> --workdir <dir> | finalize --workdir <dir>" : "用法：prepare <目标> --workdir <目录> | finalize --workdir <目录>");
+    return 2;
+  } catch (error) {
+    stderr(errorText(error, language));
+    return 1;
+  }
+}
+
 export async function main(argv = process.argv.slice(2), dependencies: CliDependencies = {}) {
+  if (argv[0] === "prepare" || argv[0] === "finalize") return workspaceMain(argv, dependencies);
   const language = languageFromArgv(argv);
   const stdout = dependencies.stdout ?? ((message: string) => console.log(message));
   const stderr = dependencies.stderr ?? ((message: string) => console.error(message));
