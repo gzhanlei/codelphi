@@ -23,10 +23,11 @@ const vitest = join(root, "node_modules", "vitest", "vitest.mjs");
 const scratch = join(root, "node_modules", ".vitest-tmp");
 mkdirSync(scratch, { recursive: true });
 
-const files = readdirSync(join(root, "tests"))
-  .filter((name) => name.endsWith(".test.ts"))
+const files = readdirSync(join(root, "tests"), { recursive: true })
+  .map((entry) => String(entry).replaceAll("\\", "/"))
+  .filter((entry) => entry.endsWith(".test.ts"))
   .sort()
-  .map((name) => `tests/${name}`);
+  .map((entry) => `tests/${entry}`);
 const shardCount = Math.max(1, Math.min(files.length, Number(process.env.TEST_SHARDS ?? 12)));
 const env = { ...process.env, TMPDIR: scratch, NO_COLOR: "1" };
 

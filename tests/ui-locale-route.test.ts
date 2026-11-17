@@ -21,6 +21,8 @@ describe("POST /api/ui-locale", () => {
     expect((await post({ locale: "fr", redirectTo: "/" })).status).toBe(400);
     expect((await post({ locale: "en", redirectTo: "https://evil.example" })).status).toBe(400);
     expect((await post({ locale: "en", redirectTo: "//evil.example" })).status).toBe(400);
+    // WHATWG URL 在 special scheme 下把 `\` 归一为 `/`：/\evil.example 是跨站重定向
+    expect((await post({ locale: "en", redirectTo: "/\\evil.example" })).status).toBe(400);
     expect((await post(null)).status).toBe(400);
   });
 });

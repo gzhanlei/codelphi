@@ -59,6 +59,10 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
       }
       const catalog = featureRows.map((item) => ({ ...item, scenarioHints: hintsByFeature.get(Number(item.id)) ?? [] }));
       if (catalog.length === 0) return NextResponse.json({ ...decorated, aiAnswer: null });
+      // 产品名必须在 selectCall 定义前取好：闭包引用 const 的 TDZ 会让首次调用抛
+      // ReferenceError，被外层 catch 吞掉后整个 AI 兜底通道静默变成死代码
+      const [productRow] = (await getDb().execute("SELECT name FROM products WHERE id = ?", [access.productId]) as unknown) as Array<{ name: string }>;
+      const productNameForAsk = productRow?.name ?? "";
       const validIds = new Set(catalog.map((item) => item.id));
       const lexicalIds = new Set(matchFeaturesByNameGrams(decorated.question, catalog).map((feature) => feature.id));
       const selectCall = () => requestStructuredCompletion(
@@ -94,8 +98,6 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
           .map((item) => item.id);
       }
       if (relevant.length === 0) return NextResponse.json({ ...decorated, aiAnswer: null });
-      const [productRow] = (await getDb().execute("SELECT name FROM products WHERE id = ?", [access.productId]) as unknown) as Array<{ name: string }>;
-      const productNameForAsk = productRow?.name ?? "";
       const idList = relevant.join(",");
       const scenarioResult = await getDb().execute(
         `SELECT s.id, s.feature_id AS featureId, f.name AS featureName, s.reference, s.context, s.action, s.outcome, s.evidence

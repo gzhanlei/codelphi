@@ -27,12 +27,14 @@ if smoke "$APP_PORT"; then
   prune_images
   log "DEPLOY OK: $IMAGE（prev=$(printf '%s' "${PREV_GOOD_IMAGE:-$LAST_GOOD_IMAGE}")）"
 else
+  # 回滚目标 = 部署前正在运行且冒烟通过的那个版本（LAST_GOOD_IMAGE 是 save_state 前的旧值）；
+  # PREV_GOOD_IMAGE 是「上一版」，用它会把生产切到两版之前并跳过正在运行的好版本
   log "smoke FAILED；回滚"
-  if [[ -n "${PREV_GOOD_IMAGE:-}" ]]; then
-    CODELPHI_IMAGE="$PREV_GOOD_IMAGE" dc up -d app
+  local_target="${LAST_GOOD_IMAGE:-}"
+  if [[ -n "$local_target" ]]; then
+    CODELPHI_IMAGE="$local_target" dc up -d app
+    save_state "$local_target"
+    die "已回滚到 $local_target；请排查镜像 $IMAGE"
   fi
-  dc down 2>/dev/null || true
-  CODELPHI_IMAGE="$PREV_GOOD_IMAGE" dc up -d app
-  save_state "$PREV_GOOD_IMAGE"
-  die "已回滚到 ${PREV_GOOD_IMAGE:-（无上一版本）}；请排查镜像 $IMAGE"
+  die "冒烟失败且无上一好版本（首次部署）：app 保持 $IMAGE 运行，请人工排查"
 fi

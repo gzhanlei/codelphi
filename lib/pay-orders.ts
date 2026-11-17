@@ -67,19 +67,19 @@ export async function createPaymentOrder(input: CreatePaymentOrderInput): Promis
   let orderNo: string;
   try {
     await conn.beginTransaction();
-    // 30 分钟内同账户同参数 pending 单复用（契约 §7.0；防重复点单产生多张待付单）
+    // 30 分钟内同账户同参数 pending 单复用（契约 §7.0；防重复点单产生多张待付单）。
+    // channel 必须参与匹配：远端幂等键是 order_no，复用不同渠道的单会拿到原渠道的付款码。
     const [reuseRows] = await conn.execute(
       `SELECT order_no FROM payment_orders
        WHERE account_id = ? AND user_id = ? AND kind = ? AND plan_id <=> ? AND pack_sku <=> ?
-         AND amount = ? AND status = 'pending' AND platform_order_no IS NOT NULL
+         AND channel = ? AND amount = ? AND status = 'pending' AND platform_order_no IS NOT NULL
          AND created_at >= DATE_SUB(NOW(3), INTERVAL 30 MINUTE)
        ORDER BY created_at DESC LIMIT 1`,
-      [input.accountId, input.userId, input.kind, planId, packSku, amount],
+      [input.accountId, input.userId, input.kind, planId, packSku, input.channel, amount],
     );
     const reuse = (reuseRows as Array<{ order_no: string }>)[0];
     if (reuse) {
       orderNo = reuse.order_no;
-      await conn.execute(`UPDATE payment_orders SET channel = ? WHERE order_no = ?`, [input.channel, orderNo]);
     } else {
       orderNo = newOrderNo(input.accountId);
       await conn.execute(
@@ -151,7 +151,8 @@ export async function getOrderWithReconcile(orderNo: string, userId: number): Pr
   const db = getDb();
   const [rows] = await db.execute(
     `SELECT order_no AS orderNo, platform_order_no AS platformOrderNo, user_id AS userId, kind, status,
-            refund_status AS refundStatus, amount, created_at AS createdAt,
+            refund_status AS refundStatus, amount,
+            (created_at < DATE_SUB(NOW(3), INTERVAL 20 SECOND)) AS reconcileDue,
             prepay_code_url AS prepayCodeUrl, prepay_pay_url AS prepayPayUrl, prepay_h5_url AS prepayH5Url
      FROM payment_orders WHERE order_no = ?`,
     [orderNo],
@@ -159,7 +160,9 @@ export async function getOrderWithReconcile(orderNo: string, userId: number): Pr
   const row = (rows as unknown as OrderDbRow[])[0];
   if (!row || Number(row.user_id) !== Number(userId)) return null;
 
-  if (row.status === "pending" && row.platformOrderNo && Date.now() - new Date(row.createdAt).getTime() > 20_000) {
+  // 对账时钟用 SQL 侧比较：created_at 是 DB 墙钟（连接 timezone:"Z" 解析为 UTC 后比真实时刻
+  // 超前 8 小时），JS 侧 Date.now() 相减在前 8 小时恒为 false，对账从未触发过
+  if (row.status === "pending" && row.platformOrderNo && Number((row as { reconcileDue?: number }).reconcileDue ?? 0) === 1) {
     try {
       const userToken = await getValidUserToken(Number(row.user_id));
       const remote = await queryChandlerOrder(row.platformOrderNo, userToken);

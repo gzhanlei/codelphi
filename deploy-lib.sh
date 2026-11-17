@@ -35,12 +35,19 @@ save_state() {
 LAST_GOOD_IMAGE=${image}
 PREV_GOOD_IMAGE=${LAST_GOOD_IMAGE:-}
 ENVEOF
+  # 同步 shell 变量：prune 守卫与后续回滚决策必须保护刚保存的状态，而非部署开始时载入的过期值
+  PREV_GOOD_IMAGE="${LAST_GOOD_IMAGE:-}"
+  LAST_GOOD_IMAGE="$image"
 }
 
+# 返回布尔而非 die：镜像缺失时调用方（rollback.sh 的 || true 语义）应继续让 compose 拉取，
+# 函数体内的 exit 在 || true 上下文里仍会终止整个脚本（bash 语义）。
 require_image() {
   local image="$1"
-  [[ -n "$image" ]] || die "镜像未指定（CODELPHI_IMAGE / state.env）"
-  docker image inspect "$image" > /dev/null 2>&1 || die "镜像不在本地：$image（先 docker pull）"
+  [[ -n "$image" ]] || { log "ERROR: 镜像未指定（CODELPHI_IMAGE / state.env）"; return 1; }
+  docker image inspect "$image" > /dev/null 2>&1 && return 0
+  log "warn: 镜像不在本地，交由 compose 拉取：$image"
+  return 1
 }
 
 # ── 镜像清理：删除过时的 codelphi 镜像，仅保留当前运行版本（LAST_GOOD）与回滚备用上一版本（PREV_GOOD）。

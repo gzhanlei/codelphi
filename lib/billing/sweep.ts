@@ -118,8 +118,10 @@ export async function runReservationSweepOnce(): Promise<JobResult> {
 /** 限流计数过期行清理（P1-5 派生）：已翻页的旧窗口行不再有用，防 rate_limit_hits 无界增长。 */
 export async function runRateLimitCleanupOnce(windowSeconds = 3600): Promise<JobResult> {
   return withSweepLock("rate-limit-cleanup", async (conn) => {
+    // window_start 是 Node 侧 UTC 串（连接 timezone:"Z" 语义），须用 UTC_TIMESTAMP 对齐；
+    // 用 NOW(3)（CST 墙钟）会把偏移折算成恒真条件，清理作业每小时清空含活跃窗口的全表
     const [result] = await conn.execute(
-      `DELETE FROM rate_limit_hits WHERE window_start < DATE_SUB(NOW(3), INTERVAL ? SECOND)`,
+      `DELETE FROM rate_limit_hits WHERE window_start < DATE_SUB(UTC_TIMESTAMP(3), INTERVAL ? SECOND)`,
       [windowSeconds * 2],
     );
     return { deleted: Number((result as { affectedRows?: number }).affectedRows ?? 0) };

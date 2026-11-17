@@ -29,7 +29,9 @@ export async function grantQuotaByEmail(input: ManualGrantInput): Promise<Manual
   try {
     await conn.beginTransaction();
 
-    // 定位用户与个人工作区账户（无锁读；email 唯一、slug 固定）
+    // 定位用户与个人工作区账户（无锁读）。个人工作区 slug 已于 2026-11-09 随机化
+    // （migration 049 批量改名），不能再按 `u-<sub>` 字面量拼——与 ensureUserWorkspace
+    // 同款解析：chandler_sub 关联 owner 角色的个人前缀工作区。
     const [userRows] = await conn.execute(
       `SELECT id, chandler_sub FROM users WHERE email = ? LIMIT 1`,
       [input.email],
@@ -38,8 +40,12 @@ export async function grantQuotaByEmail(input: ManualGrantInput): Promise<Manual
     if (!user) throw new Error(`no user with email ${input.email}`);
     const userId = Number(user.id);
     const [orgRows] = await conn.execute(
-      `SELECT id FROM organizations WHERE slug = ? LIMIT 1`,
-      [`u-${user.chandler_sub}`],
+      `SELECT o.id FROM organizations o
+       JOIN organization_members m ON m.organization_id = o.id
+       JOIN users u ON u.id = m.user_id
+       WHERE u.chandler_sub = ? AND o.slug LIKE 'u-%' AND m.role = 'owner'
+       ORDER BY o.id LIMIT 1`,
+      [user.chandler_sub],
     );
     const orgRow = (orgRows as Array<{ id: number }>)[0];
     if (!orgRow) throw new Error(`user ${userId} has no personal workspace`);

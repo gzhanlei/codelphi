@@ -6,7 +6,9 @@ export const runtime = "nodejs";
 
 const schema = z.object({
   locale: z.enum(["zh-CN", "en"]),
-  redirectTo: z.string().regex(/^\/(?!\/)/, "redirect target must be a same-origin path").max(2_000),
+  // 反斜杠必须显式拒绝：WHATWG URL 在 special scheme 下把 `\` 归一为 `/`，
+  // `/\evil.com` 会绕过 `^(?!//)` 校验变成跨站重定向（开放重定向钓鱼跳板）
+  redirectTo: z.string().regex(/^\/(?!\/)/, "redirect target must be a same-origin path").refine((v) => !v.includes("\\"), "redirect target must be a same-origin path").max(2_000),
 });
 
 /** 界面语言切换：写 cookie（一年期、非 HttpOnly、SameSite=Lax）并重定向回原页。

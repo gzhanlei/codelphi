@@ -6,7 +6,11 @@ node_modules
 .env.*
 *.md
 !README.md
-77hlw1qt
-ch533d4t
-t17ly42o
 video
+# 纯本地产物：不进镜像也不打断构建缓存（artifacts 75MB 每次都进 context）
+artifacts
+dist
+coverage
+target
+docs
+.metrics

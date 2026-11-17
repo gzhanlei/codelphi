@@ -26,7 +26,7 @@ function harness(state: { userRow?: Record<string, unknown> | null; orgRow?: Rec
             const userRow = "userRow" in state ? state.userRow : { id: 5, chandler_sub: SUB };
             return [userRow ? [userRow] : [], []];
           }
-          if (sql.includes("FROM organizations WHERE slug")) return [[state.orgRow ?? { id: 7 }], []];
+          if (sql.includes("FROM organizations o")) return [[state.orgRow ?? { id: 7 }], []];
           if (sql.includes("FROM billing_accounts WHERE account_id = ? FOR UPDATE")) return [[{ account_id: 7 }], []];
           if (sql.includes("t FOR UPDATE")) {
             // 运行时真实列名（wallet_id）：camelCase 伪造会掩盖读错列的 bug（生产 4318fd6 实发事故）
@@ -118,5 +118,18 @@ describe("grantQuotaByEmail", () => {
     vi.mocked(getDb).mockReturnValue(h.db as never);
     await expect(grantQuotaByEmail({ email: "ghost@example.com", units: 100, reason: "r" })).rejects.toThrow("no user with email");
     expect(h.rolledBack()).toBe(1);
+  });
+
+  it("resolves the personal workspace via chandler_sub + owner role, not the retired u-<sub> slug scheme", async () => {
+    // 个人工作区 slug 已随机化（migration 049 全量改名）：按 `u-<sub>` 字面量拼 slug
+    // 查不到任何组织，管理端充值对所有用户恒 404（功能上线即死）
+    const h = harness({});
+    vi.mocked(getDb).mockReturnValue(h.db as never);
+    await grantQuotaByEmail({ email: EMAIL, units: 100, reason: "r" });
+    const orgLookup = h.calls.find((c) => c.sql.includes("FROM organizations o"));
+    expect(orgLookup?.sql).toContain("organization_members");
+    expect(orgLookup?.sql).toContain("m.role = 'owner'");
+    expect(orgLookup?.params).toContain(SUB);
+    expect(h.sqls().some((c) => c.includes("WHERE slug = ?"))).toBe(false);
   });
 });

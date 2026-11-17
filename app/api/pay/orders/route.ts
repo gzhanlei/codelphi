@@ -10,7 +10,9 @@ export const maxDuration = 300;
 
 import { z } from "zod";
 
-const kinds = z.enum(["subscription", "overage_pack", "test"]);
+// 测试单（0.01 元联调）只走管理员专用通道 /api/admin/pay/test-orders；
+// 公开建单放行 kind:"test" 会绕过 requirePlatformAdmin 门禁。
+const kinds = z.enum(["subscription", "overage_pack"]);
 
 const createSchema = z.object({
   kind: kinds,
@@ -60,7 +62,10 @@ export async function GET(request: NextRequest) {
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const orderNo = request.nextUrl.searchParams.get("orderNo");
   if (!orderNo) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
-  const order = await getOrderWithReconcile(orderNo, Number(user.sub));
+  // sub 是 Chandler 不透明字符串身份，须换算本地 users.id（Number(sub) 是 NaN/错位）
+  const userId = await findUserIdBySub(user.sub);
+  if (userId === null) return NextResponse.json({ error: "user_not_found" }, { status: 401 });
+  const order = await getOrderWithReconcile(orderNo, userId);
   if (!order) return NextResponse.json({ error: "order_not_found" }, { status: 404 });
   return NextResponse.json(order);
 }
