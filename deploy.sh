@@ -23,6 +23,8 @@ CODELPHI_IMAGE="$IMAGE" dc up -d app
 log "smoke"
 if smoke "$APP_PORT"; then
   save_state "$IMAGE"
+  log "prune outdated images"
+  prune_images
   log "DEPLOY OK: $IMAGE（prev=$(printf '%s' "${PREV_GOOD_IMAGE:-$LAST_GOOD_IMAGE}")）"
 else
   log "smoke FAILED；回滚"

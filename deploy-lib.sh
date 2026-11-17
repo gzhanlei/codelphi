@@ -43,6 +43,18 @@ require_image() {
   docker image inspect "$image" > /dev/null 2>&1 || die "镜像不在本地：$image（先 docker pull）"
 }
 
+# ── 镜像清理：删除过时的 codelphi 镜像，仅保留当前运行版本（LAST_GOOD）与回滚备用上一版本（PREV_GOOD）。
+#    只匹配 codelphi-server 两种仓库前缀，不触碰同机其他项目（salesbuddy/pptcreator/mysql 等）的镜像。
+prune_images() {
+  local image
+  while IFS= read -r image; do
+    [[ -z "$image" ]] && continue
+    [[ "$image" == "$LAST_GOOD_IMAGE" || "$image" == "$PREV_GOOD_IMAGE" ]] && continue
+    log "prune outdated image: $image"
+    docker rmi "$image" >/dev/null 2>&1 || log "prune skipped (in use or already gone): $image"
+  done < <(docker images --format '{{.Repository}}:{{.Tag}}' | grep -E '^(ghcr\.io/gzhanlei/)?codelphi-server:')
+}
+
 # ── 冒烟：/login 200 即应用可达（DB 连接在首页/问答链路各自暴露） ──
 smoke() {
   local port="$1"
