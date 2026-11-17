@@ -7,7 +7,7 @@ import type { FeatureRow, ScenarioRow } from "@/lib/types";
 import { deleteConfirmedFeature } from "@/lib/spec-editor-client";
 import { errorMessage } from "@/lib/error-message";
 import { entityId, featureHref, scenariosForFeature, scenariosForFeatureTree } from "@/lib/spec-editor-ui";
-import { coverageByteLabel, coverageExplainer, coverageFilesLabel } from "@/lib/coverage-display";
+import { coverageByteLabel, coverageFilesLabel } from "@/lib/coverage-display";
 import { FeatureTree } from "./feature-tree";
 import { SpecSearch } from "./spec-search";
 import { SpecAsk } from "./spec-ask";
@@ -69,7 +69,7 @@ export function SpecWorkspace({ slug, productBase, tree, feature, scenarios, mod
         <p className="coverage-disclosure" title={pick(locale, COVERAGE.disclosureTitle)}>
           {coverageByteLabel(coverage, locale)}（{coverageFilesLabel(coverage, locale)}，{pick(locale, COVERAGE.partitionsUnit).replace("{count}", String(coverage.partitionsUsed))}）
           {coverage.partitionsCapped ? pick(locale, COVERAGE.cappedNote) : ""}
-          。{coverageExplainer(locale)}
+          。
           {/* R6：静态提取盲区的人工补充入口要可发现——指向数据说明页（边界声明）与页内编辑器 */}
           {pick(locale, COVERAGE.runtimeBlindSpotPrefix)}
           <a href="/data-notice" target="_blank" rel="noreferrer">{pick(locale, COVERAGE.boundaryLabel)}</a>

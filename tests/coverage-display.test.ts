@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { coverageByteLabel, coverageExplainer, coverageFilesLabel, coveragePercent } from "../lib/coverage-display";
+import { coverageByteLabel, coverageFilesLabel, coveragePercent } from "../lib/coverage-display";
 
 const receipt = (ratio: number) => ({ coverageRatio: ratio, implFilesAssembled: 70, implFilesTotal: 79, implBytesAssembled: 1_000, implBytesTotal: 10_000, partitionsUsed: 3, partitionsCapped: false });
 
@@ -22,16 +22,5 @@ describe("coverage display (统一字节口径)", () => {
     expect(label).not.toContain("88.6");
     expect(label).not.toContain("规格正确率");
     expect(label).not.toContain("证据可信度");
-  });
-
-  it("explains why the ratio can stay below 100% and where conclusion trust comes from", () => {
-    const text = coverageExplainer();
-    // 打消「百分比低 = 账本不可信」误读的两个支点：不足 100% 是设计内行为；单条结论看证据链接
-    expect(text).toContain("低于 100% 是设计内行为");
-    expect(text).toContain("不代表分析出错或结论不可信");
-    expect(text).toContain("源码证据链接");
-    // 口径守卫：解释句本身不得变成结论性指标
-    expect(text).not.toContain("正确率");
-    expect(text).not.toContain("可信度为");
   });
 });

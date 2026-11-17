@@ -45,6 +45,9 @@ describe("product overview rendering (Specsight 原则版式)", () => {
     expect(html).toContain("源码装配覆盖率（按文件字节）42.1%");
     expect(html).toContain("已装配实现文件 12/28 个");
     expect(html).toContain("证据文件");
+    expect(html).not.toContain("低于 100% 是设计内行为");
+    expect(html).not.toContain("不代表分析出错或结论不可信");
+    expect(html).not.toContain("规格未覆盖不等于产品不支持");
     expect(html).not.toContain("架构");
     expect(html).not.toContain("/architecture/");
   });

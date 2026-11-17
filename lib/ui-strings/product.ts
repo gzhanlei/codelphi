@@ -66,10 +66,6 @@ export const PRODUCT_OVERVIEW = {
   trustCoverageMissing: { "zh-CN": "源码装配覆盖率 —（无覆盖率回执）", en: "Source assembly coverage — (no coverage receipt)" },
   trustEvidenceFiles: { "zh-CN": "证据文件 {count} 个", en: "{count} evidence files" },
   trustManualEntries: { "zh-CN": "人工条目 {count} 条", en: "{count} manually maintained entries" },
-  trustDisclaimer: {
-    "zh-CN": "规格未覆盖不等于产品不支持，采纳前应经人工核实。",
-    en: "A spec gap does not mean the product lacks the capability — verify before adopting.",
-  },
 } satisfies Record<string, LocaleEntry>;
 
 // ── 产品总览数据标签（lib/product-overview.ts） ──
@@ -348,10 +344,6 @@ export const LEDGER = {
 export const COVERAGE = {
   byteLabel: { "zh-CN": "源码装配覆盖率（按文件字节）", en: "Source assembly coverage (by file bytes) " },
   filesLabel: { "zh-CN": "已装配实现文件 {assembled}/{total} 个", en: "Assembled implementation files {assembled}/{total}" },
-  explainer: {
-    "zh-CN": "覆盖率指本次分析实际读取的源码占仓库全部实现面的比例：大仓库按预算分趟读取，低于 100% 是设计内行为，不代表分析出错或结论不可信；判断单条结论是否可信，看它附带的源码证据链接，而不是这个比例。",
-    en: "Coverage is the share of the repository's full implementation surface actually read by this analysis: large repositories are read in budgeted passes, so below 100% is by design and does not mean the analysis failed or conclusions are untrustworthy; to judge a single conclusion, look at its source evidence links, not this ratio.",
-  },
   disclosureTitle: { "zh-CN": "源码装配覆盖率按本规格版本对应的完整实现面（文件字节）计算", en: "Source assembly coverage is computed over the full implementation surface (file bytes) of this spec version" },
   partitionsUnit: { "zh-CN": "{count} 趟提取", en: "{count} extraction pass(es)" },
   cappedNote: { "zh-CN": "；本规格未覆盖全部实现面（提取趟数触顶），未覆盖部分不产生结论", en: "; this spec does not cover the full implementation surface (extraction pass cap reached); uncovered parts produce no conclusions" },

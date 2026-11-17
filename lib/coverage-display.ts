@@ -26,12 +26,3 @@ export function coverageByteLabel(receipt: CoverageReceiptShape, locale: UiLocal
 export function coverageFilesLabel(receipt: CoverageReceiptShape, locale: UiLocale = "zh-CN") {
   return pick(locale, COVERAGE.filesLabel).replace("{assembled}", String(receipt.implFilesAssembled)).replace("{total}", String(receipt.implFilesTotal));
 }
-
-/**
- * 覆盖率口径解释：主动回答读者看到低百分比时的两个疑问——为什么不足 100%（按预算分趟读取，
- * 设计内行为）与单条结论可信度看什么（随附源码证据链接，不看这个比例）。概览信任行与规格
- * 工作台披露行共用，避免解释漂移。
- */
-export function coverageExplainer(locale: UiLocale = "zh-CN") {
-  return pick(locale, COVERAGE.explainer);
-}

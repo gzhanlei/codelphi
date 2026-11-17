@@ -5,7 +5,6 @@ import { pick } from "@/lib/ui-locale";
 import { PRODUCT_OVERVIEW, SPEC_EDITOR } from "@/lib/ui-strings/product";
 import { SpecAsk } from "./spec-ask";
 import type { ProductOverviewData, TimelineEntry } from "@/lib/product-overview";
-import { coverageExplainer } from "@/lib/coverage-display";
 
 function CapabilityList({ capabilities, locale = "zh-CN" }: { capabilities: ProductOverviewData["capabilities"]; locale?: UiLocale }) {
   if (capabilities.length === 0) return <p className="overview-note">{pick(locale, PRODUCT_OVERVIEW.emptyCapabilities)}</p>;
@@ -75,7 +74,7 @@ function ReleaseTimeline({ data, locale = "zh-CN" }: { data: ProductOverviewData
 function TrustLine({ data, locale = "zh-CN" }: { data: ProductOverviewData; locale?: UiLocale }) {
   const { trust, coverageByte, coverageFiles } = data;
   return (
-    <p className="overview-trust-line">{coverageByte ?? pick(locale, PRODUCT_OVERVIEW.trustCoverageMissing)}{coverageFiles ? ` · ${coverageFiles}` : ""} · {pick(locale, PRODUCT_OVERVIEW.trustEvidenceFiles).replace("{count}", String(trust.evidencePathCount))} · {pick(locale, PRODUCT_OVERVIEW.trustManualEntries).replace("{count}", String(trust.manualFeatureCount + trust.manualScenarioCount))}{trust.specVersionId !== null ? ` · Spec v${trust.specVersionId}` : ""}。{coverageExplainer(locale)}{pick(locale, PRODUCT_OVERVIEW.trustDisclaimer)}</p>
+    <p className="overview-trust-line">{coverageByte ?? pick(locale, PRODUCT_OVERVIEW.trustCoverageMissing)}{coverageFiles ? ` · ${coverageFiles}` : ""} · {pick(locale, PRODUCT_OVERVIEW.trustEvidenceFiles).replace("{count}", String(trust.evidencePathCount))} · {pick(locale, PRODUCT_OVERVIEW.trustManualEntries).replace("{count}", String(trust.manualFeatureCount + trust.manualScenarioCount))}{trust.specVersionId !== null ? ` · Spec v${trust.specVersionId}` : ""}</p>
   );
 }
 
