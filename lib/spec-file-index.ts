@@ -66,6 +66,23 @@ export async function loadAffectedFeatureKeys(repositoryId: number, paths: strin
   return { keys: new Set(rows.map((row) => row.stableKey)), names: [...new Set(rows.map((row) => row.name))], matchedPaths: new Set(rows.map((row) => row.path)) };
 }
 
+export async function loadAffectedEvidencePaths(repositoryId: number, affectedKeys: ReadonlySet<string>, execute: Execute = defaultExecute): Promise<string[]> {
+  const keys = [...affectedKeys].sort();
+  if (keys.length === 0) return [];
+  const placeholders = keys.map(() => "?").join(",");
+  const result = await execute(
+    `SELECT DISTINCT i.path
+     FROM spec_file_index i
+     JOIN spec_features sf ON sf.id = i.spec_feature_id
+     WHERE i.repository_id = ? AND sf.stable_key IN (${placeholders})
+     ORDER BY i.path`,
+    [repositoryId, ...keys],
+  );
+  const payload = Array.isArray(result) ? result[0] : [];
+  const rows = (Array.isArray(payload) ? payload : []) as Array<{ path: string }>;
+  return [...new Set(rows.map((row) => row.path))].sort();
+}
+
 export interface AffectedScenario {
   reference: string | null;
   evidencePath: string;

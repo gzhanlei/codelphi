@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PoolConnection } from "mysql2/promise";
-import { rebuildSpecFileIndex } from "../lib/spec-file-index";
+import { loadAffectedEvidencePaths, rebuildSpecFileIndex } from "../lib/spec-file-index";
 
 function connectionWith(selectResult: unknown[]) {
   const execute = vi.fn();
@@ -54,5 +54,23 @@ describe("spec file index migration", () => {
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS spec_file_index");
     expect(sql).toContain("spec_file_index_repo_path_idx");
     expect(sql).toContain("path VARCHAR(500) NOT NULL");
+  });
+});
+
+describe("affected evidence paths", () => {
+  it("returns unique sorted paths for all affected features", async () => {
+    const execute = vi.fn(async () => [[{ path: "lib/z.ts" }, { path: "lib/a.ts" }, { path: "lib/a.ts" }]]);
+    const paths = await loadAffectedEvidencePaths(4, new Set(["登录", "支付"]), execute);
+
+    expect(paths).toEqual(["lib/a.ts", "lib/z.ts"]);
+    expect(execute).toHaveBeenCalledOnce();
+    expect(String(execute.mock.calls[0][0])).toContain("SELECT DISTINCT i.path");
+    expect(execute.mock.calls[0][1]).toEqual([4, "支付", "登录"]);
+  });
+
+  it("returns no paths without querying when no features are affected", async () => {
+    const execute = vi.fn();
+    await expect(loadAffectedEvidencePaths(4, new Set(), execute)).resolves.toEqual([]);
+    expect(execute).not.toHaveBeenCalled();
   });
 });
