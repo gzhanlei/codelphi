@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { computeCoverageReceipt, enumerateImplementationSurface, loadInheritedCoverageReceipt } from "../lib/analysis-coverage";
+import { computeCoverageReceipt, enumerateImplementationSurface, enumerateRequiredImplementationSurface, loadInheritedCoverageReceipt } from "../lib/analysis-coverage";
 import { createRemoteSourceIndex, type RemoteSourceBackend } from "../lib/remote-source-index";
 import type { AnalysisPartition, } from "../lib/remote-analysis";
 import type { OpenedRemoteSourceRevision, SourceTreeListing } from "../lib/remote-source-index";
@@ -35,6 +35,20 @@ const partition = (paths: Array<{ path: string; content: string }>): AnalysisPar
   slice: { files: paths.map((file) => ({ path: file.path })) },
   sources: paths,
 } as unknown as AnalysisPartition);
+
+describe("required implementation surface", () => {
+  it("stats only required paths and excludes missing or non-implementation entries", async () => {
+    const index = fakeIndex([]);
+    const statPath = vi.fn(async (path: string) => {
+      if (path === "lib/missing.ts") return null;
+      return { path, blobSha: `blob-${path}`, treeEntrySha: `tree-${path}`, byteSize: path === "lib/a.ts" ? 100 : 50, cacheState: "cached" };
+    });
+    const surface = await enumerateRequiredImplementationSurface({ ...index, statPath }, ["README.md", "lib/missing.ts", "lib/a.ts"]);
+
+    expect(surface).toEqual([{ path: "lib/a.ts", size: 100 }]);
+    expect(statPath).toHaveBeenCalledTimes(2);
+  });
+});
 
 describe("computeCoverageReceipt", () => {
   it("computes the assembled-vs-total implementation surface in the measure-script dialect", async () => {

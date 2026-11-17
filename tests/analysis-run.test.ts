@@ -13,6 +13,7 @@ const execute = vi.fn();
 const readLines = vi.fn();
 const listDir = vi.fn();
 const listRoot = vi.fn();
+const statPath = vi.fn();
 const openArchitectureIndex = vi.fn();
 const connection = {
   execute: vi.fn(),
@@ -113,15 +114,16 @@ describe("analysis orchestration", () => {
     });
     adapter.getRepository.mockResolvedValue({ owner: "gzhanlei", name: "radar", defaultBranch: "main" });
     adapter.getChangeContext.mockResolvedValue({ message: "change", committedAt: "2026-11-01T00:00:00Z", url: "https://github.com/commit/sha", files: [{ path: "lib/auth.ts", status: "modified", patch: "+export const ok = 1;" }] });
-    vi.mocked(getRemoteAnalysisSources).mockResolvedValue({ sources: [], slice: { files: [{ path: "lib/db.ts" }] }, index: { readLines, listDir, listRoot }, openArchitectureIndex } as never);
+    vi.mocked(getRemoteAnalysisSources).mockResolvedValue({ sources: [], slice: { files: [{ path: "lib/db.ts" }] }, index: { readLines, listDir, listRoot, statPath }, openArchitectureIndex } as never);
     // 真全量路径（affectedKeys=null）默认走分区提取：单分区等价旧行为
     partitionedSourcesMock.mockResolvedValue({
       partitions: [{ slice: { files: [{ path: "lib/db.ts" }] }, sources: [] }],
-      index: { readLines, listDir, listRoot },
+      index: { readLines, listDir, listRoot, statPath },
     });
     openArchitectureIndex.mockReset().mockResolvedValue({ readLines, listDir });
     listDir.mockResolvedValue({ status: "indexed", truncated: false, entries: [{ path: "lib/db.ts", type: "blob" }, { path: "lib/ai.ts", type: "blob" }] });
     listRoot.mockResolvedValue({ status: "indexed", truncated: false, entries: [{ path: "lib", type: "tree" }] });
+    statPath.mockImplementation(async (path: string) => ({ path, blobSha: `blob-${path}`, treeEntrySha: `tree-${path}`, byteSize: 100, cacheState: "cached" }));
     readLines.mockImplementation(async (request) => ({ startLine: 1, endLine: 1, lineCount: 1, byteSize: 100, lines: [`${request.path} complete evidence`] }));
     vi.mocked(analyzeWithAI).mockResolvedValue({ product: { description: "代码驱动的产品知识与变更中心。", evidence: [{ path: "lib/db.ts", startLine: 1 }] }, release: { title: "v1", summary: "summary" }, features: [], changes: [] });
     vi.mocked(analyzeBehavioralGroup).mockResolvedValue({ product: { description: "枚举", evidence: [{ path: "lib/db.ts", startLine: 1 }] }, release: { title: "", summary: "" }, changes: [], features: [] });
@@ -343,7 +345,7 @@ describe("analysis orchestration", () => {
         { slice: { files: [{ path: "lib/auth.ts" }] }, sources: [{ path: "lib/auth.ts", content: "1: auth" }] },
         { slice: { files: [{ path: "lib/export.ts" }] }, sources: [{ path: "lib/export.ts", content: "1: export" }] },
       ],
-      index: { readLines, listDir, listRoot },
+      index: { readLines, listDir, listRoot, statPath },
     });
     execute.mockImplementation(async (sql: string) => {
       if (sql.includes("JOIN repositories repo")) return [runRows];
@@ -386,11 +388,53 @@ describe("analysis orchestration", () => {
     }
   });
 
+  it("limits incremental planning and coverage to diff and affected evidence", async () => {
+    runRows = [{ ...run, analyzeMode: "incremental" }];
+    const statPath = vi.fn(async (path: string) => ({ path, blobSha: `blob-${path}`, treeEntrySha: `tree-${path}`, byteSize: 100, cacheState: "cached" }));
+    partitionedSourcesMock.mockResolvedValue({
+      partitions: [{ slice: { files: [{ path: "lib/auth.ts" }] }, sources: [{ path: "lib/auth.ts", content: "1: auth" }] }],
+      index: { readLines, listDir, listRoot, statPath },
+    });
+    execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("JOIN repositories repo")) return [runRows];
+      if (sql.includes("source_roots")) return [[]];
+      if (sql.includes("SELECT id FROM analysis_runs WHERE repository_id = ? AND after_sha = ?")) return [existingRunRows];
+      if (sql.includes("INSERT INTO analysis_runs")) return [{ insertId: 55 }];
+      if (sql.includes("SELECT sf.name FROM spec_features")) return [[{ name: "统一登录" }]];
+      if (sql.includes("SELECT DISTINCT i.path")) return [[{ path: "lib/shared.ts" }, { path: "lib/context.ts" }]];
+      if (sql.includes("FROM spec_file_index i")) return [[{ stableKey: "统一登录", name: "统一登录", path: "lib/auth.ts" }]];
+      return [{}];
+    });
+    adapter.getChangeContext.mockResolvedValue({
+      message: "change",
+      committedAt: "2026-11-01T00:00:00Z",
+      url: "",
+      files: [
+        { path: "lib/other.ts", status: "modified", patch: "+ const other = true;" },
+        { path: "lib/auth.ts", status: "modified", patch: "+ const token = sign(payload);" },
+        { path: "lib/new.ts", status: "added", patch: "+ const created = true;" },
+      ],
+    });
+    listRoot.mockClear();
+    listDir.mockClear();
+
+    await runAnalysis(8);
+
+    const request = partitionedSourcesMock.mock.calls[0][0];
+    expect(request.discovery).toBe("required_only");
+    expect(request.requiredPaths).toEqual(["lib/auth.ts", "lib/context.ts", "lib/new.ts", "lib/other.ts", "lib/shared.ts"]);
+    expect(request.diffPaths).toEqual(["lib/other.ts", "lib/auth.ts", "lib/new.ts"]);
+    expect(request.requiredPaths).not.toContain("lib/unrelated.ts");
+    expect(statPath).toHaveBeenCalledTimes(5);
+    expect(listRoot).not.toHaveBeenCalled();
+    expect(listDir).not.toHaveBeenCalled();
+  });
+
   it("retries a failed extraction pass once before failing the run (model-drift resilience)", async () => {
     // 模型侧偶发（证据路径幻觉、JSON 键漂移）按趟重试一次；重试调用的 receipt 照常落库
     partitionedSourcesMock.mockResolvedValue({
       partitions: [{ slice: { files: [{ path: "lib/auth.ts" }] }, sources: [{ path: "lib/auth.ts", content: "1: auth" }] }],
-      index: { readLines, listDir, listRoot },
+      index: { readLines, listDir, listRoot, statPath },
     });
     execute.mockImplementation(async (sql: string) => {
       if (sql.includes("JOIN repositories repo")) return [runRows];
@@ -463,7 +507,7 @@ describe("analysis orchestration", () => {
         { slice: { files: [{ path: "lib/auth.ts" }] }, sources: [{ path: "lib/auth.ts", content: "1: auth" }] },
         { slice: { files: [{ path: "lib/export.ts" }] }, sources: [{ path: "lib/export.ts", content: "1: export" }] },
       ],
-      index: { readLines, listDir, listRoot },
+      index: { readLines, listDir, listRoot, statPath },
     });
     adapter.getChangeContext.mockResolvedValue({ message: "change", committedAt: "2026-11-01T00:00:00Z", url: "", files: [{ path: "lib/auth.ts", status: "modified", patch: "+ const token = sign(payload);" }] });
     vi.mocked(analyzeWithAI)
@@ -505,7 +549,7 @@ describe("analysis orchestration", () => {
         { slice: { files: [{ path: "lib/auth.ts" }] }, sources: [{ path: "lib/auth.ts", content: "1: auth" }] },
         { slice: { files: [{ path: "lib/export.ts" }] }, sources: [{ path: "lib/export.ts", content: "1: export" }] },
       ],
-      index: { readLines, listDir, listRoot },
+      index: { readLines, listDir, listRoot, statPath },
     });
     vi.mocked(analyzeWithAI)
       .mockResolvedValueOnce({ product: { description: "d", evidence: [{ path: "lib/auth.ts", startLine: 1 }] }, release: { title: "v1", summary: "s" }, changes: [], features: [{ name: "统一登录", summary: "s1", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy", evidence: [{ path: "lib/auth.ts", startLine: 1 }] }] }] } as never)
@@ -534,7 +578,7 @@ describe("analysis orchestration", () => {
         { slice: { files: [{ path: "lib/auth.ts" }] }, sources: [{ path: "lib/auth.ts", content: "1: auth" }] },
         { slice: { files: [{ path: "lib/export.ts" }] }, sources: [{ path: "lib/export.ts", content: "1: export" }] },
       ],
-      index: { readLines, listDir, listRoot },
+      index: { readLines, listDir, listRoot, statPath },
     });
     execute.mockImplementation(async (sql: string) => {
       if (sql.includes("JOIN repositories repo")) return [runRows];
@@ -559,7 +603,7 @@ describe("analysis orchestration", () => {
   it("enumerates behavioral diff files with targeted per-file extraction (W0-8)", async () => {
     partitionedSourcesMock.mockResolvedValue({
       partitions: [{ slice: { files: [{ path: "lib/auth.ts" }] }, sources: [{ path: "lib/auth.ts", content: "1: auth" }] }],
-      index: { readLines, listDir, listRoot },
+      index: { readLines, listDir, listRoot, statPath },
     });
     execute.mockImplementation(async (sql: string) => {
       if (sql.includes("JOIN repositories repo")) return [runRows];
@@ -616,7 +660,7 @@ describe("analysis orchestration", () => {
     runRows = [run];
     partitionedSourcesMock.mockResolvedValue({
       partitions: [{ slice: { files: [{ path: "lib/auth.ts" }] }, sources: [{ path: "lib/auth.ts", content: "1: auth" }] }],
-      index: { readLines, listDir, listRoot },
+      index: { readLines, listDir, listRoot, statPath },
     });
     execute.mockImplementation(async (sql: string) => {
       if (sql.includes("JOIN repositories repo")) return [runRows];

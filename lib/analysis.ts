@@ -10,12 +10,12 @@ import { resolveAnalysisTarget, type ChangeContext, type CodeHostingProvider } f
 import { analysisSliceBudgets, getPartitionedAnalysisSources, getRemoteAnalysisSources, parseSourceRoots, type AnalysisPartition } from "./remote-analysis";
 import { createSlicePlanner } from "./slice-planner";
 import { insertSpecVersion, loadLatestSpecFeatures, loadLatestSpecVersionLanguage, loadPreviousFeatureNames, loadPreviousSpecText } from "./spec-versions";
-import { loadAffectedFeatureKeys, rebuildSpecFileIndex } from "./spec-file-index";
+import { loadAffectedEvidencePaths, loadAffectedFeatureKeys, rebuildSpecFileIndex } from "./spec-file-index";
 import { resolveAnalysisMode } from "./incremental";
 import { compareIncrementalShadow } from "./incremental-shadow";
 import { incrementalShadowEnabled } from "./env";
 import type { BehavioralEnumerationMetrics } from "./behavioral-enumeration";
-import { computeCoverageReceipt, loadInheritedCoverageReceipt, enumerateImplementationSurface, saveCoverageReceipt, type AnalysisCoverageReceipt } from "./analysis-coverage";
+import { computeCoverageReceipt, loadInheritedCoverageReceipt, enumerateImplementationSurface, enumerateRequiredImplementationSurface, saveCoverageReceipt, type AnalysisCoverageReceipt } from "./analysis-coverage";
 import { mergeChunkResults, type ExtractionChunk } from "./extraction-merge";
 import { behavioralEnumerationEnabled } from "./env";
 import { behavioralChangePaths } from "./patch-scan";
@@ -498,15 +498,24 @@ async function runAnalysisBody(run: RunContext) {
     }
     console.log("[analysis] no-behavioral-change window; previous spec carried verbatim", { runId: run.id, diffFiles: change.files.length, carriedFeatures: result.features.length, specVersionId: previousSpec?.specVersionId ?? null });
   } else {
-  const { partitions: planned, index: sourceIndex } = await getPartitionedAnalysisSources(remoteAnalysisRequest, { planner, budgets: analysisSliceBudgets });
+  const requiredPaths = affectedKeys === null ? null : [...new Set([
+    ...change.files.map((file) => file.path),
+    ...await loadAffectedEvidencePaths(run.repositoryId, affectedKeys, executeWrapper),
+  ])].sort();
+  const analysisRequest = requiredPaths === null ? remoteAnalysisRequest : {
+    ...remoteAnalysisRequest,
+    discovery: "required_only" as const,
+    requiredPaths,
+  };
+  const { partitions: planned, index: sourceIndex } = await getPartitionedAnalysisSources(analysisRequest, { planner, budgets: analysisSliceBudgets });
   partitions = planned;
-  console.log("[analysis] partitioned extraction", { runId: run.id, partitions: partitions.length, mode: affectedKeys === null ? "full" : "incremental-carry" });
-  // B1 覆盖披露回执：装配面 vs 索引全树实现面（元数据级枚举，不读文件内容），
-  // 落 analysis_coverage_receipts，append-only 可回溯；口径与 measure-first-analysis.ts 一致。
+  console.log("[analysis] partitioned extraction", { runId: run.id, partitions: partitions.length, mode: affectedKeys === null ? "full" : "incremental-carry", requiredPaths: requiredPaths?.length ?? null });
+  // B1 覆盖披露回执：全量按全树实现面，增量按 diff 与受影响证据的实现面，
+  // 落 analysis_coverage_receipts，append-only 可回溯。
   coverage = computeCoverageReceipt({
     index: sourceIndex,
     partitions,
-    implSurface: await enumerateImplementationSurface(sourceIndex),
+    implSurface: requiredPaths === null ? await enumerateImplementationSurface(sourceIndex) : await enumerateRequiredImplementationSurface(sourceIndex, requiredPaths),
     diffPaths: remoteAnalysisRequest.diffPaths,
   });
   if (partitions.length === 1) {

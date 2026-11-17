@@ -66,9 +66,19 @@ export async function enumerateImplementationSurface(index: OpenedRemoteSourceRe
   return impl;
 }
 
+export async function enumerateRequiredImplementationSurface(index: OpenedRemoteSourceRevision, paths: readonly string[]): Promise<Array<{ path: string; size: number }>> {
+  const surface: Array<{ path: string; size: number }> = [];
+  for (const path of [...new Set(paths)].sort()) {
+    if (evidenceKind(path) !== "implementation") continue;
+    const stat = await index.statPath(path);
+    if (stat) surface.push({ path, size: stat.byteSize });
+  }
+  return surface;
+}
+
 /**
  * 覆盖率回执：装配面 = 各分区 slice 文件去重（与 assertEvidence 允许集同源）；
- * 总面 = 索引全树实现面。字节数用装配内容实长（进 prompt 的字节）。
+ * 总面 = 全量时的全树实现面，或定向增量时的 requiredPaths 实现面。字节数用装配内容实长。
  */
 export function computeCoverageReceipt(input: {
   index: OpenedRemoteSourceRevision;
