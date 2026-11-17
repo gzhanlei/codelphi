@@ -16,6 +16,8 @@ export interface RemoteAnalysisRequest {
   backend?: RemoteSourceBackend;
   /** W0-7：窗口 diff 文件路径——分区装配必选（行为证据一手面）。 */
   diffPaths?: readonly string[];
+  discovery?: "full" | "required_only";
+  requiredPaths?: readonly string[];
 }
 
 export interface RemoteAnalysisRuntime {
@@ -41,11 +43,11 @@ export const analysisSliceBudgets: SliceBudgets = {
 };
 
 export const analysisSourceIndexBudgets: RemoteSourceBudgets = {
-  maxTreeExpansions: 1000,
-  maxBlobFetches: 1000,
+  maxTreeExpansions: Number.POSITIVE_INFINITY,
+  maxBlobFetches: Number.POSITIVE_INFINITY,
   maxBlobBytes: 1_000_000,
   maxLinesPerRead: 600,
-  maxTotalContentBytes: 10_000_000,
+  maxTotalContentBytes: Number.POSITIVE_INFINITY,
 };
 
 const sourceRootsSchema = z.array(z.object({
@@ -118,7 +120,7 @@ export function loadAIVlogArchitectureSources(index: OpenedRemoteSourceRevision,
 }
 
 export async function getRemoteAnalysisSources(request: RemoteAnalysisRequest, runtime: RemoteAnalysisRuntime): Promise<RemoteAnalysisResult> {
-  const partitioned = await getPartitionedAnalysisSources(request, runtime, { maxPartitions: 1 });
+  const partitioned = await getPartitionedAnalysisSources(request, runtime, { singleWindow: true });
   return { ...partitioned.partitions[0], index: partitioned.index };
 }
 
@@ -135,10 +137,9 @@ export interface PartitionedAnalysisResult {
 
 /**
  * 多趟提取的分区规划（无 AI 成本）：在同一个种子索引上反复规划，每趟排除此前分区
- * 已选路径，直至无新路径或趟数上限。趟数总数在提取开始前确定（prompt 需要报 i/N）。
- * 单窗仓库（实现面 ≤ 窗口）返回恰好 1 个分区，行为与 getRemoteAnalysisSources 一致。
+ * 已选路径，直至无新路径。单窗口入口只读取首趟。
  */
-export async function getPartitionedAnalysisSources(request: RemoteAnalysisRequest, runtime: RemoteAnalysisRuntime, options: { maxPartitions: number }): Promise<PartitionedAnalysisResult> {
+export async function getPartitionedAnalysisSources(request: RemoteAnalysisRequest, runtime: RemoteAnalysisRuntime, options: { singleWindow?: boolean } = {}): Promise<PartitionedAnalysisResult> {
   const revision: SourceRevisionRef = {
     owner: request.repository.owner,
     repo: request.repository.repo,
@@ -147,7 +148,7 @@ export async function getPartitionedAnalysisSources(request: RemoteAnalysisReque
   const index = await createRemoteSourceIndex(revision, { scopeRoots: request.scopeRoots, access: request.access, provider: request.provider, backend: request.backend, budgets: analysisSourceIndexBudgets });
   const partitions: AnalysisPartition[] = [];
   const excludePaths = new Set<string>();
-  while (partitions.length < options.maxPartitions) {
+  while (!options.singleWindow || partitions.length === 0) {
     const result = await runtime.planner.plan({
       product: request.product,
       repository: request.repository,
@@ -157,6 +158,8 @@ export async function getPartitionedAnalysisSources(request: RemoteAnalysisReque
       profileVersion: "remote-analysis-v1",
       excludePaths,
       diffPaths: request.diffPaths,
+      discovery: request.discovery,
+      requiredPaths: request.requiredPaths,
     }, index);
     if (!result.slice) throw new Error(`Remote source slice failed: ${result.missing.join("; ") || "unknown planner failure"}`);
     if (result.slice.files.length === 0) {

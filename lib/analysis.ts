@@ -13,7 +13,7 @@ import { insertSpecVersion, loadLatestSpecFeatures, loadLatestSpecVersionLanguag
 import { loadAffectedFeatureKeys, rebuildSpecFileIndex } from "./spec-file-index";
 import { resolveAnalysisMode } from "./incremental";
 import { compareIncrementalShadow } from "./incremental-shadow";
-import { analysisMaxPartitions, incrementalShadowEnabled } from "./env";
+import { incrementalShadowEnabled } from "./env";
 import type { BehavioralEnumerationMetrics } from "./behavioral-enumeration";
 import { computeCoverageReceipt, loadInheritedCoverageReceipt, enumerateImplementationSurface, saveCoverageReceipt, type AnalysisCoverageReceipt } from "./analysis-coverage";
 import { mergeChunkResults, type ExtractionChunk } from "./extraction-merge";
@@ -498,7 +498,7 @@ async function runAnalysisBody(run: RunContext) {
     }
     console.log("[analysis] no-behavioral-change window; previous spec carried verbatim", { runId: run.id, diffFiles: change.files.length, carriedFeatures: result.features.length, specVersionId: previousSpec?.specVersionId ?? null });
   } else {
-  const { partitions: planned, index: sourceIndex } = await getPartitionedAnalysisSources(remoteAnalysisRequest, { planner, budgets: analysisSliceBudgets }, { maxPartitions: analysisMaxPartitions() });
+  const { partitions: planned, index: sourceIndex } = await getPartitionedAnalysisSources(remoteAnalysisRequest, { planner, budgets: analysisSliceBudgets });
   partitions = planned;
   console.log("[analysis] partitioned extraction", { runId: run.id, partitions: partitions.length, mode: affectedKeys === null ? "full" : "incremental-carry" });
   // B1 覆盖披露回执：装配面 vs 索引全树实现面（元数据级枚举，不读文件内容），
@@ -506,7 +506,6 @@ async function runAnalysisBody(run: RunContext) {
   coverage = computeCoverageReceipt({
     index: sourceIndex,
     partitions,
-    maxPartitions: analysisMaxPartitions(),
     implSurface: await enumerateImplementationSurface(sourceIndex),
     diffPaths: remoteAnalysisRequest.diffPaths,
   });

@@ -162,7 +162,7 @@ describe("analysis orchestration", () => {
       provider: "github",
       access: { connectionId: 42, organizationId: 7 },
       scopeRoots: [{ path: "", role: "shared" }],
-    }), expect.anything(), expect.objectContaining({ maxPartitions: 6 }));
+    }), expect.anything());
     // 单分区（默认 mock）行为与旧单窗路径一致：无 affectedFeatureNames
     expect(vi.mocked(analyzeWithAI).mock.calls[0][2]).toEqual({
       previousFeatureNames: ["统一登录", "支付", "规格导出"],
@@ -261,7 +261,7 @@ describe("analysis orchestration", () => {
   it("uses persisted source roots when present", async () => {
     sourceRows = [{ sourceRoots: [{ path: "apps/web", role: "web" }] }];
     await runAnalysis(8);
-    expect(partitionedSourcesMock).toHaveBeenCalledWith(expect.objectContaining({ scopeRoots: [{ path: "apps/web", role: "web" }] }), expect.anything(), expect.anything());
+    expect(partitionedSourcesMock).toHaveBeenCalledWith(expect.objectContaining({ scopeRoots: [{ path: "apps/web", role: "web" }] }), expect.anything());
     expect(connection.commit).toHaveBeenCalledOnce();
   });
 

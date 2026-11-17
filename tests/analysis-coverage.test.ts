@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { computeCoverageReceipt, enumerateImplementationSurface, isCoverageCapped, loadInheritedCoverageReceipt } from "../lib/analysis-coverage";
+import { computeCoverageReceipt, enumerateImplementationSurface, loadInheritedCoverageReceipt } from "../lib/analysis-coverage";
 import { createRemoteSourceIndex, type RemoteSourceBackend } from "../lib/remote-source-index";
 import type { AnalysisPartition, } from "../lib/remote-analysis";
 import type { OpenedRemoteSourceRevision, SourceTreeListing } from "../lib/remote-source-index";
@@ -49,7 +49,6 @@ describe("computeCoverageReceipt", () => {
     const receipt = computeCoverageReceipt({
       index,
       partitions: [partition([{ path: "lib/a.ts", content: "x".repeat(3000) }]), partition([{ path: "lib/b.ts", content: "y".repeat(5000) }])],
-      maxPartitions: 6,
       implSurface: await enumerateImplementationSurface(index),
     });
     expect(receipt.implFilesTotal).toBe(3);
@@ -63,31 +62,25 @@ describe("computeCoverageReceipt", () => {
   it("deduplicates paths shared across partitions before summing", () => {
     const index = fakeIndex([{ path: "lib/a.ts", size: 4000 }, { path: "lib/b.ts", size: 6000 }]);
     const shared = partition([{ path: "lib/a.ts", content: "x".repeat(3000) }]);
-    const receipt = computeCoverageReceipt({ index, partitions: [shared, partition([{ path: "lib/b.ts", content: "y" }]), shared], maxPartitions: 6 });
+    const receipt = computeCoverageReceipt({ index, partitions: [shared, partition([{ path: "lib/b.ts", content: "y" }]), shared] });
     expect(receipt.implFilesAssembled).toBe(2);
   });
 
-  it("flags the partition cap when the last pass is not exhausted", async () => {
-    // 趟数 = 上限 → 可能触顶（规划器耗尽时趟数恰好等于上限也会误报，故以「计划还有下一趟」为准，
-    // 这里用 capped = 趟数达到上限 且 最后一趟仍有新增文件 近似；isCoverageCapped 语义由实现定义）
-    const index = fakeIndex([
-      { path: "lib/a.ts", size: 1000 },
-      { path: "lib/b.ts", size: 1000 },
-      { path: "lib/c.ts", size: 1000 },
-    ]);
+  it("does not cap new receipts at six partitions", async () => {
+    const index = fakeIndex([{ path: "lib/a.ts", size: 1000 }]);
+    const partitions = Array.from({ length: 7 }, () => partition([{ path: "lib/a.ts", content: "x" }]));
     const receipt = computeCoverageReceipt({
       index,
-      partitions: [partition([{ path: "lib/a.ts", content: "x" }]), partition([{ path: "lib/b.ts", content: "x" }])],
-      maxPartitions: 2,
+      partitions,
       implSurface: await enumerateImplementationSurface(index),
     });
-    expect(receipt.partitionsUsed).toBe(2);
-    expect(isCoverageCapped(receipt, 2)).toBe(true);
+    expect(receipt.partitionsUsed).toBe(7);
+    expect(receipt.partitionsCapped).toBe(false);
   });
 
   it("reports zero coverage honestly when nothing was assembled", () => {
     const index = fakeIndex([{ path: "lib/a.ts", size: 4000 }]);
-    const receipt = computeCoverageReceipt({ index, partitions: [], maxPartitions: 6 });
+    const receipt = computeCoverageReceipt({ index, partitions: [] });
     expect(receipt.implFilesAssembled).toBe(0);
     expect(receipt.coverageRatio).toBe(0);
   });

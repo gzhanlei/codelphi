@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { getRemoteAnalysisSources, loadAIVlogArchitectureSources, loadRadarArchitectureSources, parseSourceRoots, sliceToSourceFiles } from "../lib/remote-analysis";
+import { getPartitionedAnalysisSources, getRemoteAnalysisSources, loadAIVlogArchitectureSources, loadRadarArchitectureSources, parseSourceRoots, sliceToSourceFiles } from "../lib/remote-analysis";
 import { gitBlobSha, type OpenedRemoteSourceRevision, type RemoteSourceBackend, type SourceLineRequest, type SourceLineSlice, type SourceRevisionRef } from "../lib/remote-source-index";
 import { analysisSliceBudgets } from "../lib/remote-analysis";
 import { createSlicePlanner, type SlicePlanner } from "../lib/slice-planner";
@@ -327,5 +327,66 @@ describe("remote analysis adapter", () => {
     }, { planner: createSlicePlanner({ now: Date.now }), budgets: analysisSliceBudgets });
     expect(result.slice.metrics.treeExpansions).toBe(0);
     expect(result.sources.map((source) => source.path)).toEqual(["package.json", deepPath]);
+  });
+});
+
+describe("unbounded partition planning", () => {
+  function plannerReturningSevenPartitions() {
+    let calls = 0;
+    return {
+      calls: () => calls,
+      planner: {
+        resolveScope: async () => ({ status: "resolved", unresolved: [], scopeRoots: [{ path: "" }] }),
+        plan: async () => {
+          calls += 1;
+          const files = calls <= 7 ? [{ path: `lib/${calls}.ts`, byteSize: 1, lineRanges: [{ startLine: 1, endLine: 1, purpose: "service" }] }] : [];
+          return {
+            status: "completed",
+            missing: [],
+            diagnostics: [],
+            slice: {
+              files,
+              confidence: "high",
+              unresolved: [],
+              evidenceClaims: [],
+              metrics: {},
+            },
+          };
+        },
+      } as unknown as SlicePlanner,
+    };
+  }
+
+  const request = {
+    product: { id: 1, slug: "commerce", name: "Commerce" },
+    repository: { owner: "gzhanlei", repo: "commerce", revision },
+    access: {},
+    scopeRoots: [{ path: "" }],
+    backend: {
+      kind: "github_api",
+      resolveRevision: async () => ({ rootTreeSha: "tree-root" }),
+      listTree: async () => ({
+        entries: Array.from({ length: 7 }, (_, index) => ({ path: `lib/${index + 1}.ts`, type: "blob", sha: gitBlobSha("x"), size: 1 })),
+        truncated: false,
+      }),
+      fetchBlob: async () => new TextEncoder().encode("x"),
+    } as RemoteSourceBackend,
+  };
+
+  it("keeps planning until no new readable candidates remain", async () => {
+    const { planner, calls } = plannerReturningSevenPartitions();
+    const result = await getPartitionedAnalysisSources(request, { planner, budgets: analysisSliceBudgets });
+
+    expect(result.partitions).toHaveLength(7);
+    expect(result.partitions.map((partition) => partition.sources[0].path)).toEqual(Array.from({ length: 7 }, (_, index) => `lib/${index + 1}.ts`));
+    expect(calls()).toBe(8);
+  });
+
+  it("preserves the explicit single-window entry point", async () => {
+    const { planner, calls } = plannerReturningSevenPartitions();
+    const result = await getRemoteAnalysisSources(request, { planner, budgets: analysisSliceBudgets });
+
+    expect(result.sources).toHaveLength(1);
+    expect(calls()).toBe(1);
   });
 });

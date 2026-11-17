@@ -3,7 +3,6 @@ import { getPartitionedAnalysisSources, getRemoteAnalysisSources, analysisSliceB
 import { createSlicePlanner } from "../lib/slice-planner";
 import { analyzeWithAI, type AnalysisResult } from "../lib/ai";
 import { mergeChunkResults, type ExtractionChunk } from "../lib/extraction-merge";
-import { analysisMaxPartitions } from "../lib/env";
 import { evidenceKind } from "../lib/evidence";
 import { getBranchHead, getRepository, githubFetch, parseRepository } from "../lib/github";
 import type { Evidence } from "../lib/types";
@@ -143,7 +142,7 @@ async function measure(repoFullName: string, access: { token?: string }): Promis
     access,
     provider: "github",
     scopeRoots: [{ path: "", role: "shared" as const }],
-  }, { planner: createSlicePlanner({ now: () => Date.now() }), budgets: analysisSliceBudgets }, { maxPartitions: analysisMaxPartitions() });
+  }, { planner: createSlicePlanner({ now: () => Date.now() }), budgets: analysisSliceBudgets });
   const allSources = partitions.flatMap((partition) => partition.sources);
   const windowBytes = allSources.reduce((total, source) => total + Buffer.byteLength(source.content, "utf8"), 0);
 

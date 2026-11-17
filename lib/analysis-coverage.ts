@@ -37,7 +37,7 @@ function isFileWithinScope(path: string, scopeRoots: OpenedRemoteSourceRevision[
 }
 
 /** 全树实现面枚举：BFS listDir，元数据级（不读文件内容），受索引预算约束。 */
-export async function enumerateImplementationSurface(index: OpenedRemoteSourceRevision, maxDirs = 1000): Promise<Array<{ path: string; size: number }>> {
+export async function enumerateImplementationSurface(index: OpenedRemoteSourceRevision, maxDirs = Number.POSITIVE_INFINITY): Promise<Array<{ path: string; size: number }>> {
   // scopeRoots 缺省按「无 scope 配置」处理（与索引 assertAllowed 同语义；测试 mock 可能不带该字段）
   const scopeRoots = index.scopeRoots ?? [];
   const impl: Array<{ path: string; size: number }> = [];
@@ -73,7 +73,6 @@ export async function enumerateImplementationSurface(index: OpenedRemoteSourceRe
 export function computeCoverageReceipt(input: {
   index: OpenedRemoteSourceRevision;
   partitions: AnalysisPartition[];
-  maxPartitions: number;
   implSurface?: Array<{ path: string; size: number }>;
   /** W0-9 评审采纳：窗口 diff 路径清单（diff 覆盖率口径）。 */
   diffPaths?: readonly string[];
@@ -104,16 +103,11 @@ export function computeCoverageReceipt(input: {
     implBytesTotal,
     coverageRatio: implBytesTotal === 0 ? 0 : implBytesAssembled / implBytesTotal,
     partitionsUsed: input.partitions.length,
-    partitionsCapped: input.partitions.length >= input.maxPartitions,
+    partitionsCapped: false,
     diffTotalPaths: diffPaths.length > 0 ? diffTotal : null,
     diffSelectedPaths: diffPaths.length > 0 ? diffSelectedPaths.size : null,
     diffOmittedPaths: diffPaths.length > 0 ? diffTotal - diffSelectedPaths.size : null,
   };
-}
-
-/** 触顶判定：趟数到达上限即视为可能未覆盖全部实现面，展示层必须显式警示。 */
-export function isCoverageCapped(receipt: AnalysisCoverageReceipt, maxPartitions: number) {
-  return receipt.partitionsUsed >= maxPartitions;
 }
 
 /** 回执与规格版本同事务落库（append-only，历史版本可回溯当时覆盖率）。 */
