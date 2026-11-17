@@ -200,15 +200,35 @@ export function chatCompletionsUrl() {
 
 const gatewayResponseSchema = z.object({
   id: z.union([z.string(), z.number()]).optional(),
-  choices: z.array(z.object({ message: z.object({ content: z.string().optional() }).optional() })),
+  choices: z.array(z.object({
+    message: z.object({ content: z.string().optional() }).optional(),
+    finish_reason: z.string().nullish(),
+  })),
   usage: z.unknown().optional(),
 });
+
+/**
+ * 输出被 max_tokens 截断（finish_reason=length）：继续 JSON.parse 只会得到难以归因的
+ * SyntaxError，并在同输入重试上白烧一次全 prompt 调用。显式错误类型让管线跳过重试、
+ * 失败分类给出人话、issue 去重按同一签名收敛。
+ */
+export class AiOutputTruncatedError extends Error {
+  constructor() {
+    super("AI output truncated (finish_reason=length): raise the model output budget or narrow the analysis scope");
+    this.name = "AiOutputTruncatedError";
+  }
+  static isInstance(error: unknown): boolean {
+    return error instanceof AiOutputTruncatedError || /AI output truncated \(finish_reason=length\)/.test(error instanceof Error ? error.message : String(error));
+  }
+}
 
 export interface GatewayResponse {
   content: string;
   /** 网关原始 usage 对象（结构因 provider 而异，采集期只透传落库）；缺失时为 null。 */
   usage: unknown | null;
   requestId: string | null;
+  /** 首个 choice 的 finish_reason（stop/length/…）；provider 未返回时为 null。 */
+  finishReason: string | null;
 }
 
 export function gatewayResponse(value: unknown): GatewayResponse {
@@ -219,6 +239,7 @@ export function gatewayResponse(value: unknown): GatewayResponse {
     content,
     usage: data.usage ?? null,
     requestId: data.id === undefined ? null : String(data.id),
+    finishReason: data.choices[0]?.finish_reason ?? null,
   };
 }
 
@@ -518,8 +539,9 @@ export async function requestStructuredCompletion(messages: Array<{ role: string
   let content: string;
   let usage: unknown | null;
   let requestId: string | null;
+  let finishReason: string | null;
   try {
-    ({ content, usage, requestId } = gatewayResponse(payload));
+    ({ content, usage, requestId, finishReason } = gatewayResponse(payload));
   } catch (error) {
     // 网关返回 2xx 但结构不可解析：usage 若存在仍要落库（成本已发生）
     if (billing) {
@@ -536,6 +558,22 @@ export async function requestStructuredCompletion(messages: Array<{ role: string
       });
     }
     throw error;
+  }
+  if (finishReason === "length") {
+    // 截断是确定性失败：照常落 usage 回执（成本已发生），但不再走 JSON 解析与同输入重试
+    if (billing) {
+      await recordLlmCallReceipt({
+        runId: billing.runId,
+        accountId: billing.accountId,
+        chargeComponent: billing.chargeComponent,
+        callKind: billing.callKind ?? null,
+        model,
+        outcome: "failed",
+        usageRaw: usage,
+        providerRequestId: requestId,
+      });
+    }
+    throw new AiOutputTruncatedError();
   }
   if (billing) {
     await recordLlmCallReceipt({

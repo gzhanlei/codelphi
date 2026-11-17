@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { chatCompletionsUrl, gatewayResponse } from "../lib/ai";
+import { AiOutputTruncatedError, chatCompletionsUrl, gatewayResponse } from "../lib/ai";
 
 describe("AI gateway compatibility", () => {
   afterEach(() => vi.unstubAllEnvs());
@@ -36,5 +36,13 @@ describe("AI gateway compatibility", () => {
     expect(() => gatewayResponse({ choices: [] })).toThrow("AI gateway returned empty content");
     expect(() => gatewayResponse({ choices: [{}] })).toThrow("AI gateway returned empty content");
     expect(() => gatewayResponse(null)).toThrow();
+  });
+
+  it("exposes finish_reason so a truncated output can be detected before JSON parsing", () => {
+    expect(gatewayResponse({ choices: [{ message: { content: "{\"ok\":true}" } }] }).finishReason).toBeNull();
+    expect(gatewayResponse({ choices: [{ message: { content: "partial" }, finish_reason: "stop" }] }).finishReason).toBe("stop");
+    expect(gatewayResponse({ choices: [{ message: { content: "partial" }, finish_reason: "length" }] }).finishReason).toBe("length");
+    expect(AiOutputTruncatedError.isInstance(new AiOutputTruncatedError())).toBe(true);
+    expect(AiOutputTruncatedError.isInstance(new Error("AI output truncated (finish_reason=length)"))).toBe(true);
   });
 });

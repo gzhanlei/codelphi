@@ -115,4 +115,17 @@ describe("allocateHunkReads (R3 hunk 公平预算)", () => {
     expect(allocated[0].truncated).toBe(true);
     expect(lines(allocated[0].allocated)).toBe(400);
   });
+
+  it("never produces a zero-grant range when the budget can still afford one line per hunk", () => {
+    // 15 个 hunk × 61 行需求 > 400 预算：旧逻辑第 13 个之后耗尽预算，尾部 hunk 拿 0 行，
+    // allocated.endLine < startLine 会让 readLines 抛 invalid_line_range，整文件被当不可读丢弃。
+    const ranges = Array.from({ length: 15 }, (_, index) => range(index * 100 + 1, index * 100 + 61));
+    const allocated = allocateHunkReads(ranges, 400, 30);
+    const total = allocated.reduce((sum, item) => sum + lines(item.allocated), 0);
+    expect(total).toBeLessThanOrEqual(400);
+    expect(allocated.every((item) => item.allocated.endLine >= item.allocated.startLine)).toBe(true);
+    // 预算保得住 1 行/hunk 时不得出现 0-grant
+    expect(allocated.every((item) => lines(item.allocated) >= 1)).toBe(true);
+    expect(allocated.every((item) => item.truncated)).toBe(true);
+  });
 });

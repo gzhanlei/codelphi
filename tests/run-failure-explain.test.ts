@@ -16,6 +16,7 @@ describe("run failure explanation (页面人话 + GitHub 上报分类)", () => {
 
   it("classifies broken-JSON, db-schema, credential, timeout and network failures", () => {
     expect(explainRunFailure("AI response did not contain a JSON object").technicalClass).toBe("ai_output_format");
+    expect(explainRunFailure("AI output truncated (finish_reason=length): raise the model output budget or narrow the analysis scope").technicalClass).toBe("ai_output_truncated");
     expect(explainRunFailure("Unknown column 'step_order' in 'field list'\n    at i (/data/www/…)").technicalClass).toBe("db_schema");
     expect(explainRunFailure("Access denied for user 'radar'@'172.19.32.3' (using password: YES)").technicalClass).toBe("credential");
     expect(explainRunFailure("TimeoutError: The operation was aborted due to timeout").technicalClass).toBe("timeout");

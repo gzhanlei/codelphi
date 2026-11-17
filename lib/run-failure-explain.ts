@@ -8,6 +8,7 @@
 
 export type RunFailureClass =
   | "ai_output_format"
+  | "ai_output_truncated"
   | "db_schema"
   | "timeout"
   | "network"
@@ -37,6 +38,14 @@ export function explainRunFailure(errorMessage: string): RunFailureExplanation {
       userMessage: "本次分析已被更新的分析取代，无需处理。",
       technicalClass: "superseded",
       reportable: false,
+    };
+  }
+  // 截断是确定性失败（同输入重试也会复现），必须与格式类失败分开归因
+  if (/AI output truncated \(finish_reason=length\)/i.test(head)) {
+    return {
+      userMessage: "AI 输出超出单次输出上限被截断，本次分析未完成。技术详情已自动上报，可重试；若持续出现需调整分析范围或模型输出预算。",
+      technicalClass: "ai_output_truncated",
+      reportable: true,
     };
   }
   // zod 失败是多行 JSON 数组（pretty-printed），JSON.parse 类错误是一句话。

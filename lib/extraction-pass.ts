@@ -1,4 +1,5 @@
 import type { analyzeWithAI, AnalysisResult } from "./ai";
+import { AiOutputTruncatedError } from "./ai";
 import type { ChangeContext } from "./code-hosting";
 import type { EvidenceSanitizeSummary } from "./completeness-ledger";
 import type { AnalysisPartition } from "./remote-analysis";
@@ -82,6 +83,8 @@ export async function extractPassWithRetry(options: ExtractPassOptions): Promise
   try {
     result = await analyze(options.sources, options.change, options.context);
   } catch (firstError) {
+    // 输出截断是确定性失败（同输入同 max_tokens 大概率复现）：不烧同输入重试，直接失败
+    if (AiOutputTruncatedError.isInstance(firstError)) throw firstError;
     options.onRetry?.(firstError instanceof Error ? firstError : new Error(String(firstError)));
     retries = 1;
     console.warn("[analysis] extraction pass failed; retrying once", {

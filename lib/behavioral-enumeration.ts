@@ -164,9 +164,11 @@ export async function enumerateBehavioralChunks(options: BehavioralEnumerationOp
         const allocatedReads = allocateHunkReads(changeFileHunkRanges(file, CONTEXT_LINES), MAX_CONTEXT_LINES_PER_FILE, CONTEXT_LINES);
         hunksTotal += allocatedReads.length;
         for (const item of allocatedReads) {
+          if (item.truncated) hunksTruncated += 1;
+          // 极端路径（hunk 数超过预算）仍可能 0-grant：跳过而不发起非法读取
+          if (item.allocated.endLine < item.allocated.startLine) continue;
           const read = await options.index.readLines({ path, startLine: item.allocated.startLine, endLine: Math.min(item.allocated.endLine, item.allocated.startLine + MAX_LINES_PER_READ - 1), requestedBy: "behavioral_enumeration", reason: "W0-8 targeted behavioral extraction" });
           blocks.push({ startLine: read.startLine, endLine: read.endLine, content: read.lines.map((line, offset) => `${read.startLine + offset}: ${line}`).join("\n") });
-          if (item.truncated) hunksTruncated += 1;
         }
       } catch (error) {
         // 文件在窗口内被删除或不可读：跳过该文件（patch 仍在组 prompt 里提供变更内容）
@@ -219,11 +221,14 @@ export function allocateHunkReads(ranges: ReadonlyArray<ReadRange>, totalBudget:
   const needs = ranges.map((range) => Math.max(1, range.endLine - range.startLine + 1));
   const grants = needs.map(() => 0);
   let used = 0;
-  // 第一步：每个 hunk 保底核心区间
-  for (let index = 0; index < needs.length && used < totalBudget; index += 1) {
-    const grant = Math.min(needs[index], minPerHunk, totalBudget - used);
-    grants[index] = grant;
-    used += grant;
+  // 第一步：每个 hunk 保底核心区间。为后续 hunk 预留 1 行预算（remainingAfterThis），
+  // 预算不足以保底时每 hunk 至少 1 行——0-grant 会产生 endLine < startLine 的非法读区间，
+  // 让整文件在编排层被当不可读丢弃（index.readLines 对非法区间直接抛错）。
+  for (let index = 0; index < needs.length; index += 1) {
+    const remainingAfterThis = needs.length - index - 1;
+    const grant = Math.min(needs[index], minPerHunk, Math.max(0, totalBudget - used - remainingAfterThis));
+    grants[index] = Math.max(used < totalBudget ? 1 : 0, grant);
+    used += grants[index];
   }
   // 第二步：剩余预算按剩余需求比例一次性分配（同一基数，顺序公平），零头按序补齐
   let remaining = totalBudget - used;
