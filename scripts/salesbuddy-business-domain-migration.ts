@@ -101,9 +101,10 @@ export function planBusinessDomainMigration(features: MigrationFeatureRow[], dom
   }
   // 域名与现有功能同名 → 父节点 INSERT 会撞 product_id+name 唯一键并劫持该功能行
   // （2026-11-17 Chandler 自指事故根因）。豁免：同名行是本域成员的既有父节点（幂等重跑，
-  // 归组状态由后续「已有父级/kept」逻辑判定）。
+  // 归组状态由后续「已有父级/kept」逻辑判定）。比较对齐 MySQL utf8mb4_0900_ai_ci（大小写不敏感）。
+  const collationKey = (value: string) => value.trim().toLowerCase();
   for (const domain of domains) {
-    const sameNameRows = features.filter((row) => row.name === domain.name);
+    const sameNameRows = features.filter((row) => collationKey(row.name) === collationKey(domain.name));
     if (sameNameRows.length === 0) continue;
     const isOwnParentRow = (row: MigrationFeatureRow) =>
       row.source === "manual" && domain.featureIds.some((id) => byId.get(id)?.parentId === row.id);
