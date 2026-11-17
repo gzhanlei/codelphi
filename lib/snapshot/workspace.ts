@@ -75,6 +75,7 @@ export async function prepareSnapshotWorkspace(options: PrepareSnapshotWorkspace
   for (const workOrder of prepared.workOrders) {
     await writeAtomically(join(options.directory, "work-orders", `${workOrder.id}.json`), JSON.stringify(workOrder, null, 2), true);
   }
+  await mkdir(join(options.directory, "results"), { recursive: true });
   await writeAtomically(manifestPath, JSON.stringify(manifest, null, 2), true);
   return { manifest };
 }
