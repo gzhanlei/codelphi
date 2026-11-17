@@ -30,10 +30,10 @@ Preparation does not require a model API, completion CLI, bridge, token, adapter
 First try the CLI completion pass — it is dramatically faster than per-partition agent execution when any completion backend exists:
 
 ```bash
-node "<skill-directory>/scripts/snapshot.cjs" complete --workdir <work-directory> --concurrency 4
+CODELPHI_SKILL_HOST=<your-host-identity> node "<skill-directory>/scripts/snapshot.cjs" complete --workdir <work-directory> --concurrency 4
 ```
 
-The command detects a backend in order: explicit standalone AI configuration (`--env-file` or `AI_API_KEY`/`AI_MODEL`), a host-injected bridge (`CODELPHI_HOST_AI_BRIDGE_URL`/`TOKEN` or `CODELPHI_HOST_AI_COMMAND`/`CODELPHI_HOST_AI_ARGS_JSON`), then the current host's own headless CLI (matched only against `CODELPHI_SKILL_HOST`, never across vendors). If it reports no available backend, fall back to the agent flow below.
+Set `CODELPHI_SKILL_HOST` to the identity of the host you are running in (`claude-code`, `codex`, `gemini`, `cursor`, `kimi`, `qwen`, `opencode`, `antigravity`) so the command may use that host's own headless CLI as a completion backend; leave it unset to disable CLI autodetect. The command detects a backend in order: explicit standalone AI configuration (`--env-file` or `AI_API_KEY`/`AI_MODEL`), a host-injected bridge (`CODELPHI_HOST_AI_BRIDGE_URL`/`TOKEN` or `CODELPHI_HOST_AI_COMMAND`/`CODELPHI_HOST_AI_ARGS_JSON`), then the current host's own headless CLI (matched only against `CODELPHI_SKILL_HOST`, never across vendors). If it reports no available backend, fall back to the agent flow below.
 
 For every `work-orders/<partition-id>.json`:
 

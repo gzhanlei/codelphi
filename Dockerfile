@@ -11,6 +11,8 @@ ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN NEXT_OUTPUT_STANDALONE=1 npm run build
+# radar skill 分发包随镜像产出，供 /downloads/codelphi-radar.zip 下载路由读取
+RUN npm run radar:package
 
 FROM node:20-bookworm-slim AS runner
 WORKDIR /app
@@ -22,6 +24,7 @@ ENV NODE_ENV=production \
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
+COPY --from=build /app/dist ./dist
 COPY package.json next.config.ts tsconfig.json ./
 COPY scripts ./scripts
 COPY migrations ./migrations
