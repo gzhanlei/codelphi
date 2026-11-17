@@ -51,3 +51,22 @@ export function buildBusinessDomainCards(features: FeatureRow[], scenarios: Scen
   }
   return cards.sort((a, b) => (b.scenarioCount - a.scenarioCount) || a.canonicalName.localeCompare(b.canonicalName));
 }
+
+/**
+ * 主动提示口径：push 分析新增的平铺功能不会自动归入业务域（upsert 从不写 parent_id）。
+ * 「新」= created_at 晚于最晚业务父节点（分组建立之后出现的）；故意不分组的存量功能
+ * 不误报。无分组、或父节点缺时间戳（无法判定）时返回 null——提示保持沉默。
+ */
+export function countNewUngroupedFeatures(features: FeatureRow[]): number | null {
+  const byId = new Map(features.map((feature) => [feature.id, feature]));
+  const parentIds = new Set<number>();
+  for (const feature of features) {
+    if (feature.parentId !== null && byId.has(feature.parentId)) parentIds.add(feature.parentId);
+  }
+  if (parentIds.size === 0) return null;
+  const parentCreatedAt = [...parentIds].map((id) => byId.get(id)!.createdAt).filter((value): value is Date | string => value !== undefined && value !== null);
+  if (parentCreatedAt.length === 0) return null;
+  const since = Math.max(...parentCreatedAt.map((value) => new Date(value).getTime()));
+  if (!Number.isFinite(since)) return null;
+  return features.filter((feature) => feature.parentId === null && !parentIds.has(feature.id) && feature.createdAt !== undefined && feature.createdAt !== null && new Date(feature.createdAt).getTime() > since).length;
+}

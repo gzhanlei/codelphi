@@ -42,6 +42,8 @@ export interface FeatureRow {
   /** P2 编辑归因（migration 064）：最后一次人工编辑者与时间；自动分析不写。 */
   lastEditedBy?: string | null;
   lastEditedAt?: Date | string | null;
+  /** 行创建时间（业务域「新增未分组」提示用：晚于最晚父节点=分组建立后新出现）。 */
+  createdAt?: Date | string | null;
 }
 
 export interface ScenarioRow {

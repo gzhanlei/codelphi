@@ -11,6 +11,7 @@ import { NotificationSettings } from "@/components/notification-settings";
 import { ProductIdentitySettings } from "@/components/product-identity-settings";
 import { ProductOutputLanguageSettings } from "@/components/product-output-language-settings";
 import { DomainCandidateReview } from "@/components/domain-candidate-review";
+import { countNewUngroupedFeatures } from "@/lib/business-domains";
 import { resolveUiLocale } from "@/lib/ui-locale-server";
 import { pick, type UiLocale } from "@/lib/ui-locale";
 import { PRODUCT_PAGE } from "@/lib/ui-strings/product";
@@ -146,7 +147,7 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
         canEdit={access.role !== "viewer"}
       />
 
-      <DomainCandidateReview slug={details.product.slug} canEdit={access.role !== "viewer"} />
+      <DomainCandidateReview slug={details.product.slug} canEdit={access.role !== "viewer"} ungroupedCount={countNewUngroupedFeatures(details.features)} />
     </>
   ) : null;
 

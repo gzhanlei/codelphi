@@ -17,7 +17,7 @@ interface Candidate {
   source: "generated";
 }
 
-export function DomainCandidateReview({ slug, canEdit }: { slug: string; canEdit: boolean }) {
+export function DomainCandidateReview({ slug, canEdit, ungroupedCount }: { slug: string; canEdit: boolean; ungroupedCount?: number | null }) {
   const router = useRouter();
   const [candidates, setCandidates] = useState<Candidate[] | null>(null);
   const [drafts, setDrafts] = useState<Record<number, { name: string; summary: string }>>({});
@@ -56,6 +56,11 @@ export function DomainCandidateReview({ slug, canEdit }: { slug: string; canEdit
     <section className="overview-panel settings-panel">
       <div className="overview-panel-heading"><span>07</span><h2>业务分组候选（AI 提案）</h2></div>
       <p className="overview-note">AI 根据本产品的说明、功能与场景提出「业务域」候选，供首页按业务价值聚合。候选仅供参考：这里不会写入数据库，也不会改变当前首页；确认后用迁移脚本落地。</p>
+      {ungroupedCount !== undefined && ungroupedCount !== null ? (
+        ungroupedCount > 0
+          ? <p className="overview-note" style={{ fontWeight: 600 }} role="status">📌 有 {ungroupedCount} 个新功能尚未归入业务分组——push 分析产生的新功能不会自动归入任何业务域；点下方按钮重新生成候选，审核后即可把它们并入。</p>
+          : <p className="overview-note" role="status">✓ 没有待归组的新功能。</p>
+      ) : null}
       {candidates === null ? (
         <button className="text-button" type="button" onClick={generate} disabled={pending}>{pending ? "生成中…" : "生成业务分组候选"}</button>
       ) : (

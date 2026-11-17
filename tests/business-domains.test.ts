@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildBusinessDomainCards } from "../lib/business-domains";
+import { buildBusinessDomainCards, countNewUngroupedFeatures } from "../lib/business-domains";
 import type { FeatureRow, ScenarioRow } from "../lib/types";
 
 const feature = (id: number, name: string, parentId: number | null = null, extra: Partial<FeatureRow> = {}): FeatureRow =>
@@ -72,5 +72,45 @@ describe("business domain projection (Task 1)", () => {
   it("builds href from productBase and the existing featureHref", () => {
     const cards = buildBusinessDomainCards(features, scenarios, "/products/o/p");
     expect(cards[0].href).toBe("/products/o/p?view=spec&feature=10");
+  });
+});
+
+// ── 主动提示（2026-11-17）：push 分析新增的平铺功能未归入业务域 ──
+
+describe("countNewUngroupedFeatures", () => {
+  const ts = (day: string) => new Date(`2026-11-${day}`);
+  const row = (id: number, name: string, parentId: number | null, createdAt?: Date): FeatureRow =>
+    ({ id, name, summary: "", parentId, source: "manual" as const, createdAt });
+
+  it("returns null when the product has no domain grouping (flat is the default, no hint)", () => {
+    expect(countNewUngroupedFeatures([row(1, "甲", null), row(2, "乙", null)])).toBeNull();
+    expect(countNewUngroupedFeatures([])).toBeNull();
+  });
+
+  it("counts flat features created after the latest domain parent as new-and-ungrouped", () => {
+    // 父节点（域）11-10 建立；故意不分组的旧功能 11-01；push 新增 11-15 两个
+    const features = [
+      row(10, "客户认知", null, ts("10")),
+      row(11, "客户沟通", null, ts("10")),
+      row(12, "子功能", 10, ts("01")),
+      row(30, "故意不分组的运维功能", null, ts("01")),
+      row(40, "push 新增功能A", null, ts("15")),
+      row(41, "push 新增功能B", null, ts("16")),
+    ];
+    expect(countNewUngroupedFeatures(features)).toBe(2);
+  });
+
+  it("returns 0 when everything recent is grouped (no false alarm on deliberately ungrouped features)", () => {
+    const features = [
+      row(10, "客户认知", null, ts("10")),
+      row(12, "子功能", 10, ts("01")),
+      row(30, "故意不分组的运维功能", null, ts("01")),
+    ];
+    expect(countNewUngroupedFeatures(features)).toBe(0);
+  });
+
+  it("returns null when parents carry no timestamps (cannot judge, stay silent)", () => {
+    const features = [row(10, "客户认知", null), row(12, "子功能", 10), row(40, "新增", null, ts("15"))];
+    expect(countNewUngroupedFeatures(features)).toBeNull();
   });
 });
