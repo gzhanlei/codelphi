@@ -41,7 +41,7 @@ describe("required implementation surface", () => {
     const index = fakeIndex([]);
     const statPath = vi.fn(async (path: string) => {
       if (path === "lib/missing.ts") return null;
-      return { path, blobSha: `blob-${path}`, treeEntrySha: `tree-${path}`, byteSize: path === "lib/a.ts" ? 100 : 50, cacheState: "cached" };
+      return { path, blobSha: `blob-${path}`, treeEntrySha: `tree-${path}`, byteSize: path === "lib/a.ts" ? 100 : 50, cacheState: "cached" as const };
     });
     const surface = await enumerateRequiredImplementationSurface({ ...index, statPath }, ["README.md", "lib/missing.ts", "lib/a.ts"]);
 

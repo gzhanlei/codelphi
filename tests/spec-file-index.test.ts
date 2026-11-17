@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PoolConnection } from "mysql2/promise";
+import type { Execute } from "../lib/db";
 import { loadAffectedEvidencePaths, rebuildSpecFileIndex } from "../lib/spec-file-index";
 
 function connectionWith(selectResult: unknown[]) {
@@ -59,7 +60,7 @@ describe("spec file index migration", () => {
 
 describe("affected evidence paths", () => {
   it("returns unique sorted paths for all affected features", async () => {
-    const execute = vi.fn(async () => [[{ path: "lib/z.ts" }, { path: "lib/a.ts" }, { path: "lib/a.ts" }]]);
+    const execute = vi.fn<Execute>(async () => [[{ path: "lib/z.ts" }, { path: "lib/a.ts" }, { path: "lib/a.ts" }]]);
     const paths = await loadAffectedEvidencePaths(4, new Set(["登录", "支付"]), execute);
 
     expect(paths).toEqual(["lib/a.ts", "lib/z.ts"]);
@@ -69,7 +70,7 @@ describe("affected evidence paths", () => {
   });
 
   it("returns no paths without querying when no features are affected", async () => {
-    const execute = vi.fn();
+    const execute = vi.fn<Execute>();
     await expect(loadAffectedEvidencePaths(4, new Set(), execute)).resolves.toEqual([]);
     expect(execute).not.toHaveBeenCalled();
   });
