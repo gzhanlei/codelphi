@@ -1,3 +1,4 @@
+import type { RegressionTaskView } from "./regression-task-view";
 import type { BehaviorChangeRow, ChangeRow, FoldedBehaviorChangeRow, ReleaseRow } from "./types";
 
 /** 发布变化列表的分页大小：首屏与每次「加载更多」各取一页。 */
@@ -10,6 +11,7 @@ export interface ReleasePagePayload {
   behaviorChanges: BehaviorChangeRow[];
   reviewedChanges: ChangeRow[];
   foldedChanges: FoldedBehaviorChangeRow[];
+  regressionTasks: RegressionTaskView[];
 }
 
 type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;

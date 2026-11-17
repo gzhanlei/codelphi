@@ -1,6 +1,36 @@
 import { getDb } from "./db";
 import { publicDemoSlugs } from "./env";
 
+interface PublicDemoCacheEntry {
+  value?: unknown;
+  expiresAt?: number;
+  pending?: Promise<unknown>;
+}
+
+export function createPublicDemoCache({ ttlMs = 15_000, now = Date.now }: { ttlMs?: number; now?: () => number } = {}) {
+  const entries = new Map<string, PublicDemoCacheEntry>();
+  return async function cached<T>(key: string, loader: () => Promise<T>): Promise<T> {
+    const existing = entries.get(key);
+    if (existing?.pending) return existing.pending as Promise<T>;
+    if (existing && existing.expiresAt !== undefined && existing.expiresAt > now()) return existing.value as T;
+
+    const pending = loader().then(
+      (value) => {
+        entries.set(key, { value, expiresAt: now() + ttlMs });
+        return value;
+      },
+      (error: unknown) => {
+        entries.delete(key);
+        throw error;
+      },
+    );
+    entries.set(key, { pending });
+    return pending;
+  };
+}
+
+export const readPublicDemoCache = createPublicDemoCache();
+
 /** 产品自身标记的公开演示（产品设置页开关）。 */
 export async function isPublicDemoProduct(slug: string): Promise<boolean> {
   const [rows] = await getDb().execute("SELECT 1 FROM products WHERE slug = ? AND is_public_demo = 1 LIMIT 1", [slug]);

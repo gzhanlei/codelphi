@@ -154,7 +154,10 @@ async function loadFoldedChanges(releases: ReleaseRow[]): Promise<FoldedBehavior
   return folded;
 }
 
-export async function getProductDetails(slug: string, organizationId?: number) {
+export type ProductDetailsView = "overview" | "spec" | "changes";
+
+export async function getProductDetails(slug: string, organizationId?: number, options: { view?: ProductDetailsView } = {}) {
+  const view = options.view;
   const db = getDb();
   const [products] = await db.execute(
     organizationId === undefined
@@ -179,7 +182,16 @@ export async function getProductDetails(slug: string, organizationId?: number) {
   const features = featureRows as FeatureRow[];
   const releases = releaseRows[0] as ReleaseRow[];
   const releaseTotal = Number((countRows[0] as Array<{ total: number }>)[0]?.total ?? 0);
-  const [scenarios, changes, reviewedChanges, behaviorChanges, regressionTasks, foldedChanges] = await Promise.all([loadScenarios(features), loadChanges(releases), loadReviewedChanges(releases), loadBehaviorChanges(releases), loadRegressionTasks(product.id), loadFoldedChanges(releases)]);
+  const loadReleaseOnlyData = view === undefined || view === "changes";
+  const regressionReleaseIds = view === undefined ? undefined : releases.map((release) => release.id);
+  const [scenarios, changes, reviewedChanges, behaviorChanges, regressionTasks, foldedChanges] = await Promise.all([
+    loadScenarios(features),
+    view === "spec" ? Promise.resolve([]) : loadChanges(releases),
+    loadReleaseOnlyData ? loadReviewedChanges(releases) : Promise.resolve([]),
+    loadBehaviorChanges(releases),
+    view === "spec" ? Promise.resolve([]) : loadRegressionTasks(product.id, defaultExecute, view === "overview" ? releases.slice(0, 1).map((release) => release.id) : regressionReleaseIds),
+    loadReleaseOnlyData ? loadFoldedChanges(releases) : Promise.resolve([]),
+  ]);
   // B1 覆盖披露：最新发布对应的覆盖率回执（migration 054 之前的历史版本无回执，为 null）。
   // BM-10 沿用版本不落自有回执 → 沿版本链向上取最近有效回执（沿用版本的覆盖面 = 被沿用版本的
   // 覆盖面）；合成零回执（implFilesTotal = 0）同样视为无、跳过。
@@ -193,7 +205,7 @@ export async function getProductDetails(slug: string, organizationId?: number) {
     }
   }
   // R1 分析完整性账本：与覆盖率回执同源同点加载（run 级 best-effort 写入，历史版本为 null）
-  const completeness = latestSpecVersionId === null ? null : await loadCompletenessLedgerBySpecVersion(db.execute.bind(db) as (sql: string, params?: unknown[]) => Promise<unknown>, latestSpecVersionId);
+  const completeness = latestSpecVersionId === null || view === "overview" || view === "changes" ? null : await loadCompletenessLedgerBySpecVersion(db.execute.bind(db) as (sql: string, params?: unknown[]) => Promise<unknown>, latestSpecVersionId);
   const finalSpecFeatures: SpecFeature[] = features.map((feature) => ({
     name: feature.name,
     summary: feature.summary,
@@ -209,8 +221,9 @@ export async function getProductDetails(slug: string, organizationId?: number) {
       evidence: evidenceItems(scenario.evidence),
     })),
   }));
-  const featureFlows = latestSpecVersionId === null ? new Map() : await loadFeatureFlowGraphs(defaultExecute, latestSpecVersionId, finalSpecFeatures);
-  const featureFlowErrors = latestSpecVersionId === null ? new Map() : await loadFeatureFlowErrors(defaultExecute, latestSpecVersionId, finalSpecFeatures);
+  const loadFlows = view === undefined || view === "spec";
+  const featureFlows = latestSpecVersionId === null || !loadFlows ? new Map() : await loadFeatureFlowGraphs(defaultExecute, latestSpecVersionId, finalSpecFeatures);
+  const featureFlowErrors = latestSpecVersionId === null || !loadFlows ? new Map() : await loadFeatureFlowErrors(defaultExecute, latestSpecVersionId, finalSpecFeatures);
 
   const repository = (repositories as Array<{ provider?: string; owner: string; name: string; defaultBranch: string }>)[0];
   const afterSha = (runs as Array<{ status: string; errorMessage?: string; afterSha?: string | null }>)[0]?.afterSha;
@@ -282,7 +295,13 @@ export async function loadReleasePage(slug: string, organizationId: number | und
   ]);
   const releases = releaseRows[0] as ReleaseRow[];
   const total = Number((countRows[0] as Array<{ total: number }>)[0]?.total ?? 0);
-  const [changes, reviewedChanges, behaviorChanges, foldedChanges] = await Promise.all([loadChanges(releases), loadReviewedChanges(releases), loadBehaviorChanges(releases), loadFoldedChanges(releases)]);
+  const [changes, reviewedChanges, behaviorChanges, foldedChanges, regressionTasks] = await Promise.all([
+    loadChanges(releases),
+    loadReviewedChanges(releases),
+    loadBehaviorChanges(releases),
+    loadFoldedChanges(releases),
+    loadRegressionTasks(product.id, defaultExecute, releases.map((release) => release.id)),
+  ]);
 
   const repository = (repositories as Array<{ owner: string; name: string }>)[0];
   const afterSha = (runs as Array<{ afterSha?: string | null }>)[0]?.afterSha;
@@ -295,5 +314,6 @@ export async function loadReleasePage(slug: string, organizationId: number | und
     reviewedChanges: reviewedChanges.map((change) => ({ ...change, evidence: decorateEvidence(change.evidence, source) })),
     behaviorChanges: annotateSuspectedRenames(behaviorChanges.map((change) => ({ ...change, before: decorateSubject(change.before, source), after: decorateSubject(change.after, source) }))),
     foldedChanges: foldedChanges.map((change) => ({ ...change, before: decorateSubject(change.before, source), after: decorateSubject(change.after, source) })),
+    regressionTasks,
   };
 }

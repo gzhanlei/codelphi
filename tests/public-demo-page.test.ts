@@ -13,7 +13,10 @@ vi.mock("next/navigation", () => ({
   notFound: vi.fn(() => { throw new Error("NOT_FOUND"); }),
   redirect: vi.fn((url: string) => { throw new Error(`NEXT_REDIRECT:${url}`); }),
 }));
-vi.mock("@/lib/public-demo", () => ({ resolvePublicDemoProduct: vi.fn(async () => null) }));
+vi.mock("@/lib/public-demo", () => ({
+  resolvePublicDemoProduct: vi.fn(async () => null),
+  readPublicDemoCache: vi.fn(async (_key: string, loader: () => Promise<unknown>) => loader()),
+}));
 vi.mock("@/lib/ui-locale-server", () => ({ resolveUiLocale: async () => "zh-CN" }));
 vi.mock("@/lib/session", () => ({ getSessionUser: vi.fn(async () => null) }));
 vi.mock("@/lib/product-access", () => ({ requireProductAccess: vi.fn() }));
@@ -62,7 +65,7 @@ describe("public demo product page (canonical org-qualified route)", () => {
     expect(html).not.toContain("data-remove-product");
     expect(resolvePublicDemoProduct).toHaveBeenCalledWith("default", "reporadar");
     // demo 详情按 (org, slug) 精确解析，不再有全局 slug 兜底
-    expect(getProductDetails).toHaveBeenCalledWith("reporadar", 3);
+    expect(getProductDetails).toHaveBeenCalledWith("reporadar", 3, { view: "overview" });
   });
 
   it("links demo view tabs through the canonical org-qualified base path", async () => {

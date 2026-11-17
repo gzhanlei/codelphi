@@ -25,7 +25,7 @@ import { defaultExecute } from "@/lib/db";
 import { getProductDetails } from "@/lib/product-details";
 import { productBasePath } from "@/lib/product-links";
 import { listProductMembers } from "@/lib/product-members";
-import { resolvePublicDemoProduct } from "@/lib/public-demo";
+import { readPublicDemoCache, resolvePublicDemoProduct } from "@/lib/public-demo";
 import { featureIdFromParam } from "@/lib/spec-editor-client";
 import { driftTargetFeatureId, featureHref } from "@/lib/spec-editor-ui";
 import { buildProductOverview, type ProductOverviewData } from "@/lib/product-overview";
@@ -103,10 +103,11 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
       notFound();
     }
     const productBase = productBasePath(demo.organizationSlug, demo.slug);
-    const demoDetails = await getProductDetails(slug, demo.organizationId);
+    const demoView = view === "settings" ? "overview" : view;
+    const detailsView = demoView === "spec" || demoView === "changes" ? demoView : ["overview", "map", "notes"].includes(demoView) ? "overview" : "changes";
+    const demoDetails = await readPublicDemoCache(`${demo.organizationId}:${demo.slug}:${detailsView}`, () => getProductDetails(slug, demo.organizationId, { view: detailsView }));
     if (!demoDetails) notFound();
     const demoOverview = buildProductOverview({ ...demoDetails, productBase }, locale);
-    const demoView = view === "settings" ? "overview" : view;
     return (
       <DemoShell>
         {/* 设计 §11.1：demo 不再为展示控件传 canEdit=true——编辑控件隐藏，写操作降为登录引导（writeAccess="demo"）。 */}
@@ -116,7 +117,8 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
   }
 
   const productBase = productBasePath(access.organization.slug, slug);
-  const details = await getProductDetails(slug, access.product.organizationId);
+  const detailsView = view === "spec" || view === "changes" ? view : ["overview", "map", "notes", "settings"].includes(view) ? "overview" : "changes";
+  const details = await getProductDetails(slug, access.product.organizationId, { view: detailsView });
   if (!details) notFound();
   const overview = buildProductOverview({ ...details, productBase }, locale);
   const isOrganizationMember = access.via === "organization";

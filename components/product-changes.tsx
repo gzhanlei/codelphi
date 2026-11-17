@@ -9,7 +9,7 @@ import { pick, type UiLocale } from "@/lib/ui-locale";
 import { PRODUCT_CHANGES as L } from "@/lib/ui-strings/product";
 import type { BehaviorChangeRow, ChangeRow, FoldedBehaviorChangeRow, ReleaseRow } from "@/lib/types";
 
-export function ProductChanges({ slug, releases: initialReleases, changes: initialChanges, reviewedChanges: initialReviewedChanges = [], behaviorChanges: initialBehaviorChanges, foldedChanges: initialFoldedChanges = [], regressionTasks = [], releaseTotal = 0, canEdit = false, changelogHref, locale = "zh-CN" }: {
+export function ProductChanges({ slug, releases: initialReleases, changes: initialChanges, reviewedChanges: initialReviewedChanges = [], behaviorChanges: initialBehaviorChanges, foldedChanges: initialFoldedChanges = [], regressionTasks: initialRegressionTasks = [], releaseTotal = 0, canEdit = false, changelogHref, locale = "zh-CN" }: {
   changelogHref?: string;
   slug: string;
   releases: ReleaseRow[];
@@ -27,6 +27,7 @@ export function ProductChanges({ slug, releases: initialReleases, changes: initi
   const [reviewedChanges, setReviewedChanges] = useState(initialReviewedChanges);
   const [behaviorChanges, setBehaviorChanges] = useState(initialBehaviorChanges);
   const [foldedChanges, setFoldedChanges] = useState(initialFoldedChanges);
+  const [regressionTasks, setRegressionTasks] = useState(initialRegressionTasks);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const hasMore = releases.length < releaseTotal;
@@ -42,6 +43,7 @@ export function ProductChanges({ slug, releases: initialReleases, changes: initi
       setReviewedChanges((current) => [...current, ...page.reviewedChanges]);
       setBehaviorChanges((current) => [...current, ...page.behaviorChanges]);
       setFoldedChanges((current) => [...current, ...page.foldedChanges]);
+      setRegressionTasks((current) => [...current, ...(page.regressionTasks ?? [])]);
     } catch (cause: unknown) {
       setError(errorMessage(cause, pick(locale, L.loadError)));
     } finally {
@@ -58,7 +60,19 @@ export function ProductChanges({ slug, releases: initialReleases, changes: initi
       <div className="release-list-head">
         <a className="overview-text-link" href={`/api/products/${slug}/progress-summary?days=30`}>{pick(locale, L.exportIndex)}</a>
       </div>
-      {releases.map((release) => <ReleaseCard slug={slug} release={release} changes={changes} reviewedChanges={reviewedChanges} behaviorChanges={behaviorChanges} foldedChanges={foldedChanges} tasks={regressionTasks} canEdit={canEdit} changelogHref={changelogHref} locale={locale} key={release.id} />)}
+      {releases.map((release) => <ReleaseCard
+        slug={slug}
+        release={release}
+        changes={changes.filter((change) => change.releaseId === release.id)}
+        reviewedChanges={reviewedChanges.filter((change) => change.releaseId === release.id)}
+        behaviorChanges={behaviorChanges.filter((change) => change.releaseId === release.id)}
+        foldedChanges={foldedChanges.filter((change) => change.releaseId === release.id)}
+        tasks={regressionTasks.filter((task) => task.releaseId === release.id)}
+        canEdit={canEdit}
+        changelogHref={changelogHref}
+        locale={locale}
+        key={release.id}
+      />)}
       {hasMore ? (
         <div className="release-load-more">
           <button className="secondary-button" type="button" onClick={() => void loadMore()} disabled={loading}>

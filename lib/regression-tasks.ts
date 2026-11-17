@@ -137,7 +137,10 @@ export async function ensureRegressionTasks(connection: Pick<PoolConnection, "ex
   }
 }
 
-export async function loadRegressionTasks(productId: number, execute: Execute = defaultExecute): Promise<RegressionTaskView[]> {
+export async function loadRegressionTasks(productId: number, execute: Execute = defaultExecute, releaseIds?: number[]): Promise<RegressionTaskView[]> {
+  if (releaseIds?.length === 0) return [];
+  const placeholders = releaseIds?.map(() => "?").join(",");
+  const params = releaseIds ? [productId, ...releaseIds] : [productId];
   const [rows] = await execute(
     `SELECT t.id AS taskId, t.release_id AS releaseId, t.status, t.checked_by AS checkedBy, t.checked_at AS checkedAt,
             t.skip_reason AS skipReason, t.failure_note AS failureNote,
@@ -153,7 +156,7 @@ export async function loadRegressionTasks(productId: number, execute: Execute = 
      LEFT JOIN spec_scenarios ss ON ss.id = t.spec_scenario_id
      LEFT JOIN spec_features sf ON sf.id = ss.spec_feature_id
      LEFT JOIN spec_changes c ON c.id = t.spec_change_id
-     WHERE r.product_id = ?
+     WHERE r.product_id = ?${releaseIds ? ` AND r.id IN (${placeholders})` : ""}
        -- 措辞噪音任务不进清单：没有文件命中理由（影响面证据），且所有行为变化来源都是仅措辞行。
        -- 文件命中是独立证据，带命中理由的任务一律保留。
        AND (EXISTS (SELECT 1 FROM regression_task_reasons rr WHERE rr.task_id = t.id AND rr.hit_type <> 'behavior_change')
@@ -161,22 +164,22 @@ export async function loadRegressionTasks(productId: number, execute: Execute = 
                        JOIN spec_changes pc2 ON pc2.id = s2.spec_change_id AND pc2.wording_only = 0
                        WHERE s2.task_id = t.id))
      ORDER BY r.committed_at DESC, sf.name, ss.reference, t.id`,
-    [productId],
+    params,
   ) as [Array<{ taskId: number; releaseId: number; status: RegressionTaskStatus; checkedBy: string | null; checkedAt: Date | null; skipReason: string | null; failureNote: string | null; specScenarioId: number | null; specChangeId: number | null; reference: string | null; featureName: string | null; scenarioContext: string | null; scenarioAction: string | null; primaryChangeId: number | null }>, unknown];
 
   const [sourceRows] = await execute(
     `SELECT s.task_id AS taskId, s.spec_change_id AS changeId FROM regression_task_sources s
      JOIN regression_tasks t ON t.id = s.task_id JOIN releases r ON r.id = t.release_id
      JOIN spec_changes pc ON pc.id = s.spec_change_id AND pc.wording_only = 0
-     WHERE r.product_id = ? ORDER BY s.spec_change_id`,
-    [productId],
+     WHERE r.product_id = ?${releaseIds ? ` AND r.id IN (${placeholders})` : ""} ORDER BY s.spec_change_id`,
+    params,
   ) as [Array<{ taskId: number; changeId: number }>, unknown];
   const [reasonRows] = await execute(
     `SELECT r.task_id AS taskId, r.hit_type AS hitType, r.matched_path AS matchedPath, r.spec_feature_id AS featureId, r.spec_scenario_id AS scenarioId
      FROM regression_task_reasons r
      JOIN regression_tasks t ON t.id = r.task_id JOIN releases rel ON rel.id = t.release_id
-     WHERE rel.product_id = ? ORDER BY r.id`,
-    [productId],
+     WHERE rel.product_id = ?${releaseIds ? ` AND rel.id IN (${placeholders})` : ""} ORDER BY r.id`,
+    params,
   ) as [Array<{ taskId: number; hitType: RegressionHitType; matchedPath: string | null; featureId: number | null; scenarioId: number | null }>, unknown];
 
   const sourcesByTask = new Map<number, number[]>();

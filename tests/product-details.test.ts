@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getProductDetails } from "../lib/product-details";
+import { getProductDetails, loadReleasePage } from "../lib/product-details";
 
 const { execute } = vi.hoisted(() => ({ execute: vi.fn() }));
 vi.mock("../lib/db", () => ({ getDb: () => ({ execute }), defaultExecute: execute }));
@@ -159,5 +159,74 @@ describe("product details", () => {
     expect(details?.product.descriptionEvidence).toEqual([{ path: "lib/analysis.ts", startLine: 185 }]);
     expect(details?.product.outputLanguage).toBe("en");
     expect(execute.mock.calls[0][0]).toContain("output_language AS outputLanguage");
+  });
+});
+
+
+describe("product detail view profiles", () => {
+  beforeEach(() => {
+    execute.mockReset();
+    loadFeatureFlowGraphs.mockReset().mockResolvedValue(new Map());
+    loadFeatureFlowErrors.mockReset().mockResolvedValue(new Map());
+    execute.mockImplementation(async (sql: string = "") => {
+      if (sql.includes("FROM products")) return [[product]];
+      if (sql.includes("FROM repositories")) return [[{ provider: "github", owner: "gzhanlei", name: "codelphi", defaultBranch: "main" }]];
+      if (sql.includes("FROM analysis_runs")) return [[{ status: "succeeded", errorMessage: null }]];
+      if (sql.includes("FROM features")) return [[{ id: 5, name: "Login", summary: "OAuth", parentId: null, source: "generated" }]];
+      if (sql.includes("FROM releases")) return [[{ id: 6, title: "v1", summary: "Release", sha: "abc", url: "https://github.com/commit/abc", committedAt: new Date("2026-11-01T00:00:00Z"), specVersionId: 3 }]];
+      return [[]];
+    });
+  });
+
+  it("overview does not read historical folded diffs, reviewed items, or feature flows", async () => {
+    const details = await getProductDetails("radar", 7, { view: "overview" });
+    const queries = execute.mock.calls.map(([sql]) => String(sql));
+
+    expect(details?.features).toHaveLength(1);
+    expect(details?.foldedChanges).toEqual([]);
+    expect(loadFeatureFlowGraphs).not.toHaveBeenCalled();
+    expect(loadFeatureFlowErrors).not.toHaveBeenCalled();
+    expect(queries.some((sql) => sql.includes("FROM spec_features WHERE spec_version_id IN"))).toBe(false);
+    expect(queries.some((sql) => sql.includes("FROM release_reviewed_items"))).toBe(false);
+  });
+
+  it("spec loads feature flows without reading release-only historical data", async () => {
+    await getProductDetails("radar", 7, { view: "spec" });
+    const queries = execute.mock.calls.map(([sql]) => String(sql));
+
+    expect(loadFeatureFlowGraphs).toHaveBeenCalledOnce();
+    expect(loadFeatureFlowErrors).toHaveBeenCalledOnce();
+    expect(queries.some((sql) => sql.includes("FROM spec_features WHERE spec_version_id IN"))).toBe(false);
+    expect(queries.some((sql) => sql.includes("COALESCE(ss.reference"))).toBe(false);
+    expect(queries.some((sql) => sql.includes("FROM release_reviewed_items"))).toBe(false);
+  });
+
+  it("overview restricts every regression task query to the latest release", async () => {
+    await getProductDetails("radar", 7, { view: "overview" });
+    const regressionQueries = execute.mock.calls.filter(([sql]) => String(sql).includes("COALESCE(ss.reference") || String(sql).includes("FROM regression_task_sources s") || String(sql).includes("FROM regression_task_reasons r"));
+
+    expect(regressionQueries).toHaveLength(3);
+    for (const [sql, params] of regressionQueries) {
+      expect(String(sql)).toMatch(/(?:r|rel)\.id IN \(\?\)/);
+      expect(params).toEqual([4, 6]);
+    }
+  });
+
+  it("release pages include only their own regression tasks", async () => {
+    execute.mockImplementation(async (sql: string = "") => {
+      if (sql.includes("FROM products")) return [[product]];
+      if (sql.includes("FROM repositories")) return [[{ provider: "github", owner: "gzhanlei", name: "codelphi", defaultBranch: "main" }]];
+      if (sql.includes("FROM analysis_runs")) return [[{ status: "succeeded", errorMessage: null }]];
+      if (sql.includes("FROM releases")) return [[{ id: 6, title: "v1", summary: "Release", sha: "abc", url: "https://github.com/commit/abc", committedAt: new Date("2026-11-01T00:00:00Z"), specVersionId: 3 }]];
+      if (sql.includes("COALESCE(ss.reference")) return [[{ taskId: 9, releaseId: 6, status: "pending", checkedBy: null, checkedAt: null, skipReason: null, failureNote: null, specScenarioId: 501, specChangeId: null, reference: "HP-1", featureName: "Login", scenarioContext: null, scenarioAction: null, primaryChangeId: 8 }]];
+      return [[]];
+    });
+
+    const page = await loadReleasePage("radar", 7, 0, 10);
+
+    expect(page?.regressionTasks).toEqual([expect.objectContaining({ taskId: 9, releaseId: 6, reference: "HP-1" })]);
+    const taskQuery = execute.mock.calls.find(([sql]) => String(sql).includes("COALESCE(ss.reference"));
+    expect(String(taskQuery?.[0])).toContain("r.id IN (?)");
+    expect(taskQuery?.[1]).toEqual([4, 6]);
   });
 });
