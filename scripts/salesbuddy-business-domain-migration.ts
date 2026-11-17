@@ -99,6 +99,18 @@ export function planBusinessDomainMigration(features: MigrationFeatureRow[], dom
   for (const id of ungroupedIds) {
     if (!byId.has(id)) errors.push(`未分组清单引用未知功能 ID ${id}；整个迁移中止`);
   }
+  // 域名与现有功能同名 → 父节点 INSERT 会撞 product_id+name 唯一键并劫持该功能行
+  // （2026-11-17 Chandler 自指事故根因）。豁免：同名行是本域成员的既有父节点（幂等重跑，
+  // 归组状态由后续「已有父级/kept」逻辑判定）。
+  for (const domain of domains) {
+    const sameNameRows = features.filter((row) => row.name === domain.name);
+    if (sameNameRows.length === 0) continue;
+    const isOwnParentRow = (row: MigrationFeatureRow) =>
+      row.source === "manual" && domain.featureIds.some((id) => byId.get(id)?.parentId === row.id);
+    if (!sameNameRows.every(isOwnParentRow)) {
+      errors.push(`业务域「${domain.name}」与现有功能同名（features 唯一键 product_id+name）：改域名后重试；整个迁移中止`);
+    }
+  }
   if (errors.length > 0) return { parents: [], moves: [], kept: [], ungrouped: [], snapshot: {}, errors };
   const moves: MigrationMove[] = [];
   const kept: MigrationPlan["kept"] = [];
@@ -301,17 +313,25 @@ async function applyMigration(connection: MigrationConnection, productId: number
     }),
   };
   fs.mkdirSync(backupDir, { recursive: true });
-  const backupPath = path.join(backupDir, `salesbuddy-${new Date().toISOString().replace(/[:.]/g, "-")}.json`);
+  const backupPath = path.join(backupDir, `${options.productSlug}-${new Date().toISOString().replace(/[:.]/g, "-")}.json`);
   fs.writeFileSync(backupPath, JSON.stringify(backup, null, 2));
   try {
     await connection.beginTransaction();
     const parentIds = new Map<string, number>();
     for (const parent of plan.parents) {
-      const insertId = insertIdOf(await connection.execute(INSERT_PARENT_SQL, [productId, parent.name, parent.name, parent.summary]));
+      const insertResult = await connection.execute(INSERT_PARENT_SQL, [productId, parent.name, parent.name, parent.summary]);
+      const insertId = insertIdOf(insertResult);
+      // 纵深防御：撞唯一键时 LAST_INSERT_ID 返回已存在行——若非 manual 域行则中止（防功能行被劫持成父节点）。
+      const parentRows = rowsOf<{ source: string }>(await connection.execute("SELECT source FROM features WHERE id = ?", [insertId]));
+      if (parentRows.length !== 1 || parentRows[0].source !== "manual") {
+        throw new Error(`父节点「${parent.name}」解析到非 manual 行（id=${insertId}），中止写入`);
+      }
       parentIds.set(parent.key, insertId);
     }
     for (const move of plan.moves) {
-      await connection.execute(MOVE_CHILD_SQL, [parentIds.get(move.targetDomainKey)!, move.featureId]);
+      const parentId = parentIds.get(move.targetDomainKey)!;
+      if (parentId === move.featureId) throw new Error(`功能 ${move.featureId} 的目标父级是自身（自指），中止写入`);
+      await connection.execute(MOVE_CHILD_SQL, [parentId, move.featureId]);
     }
     await connection.commit();
   } catch (error) {

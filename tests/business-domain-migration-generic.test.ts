@@ -58,6 +58,7 @@ function fakeConnection(features: MigrationFeatureRow[], failOn?: string) {
     async execute(statement: string, parameters?: unknown[]) {
       statements.push({ statement, parameters });
       if (statement.startsWith("SELECT id, slug FROM products")) return [[{ id: 9, slug: "other" }], []];
+      if (statement.startsWith("SELECT source FROM features")) return [[{ source: "manual" }], []];
       if (statement.startsWith("SELECT id, name, summary")) return [features, []];
       if (statement.startsWith("INSERT INTO features")) return [[{ insertId: ++insertCounter }], []];
       if (failOn && statement.startsWith(failOn)) throw new Error("模拟写入失败");
@@ -82,6 +83,28 @@ describe("planBusinessDomainMigration incremental mode (通用化)", () => {
     const plan = planBusinessDomainMigration(features, domains);
     expect(plan.errors.join("")).toContain("已有父级");
     expect(plan.moves).toHaveLength(0);
+  });
+
+  it("aborts when a domain name collides with an existing feature name (Chandler 自指事故根因)", () => {
+    // 域名「子商户进件与服务商模式」恰是成员功能 93 的名字：INSERT 会撞唯一键 → 父节点 id=功能 id → parent_id 自指
+    const selfNamed = [
+      { key: "subm", name: "子商户进件与服务商模式", summary: "", featureIds: [93] },
+      { key: "other", name: "别的域", summary: "", featureIds: [71] },
+    ];
+    const features = [...genericFeatures(), feature(93, "子商户进件与服务商模式")];
+    const plan = planBusinessDomainMigration(features, selfNamed);
+    expect(plan.errors.join("")).toContain("同名");
+    expect(plan.moves).toHaveLength(0);
+    // 增量模式同样拒绝：同名行既不是 manual 也不是本域既有父节点
+    const incremental = planBusinessDomainMigration(features, selfNamed, { incremental: true });
+    expect(incremental.errors.join("")).toContain("同名");
+  });
+
+  it("incremental mode allows the name collision only for the domain's own existing parent row", () => {
+    // 幂等重跑：父节点 500 名为「客户沟通」=域名，是成员 71 的当前父级 → 合法
+    const features = [...genericFeatures(), parentRow(500, "客户沟通"), feature(71, "多源沟通录入与录音", 500)];
+    const plan = planBusinessDomainMigration(features, domains, { incremental: true });
+    expect(plan.errors).toEqual([]);
   });
 
   it("incremental: a child already under the target domain parent is kept, not moved", () => {
@@ -121,6 +144,8 @@ describe("runBusinessDomainMigration with provided domains (通用化)", () => {
     const backup = JSON.parse(fs.readFileSync(path.join(backupDir, fs.readdirSync(backupDir)[0]), "utf8"));
     expect(backup.children).toHaveLength(4);
     expect(backup.domains.map((domain: { name: string }) => domain.name)).toEqual(["客户沟通", "运维保障"]);
+    // 备份文件名以产品 slug 为前缀（不再硬编码 salesbuddy-）
+    expect(fs.readdirSync(backupDir)[0]).toMatch(/^other-/);
   });
 
   it("refuses to run without a domain mapping", async () => {

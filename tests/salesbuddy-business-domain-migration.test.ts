@@ -79,6 +79,7 @@ function fakeConnection(features: MigrationFeatureRow[], failOn?: string) {
     async execute(statement: string, parameters?: unknown[]) {
       statements.push({ statement, parameters });
       if (statement.startsWith("SELECT id, slug FROM products")) return [[{ id: 6, slug: "salesbuddy" }], []];
+      if (statement.startsWith("SELECT source FROM features")) return [[{ source: "manual" }], []];
       if (statement.startsWith("SELECT id, name, summary")) return [features, []];
       if (statement.startsWith("INSERT INTO features")) return [[{ insertId: ++insertCounter }], []];
       if (failOn && statement.startsWith(failOn)) throw new Error("模拟写入失败");
