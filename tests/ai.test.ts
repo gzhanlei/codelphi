@@ -1,3 +1,4 @@
+import type { StructuredCompletionMessage } from "../lib/llm-client";
 import { describe, expect, it, vi } from "vitest";
 import { analyzeBehavioralGroup, analyzeWithAI, behavioralDescribePrompt, behavioralJudgmentPrompt, capEvidence, featureContinuitySection, incrementalScopeSection, capScenariosPerFeature, parseAnalysisContent, parseBehavioralDescriptions, specAnchoringSection } from "../lib/ai";
 
@@ -315,6 +316,30 @@ describe("behavioral enumeration two-step extraction (W0-9)", () => {
     expect(parsed.changes[0].evidence[0].path).toBe("superset/utils/oauth2.py");
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
+  });
+});
+
+describe("injected structured completion clients", () => {
+  it("uses the host client without requiring standalone AI environment variables", async () => {
+    vi.stubEnv("AI_MODEL", "");
+    vi.stubEnv("AI_API_KEY", "");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const complete = vi.fn(async (_messages: StructuredCompletionMessage[]) => JSON.stringify(result));
+    try {
+      const parsed = await analyzeWithAI(
+        [{ path: "lib/a.ts", content: "1: x" }],
+        { message: "m", files: [] },
+        { client: { complete, displayName: "Host current model" } },
+      );
+      expect(parsed.features[0].name).toBe("认证");
+      expect(complete).toHaveBeenCalledOnce();
+      expect(complete.mock.calls[0][0]).toHaveLength(2);
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+      vi.unstubAllGlobals();
+    }
   });
 });
 

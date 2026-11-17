@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AnalysisResult } from "../lib/ai";
-import { sanitizeEvidence } from "../lib/analysis";
+import { sanitizeEvidence } from "../lib/extraction-pass";
 
 const result: AnalysisResult = {
   product: { description: "Test product", evidence: [{ path: "lib/feature.ts", startLine: 1 }] },

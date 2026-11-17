@@ -51,6 +51,23 @@ Next.js（App Router）· TypeScript · React · MySQL 8 · Vitest · OpenAI 兼
 - 自动分析仅更新 generated 内容，不覆盖 manual 功能或场景；生成功能名作为稳定关联键不可直接修改。
 - 响应式中文界面。
 
+## 本地一次性产品快照（单文件 HTML）
+
+除了服务端的持续行为账本，仓库还提供一次性快照 CLI／Skill：读取本地 Git 仓库或 GitHub 公开仓库的固定 commit，生成一份可离线打开、可独立分享的产品现状 HTML。它不创建 MySQL 记录，不做持续分析，也不要求宿主用户重复配置当前模型。
+
+```bash
+# standalone CLI（需 AI_BASE_URL / AI_API_KEY / AI_MODEL）
+npm run snapshot -- /path/to/repo --language zh-CN --output report.html
+npm run snapshot -- https://github.com/owner/repo --language en --output report.html
+
+# 构建可独立分发的 Skill
+npm run snapshot:skill
+```
+
+在受支持的 Agent 宿主中，Skill 优先使用宿主已配置的当前模型；宿主未开放接口时明确报错，只有用户显式选择 standalone 才使用独立 AI 配置。各宿主支持状态以文档中的验收矩阵为准，不宣称未经测试的全宿主兼容。
+
+详见 [本地产品现状快照](docs/local-snapshot.md)。
+
 ## 本地启动
 
 ### 1. 准备配置

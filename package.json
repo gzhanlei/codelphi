@@ -14,6 +14,8 @@
     "db:backfill-wording": "tsx scripts/backfill-wording-only.ts",
     "db:seed": "tsx scripts/seed.ts",
     "analyze": "tsx scripts/analyze.ts",
+    "snapshot": "tsx scripts/snapshot.ts",
+    "snapshot:skill": "tsx scripts/build-snapshot-skill.ts",
     "archify:prepare": "tsx scripts/prepare-archify.ts",
     "archify:prototype": "tsx scripts/architecture-prototype.ts",
     "stack:corpus": "tsx scripts/stack-corpus.ts",
@@ -39,6 +41,7 @@
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
     "@vitest/coverage-v8": "^4.1.12",
+    "esbuild": "^0.28.2",
     "tsx": "^4.20.6",
     "typescript": "^5.8.3",
     "vitest": "^4.1.10"

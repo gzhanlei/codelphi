@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { requiredEnv } from "./env";
+import type { StructuredCompletionClient } from "./llm-client";
 import type { SourceFile } from "./github";
 import { recordLlmCallReceipt, type ChargeComponent } from "./billing/cost-receipt";
 import type { OutputLanguage } from "./analysis-language";
@@ -413,7 +414,7 @@ export function extractionInstructionLines(language: OutputLanguage, options: { 
   ];
 }
 
-export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext, context: { previousFeatureNames?: string[]; previousSpec?: SpecAnchorFeature[]; affectedFeatureNames?: string[]; unassignedBehavioralPaths?: string[]; partition?: { index: number; total: number }; outputLanguage?: "zh-CN" | "en"; billing?: LlmBillingContext } = {}): Promise<AnalysisResult> {
+export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext, context: { previousFeatureNames?: string[]; previousSpec?: SpecAnchorFeature[]; affectedFeatureNames?: string[]; unassignedBehavioralPaths?: string[]; partition?: { index: number; total: number }; outputLanguage?: "zh-CN" | "en"; billing?: LlmBillingContext; client?: StructuredCompletionClient } = {}): Promise<AnalysisResult> {
   const language: OutputLanguage = context.outputLanguage ?? "zh-CN";
   const anchor = specAnchoringSection(context.previousSpec, 24_000, language);
   const continuity = anchor ? null : featureContinuitySection(context.previousFeatureNames, language);
@@ -444,13 +445,13 @@ export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext
     codeSection,
   ].join("\n");
 
-  const content = await requestStructuredCompletion(
-    [
-      { role: "system", content: systemPrompt(language) },
-      { role: "user", content: prompt },
-    ],
-    context.billing,
-  );
+  const messages = [
+    { role: "system", content: systemPrompt(language) },
+    { role: "user", content: prompt },
+  ];
+  const content = context.client
+    ? await context.client.complete(messages)
+    : await requestStructuredCompletion(messages, context.billing);
   return parseAnalysisContent(content);
 }
 

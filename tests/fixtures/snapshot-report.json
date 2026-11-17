@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "language": "en",
+  "snapshot": {
+    "source": "github",
+    "name": "example-repo",
+    "owner": "example",
+    "target": "https://github.com/example/example-repo",
+    "repositoryUrl": "https://github.com/example/example-repo",
+    "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "branch": "main",
+    "message": "Initial product snapshot",
+    "committedAt": "2026-11-17T00:00:00.000Z",
+    "workingTreeDirty": false
+  },
+  "generatedAt": "2026-11-17T01:00:00.000Z",
+  "modelName": "Host current model",
+  "product": {
+    "description": "A small product with traceable behavior.",
+    "evidence": [{ "path": "src/index.ts", "startLine": 1 }]
+  },
+  "features": [
+    {
+      "name": "Product snapshots",
+      "summary": "Generates a portable description of the current product.",
+      "scenarios": [
+        {
+          "reference": "HP-1",
+          "context": "A user provides a Git repository",
+          "action": "The user requests a snapshot",
+          "outcome": "A single HTML report is generated",
+          "category": "happy",
+          "evidence": [{ "path": "src/index.ts", "startLine": 2 }]
+        },
+        {
+          "reference": "ER-1",
+          "context": "No supported source is available",
+          "action": "The user requests a snapshot",
+          "outcome": "The command fails without a success report",
+          "category": "error",
+          "evidence": [{ "path": "src/errors.ts", "startLine": 4 }]
+        }
+      ]
+    }
+  ],
+  "evidenceSnippets": [
+    {
+      "id": "evidence-product",
+      "path": "src/index.ts",
+      "citedStartLine": 1,
+      "citedEndLine": 1,
+      "lines": [{ "number": 1, "text": "export const product = true;" }],
+      "truncated": false,
+      "unavailable": false,
+      "sourceUrl": "https://github.com/example/example-repo/blob/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/src/index.ts#L1"
+    },
+    {
+      "id": "evidence-scenario",
+      "path": "src/index.ts",
+      "citedStartLine": 2,
+      "citedEndLine": 2,
+      "lines": [{ "number": 2, "text": "export function snapshot() { return true; }" }],
+      "truncated": false,
+      "unavailable": false,
+      "sourceUrl": "https://github.com/example/example-repo/blob/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/src/index.ts#L2"
+    },
+    {
+      "id": "evidence-error",
+      "path": "src/errors.ts",
+      "citedStartLine": 4,
+      "citedEndLine": 4,
+      "lines": [{ "number": 4, "text": "throw new Error('no_supported_source');" }],
+      "truncated": false,
+      "unavailable": false
+    }
+  ],
+  "coverage": {
+    "implFilesAssembled": 2,
+    "implFilesTotal": 4,
+    "implBytesAssembled": 120,
+    "implBytesTotal": 240,
+    "coverageRatio": 0.5,
+    "partitionsUsed": 1,
+    "partitionsCapped": false,
+    "diffTotalPaths": null,
+    "diffSelectedPaths": null,
+    "diffOmittedPaths": null
+  },
+  "warnings": [{ "code": "working_tree_dirty" }],
+  "analysis": {
+    "partitions": 1,
+    "retries": 0,
+    "emptyPasses": 0,
+    "droppedScenarios": 0,
+    "scenariosDeduped": 0,
+    "featuresFolded": 0
+  }
+}
