@@ -33,7 +33,8 @@ export interface DomainCandidateResult {
 }
 
 const MIN_CANDIDATES = 3;
-const MAX_CANDIDATES = 8;
+/** 与通用迁移脚本的 MAX_GENERIC_DOMAINS 对齐（2026-11-17：Chandler 实测自然产出 9 域，8 上限误杀）。 */
+const MAX_CANDIDATES = 12;
 
 export function buildDomainCandidatePrompt(product: DomainCandidateInput): Array<{ role: "system" | "user"; content: string }> {
   const featureLines = product.features
@@ -47,7 +48,7 @@ export function buildDomainCandidatePrompt(product: DomainCandidateInput): Array
     {
       role: "system",
       content:
-        "你是产品规格整理助手。根据给定产品自己的说明、功能与场景，提出 3-8 个「业务域」候选：每个业务域是一组面向用户价值的功能归属（如某来源的沟通、某类认知、某类管理），不是技术架构分层。只输出 JSON 数组，每项形如 {\"name\":\"业务域名\",\"summary\":\"一句话用户价值\",\"featureIds\":[功能ID]}，featureIds 只能使用输入中列出的功能 ID，每个功能最多归属一个业务域，允许部分功能不归属任何业务域。不要输出 JSON 之外的任何文字。",
+        "你是产品规格整理助手。根据给定产品自己的说明、功能与场景，提出 3-12 个「业务域」候选：每个业务域是一组面向用户价值的功能归属（如某来源的沟通、某类认知、某类管理），不是技术架构分层；宁可合并成少数几个有分量的域，不要碎片化。只输出 JSON 数组，每项形如 {\"name\":\"业务域名\",\"summary\":\"一句话用户价值\",\"featureIds\":[功能ID]}，featureIds 只能使用输入中列出的功能 ID，每个功能最多归属一个业务域，允许部分功能不归属任何业务域。不要输出 JSON 之外的任何文字。",
     },
     {
       role: "user",

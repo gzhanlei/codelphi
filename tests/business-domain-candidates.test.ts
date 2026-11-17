@@ -87,11 +87,13 @@ describe("business domain candidates (Task 0)", () => {
     expect(result.error).toBeTruthy();
   });
 
-  it("caps candidates at 3-8 by construction and rejects out-of-range AI output", () => {
+  it("rejects fewer than 3 candidates but accepts wide products with up to 12 (Chandler 实测 9 域)", () => {
     const two = JSON.stringify([
       { name: "域一", summary: "", featureIds: [1] },
       { name: "域二", summary: "", featureIds: [2] },
     ]);
     expect(parseDomainCandidates(two, recordingProduct.features, recordingProduct.scenarios)).toEqual([]);
+    const nine = JSON.stringify(Array.from({ length: 9 }, (_, index) => ({ name: `域${index + 1}`, summary: "", featureIds: [((index % 3) + 1)] })));
+    expect(parseDomainCandidates(nine, recordingProduct.features, recordingProduct.scenarios)).toHaveLength(9);
   });
 });
