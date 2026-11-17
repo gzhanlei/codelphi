@@ -16,6 +16,7 @@
     "analyze": "tsx scripts/analyze.ts",
     "snapshot": "tsx scripts/snapshot.ts",
     "snapshot:skill": "tsx scripts/build-snapshot-skill.ts",
+    "radar:skill": "tsx scripts/build-snapshot-skill.ts",
     "archify:prepare": "tsx scripts/prepare-archify.ts",
     "archify:prototype": "tsx scripts/architecture-prototype.ts",
     "stack:corpus": "tsx scripts/stack-corpus.ts",

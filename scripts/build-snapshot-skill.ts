@@ -1,16 +1,15 @@
-import { copyFile, cp, mkdir, rm } from "node:fs/promises";
+import { copyFile, mkdir, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const output = resolve(root, "dist/codelphi-snapshot-skill");
+const output = resolve(root, "dist/codelphi-radar");
 
 export async function buildSnapshotSkill() {
   await rm(output, { recursive: true, force: true });
   await mkdir(resolve(output, "scripts"), { recursive: true });
-  await copyFile(resolve(root, "skills/codelphi-snapshot/SKILL.md"), resolve(output, "SKILL.md"));
-  await cp(resolve(root, "skills/codelphi-snapshot/adapters"), resolve(output, "adapters"), { recursive: true });
+  await copyFile(resolve(root, "skills/codelphi-radar/SKILL.md"), resolve(output, "SKILL.md"));
   await build({
     entryPoints: [resolve(root, "scripts/snapshot.ts")],
     outfile: resolve(output, "scripts/snapshot.cjs"),
