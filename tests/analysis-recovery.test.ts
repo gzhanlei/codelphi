@@ -15,7 +15,7 @@ interface RouterState {
 function sqlRouter() {
   const state: RouterState = { requeueAffected: 0, bootQueue: [], stuckNewest: [] };
   const execute = vi.fn(async (sql: string, _params?: unknown[]) => {
-    if (sql.includes("WHERE status = 'running' OR (status = 'failed' AND error_message = ?)")) return [{ affectedRows: state.requeueAffected }];
+    if (sql.includes("WHERE status = 'running'") && sql.includes("OR (status = 'failed' AND error_message = ?)")) return [{ affectedRows: state.requeueAffected }];
     if (sql.includes("FROM analysis_runs WHERE status = 'queued' AND started_at IS NULL ORDER BY id")) return [state.bootQueue];
     if (sql.includes("MAX(id) AS max_id")) return [state.stuckNewest];
     if (sql.includes("SET status = 'failed', error_message = ?")) return [{ affectedRows: 1 }];
@@ -42,7 +42,7 @@ describe("startup analysis recovery", () => {
     const result = await recoverInterruptedRuns(runAnalysis, execute, gatePass);
     expect(result).toEqual({ requeued: 2, dispatched: 3 });
     expect(execute).toHaveBeenCalledWith(
-      expect.stringContaining("WHERE status = 'running' OR (status = 'failed' AND error_message = ?)"),
+      expect.stringContaining("WHERE status = 'running'"),
       [orphanedRunMessage],
     );
     expect(runAnalysis).toHaveBeenCalledTimes(3);
@@ -64,6 +64,15 @@ describe("startup analysis recovery", () => {
     state.bootQueue = [{ id: 51, triggerType: "manual", accountId: 7 }];
     await recoverInterruptedRuns(runAnalysis, execute, gatePass);
     expect(sqlRouterFirstSql(execute)).not.toContain("WHERE status = 'failed' AND error_message IS NOT NULL");
+  });
+
+  it("reclaims claimed-but-still-queued runs (crash between sweep claim and performAnalysis)", async () => {
+    // sweep 认领（started_at 置位）后进程被杀：run 停在 queued+started_at 非空，
+    // 启动恢复与积压 sweep 都看不到它（各自过滤 started_at IS NULL）→ 永久卡死。
+    // 启动时单实例无并发持有者：把这类行释放回可认领状态。
+    const { execute } = sqlRouter();
+    await recoverInterruptedRuns(runAnalysis, execute, gatePass);
+    expect(sqlRouterFirstSql(execute)).toContain("status = 'queued' AND started_at IS NOT NULL");
   });
 
   it("keeps billing-gated queued runs queued instead of dispatching them into certain failure", async () => {

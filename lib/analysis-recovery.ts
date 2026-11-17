@@ -16,6 +16,8 @@ async function defaultGate(run: { id: number; triggerType: string; accountId: nu
  * 启动逻辑置为孤儿失败的 run）永远无人认领（loadRun 只认 queued/failed）。
  * saveResult 是原子事务——孤儿 run 必然没有落库，重新排队并派发是安全且幂等的：
  * 产品页显示「等待分析」直到补跑完成，用户不需要看到失败或手工处理。
+ * 「queued 但 started_at 非空」= sweep 认领后、performAnalysis 置 running 前崩溃：
+ * 两条恢复路径都按 started_at IS NULL 过滤会永久卡死它，启动时一并释放回可认领态。
  * 单实例部署假设（README 拓扑）：启动时不存在并发持有者。
  * 派发前过补跑闸门（decideQueuedRunDispatch）：账务不允许的（trialing push / 额度不足）
  * 保持 queued 不标 failed，等条件满足后由 queued-run-recovery sweep 补跑；
@@ -28,7 +30,9 @@ export async function recoverInterruptedRuns(
 ) {
   const [result] = await execute(
     `UPDATE analysis_runs SET status = 'queued', error_message = NULL, finished_at = NULL, started_at = NULL
-     WHERE status = 'running' OR (status = 'failed' AND error_message = ?)`,
+     WHERE status = 'running'
+        OR (status = 'failed' AND error_message = ?)
+        OR (status = 'queued' AND started_at IS NOT NULL)`,
     [orphanedRunMessage],
   ) as [{ affectedRows?: number }, unknown];
   const requeued = result.affectedRows ?? 0;

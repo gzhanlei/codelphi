@@ -12,7 +12,7 @@ import { createSlicePlanner } from "./slice-planner";
 import { insertSpecVersion, loadLatestSpecFeatures, loadLatestSpecVersionLanguage, loadPreviousFeatureNames, loadPreviousSpecText } from "./spec-versions";
 import { loadAffectedEvidencePaths, loadAffectedFeatureKeys, rebuildSpecFileIndex } from "./spec-file-index";
 import { resolveAnalysisMode } from "./incremental";
-import { compareIncrementalShadow } from "./incremental-shadow";
+import { comparableShadowFeatures, compareIncrementalShadow } from "./incremental-shadow";
 import { incrementalShadowEnabled } from "./env";
 import type { BehavioralEnumerationMetrics } from "./behavioral-enumeration";
 import { computeCoverageReceipt, loadInheritedCoverageReceipt, enumerateImplementationSurface, enumerateRequiredImplementationSurface, saveCoverageReceipt, type AnalysisCoverageReceipt } from "./analysis-coverage";
@@ -115,6 +115,16 @@ export async function upsertGeneratedSpec(connection: PoolConnection, run: RunCo
 }
 
 export async function upsertRelease(connection: PoolConnection, run: RunContext, result: AnalysisResult, change: ChangeContext, specVersionId: number | null = null, specChanges: ReleaseChangeFact[] = [], baselineFeatures: SpecFeature[] | null = null): Promise<{ releaseId: number; projections: ReleaseChangeProjection[] }> {
+  // 先查既有发布归属：webhook 重放（同一 run）走幂等短路；reanalyze-latest（新 run 重分析
+  // 同一 sha）会把 release 重指向新 spec 版本，旧 changes 投影必须删除重建，否则发布页
+  // 永远呈现被用户点名要修掉的旧分析结果（hasChanges 短路只该服务重放幂等）。
+  const [priorRelease] = await connection.execute(
+    "SELECT id, analysis_run_id AS analysisRunId FROM releases WHERE repository_id = ? AND sha = ?",
+    [run.repositoryId, run.afterSha],
+  );
+  const priorRows = (Array.isArray(priorRelease) ? priorRelease : []) as Array<{ id: number; analysisRunId: number | null }>;
+  const priorRow = priorRows[0];
+  const reanalyzed = priorRow !== undefined && Number(priorRow.analysisRunId) !== run.id;
   await connection.execute(
     `INSERT INTO releases
        (product_id, repository_id, analysis_run_id, spec_version_id, sha, title, summary, url, committed_at)
@@ -124,6 +134,11 @@ export async function upsertRelease(connection: PoolConnection, run: RunContext,
   );
   const [existing] = await connection.execute("SELECT id FROM releases WHERE repository_id = ? AND sha = ?", [run.repositoryId, run.afterSha]);
   const releaseId = Number((existing as Array<{ id: number }>)[0].id);
+  if (reanalyzed) {
+    // 投影重建：changes/change_sources 级联（074），release_reviewed_items 随旧 run 一并清除
+    await connection.execute("DELETE FROM changes WHERE release_id = ?", [releaseId]);
+    await connection.execute("DELETE FROM release_reviewed_items WHERE release_id = ?", [releaseId]);
+  }
   // P0：发布改动文件清单落库，供回归任务的影响面映射（文件 → 证据路径 → 场景）离线复算。
   // 行为性标志（patch-scan）：注释/空白变动的文件不构成行为变更，渲染期折叠重算与
   // tests-only 门禁共用该标志。
@@ -204,7 +219,11 @@ async function saveResult(run: RunContext, result: AnalysisResult, change: Chang
     // 增量模式把未受影响的 generated 功能全部下线,工作台坍缩为本次触及的功能。
     await upsertGeneratedSpec(connection, run, mergedFeatures);
     const { releaseId, projections: releaseChangeProjections } = await upsertRelease(connection, run, result, change, specVersionId, specChanges, baseline ? mergedFeatures : null);
-    await connection.execute("UPDATE analysis_runs SET status = 'succeeded', finished_at = CURRENT_TIMESTAMP(3) WHERE id = ?", [run.id]);
+    const [succeeded] = await connection.execute("UPDATE analysis_runs SET status = 'succeeded', finished_at = CURRENT_TIMESTAMP(3) WHERE id = ? AND status = 'running'", [run.id]) as [{ affectedRows?: number }, unknown];
+    if ((succeeded.affectedRows ?? 0) !== 1) {
+      // run 已不归本执行持有（被恢复路径重置）：回滚整笔落库，规格与 run 状态保持一致
+      throw new Error(`analysis run ${run.id} is no longer running; result discarded`);
+    }
     await connection.commit();
     return { specVersionId, releaseId, releaseChangeProjections, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds };
   } catch (error) {
@@ -254,7 +273,16 @@ async function loadSourceRoots(productId: number) {
 }
 
 async function performAnalysis(run: RunContext) {
-  await getDb().execute("UPDATE analysis_runs SET status = 'running', started_at = CURRENT_TIMESTAMP(3), error_message = NULL WHERE id = ?", [run.id]);
+  // 原子认领：只有 queued/failed 的 run 才能翻成 running。双派发（webhook 幂等回传
+  // runId + sweep 认领 + 手动补分析并发）下输家静默退出——防双跑双计费、防终态互踩。
+  const [claim] = await getDb().execute(
+    "UPDATE analysis_runs SET status = 'running', started_at = CURRENT_TIMESTAMP(3), error_message = NULL WHERE id = ? AND status IN ('queued', 'failed')",
+    [run.id],
+  ) as [{ affectedRows?: number }, unknown];
+  if ((claim.affectedRows ?? 0) !== 1) {
+    console.warn("[analysis] run claim lost to a concurrent dispatcher; skipped", { runId: run.id });
+    return;
+  }
   // 执行入口预留检查（契约 §6.6/§9）：failed run 重试 / 恢复重派发时无 active 预留 → 重新预留
   // （封死免费重试漏洞）；有则沿用原预留。额度被拒的 BillingError 冒泡为失败原因。
   await ensureReservation(run);
@@ -426,9 +454,9 @@ async function runAnalysisBody(run: RunContext) {
     discovery: "required_only" as const,
     requiredPaths,
   };
-  const { partitions: planned, index: sourceIndex } = await getPartitionedAnalysisSources(analysisRequest, { planner, budgets: analysisSliceBudgets });
+  const { partitions: planned, index: sourceIndex, partitionsCapped } = await getPartitionedAnalysisSources(analysisRequest, { planner, budgets: analysisSliceBudgets });
   partitions = planned;
-  console.log("[analysis] partitioned extraction", { runId: run.id, partitions: partitions.length, mode: affectedKeys === null ? "full" : "incremental-carry", requiredPaths: requiredPaths?.length ?? null });
+  console.log("[analysis] partitioned extraction", { runId: run.id, partitions: partitions.length, capped: partitionsCapped, mode: affectedKeys === null ? "full" : "incremental-carry", requiredPaths: requiredPaths?.length ?? null });
   // B1 覆盖披露回执：全量按全树实现面，增量按 diff 与受影响证据的实现面，
   // 落 analysis_coverage_receipts，append-only 可回溯。
   coverage = computeCoverageReceipt({
@@ -436,6 +464,7 @@ async function runAnalysisBody(run: RunContext) {
     partitions,
     implSurface: requiredPaths === null ? await enumerateImplementationSurface(sourceIndex) : await enumerateRequiredImplementationSurface(sourceIndex, requiredPaths),
     diffPaths: remoteAnalysisRequest.diffPaths,
+    partitionsCapped,
   });
   if (partitions.length === 1) {
     const single = partitions[0];
@@ -631,7 +660,7 @@ async function runAnalysisBody(run: RunContext) {
           shadow: shadow.features,
         }));
       }
-      const shadowComparison = compareIncrementalShadow({ features: mergedFeatures, changes: result.changes }, shadow);
+      const shadowComparison = compareIncrementalShadow({ features: comparableShadowFeatures(mergedFeatures), changes: result.changes }, shadow);
       shadowConsistent = shadowComparison.consistent;
       console.log("[incremental-shadow]", JSON.stringify(shadowComparison));
     } catch (error) {
@@ -699,10 +728,17 @@ export async function runAnalysis(runId: number) {
     const message = error instanceof Error
       ? [error.message, ...(error.stack?.split("\n").slice(1, 6) ?? [])].join("\n").slice(0, 8_000)
       : "Unknown analysis error";
-    await getDb().execute(
-      "UPDATE analysis_runs SET status = 'failed', error_message = ?, finished_at = CURRENT_TIMESTAMP(3) WHERE id = ?",
+    const [failedUpdate] = await getDb().execute(
+      // 终态守卫：绝不把 succeeded 翻成 failed（双执行竞态的核心不变量）；
+      // queued/failed/running 都可能走到这里——loadRun 失败时 run 尚未被认领，仍须标失败
+      "UPDATE analysis_runs SET status = 'failed', error_message = ?, finished_at = CURRENT_TIMESTAMP(3) WHERE id = ? AND status <> 'succeeded'",
       [message, runId],
-    );
+    ) as [{ affectedRows?: number }, unknown];
+    if ((failedUpdate.affectedRows ?? 0) === 0) {
+      // run 已是终态成功（被并发执行落库）：不覆盖、不释放预留、不重复上报
+      console.warn("[analysis] failed run already succeeded; finalization skipped", { runId });
+      return;
+    }
     // 失败释放（契约 §6.6）：独立短事务置 failed 后调用；释放失败由 M1-T6 sweep 兜底。
     try {
       await release(runId, "analysis_failed");

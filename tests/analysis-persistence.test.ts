@@ -23,6 +23,8 @@ const specChanges: ReleaseChangeFact[] = [
 function connectionWithCount(count: number) {
   return {
     execute: vi.fn(async (sql: string) => {
+      // 既有发布归当前 run（webhook 重放幂等）：不触发重分析重建分支
+      if (sql.includes("analysis_run_id AS analysisRunId")) return [[{ id: 10, analysisRunId: run.id }]];
       if (sql.includes("SELECT id FROM releases")) return [[{ id: 10 }]];
       if (sql.includes("SELECT COUNT(*)")) return [[{ count }]];
       // 自动发布稿草稿（ensureAutoReleaseNoteDraft）：无 Highlight 变化 → 无草稿，不追加调用
@@ -50,8 +52,29 @@ describe("analysis persistence guards", () => {
     const connection = connectionWithCount(1);
     const { projections } = await upsertRelease(connection, run, result, change, null, specChanges);
     expect(projections).toEqual([]);
-    expect(connection.execute).toHaveBeenCalledTimes(6);
+    expect(connection.execute).toHaveBeenCalledTimes(7);
+    expect(connection.execute).not.toHaveBeenCalledWith(expect.stringContaining("DELETE FROM changes WHERE release_id"), expect.anything());
     expect(connection.execute).not.toHaveBeenCalledWith(expect.stringContaining("INSERT INTO change_sources"), expect.anything());
+  });
+
+  it("rebuilds projections when a re-analysis re-points the release to a new run", async () => {
+    // reanalyze-latest 对同一 sha 落新 run/spec 版本：release 行被重指向新版本，
+    // 旧的 changes 投影若不重建，发布页继续呈现被用户点名要修掉的旧分析结果。
+    const connection = {
+      execute: vi.fn(async (sql: string) => {
+        if (sql.includes("analysis_run_id AS analysisRunId")) return [[{ id: 10, analysisRunId: run.id - 1 }]];
+        if (sql.includes("SELECT id FROM releases")) return [[{ id: 10 }]];
+        if (sql.includes("SELECT COUNT(*)")) return [[{ count: 0 }]];
+        if (sql.includes("FROM spec_changes c")) return [[]];
+        if (sql.includes("FROM release_notes WHERE release_id")) return [[]];
+        return [{}];
+      }),
+    } as unknown as PoolConnection;
+    const { projections } = await upsertRelease(connection, run, result, change, null, specChanges);
+    expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("DELETE FROM changes WHERE release_id = ?"), [10]);
+    expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("DELETE FROM release_reviewed_items WHERE release_id = ?"), [10]);
+    expect(projections).toHaveLength(2);
+    expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO change_sources"), expect.anything());
   });
 
   it("persists one source-linked projection per canonical feature and keeps reviewed out of user changes", async () => {

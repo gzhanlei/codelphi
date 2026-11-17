@@ -51,14 +51,22 @@ vi.mock("../lib/code-hosting", async (importOriginal) => ({
     product: { id: run.productId, slug: run.productSlug, name: run.productName },
   })),
 }));
-vi.mock("../lib/ai", () => ({ analyzeWithAI: vi.fn(), analyzeBehavioralGroup: vi.fn(), requestStructuredCompletion: vi.fn() }));
+vi.mock("../lib/ai", () => ({
+  analyzeWithAI: vi.fn(),
+  analyzeBehavioralGroup: vi.fn(),
+  requestStructuredCompletion: vi.fn(),
+  AiOutputTruncatedError: class AiOutputTruncatedError extends Error { static isInstance(_e: unknown) { return false; } },
+}));
 vi.mock("../lib/notifications", () => ({ deliverAnalysisNotifications: vi.fn(async () => undefined) }));
 vi.mock("../lib/release-change-projection", async (importOriginal) => ({
   ...await importOriginal<typeof import("../lib/release-change-projection")>(),
   rewriteReleaseChangeProjections: vi.fn(async () => ({ rewritten: 0, failed: 0 })),
 }));
 const { compareIncrementalShadow } = vi.hoisted(() => ({ compareIncrementalShadow: vi.fn((incremental: { features: Array<{ name: string }>; changes: unknown[] }, _full: unknown) => ({ consistent: true, missingKeys: [] as string[], extraKeys: [] as string[], scenarioDiffs: [] as string[] })) }));
-vi.mock("../lib/incremental-shadow", () => ({ compareIncrementalShadow }));
+vi.mock("../lib/incremental-shadow", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../lib/incremental-shadow")>(),
+  compareIncrementalShadow,
+}));
 const { partitionedSourcesMock } = vi.hoisted(() => ({ partitionedSourcesMock: vi.fn() }));
 vi.mock("../lib/remote-analysis", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/remote-analysis")>(), getRemoteAnalysisSources: vi.fn(), getPartitionedAnalysisSources: partitionedSourcesMock }));
 vi.mock("../lib/spec-versions", () => ({ loadLatestSpecVersionLanguage: vi.fn(async () => null), insertSpecVersion: vi.fn(async () => ({ specVersionId: 44, specChanges: [], features: [{ name: "统一登录", summary: "s", scenarios: [] }], collapse: null, featureCollapses: [], misplacedScenarios: [], identityHijacksDropped: 0, featureFolds: [] })), loadLatestSpecFeatures: vi.fn(async () => ({ specVersionId: 44, features: [{ name: "统一登录", summary: "s", scenarios: [] }] })), loadPreviousFeatureNames: vi.fn(async () => ["统一登录", "支付", "规格导出"]), loadPreviousSpecText: vi.fn(async () => [{ name: "统一登录", summary: "s", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy" }] }]) }));
@@ -94,10 +102,13 @@ describe("analysis orchestration", () => {
     existingRunRows = [];
     loadError = undefined;
     execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("SET status = 'running'")) return [{ affectedRows: 1 }];
+      if (sql.includes("SET status = 'failed'")) return [{ affectedRows: 1 }];
       if (sql.includes("JOIN repositories repo")) {
         if (loadError) throw loadError;
         return [runRows];
       }
+      if (sql.includes("SET status = 'running'")) return [{ affectedRows: 1 }];
       if (sql.includes("source_roots")) return [sourceRows];
       if (sql.includes("SELECT id FROM analysis_runs WHERE repository_id = ? AND after_sha = ?")) return [existingRunRows];
       if (sql.includes("INSERT INTO analysis_runs")) return [{ insertId: 55 }];
@@ -105,7 +116,11 @@ describe("analysis orchestration", () => {
       return [{}];
     });
     connection.execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("SET status = 'running'")) return [{ affectedRows: 1 }];
+      if (sql.includes("SET status = 'failed'")) return [{ affectedRows: 1 }];
       if (sql.includes("SELECT id FROM analysis_runs WHERE repository_id = ?")) return [[{ id: 8 }]];
+      if (sql.includes("SET status = 'succeeded'")) return [{ affectedRows: 1 }];
+      if (sql.includes("analysis_run_id AS analysisRunId")) return [[{ id: 6, analysisRunId: 8 }]];
       if (sql.includes("SELECT id FROM releases")) return [[{ id: 6 }]];
       if (sql.includes("SELECT COUNT")) return [[{ count: 1 }]];
       if (sql.includes("FROM spec_features sf")) return [[]];
@@ -195,7 +210,11 @@ describe("analysis orchestration", () => {
       featureFolds: [],
     });
     connection.execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("SET status = 'running'")) return [{ affectedRows: 1 }];
+      if (sql.includes("SET status = 'failed'")) return [{ affectedRows: 1 }];
       if (sql.includes("SELECT id FROM analysis_runs WHERE repository_id = ?")) return [[{ id: 8 }]];
+      if (sql.includes("analysis_run_id AS analysisRunId")) return [[{ id: 6, analysisRunId: 8 }]];
+      if (sql.includes("SET status = 'succeeded'")) return [{ affectedRows: 1 }];
       if (sql.includes("SELECT id FROM releases")) return [[{ id: 6 }]];
       if (sql.includes("SELECT COUNT")) return [[{ count: 0 }]];
       if (sql.includes("INSERT INTO changes")) return [{ insertId: 88 }];
@@ -311,6 +330,8 @@ describe("analysis orchestration", () => {
     runRows = [{ ...run, analyzeMode: "incremental" }];
     sourceRows = [];
     execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("SET status = 'running'")) return [{ affectedRows: 1 }];
+      if (sql.includes("SET status = 'failed'")) return [{ affectedRows: 1 }];
       if (sql.includes("JOIN repositories repo")) return [runRows];
       if (sql.includes("source_roots")) return [sourceRows];
       if (sql.includes("SELECT id FROM analysis_runs WHERE repository_id = ? AND after_sha = ?")) return [existingRunRows];
@@ -348,6 +369,8 @@ describe("analysis orchestration", () => {
       index: { readLines, listDir, listRoot, statPath },
     });
     execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("SET status = 'running'")) return [{ affectedRows: 1 }];
+      if (sql.includes("SET status = 'failed'")) return [{ affectedRows: 1 }];
       if (sql.includes("JOIN repositories repo")) return [runRows];
       if (sql.includes("source_roots")) return [[]];
       if (sql.includes("SELECT id FROM analysis_runs WHERE repository_id = ? AND after_sha = ?")) return [existingRunRows];
@@ -396,6 +419,8 @@ describe("analysis orchestration", () => {
       index: { readLines, listDir, listRoot, statPath },
     });
     execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("SET status = 'running'")) return [{ affectedRows: 1 }];
+      if (sql.includes("SET status = 'failed'")) return [{ affectedRows: 1 }];
       if (sql.includes("JOIN repositories repo")) return [runRows];
       if (sql.includes("source_roots")) return [[]];
       if (sql.includes("SELECT id FROM analysis_runs WHERE repository_id = ? AND after_sha = ?")) return [existingRunRows];
@@ -437,6 +462,8 @@ describe("analysis orchestration", () => {
       index: { readLines, listDir, listRoot, statPath },
     });
     execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("SET status = 'running'")) return [{ affectedRows: 1 }];
+      if (sql.includes("SET status = 'failed'")) return [{ affectedRows: 1 }];
       if (sql.includes("JOIN repositories repo")) return [runRows];
       if (sql.includes("source_roots")) return [[]];
       if (sql.includes("SELECT id FROM analysis_runs WHERE repository_id = ? AND after_sha = ?")) return [existingRunRows];
@@ -490,6 +517,8 @@ describe("analysis orchestration", () => {
   const incrementalSetup = () => {
     runRows = [{ ...run, analyzeMode: "incremental" }];
     execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("SET status = 'running'")) return [{ affectedRows: 1 }];
+      if (sql.includes("SET status = 'failed'")) return [{ affectedRows: 1 }];
       if (sql.includes("JOIN repositories repo")) return [runRows];
       if (sql.includes("source_roots")) return [[]];
       if (sql.includes("SELECT id FROM analysis_runs WHERE repository_id = ? AND after_sha = ?")) return [existingRunRows];
@@ -581,6 +610,8 @@ describe("analysis orchestration", () => {
       index: { readLines, listDir, listRoot, statPath },
     });
     execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("SET status = 'running'")) return [{ affectedRows: 1 }];
+      if (sql.includes("SET status = 'failed'")) return [{ affectedRows: 1 }];
       if (sql.includes("JOIN repositories repo")) return [runRows];
       if (sql.includes("source_roots")) return [[]];
       if (sql.includes("SELECT id FROM analysis_runs WHERE repository_id = ? AND after_sha = ?")) return [existingRunRows];
@@ -606,6 +637,8 @@ describe("analysis orchestration", () => {
       index: { readLines, listDir, listRoot, statPath },
     });
     execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("SET status = 'running'")) return [{ affectedRows: 1 }];
+      if (sql.includes("SET status = 'failed'")) return [{ affectedRows: 1 }];
       if (sql.includes("JOIN repositories repo")) return [runRows];
       if (sql.includes("source_roots")) return [[]];
       if (sql.includes("SELECT id FROM analysis_runs WHERE repository_id = ? AND after_sha = ?")) return [existingRunRows];
@@ -663,6 +696,8 @@ describe("analysis orchestration", () => {
       index: { readLines, listDir, listRoot, statPath },
     });
     execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("SET status = 'running'")) return [{ affectedRows: 1 }];
+      if (sql.includes("SET status = 'failed'")) return [{ affectedRows: 1 }];
       if (sql.includes("JOIN repositories repo")) return [runRows];
       if (sql.includes("source_roots")) return [[]];
       if (sql.includes("SELECT id FROM analysis_runs WHERE repository_id = ? AND after_sha = ?")) return [existingRunRows];
@@ -684,6 +719,8 @@ describe("analysis orchestration", () => {
     // 回退时按行为变更集（patch-scan）重算受影响面：证据文件无行为性行变更的功能原样沿用。
     runRows = [{ ...run, analyzeMode: "incremental" }];
     execute.mockImplementation(async (sql: string, parameters: unknown[] = []) => {
+      if (sql.includes("SET status = 'running'")) return [{ affectedRows: 1 }];
+      if (sql.includes("SET status = 'failed'")) return [{ affectedRows: 1 }];
       if (sql.includes("JOIN repositories repo")) return [runRows];
       if (sql.includes("source_roots")) return [[]];
       if (sql.includes("SELECT id FROM analysis_runs WHERE repository_id = ? AND after_sha = ?")) return [existingRunRows];
@@ -722,6 +759,8 @@ describe("analysis orchestration", () => {
   it("keeps true full mode when the behavioral set maps to no known feature (likely new features)", async () => {
     runRows = [{ ...run, analyzeMode: "incremental" }];
     execute.mockImplementation(async (sql: string, parameters: unknown[] = []) => {
+      if (sql.includes("SET status = 'running'")) return [{ affectedRows: 1 }];
+      if (sql.includes("SET status = 'failed'")) return [{ affectedRows: 1 }];
       if (sql.includes("JOIN repositories repo")) return [runRows];
       if (sql.includes("source_roots")) return [[]];
       if (sql.includes("SELECT id FROM analysis_runs WHERE repository_id = ? AND after_sha = ?")) return [existingRunRows];
@@ -771,6 +810,8 @@ describe("analysis orchestration", () => {
       files: [{ path: "docs/analysis-pipeline.md", status: "modified", patch: "+文档内容不是行为。" }],
     });
     execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("SET status = 'running'")) return [{ affectedRows: 1 }];
+      if (sql.includes("SET status = 'failed'")) return [{ affectedRows: 1 }];
       if (sql.includes("JOIN repositories repo")) return [runRows];
       if (sql.includes("source_roots")) return [sourceRows];
       if (sql.includes("FROM spec_versions WHERE repository_id = ? AND id <")) return [[{ id: 40 }]];
