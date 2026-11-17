@@ -380,6 +380,19 @@ describe("unbounded partition planning", () => {
     expect(result.partitions).toHaveLength(7);
     expect(result.partitions.map((partition) => partition.sources[0].path)).toEqual(Array.from({ length: 7 }, (_, index) => `lib/${index + 1}.ts`));
     expect(calls()).toBe(8);
+    expect(result.partitionsCapped).toBe(false);
+  });
+
+  it("stops at the configured partition cap and discloses it (ANALYSIS_MAX_PARTITIONS)", async () => {
+    vi.stubEnv("ANALYSIS_MAX_PARTITIONS", "3");
+    const { planner, calls } = plannerReturningSevenPartitions();
+    const result = await getPartitionedAnalysisSources(request, { planner, budgets: analysisSliceBudgets });
+
+    expect(result.partitions).toHaveLength(3);
+    expect(result.partitionsCapped).toBe(true);
+    // 帽在规划前判断：3 个分区规划后第 4 趟不再发起
+    expect(calls()).toBe(3);
+    vi.unstubAllEnvs();
   });
 
   it("preserves the explicit single-window entry point", async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SHADOW_REFERENCE_GATE, compareIncrementalShadow, type ShadowAnalysis } from "../lib/incremental-shadow";
+import { SHADOW_REFERENCE_GATE, comparableShadowFeatures, compareIncrementalShadow, type ShadowAnalysis } from "../lib/incremental-shadow";
 
 function feature(name: string, scenarios: Array<[string, string, string, string]>, category: "happy" | "edge" | "error" = "happy"): ShadowAnalysis["features"][number] {
   return {
@@ -58,5 +58,21 @@ describe("compareIncrementalShadow (方案 A 门槛)", () => {
     expect(report.extraKeys).toEqual(["幽灵"]);
     expect(report.consistent).toBe(false);
     expect(report.referenceConsistency).toBe(0.5);
+  });
+});
+
+describe("comparableShadowFeatures (影子只验证 AI 产出)", () => {
+  it("drops manual features and manual scenarios so human entries never count as shadow drift", () => {
+    // 人工条目只存在于合并规格（merged），影子是纯代码提取——不过滤则 extraKeys/missingKeys
+    // 恒非空，含人工条目的产品一致性门禁恒假（M9 影子 consistent=false 的残余根因之一）。
+    const merged = [
+      { name: "登录", summary: "", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy" as const, evidence: [], source: "generated" as const }, { reference: "MN-1", context: "c", action: "a", outcome: "o", category: "edge" as const, evidence: [], source: "manual" as const }] },
+      { name: "人工功能", summary: "", scenarios: [{ reference: "MN-2", context: "c", action: "a", outcome: "o", category: "happy" as const, evidence: [] }], source: "manual" as const },
+      { name: "支付", summary: "", scenarios: [{ reference: "HP-2", context: "c", action: "a", outcome: "o", category: "happy" as const, evidence: [] }] },
+    ];
+    expect(comparableShadowFeatures(merged)).toEqual([
+      { name: "登录", summary: "", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy" }] },
+      { name: "支付", summary: "", scenarios: [{ reference: "HP-2", context: "c", action: "a", outcome: "o", category: "happy" }] },
+    ]);
   });
 });

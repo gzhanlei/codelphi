@@ -60,7 +60,7 @@ describe("adjudicateFeedbackReport disposition", () => {
     const execute = vi.fn(async (sql: string) => {
       if (sql.includes("FROM feedback_reports")) return [[{ id: 12, productId: 1, repositoryId: 1, revision: "95db983", claim: report.claim, kind: "bug" }]];
       if (sql.includes("FROM spec_changes")) return [[{ kind: "removed", entityType: "scenario", featureName: "MCP OAuth", scenarioReference: "HP-5", summary: "移除场景 HP-5", beforeJson: JSON.stringify({ reference: "HP-5", context: "c", action: "a", outcome: "o", category: "happy", evidence: [{ path: "lib/mcp/oauth.ts", startLine: 16 }] }), afterJson: null }]];
-      if (sql.includes("FROM releases")) return [[{ sha: "95db983" }]];
+      if (sql.includes("FROM releases")) return [[{ sha: "95db983", repositoryId: 9 }]];
       return [[]];
     }) as unknown as (sql: string, params?: unknown[]) => Promise<unknown>;
     return {
@@ -76,7 +76,8 @@ describe("adjudicateFeedbackReport disposition", () => {
     const deps = setupDeps();
     const outcome = (await adjudicateFeedbackReport(12, deps))!;
     expect(outcome.verdict).toBe("confirmed_defect");
-    expect(deps.queueAnalysis).toHaveBeenCalledWith(1, null, "95db983", "manual");
+    // 纠偏 run 归属发布仓库（多仓库产品下按 product 任意 JOIN 会落在无关仓库上）
+    expect(deps.queueAnalysis).toHaveBeenCalledWith(9, null, "95db983", "manual");
     const update = (deps.execute as ReturnType<typeof vi.fn>).mock.calls.find(([sql]) => String(sql).includes("verdict = ?"));
     expect(update?.[1]).toEqual(["confirmed_defect", "代码仍实现该行为，场景被误删", 320, 12]);
   });
@@ -97,6 +98,22 @@ describe("adjudicateFeedbackReport disposition", () => {
 
   it("unreadable code evidence falls back to needs_human", async () => {
     const deps = setupDeps({ readFile: vi.fn(async () => { throw new Error("scope denied"); }), completion: vi.fn(async () => '{"verdict":"confirmed_defect","confidence":"high","reason":"r"}') });
+    const outcome = (await adjudicateFeedbackReport(12, deps))!;
+    expect(outcome.verdict).toBe("needs_human");
+    expect(deps.queueAnalysis).not.toHaveBeenCalled();
+  });
+
+  it("zero code evidence never auto-confirms a defect (guard bypass closed)", async () => {
+    // 近期变化无证据路径：confirm_defect+high 不得在零代码证据下触发全量重建
+    const deps = setupDeps({
+      execute: vi.fn(async (sql: string) => {
+        if (sql.includes("FROM feedback_reports")) return [[{ id: 12, productId: 1, repositoryId: 1, revision: "95db983", claim: report.claim, kind: "bug" }]];
+        if (sql.includes("FROM spec_changes")) return [[]];
+        if (sql.includes("FROM releases")) return [[{ sha: "95db983", repositoryId: 9 }]];
+        return [[]];
+      }) as unknown as (sql: string, params?: unknown[]) => Promise<unknown>,
+      completion: vi.fn(async () => '{"verdict":"confirmed_defect","confidence":"high","reason":"r"}'),
+    });
     const outcome = (await adjudicateFeedbackReport(12, deps))!;
     expect(outcome.verdict).toBe("needs_human");
     expect(deps.queueAnalysis).not.toHaveBeenCalled();

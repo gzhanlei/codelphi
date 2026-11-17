@@ -86,6 +86,8 @@ export function computeCoverageReceipt(input: {
   implSurface?: Array<{ path: string; size: number }>;
   /** W0-9 评审采纳：窗口 diff 路径清单（diff 覆盖率口径）。 */
   diffPaths?: readonly string[];
+  /** 分区被 ANALYSIS_MAX_PARTITIONS 截断（remote-analysis 返回的披露信号）。 */
+  partitionsCapped?: boolean;
 }): AnalysisCoverageReceipt {
   const assembledPaths = new Set<string>();
   for (const partition of input.partitions) {
@@ -113,7 +115,7 @@ export function computeCoverageReceipt(input: {
     implBytesTotal,
     coverageRatio: implBytesTotal === 0 ? 0 : implBytesAssembled / implBytesTotal,
     partitionsUsed: input.partitions.length,
-    partitionsCapped: false,
+    partitionsCapped: input.partitionsCapped ?? false,
     diffTotalPaths: diffPaths.length > 0 ? diffTotal : null,
     diffSelectedPaths: diffPaths.length > 0 ? diffSelectedPaths.size : null,
     diffOmittedPaths: diffPaths.length > 0 ? diffTotal - diffSelectedPaths.size : null,

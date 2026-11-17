@@ -1,4 +1,4 @@
-import { specFeatureKey } from "./spec-diff";
+import { specFeatureKey, type SpecFeature } from "./spec-diff";
 
 export interface ShadowAnalysis {
   features: Array<{
@@ -34,6 +34,23 @@ type ReferenceSignature = string;
 
 function scenarioSignatures(feature: ShadowAnalysis["features"][number]): Set<ReferenceSignature> {
   return new Set(feature.scenarios.map((scenario) => `${scenario.reference}|${scenario.category}`));
+}
+
+/**
+ * 影子只验证 AI 产出：剔除 manual 功能与 manual 场景。合并规格（carry-forward + manual）
+ * 里的纯人工条目在纯代码提取的影子侧永远不存在——不过滤则 extraKeys/missingKeys 恒非空，
+ * 含人工条目的产品一致性门禁恒假。
+ */
+export function comparableShadowFeatures(features: ReadonlyArray<SpecFeature>): ShadowAnalysis["features"] {
+  return features
+    .filter((feature) => feature.source !== "manual")
+    .map((feature) => ({
+      name: feature.name,
+      summary: feature.summary,
+      scenarios: feature.scenarios
+        .filter((scenario) => scenario.source !== "manual")
+        .map((scenario) => ({ reference: scenario.reference, context: scenario.context, action: scenario.action, outcome: scenario.outcome, category: scenario.category })),
+    }));
 }
 
 export function compareIncrementalShadow(incremental: ShadowAnalysis, full: ShadowAnalysis): ShadowReport {

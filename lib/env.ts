@@ -44,6 +44,12 @@ export function analysisAiContextBudgetOverride() {
   return Number.isInteger(raw) && raw > 0 ? raw : null;
 }
 
+/** 分区趟数上限（成本闸门）：默认无界（保持按仓库穷尽的覆盖语义）；配置后命中即截断并披露。 */
+export function analysisMaxPartitions(): number | null {
+  const raw = Number(process.env.ANALYSIS_MAX_PARTITIONS ?? "");
+  return Number.isInteger(raw) && raw > 0 ? raw : null;
+}
+
 export function behavioralEnumerationEnabled() {
   return process.env.BEHAVIORAL_ENUMERATION !== "false";
 }

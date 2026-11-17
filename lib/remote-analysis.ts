@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { analysisAiContextBudgetOverride } from "./env";
+import { analysisAiContextBudgetOverride, analysisMaxPartitions } from "./env";
 import { createRemoteSourceIndex, type OpenedRemoteSourceRevision, type RemoteSourceBudgets, type SourceRevisionRef, type SourceScopeRoot } from "./remote-source-index";
 import { createSlicePlanner, type SliceBudgets, type SlicePlanner, type SourceSlice } from "./slice-planner";
 import type { CodeHostingProvider, RepositoryAccess, SourceFile } from "./code-hosting/types";
@@ -133,6 +133,8 @@ export interface PartitionedAnalysisResult {
   partitions: AnalysisPartition[];
   /** 全部分区的规划器状态（分析层可用于后续 reads；当前保留为未来扩展位）。 */
   index: OpenedRemoteSourceRevision;
+  /** 分区被 ANALYSIS_MAX_PARTITIONS 截断（覆盖率披露口径：实现面被成本帽收窄）。 */
+  partitionsCapped: boolean;
 }
 
 /**
@@ -148,7 +150,14 @@ export async function getPartitionedAnalysisSources(request: RemoteAnalysisReque
   const index = await createRemoteSourceIndex(revision, { scopeRoots: request.scopeRoots, access: request.access, provider: request.provider, backend: request.backend, budgets: analysisSourceIndexBudgets });
   const partitions: AnalysisPartition[] = [];
   const excludePaths = new Set<string>();
+  const maxPartitions = analysisMaxPartitions();
+  let partitionsCapped = false;
   while (!options.singleWindow || partitions.length === 0) {
+    if (maxPartitions !== null && partitions.length >= maxPartitions) {
+      partitionsCapped = true;
+      console.warn("[analysis] partition cap reached; remaining implementation surface not planned", { planned: partitions.length, cap: maxPartitions });
+      break;
+    }
     const result = await runtime.planner.plan({
       product: request.product,
       repository: request.repository,
@@ -179,5 +188,5 @@ export async function getPartitionedAnalysisSources(request: RemoteAnalysisReque
     partitions.push({ slice: trimmedSlice, sources });
     for (const source of sources) excludePaths.add(source.path);
   }
-  return { partitions, index };
+  return { partitions, index, partitionsCapped };
 }

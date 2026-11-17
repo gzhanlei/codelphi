@@ -161,13 +161,14 @@ async function loadRecentChanges(execute: Execute, productId: number): Promise<A
   }));
 }
 
-async function loadLatestReleaseSha(execute: Execute, productId: number): Promise<string | null> {
+async function loadLatestReleaseSha(execute: Execute, productId: number): Promise<{ sha: string; repositoryId: number } | null> {
   const result = await execute(
-    "SELECT sha FROM releases WHERE product_id = ? ORDER BY committed_at DESC LIMIT 1",
+    "SELECT sha, repository_id AS repositoryId FROM releases WHERE product_id = ? ORDER BY committed_at DESC LIMIT 1",
     [productId],
   );
-  const shaRows = (Array.isArray(result) ? result[0] : result ?? []) as Array<{ sha: string }>;
-  return shaRows[0]?.sha ?? null;
+  const shaRows = (Array.isArray(result) ? result[0] : result ?? []) as Array<{ sha: string; repositoryId: number }>;
+  const row = shaRows[0];
+  return row ? { sha: row.sha, repositoryId: Number(row.repositoryId) } : null;
 }
 
 function collectEvidenceFiles(changes: AdjudicationChangeDigest[]): string[] {
@@ -206,14 +207,12 @@ export async function adjudicateFeedbackReport(id: number, deps: AdjudicationDep
 
   const changes = await loadRecentChanges(execute, report.productId);
   const evidenceFiles = collectEvidenceFiles(changes);
-  let evidenceUnavailable = evidenceFiles.length > 0;
   const codeExcerpts: AdjudicationCodeExcerpt[] = [];
   try {
     const readFile = deps.readFile ?? (await createRevisionFileReader(execute, report.repositoryId, report.revision));
     for (const path of evidenceFiles) {
       try {
         codeExcerpts.push({ path, content: (await readFile(path, report.revision)).slice(0, 8_000) });
-        evidenceUnavailable = false;
       } catch {
         // 单文件读取失败容忍：其余文件继续；全部失败按证据不可得降级
       }
@@ -221,6 +220,9 @@ export async function adjudicateFeedbackReport(id: number, deps: AdjudicationDep
   } catch {
     // 索引装配失败（仓库不可达等）：代码证据整体不可得，降级 needs_human
   }
+  // 护栏以「实际读到的代码证据」为准：零证据（清单为空或全部读取失败）时
+  // confirm_defect 一律降级 needs_human，杜绝无证据的自动全量重建。
+  const evidenceUnavailable = codeExcerpts.length === 0;
 
   const prompt = buildAdjudicationPrompt({ claim: report.claim, changes, codeExcerpts });
   const completion = deps.completion ?? requestStructuredCompletion;
@@ -245,10 +247,11 @@ export async function adjudicateFeedbackReport(id: number, deps: AdjudicationDep
 
   let correctiveRunId: number | null = null;
   if (finalVerdict === "confirmed_defect") {
-    const sha = await loadLatestReleaseSha(execute, report.productId);
-    if (sha) {
+    const release = await loadLatestReleaseSha(execute, report.productId);
+    if (release) {
       const queue = deps.queueAnalysis ?? queueAnalysis;
-      correctiveRunId = await queue(report.repositoryId, null, sha, "manual");
+      // 纠偏 run 归属该发布所在的仓库（多仓库产品下按 product 任取会落在无关仓库）
+      correctiveRunId = await queue(release.repositoryId, null, release.sha, "manual");
     } else {
       correctiveRunId = null;
     }
