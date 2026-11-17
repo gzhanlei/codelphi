@@ -1,7 +1,7 @@
 import { PublicShell } from "@/components/public-shell";
 import { resolveUiLocale } from "@/lib/ui-locale-server";
 
-const ZIP_URL = "https://codelphi.com/downloads/codelphi-radar.zip";
+const ZIP_URL = "https://github.com/gzhanlei/codelphi/releases/latest/download/codelphi-radar.zip";
 
 export async function generateMetadata() {
   const locale = await resolveUiLocale();
@@ -26,7 +26,7 @@ export default async function RadarInstallPage() {
         <p>{t("在支持技能的 agent 宿主（Claude Code、Kimi Code 等）里，直接对它说：", "In a skill-capable agent host (Claude Code, Kimi Code, etc.), just tell it:")}</p>
         <pre><code>{`安装 ${ZIP_URL} 这个 skill`}</code></pre>
         <p>{t("宿主会下载 zip 并解压到自己的技能目录（Claude Code 为 ~/.claude/skills/codelphi-radar/）。也可以手动下载后自行解压到对应目录。", "The host downloads the zip and unpacks it into its skill directory (~/.claude/skills/codelphi-radar/ for Claude Code). You can also download the zip and unpack it manually.")}</p>
-        <p><a href={ZIP_URL}>{t("直接下载 codelphi-radar.zip", "Download codelphi-radar.zip directly")}</a></p>
+        <p><a href={ZIP_URL}>{t("下载 codelphi-radar.zip（GitHub Releases）", "Download codelphi-radar.zip (GitHub Releases)")}</a></p>
       </section>
 
       <section className="overview-panel">

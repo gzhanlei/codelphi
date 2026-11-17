@@ -28,10 +28,10 @@ Radar 是一个独立 Skill：分析本地 Git 仓库或公开 GitHub 仓库，�
 在支持技能的 agent 宿主（Claude Code、Kimi Code 等）里，直接对它说：
 
 ```
-安装 https://codelphi.com/downloads/codelphi-radar.zip 这个 skill
+安装 https://github.com/gzhanlei/codelphi/releases/latest/download/codelphi-radar.zip 这个 skill
 ```
 
-宿主会下载 zip 并解压到自己的技能目录（Claude Code 为 `~/.claude/skills/codelphi-radar/`）。也可以[直接下载 zip](https://codelphi.com/downloads/codelphi-radar.zip) 手动解压。
+宿主会下载 zip 并解压到自己的技能目录（Claude Code 为 `~/.claude/skills/codelphi-radar/`）。也可以[直接下载 zip](https://github.com/gzhanlei/codelphi/releases/latest/download/codelphi-radar.zip) 手动解压。（维护者发布方式：`npm run radar:package` 重建后把 `dist/codelphi-radar.zip` 挂到 GitHub Release 资产；`releases/latest/download` 固定指向最新一个。）
 
 ### 使用
 
