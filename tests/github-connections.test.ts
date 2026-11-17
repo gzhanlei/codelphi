@@ -25,11 +25,21 @@ describe("GitHub connection checks", () => {
     expect(saveInstallation).toHaveBeenCalledWith(1, { id: 42, account: { login: "gzhanlei", type: "User" } }, 7);
   });
 
-  it("marks the actual connection disconnected on API failure", async () => {
+  it("marks the connection disconnected only on authoritative installation-gone errors", async () => {
     vi.mocked(getConnectionWithApp).mockResolvedValue(connection);
-    vi.mocked(getAppInstallation).mockRejectedValue(new Error("denied"));
+    vi.mocked(getAppInstallation).mockRejectedValue(new Error("GitHub App API 404: installation deleted"));
     const result = await checkGitHubConnection(9, 7);
     expect(result.status).toBe(503);
     expect(setConnectionStatus).toHaveBeenCalledWith(9, "disconnected", 7);
+  });
+
+  it("does not disconnect on transient failures (timeout/5xx/local errors keep the stored status)", async () => {
+    // 一次网络抖动就把连接置 disconnected 会封锁所有分析的 token 发放且无自动恢复路径
+    vi.mocked(getConnectionWithApp).mockResolvedValue(connection);
+    vi.mocked(getAppInstallation).mockRejectedValue(new Error("GitHub App API 502: upstream error"));
+    const result = await checkGitHubConnection(9, 7);
+    expect(result.status).toBe(503);
+    expect(setConnectionStatus).not.toHaveBeenCalled();
+    expect(result.body).toMatchObject({ status: "active" });
   });
 });

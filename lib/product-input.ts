@@ -2,17 +2,28 @@ import { z } from "zod";
 import { codeHostingProviderSchema } from "./code-hosting/types";
 import { outputLanguageSchema } from "./analysis-language";
 
+const repositorySegment = "[A-Za-z0-9_.-]+";
+/** GitHub/Gitea/Gitee 是两段 owner/repo；GitLab 支持多级 namespace（group/subgroup/project）。 */
+const gitlabRepositoryPattern = new RegExp(`^${repositorySegment}(?:/${repositorySegment}){1,9}$`);
+const defaultRepositoryPattern = new RegExp(`^${repositorySegment}/${repositorySegment}$`);
+
 export const productInputSchema = z.object({
   name: z.string().trim().min(1, "请输入产品名称").max(100, "产品名称过长"),
   slug: z.string().trim().toLowerCase().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Slug 只能包含小写字母、数字和单个连字符").max(64),
   description: z.string().trim().max(1_000, "产品简介不能超过 1000 字").default(""),
-  repository: z.string().trim().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, "仓库格式应为 owner/repo"),
+  repository: z.string().trim().regex(new RegExp(`^${repositorySegment}(?:/${repositorySegment})+$`), "仓库格式应为 owner/repo"),
   provider: codeHostingProviderSchema.default("github"),
   defaultBranch: z.string().trim().max(191).regex(/^[^\s~^:?*\\]*$/, "分支名称包含无效字符").default(""),
   analyze: z.boolean().default(true),
   connectionId: z.number().int().positive().nullable().default(null),
   /** 分析输出语言：缺省时注册路径继承工作区默认（organizations.default_output_language）。 */
   outputLanguage: outputLanguageSchema.optional(),
+}).superRefine((value, ctx) => {
+  // 与 parseGitlabRepository 的多级 namespace 支持对齐；空段（group//project）被拒绝
+  const pattern = value.provider === "gitlab" ? gitlabRepositoryPattern : defaultRepositoryPattern;
+  if (!pattern.test(value.repository)) {
+    ctx.addIssue({ code: "custom", path: ["repository"], message: value.provider === "gitlab" ? "仓库格式应为 owner/repo（GitLab 支持多级 namespace）" : "仓库格式应为 owner/repo" });
+  }
 });
 
 export const descriptionUpdateSchema = z.object({

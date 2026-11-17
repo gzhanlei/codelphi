@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getChangeContext, getSourceSnapshot } from "../lib/github";
+import { getChangeContext, getSourceSnapshot, listIssueComments } from "../lib/github";
 
 const repo = { owner: "gzhanlei", name: "radar", defaultBranch: "main" };
 
@@ -39,5 +39,18 @@ describe("GitHub API workflows", () => {
     }));
     const sources = await getSourceSnapshot(repo, "sha");
     expect(sources).toEqual([{ path: "README.md", content: "1: const answer = 42;" }]);
+  });
+
+  it("follows pagination for issue comments so PR-preview comment upsert keeps working past 100 comments", async () => {
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({ id: index + 1, body: `comment ${index + 1}` }));
+    const secondPage = [{ id: 9001, body: "codelphi-pr-preview-marker" }];
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      // 注意 "per_page=100" 也含子串 "page=1"，必须按页参数精确定位
+      if (url.includes("comments?page=1&")) return new Response(JSON.stringify(firstPage), { status: 200 });
+      return new Response(JSON.stringify(secondPage), { status: 200 });
+    }));
+    const comments = await listIssueComments(repo, 7);
+    expect(comments).toHaveLength(101);
+    expect(comments.at(-1)).toEqual({ id: 9001, body: "codelphi-pr-preview-marker" });
   });
 });

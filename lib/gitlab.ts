@@ -24,7 +24,14 @@ export function gitlabToken(access: RepositoryAccess = {}) {
 }
 
 export async function gitlabFetch(path: string, access: RepositoryAccess = {}, init: { method?: string; body?: string } = {}) {
-  const response = await fetch(`${gitlabApiBase()}${path}`, {
+  const response = await gitlabFetchResponse(path, access, init);
+  if (!response.ok) throw new Error(`GitLab API ${response.status}: ${await response.text()}`);
+  return response.json() as Promise<unknown>;
+}
+
+/** 原始 Response 版本（分页调用方需要读 x-next-page 响应头）。 */
+export async function gitlabFetchResponse(path: string, access: RepositoryAccess = {}, init: { method?: string; body?: string } = {}) {
+  return fetch(`${gitlabApiBase()}${path}`, {
     headers: {
       Accept: "application/json",
       "PRIVATE-TOKEN": gitlabToken(access),
@@ -34,8 +41,6 @@ export async function gitlabFetch(path: string, access: RepositoryAccess = {}, i
     signal: AbortSignal.timeout(30_000),
     ...init,
   });
-  if (!response.ok) throw new Error(`GitLab API ${response.status}: ${await response.text()}`);
-  return response.json() as Promise<unknown>;
 }
 
 /** GitLab 项目路径可含多级 namespace：owner 取首段，其余归入 name（URL 编码后即项目路径）。 */

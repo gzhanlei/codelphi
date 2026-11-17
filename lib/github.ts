@@ -96,8 +96,14 @@ export async function getPullRequestFiles(repo: GitHubRepository, number: number
 }
 
 export async function listIssueComments(repo: GitHubRepository, number: number, access: GitHubAccess = {}) {
-  const data = z.array(issueCommentSchema).parse(await githubFetch(`/repos/${repo.owner}/${repo.name}/issues/${number}/comments?per_page=100`, access));
-  return data.map((comment) => ({ id: comment.id, body: comment.body ?? "" }));
+  // 全量分页：PR 预演用 marker 找既有评论做原地更新，只取第一页时 ≥100 条评论的
+  // PR 永远找不到 marker → 每个 synchronize 事件都发新评论刷屏
+  const comments: Array<{ id: number; body: string }> = [];
+  for (let page = 1; ; page += 1) {
+    const data = z.array(issueCommentSchema).parse(await githubFetch(`/repos/${repo.owner}/${repo.name}/issues/${number}/comments?page=${page}&per_page=100`, access));
+    comments.push(...data.map((comment) => ({ id: comment.id, body: comment.body ?? "" })));
+    if (data.length < 100) return comments;
+  }
 }
 
 export async function upsertIssueComment(repo: GitHubRepository, number: number, body: string, commentId: number | null, access: GitHubAccess = {}) {

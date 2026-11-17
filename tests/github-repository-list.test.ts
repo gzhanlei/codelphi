@@ -30,6 +30,13 @@ describe("GitHub installation repository listing", () => {
     expect(fetcher.mock.calls[0][0]).toContain("page=2");
   });
 
+  it("does not advertise more pages beyond the last servable page (page 5 full page)", async () => {
+    // 第 5 页满 100 条时 hasMore=true 会让 UI 请求第 6 页，而服务端硬拒 → 选择器报错
+    const fetcher = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ total_count: 501, repositories: page(100) }));
+    const result = await listGitHubRepositories(access, 5, { resolveToken: async () => "token", fetcher });
+    expect(result.hasMore).toBe(false);
+  });
+
   it("defaults to page one and rejects non-positive, fractional and excessive pages", async () => {
     const fetcher = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ repositories: page(1) }));
     await listGitHubRepositories(access, undefined, { resolveToken: async () => "token", fetcher });

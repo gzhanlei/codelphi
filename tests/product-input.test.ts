@@ -19,4 +19,11 @@ describe("product registration input", () => {
     expect(() => productInputSchema.parse({ ...input, repository: "https://github.com/gzhanlei/salesbuddy" })).toThrow();
     expect(() => productInputSchema.parse({ ...input, slug: "Sales Buddy" })).toThrow();
   });
+
+  it("accepts GitLab multi-level namespaces and keeps GitHub two-segment", () => {
+    const base = { name: "Ops", slug: "ops", description: "", defaultBranch: "main", analyze: false };
+    expect(productInputSchema.parse({ ...base, repository: "group/subgroup/project", provider: "gitlab" }).repository).toBe("group/subgroup/project");
+    expect(() => productInputSchema.parse({ ...base, repository: "group/subgroup/project", provider: "github" })).toThrow("仓库格式");
+    expect(() => productInputSchema.parse({ ...base, repository: "group//project", provider: "gitlab" })).toThrow("仓库格式");
+  });
 });

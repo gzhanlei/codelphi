@@ -54,6 +54,7 @@ export async function listGitHubRepositories(access: GitHubAccess, page = 1, opt
       defaultBranch: repository.default_branch || "",
       private: repository.private,
     })),
-    hasMore: data.repositories.length === 100,
+    // 页码上限 5：满页的最后一页不得再宣称有更多页，否则 UI 请求被硬拒页
+    hasMore: page < 5 && data.repositories.length === 100,
   };
 }
