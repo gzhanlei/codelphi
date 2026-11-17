@@ -211,8 +211,6 @@ export interface MigrationRunResult {
   backupPath?: string;
 }
 
-const MAX_GENERIC_DOMAINS = 12;
-
 /** 解析审核后的候选 JSON（设置页「全部接受」输出的形态，也接受 { domains, ungroupedIds }）。 */
 export function parseDomainsDocument(content: string): { domains: SalesBuddyDomain[]; ungroupedIds: number[]; errors: string[] } {
   let parsed: unknown;
@@ -227,7 +225,6 @@ export function parseDomainsDocument(content: string): { domains: SalesBuddyDoma
       ? (parsed as { domains: unknown[] }).domains
       : null;
   if (!rawList || rawList.length === 0) return { domains: [], ungroupedIds: [], errors: ["业务域映射为空：需要非空数组或 { domains: [...] }"] };
-  if (rawList.length > MAX_GENERIC_DOMAINS) return { domains: [], ungroupedIds: [], errors: [`业务域数量 ${rawList.length} 超过上限 ${MAX_GENERIC_DOMAINS}`] };
   const errors: string[] = [];
   const domains: SalesBuddyDomain[] = [];
   const seenNames = new Set<string>();
@@ -244,11 +241,19 @@ export function parseDomainsDocument(content: string): { domains: SalesBuddyDoma
     }
     seenNames.add(name);
     const rawIds = (item as { featureIds?: unknown }).featureIds;
-    if (!Array.isArray(rawIds) || rawIds.length === 0 || !rawIds.every((id) => typeof id === "number" && Number.isInteger(id))) {
+    // 与候选解析同口径：数字字符串（"79"）容错，非数字拒绝（2026-11-17 Chandler 实测键漂移）。
+    const normalizedIds = Array.isArray(rawIds)
+      ? rawIds.map((id) => {
+          if (typeof id === "number" && Number.isInteger(id)) return id;
+          if (typeof id === "string" && /^\d+$/.test(id.trim())) return Number(id.trim());
+          return null;
+        })
+      : [];
+    if (normalizedIds.some((id) => id === null) || normalizedIds.length === 0) {
       errors.push(`业务域「${name}」的 featureIds 必须是非空整数数组`);
       return;
     }
-    const featureIds = [...new Set(rawIds as number[])];
+    const featureIds = [...new Set(normalizedIds as number[])];
     domains.push({ key, name, summary: typeof (item as { summary?: unknown }).summary === "string" ? (item as { summary: string }).summary : "", featureIds });
   });
   let ungroupedIds: number[] = [];

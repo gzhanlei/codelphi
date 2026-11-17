@@ -87,13 +87,16 @@ describe("business domain candidates (Task 0)", () => {
     expect(result.error).toBeTruthy();
   });
 
-  it("rejects fewer than 3 candidates but accepts wide products with up to 12 (Chandler 实测 9 域)", () => {
-    const two = JSON.stringify([
-      { name: "域一", summary: "", featureIds: [1] },
-      { name: "域二", summary: "", featureIds: [2] },
-    ]);
-    expect(parseDomainCandidates(two, recordingProduct.features, recordingProduct.scenarios)).toEqual([]);
-    const nine = JSON.stringify(Array.from({ length: 9 }, (_, index) => ({ name: `域${index + 1}`, summary: "", featureIds: [((index % 3) + 1)] })));
-    expect(parseDomainCandidates(nine, recordingProduct.features, recordingProduct.scenarios)).toHaveLength(9);
+  it("imposes no count budget: accepts any non-empty candidate list, tolerates string IDs (Chandler 实测)", () => {
+    const one = JSON.stringify([{ name: "唯一域", summary: "", featureIds: [1] }]);
+    const parsedOne = parseDomainCandidates(one, recordingProduct.features, recordingProduct.scenarios);
+    expect(parsedOne).toHaveLength(1);
+    // 空数组仍是无效输出
+    expect(parseDomainCandidates("[]", recordingProduct.features, recordingProduct.scenarios)).toEqual([]);
+    // 数字字符串 ID 容错（模型键漂移防御在解析层）
+    const stringIds = JSON.stringify([{ name: "域A", summary: "", featureIds: ["1", 2] }, { name: "域B", summary: "", featureIds: [3] }]);
+    const parsedStrings = parseDomainCandidates(stringIds, recordingProduct.features, recordingProduct.scenarios);
+    expect(parsedStrings[0].featureIds).toEqual([1, 2]);
+    expect(parsedStrings[0].unknowns).toEqual([]);
   });
 });

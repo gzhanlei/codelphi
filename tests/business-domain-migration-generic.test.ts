@@ -33,12 +33,16 @@ describe("parseDomainsDocument (通用化)", () => {
     expect(result.ungroupedIds).toEqual([9]);
   });
 
-  it("rejects empty documents, empty domains, duplicate names and non-numeric ids", () => {
+  it("rejects empty documents, empty domains, duplicate names and non-numeric ids; tolerates string ids", () => {
     expect(parseDomainsDocument("[]").errors.length).toBeGreaterThan(0);
     expect(parseDomainsDocument("not json").errors.length).toBeGreaterThan(0);
     expect(parseDomainsDocument(JSON.stringify([{ name: "空域", featureIds: [] }])).errors.length).toBeGreaterThan(0);
     expect(parseDomainsDocument(JSON.stringify([{ name: "A", featureIds: [1] }, { name: "A", featureIds: [2] }])).errors.length).toBeGreaterThan(0);
-    expect(parseDomainsDocument(JSON.stringify([{ name: "A", featureIds: ["71"] }])).errors.length).toBeGreaterThan(0);
+    expect(parseDomainsDocument(JSON.stringify([{ name: "A", featureIds: ["abc"] }])).errors.length).toBeGreaterThan(0);
+    // 数字字符串 ID 容错（与候选解析同口径）
+    const tolerated = parseDomainsDocument(JSON.stringify([{ name: "A", featureIds: ["71", 72] }]));
+    expect(tolerated.errors).toEqual([]);
+    expect(tolerated.domains[0].featureIds).toEqual([71, 72]);
   });
 });
 

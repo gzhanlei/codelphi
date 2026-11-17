@@ -32,9 +32,13 @@ export interface DomainCandidateResult {
   error: string | null;
 }
 
-const MIN_CANDIDATES = 3;
-/** 与通用迁移脚本的 MAX_GENERIC_DOMAINS 对齐（2026-11-17：Chandler 实测自然产出 9 域，8 上限误杀）。 */
-const MAX_CANDIDATES = 12;
+/** 候选数量不设预算（2026-11-17 用户拍板：跑出来多少就是多少）；空数组仍视为无有效候选。 */
+function toFeatureId(value: unknown): number | null {
+  if (typeof value === "number" && Number.isInteger(value)) return value;
+  // 模型键漂移防御：ID 输出成数字字符串（"79"）时在解析层容错，不整批丢弃。
+  if (typeof value === "string" && /^\d+$/.test(value.trim())) return Number(value.trim());
+  return null;
+}
 
 export function buildDomainCandidatePrompt(product: DomainCandidateInput): Array<{ role: "system" | "user"; content: string }> {
   const featureLines = product.features
@@ -48,7 +52,7 @@ export function buildDomainCandidatePrompt(product: DomainCandidateInput): Array
     {
       role: "system",
       content:
-        "你是产品规格整理助手。根据给定产品自己的说明、功能与场景，提出 3-12 个「业务域」候选：每个业务域是一组面向用户价值的功能归属（如某来源的沟通、某类认知、某类管理），不是技术架构分层；宁可合并成少数几个有分量的域，不要碎片化。只输出 JSON 数组，每项形如 {\"name\":\"业务域名\",\"summary\":\"一句话用户价值\",\"featureIds\":[功能ID]}，featureIds 只能使用输入中列出的功能 ID，每个功能最多归属一个业务域，允许部分功能不归属任何业务域。不要输出 JSON 之外的任何文字。",
+        "你是产品规格整理助手。根据给定产品自己的说明、功能与场景，提出「业务域」候选：每个业务域是一组面向用户价值的功能归属（如某来源的沟通、某类认知、某类管理），不是技术架构分层。数量按产品实际业务结构决定，不设固定额度；宁可合并成少数几个有分量的域，不要碎片化。只输出 JSON 数组，每项形如 {\"name\":\"业务域名\",\"summary\":\"一句话用户价值\",\"featureIds\":[功能ID]}，featureIds 只能使用输入中列出的功能 ID（数字），每个功能最多归属一个业务域，允许部分功能不归属任何业务域。不要输出 JSON 之外的任何文字。",
     },
     {
       role: "user",
@@ -79,13 +83,14 @@ export function parseDomainCandidates(content: string, features: DomainCandidate
   const raw = parsed.filter((item): item is { name: unknown; summary: unknown; featureIds: unknown } =>
     typeof item === "object" && item !== null && "name" in item && "featureIds" in item,
   );
-  if (raw.length < MIN_CANDIDATES || raw.length > MAX_CANDIDATES) return [];
+  if (raw.length === 0) return [];
   const candidates: DomainCandidate[] = [];
   for (const item of raw) {
     if (typeof item.name !== "string" || item.name.trim().length === 0) return [];
-    const requestedIds = Array.isArray(item.featureIds) ? item.featureIds.filter((id): id is number => typeof id === "number") : [];
-    const unknowns: DomainCandidate["unknowns"] = requestedIds.filter((id) => !knownIds.has(id));
-    const featureIds = requestedIds.filter((id) => knownIds.has(id));
+    const requestedIds = (Array.isArray(item.featureIds) ? item.featureIds : []).map(toFeatureId).filter((id): id is number => id !== null);
+    const dedupedIds = [...new Set(requestedIds)];
+    const unknowns: DomainCandidate["unknowns"] = dedupedIds.filter((id) => !knownIds.has(id));
+    const featureIds = dedupedIds.filter((id) => knownIds.has(id));
     if (featureIds.length === 0) unknowns.push("empty");
     const evidencePaths = [...new Set(featureIds.flatMap((id) => evidencePathsByFeature.get(id) ?? []))];
     if (featureIds.length > 0 && evidencePaths.length === 0) unknowns.push("evidence-missing");
@@ -106,7 +111,7 @@ export async function generateDomainCandidates(product: DomainCandidateInput, op
     const completion = options.requestCompletion ?? requestStructuredCompletion;
     const content = await completion(buildDomainCandidatePrompt(product));
     const candidates = parseDomainCandidates(content, product.features, product.scenarios);
-    if (candidates.length === 0) return { candidates: [], error: "AI 输出无法解析为有效候选（需 3-8 个带有效功能归属的候选），未做任何修改。" };
+    if (candidates.length === 0) return { candidates: [], error: "AI 输出无法解析为有效候选（需要至少一个带有效功能归属的候选），未做任何修改。" };
     return { candidates, error: null };
   } catch (error) {
     return { candidates: [], error: error instanceof Error ? error.message : "候选生成失败" };
