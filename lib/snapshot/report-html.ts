@@ -203,6 +203,14 @@ export function renderSnapshotHtml(report: SnapshotReportData) {
       ${warnings}
       <div class="boundary-card"><h3>${escapeHtml(copy.trustTitle)}</h3><p>${escapeHtml(copy.trustBody)}</p><p>${escapeHtml(copy.coverageNote)}</p></div>
     </section>
+    <article class="cta-card" id="codelphi-cta" aria-labelledby="codelphi-cta-heading">
+      <h2 id="codelphi-cta-heading">${escapeHtml(copy.ctaTitle)}</h2>
+      <p>${escapeHtml(copy.ctaBody)}</p>
+      <footer class="cta-actions">
+        <a href="https://github.com/gzhanlei/codelphi" target="_blank" rel="noopener noreferrer">${escapeHtml(copy.ctaGithub)}</a>
+        <a class="secondary" href="https://codelphi.com" target="_blank" rel="noopener noreferrer">${escapeHtml(copy.ctaCloud)}</a>
+      </footer>
+    </article>
   </main>
   <footer class="container footer"><span>CoDelphi</span><a class="back-to-top" href="#top">${escapeHtml(copy.backToTop)}</a></footer>
   <script id="snapshot-data" type="application/json">${safeJson({ ...report, presentation })}</script>

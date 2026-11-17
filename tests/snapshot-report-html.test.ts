@@ -73,6 +73,24 @@ describe("single-file snapshot HTML", () => {
     expect(chinese).not.toContain("Search features or scenarios");
   });
 
+  it("renders a bilingual continuous-analysis call to action after boundaries and before the footer", () => {
+    const english = renderSnapshotHtml(report());
+    expect(english).toContain('id="codelphi-cta"');
+    expect(english).toContain("Want continuous analysis for your repositories?");
+    expect(english).toContain('href="https://github.com/gzhanlei/codelphi"');
+    expect(english).toContain('href="https://codelphi.com"');
+    expect(english.indexOf('id="boundaries"')).toBeLessThan(english.indexOf('id="codelphi-cta"'));
+    expect(english.indexOf('id="codelphi-cta"')).toBeLessThan(english.indexOf('<footer class="container footer">'));
+    expect(english).toContain('target="_blank" rel="noopener noreferrer"');
+
+    const chineseReport = report();
+    chineseReport.language = "zh-CN";
+    const chinese = renderSnapshotHtml(chineseReport);
+    expect(chinese).toContain("想持续跟进代码仓库？");
+    expect(chinese).toContain("GitHub 自托管");
+    expect(chinese).toContain("使用 CoDelphi.com");
+  });
+
   it("escapes untrusted AI, repository and path content including script closure", () => {
     const input = report();
     input.features[0].name = '</script><script id="xss">alert(1)</script>';
