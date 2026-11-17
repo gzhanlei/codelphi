@@ -68,6 +68,7 @@ describe("local git snapshot backend", () => {
     const resolved = await backend.resolveRevision({ owner: "local", repo: "fixture" });
     const tree = await backend.listWholeTree!({ owner: "local", repo: "fixture", revision: snapshot.revision }, resolved.rootTreeSha);
     expect(tree.truncated).toBe(false);
+    expect(tree.entries.some((entry) => entry.path === "src" && entry.type === "tree")).toBe(true);
     expect(tree.entries.map((entry) => entry.path)).toEqual(expect.arrayContaining(["src/中文 file.ts", "src/line\nbreak.ts"]));
     for (const entry of tree.entries) {
       expect(entry.sha).toMatch(/^[0-9a-f]{40}$/);

@@ -93,7 +93,7 @@ export function createLocalGitBackend(snapshot: GitSnapshot): RemoteSourceBacken
     },
     async listWholeTree(_ref, treeSha) {
       if (!/^[0-9a-f]{40,64}$/.test(treeSha)) throw new SnapshotGitError("invalid_tree", "Invalid Git tree SHA");
-      return { entries: parseTreeEntries(await git(["ls-tree", "-r", "-l", "-z", treeSha, "--"])), truncated: false };
+      return { entries: parseTreeEntries(await git(["ls-tree", "-r", "-t", "-l", "-z", treeSha, "--"])), truncated: false };
     },
     async fetchBlob(_ref, _path, blobSha) {
       if (!/^[0-9a-f]{40,64}$/.test(blobSha)) throw new SnapshotGitError("invalid_blob", "Invalid Git blob SHA");
