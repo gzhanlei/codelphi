@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
-import { finalizeSnapshotWorkspace, prepareSnapshotWorkspace, readSnapshotWorkOrder, writeSnapshotResult } from "../lib/snapshot/workspace";
+import { completeSnapshotWorkspace, finalizeSnapshotWorkspace, prepareSnapshotWorkspace, readSnapshotWorkOrder, writeSnapshotResult } from "../lib/snapshot/workspace";
+import { resolveCompletionBackend } from "../lib/snapshot/host-ai";
 import { main } from "../scripts/snapshot";
 
 const exec = promisify(execFile);
@@ -146,5 +147,35 @@ describe("host-native snapshot workspace", () => {
     const second = await readSnapshotWorkOrder(directory, secondId);
     expect(second.messages[1].content).toContain("Feature list from the previous spec");
     expect(second.messages[1].content).toContain("Packaged feature");
+  });
+
+  it("completes work orders through a host bridge and finalizes the report", async () => {
+    const directory = await workspace();
+    const prepared = await prepareSnapshotWorkspace({ directory, target: await repository(), outputLanguage: "en" });
+    expect(prepared.manifest.workOrderIds).toHaveLength(1);
+
+    const bridgeScript = `const fs=require("fs");const d=JSON.parse(fs.readFileSync(0,"utf8"));if(!d.messages||!d.messages.length)process.exit(9);const result=${JSON.stringify(JSON.parse(validResult))};process.stdout.write(JSON.stringify({content:JSON.stringify(result)}));`;
+    const backend = resolveCompletionBackend({
+      environment: { CODELPHI_HOST_AI_COMMAND: process.execPath, CODELPHI_HOST_AI_ARGS_JSON: JSON.stringify(["-e", bridgeScript]) },
+      host: "TestHost",
+    });
+    if (backend.kind !== "host") throw new Error("expected host bridge backend");
+    const progress: string[] = [];
+    const outcome = await completeSnapshotWorkspace({ directory, client: backend.client, concurrency: 2, onProgress: (message) => progress.push(message) });
+    expect(outcome.completed).toEqual(prepared.manifest.workOrderIds);
+    expect(outcome.failed).toEqual([]);
+
+    const finalized = await finalizeSnapshotWorkspace(directory);
+    expect(finalized.html).toContain("Packaged feature");
+
+    // 断点续跑：已有结果时 complete 全部跳过。
+    const rerun = await completeSnapshotWorkspace({ directory, client: backend.client });
+    expect(rerun.completed).toEqual([]);
+    expect(rerun.skippedExisting).toBe(1);
+  });
+
+  it("reports no backend when neither standalone config nor host bridge exists", async () => {
+    const backend = resolveCompletionBackend({ environment: {}, host: undefined });
+    expect(backend.kind).toBe("unavailable");
   });
 });

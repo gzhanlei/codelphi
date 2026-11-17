@@ -1,11 +1,12 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHostBridgeClient, type StructuredCompletionMessage } from "../lib/llm-client";
-import { createClientForCapability, resolveHostClient, type HostAiAdapter } from "../lib/snapshot/host-ai";
+import { createClientForCapability, findOnPath, resolveCompletionBackend, resolveHostClient, VENDOR_CLI_PROFILES, type HostAiAdapter } from "../lib/snapshot/host-ai";
 import { runSnapshot } from "../lib/snapshot/run";
 
 const exec = promisify(execFile);
@@ -114,5 +115,100 @@ describe("host AI adapters", () => {
     await expect(client.complete([{ role: "user", content: "hello" }])).resolves.toBe("ok");
     const init = complete.mock.calls[0][1] as { body: string };
     expect(JSON.parse(init.body)).toEqual({ messages: [{ role: "user", content: "hello" }] });
+  });
+});
+
+function syncTempRoot() {
+  const root = mkdtempSync(join(tmpdir(), "codelphi-host-ai-"));
+  roots.push(root);
+  return root;
+}
+
+function executable(directory: string, name: string, body: string) {
+  const path = join(directory, name);
+  writeFileSync(path, `#!/bin/sh\n${body}\n`);
+  chmodSync(path, 0o755);
+  return path;
+}
+
+describe("vendor CLI profiles (host-identity-gated autodetect)", () => {
+  it("locates an executable in the injected path and reports misses as null", () => {
+    const root = syncTempRoot();
+    executable(root, "claude", "true");
+    expect(findOnPath("claude", root)).toBe(join(root, "claude"));
+    expect(findOnPath("claude", "")).toBeNull();
+    expect(findOnPath("claude", "/nonexistent-dir")).toBeNull();
+  });
+
+  it("prefers standalone when AI configuration is present", () => {
+    const backend = resolveCompletionBackend({ environment: { AI_API_KEY: "k", AI_MODEL: "m" } });
+    expect(backend.kind).toBe("standalone");
+  });
+
+  it("throws when standalone is explicitly requested but incomplete", () => {
+    expect(() => resolveCompletionBackend({ environment: {}, standalone: true })).toThrow(/AI_API_KEY/);
+  });
+
+  it("uses the host HTTP bridge when injected", () => {
+    const backend = resolveCompletionBackend({ environment: { CODELPHI_HOST_AI_BRIDGE_URL: "http://127.0.0.1:9/v1", CODELPHI_HOST_AI_BRIDGE_TOKEN: "t" }, host: "TestHost" });
+    expect(backend.kind).toBe("host");
+  });
+
+  it("uses the host CLI bridge when injected", () => {
+    const backend = resolveCompletionBackend({ environment: { CODELPHI_HOST_AI_COMMAND: "node", CODELPHI_HOST_AI_ARGS_JSON: '["-e","true"]' }, host: "TestHost" });
+    expect(backend.kind).toBe("host");
+  });
+
+  it("reports malformed bridge args as unavailable", () => {
+    const backend = resolveCompletionBackend({ environment: { CODELPHI_HOST_AI_COMMAND: "node", CODELPHI_HOST_AI_ARGS_JSON: "{not-json" }, host: "TestHost" });
+    if (backend.kind !== "unavailable") throw new Error("expected unavailable backend");
+    expect(backend.reasons.join("\n")).toContain("CODELPHI_HOST_AI_ARGS_JSON");
+  });
+
+  it("autodetects only the current host's own headless CLI, never another vendor's", () => {
+    const root = syncTempRoot();
+    executable(root, "claude", "true");
+    const matched = resolveCompletionBackend({ environment: {}, host: "claude-code", pathEnv: root });
+    expect(matched.kind).toBe("host");
+    const other = resolveCompletionBackend({ environment: {}, host: "zcode", pathEnv: root });
+    if (other.kind !== "unavailable") throw new Error("expected unavailable backend");
+    expect(other.reasons.join("\n")).toContain("no known headless CLI profile for host zcode");
+  });
+
+  it("does not autodetect when the host binary is missing from PATH", () => {
+    const backend = resolveCompletionBackend({ environment: {}, host: "claude-code", pathEnv: "/nonexistent-dir" });
+    if (backend.kind !== "unavailable") throw new Error("expected unavailable backend");
+    expect(backend.reasons.join("\n")).toContain("not on PATH");
+  });
+
+  it("collects reasons when nothing is configured", () => {
+    const backend = resolveCompletionBackend({ environment: {} });
+    if (backend.kind !== "unavailable") throw new Error("expected unavailable backend");
+    expect(backend.reasons.length).toBeGreaterThan(0);
+  });
+
+  it("parses JSON field output for the claude profile (stdin delivery)", async () => {
+    const root = syncTempRoot();
+    const fake = executable(root, "claude", 'cat >/dev/null\nprintf \'{"result":"PACKAGED"}\'');
+    const profile = VENDOR_CLI_PROFILES.find((candidate) => candidate.hostIds.includes("claude-code"))!;
+    const client = createClientForCapability({ kind: "vendor_cli", profile, binary: fake, timeoutMs: 15_000 });
+    const output = await client.complete([
+      { role: "system", content: "be strict" },
+      { role: "user", content: "extract" },
+    ]);
+    expect(output).toBe("PACKAGED");
+  });
+
+  it("delivers the prompt as an argument and returns plain output for arg profiles", async () => {
+    const root = syncTempRoot();
+    const fake = executable(root, "kimi", 'printf \'%s\' "$2"');
+    const profile = VENDOR_CLI_PROFILES.find((candidate) => candidate.hostIds.includes("kimi"))!;
+    const client = createClientForCapability({ kind: "vendor_cli", profile, binary: fake, timeoutMs: 15_000 });
+    const output = await client.complete([
+      { role: "system", content: "be strict" },
+      { role: "user", content: "extract facts" },
+    ]);
+    expect(output).toContain("be strict");
+    expect(output).toContain("extract facts");
   });
 });

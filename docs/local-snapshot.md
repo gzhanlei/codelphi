@@ -27,9 +27,19 @@ node codelphi-radar/scripts/snapshot.cjs prepare /path/to/repo --scope apps/web 
 
 - `manifest.json`：目标、revision、scope、语言、契约版本和分区清单；
 - `work-orders/<partition-id>.json`：消息、源码、变更上下文和证据允许集；
-- `results/`：由宿主写入结果。
+- `results/`：由完成通道写入结果。
 
-宿主通过 `show --workdir <目录> --partition <id>` 读取每个工作单；该命令会把已完成结果中的功能名注入后续 prompt，保持跨分区命名连续。宿主执行返回的 system/user messages，把结构化 JSON 写入 `results/<partition-id>.json`，然后执行：
+完成工作单按优先级走三级通道，`complete` 子命令把它们统一编排（批量并发、逐分区预检与重试、断点续跑）：
+
+1. **standalone**：`--env-file` 或进程环境里已配置 `AI_API_KEY`/`AI_MODEL` 时直调 OpenAI 兼容网关；
+2. **宿主显式桥**：宿主注入 `CODELPHI_HOST_AI_BRIDGE_URL`/`CODELPHI_HOST_AI_BRIDGE_TOKEN`（HTTP 桥）或 `CODELPHI_HOST_AI_COMMAND` + `CODELPHI_HOST_AI_ARGS_JSON`（stdin 收 `{messages}` 的桥接命令），可选 `CODELPHI_HOST_MODEL` 与 `CODELPHI_HOST_AI_TIMEOUT_MS`；
+3. **宿主 headless CLI 自动探测**：仅当 `CODELPHI_SKILL_HOST` 标明当前宿主（如 `claude-code`、`codex`、`gemini`、`cursor`、`kimi`、`qwen`、`opencode`、`antigravity`）且该宿主自己的 CLI 在 PATH 上时启用——绝不跨厂商探测，避免意外消耗其他订阅额度。
+
+```bash
+node codelphi-radar/scripts/snapshot.cjs complete --workdir .radar-work --concurrency 4
+```
+
+三级通道都不可用时，`complete` 报出全部探测原因并退出，此时回退到宿主原生 agent 流程：宿主通过 `show --workdir <目录> --partition <id>` 读取每个工作单；该命令会把已完成结果中的功能名注入后续 prompt，保持跨分区命名连续。宿主执行返回的 system/user messages，把结构化 JSON 写入 `results/<partition-id>.json`，然后执行：
 
 ```bash
 node codelphi-radar/scripts/snapshot.cjs finalize --workdir .radar-work

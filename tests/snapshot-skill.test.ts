@@ -95,7 +95,10 @@ describe("distributable codelphi radar skill", () => {
     const skill = await readFile(join(root, "skill", "SKILL.md"), "utf8");
     expect(skill).toContain("prepare");
     expect(skill).toContain("finalize");
-    expect(skill).not.toContain("CODELPHI_HOST_AI_COMMAND");
+    // 完成通道三级探测（standalone → 宿主显式桥 → 宿主身份门控 CLI）已进入 skill 文档：
+    // 宿主可注入 CODELPHI_HOST_AI_* 桥让 complete 子命令直调当前模型，无桥时回退 agent 执行。
+    expect(skill).toContain("complete");
+    expect(skill).toContain("CODELPHI_HOST_AI_COMMAND");
     expect(skill).not.toContain("DATABASE_URL");
     const result = await exec(process.execPath, [join(root, "skill", "scripts", "snapshot.cjs"), "--help"], { cwd: root, env: cleanEnv() });
     expect(result.stdout).toContain("--language");

@@ -3,7 +3,8 @@ import { link, lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/pro
 import { basename, dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { runSnapshot, type SnapshotRunOptions, type SnapshotRunResult } from "../lib/snapshot/run";
-import { finalizeSnapshotWorkspace, prepareSnapshotWorkspace, readSnapshotWorkOrder } from "../lib/snapshot/workspace";
+import { completeSnapshotWorkspace, finalizeSnapshotWorkspace, prepareSnapshotWorkspace, readSnapshotWorkOrder } from "../lib/snapshot/workspace";
+import { resolveCompletionBackend } from "../lib/snapshot/host-ai";
 import { standaloneGatewayHost } from "../lib/llm-client";
 import type { SnapshotProgressEvent } from "../lib/snapshot/types";
 
@@ -174,8 +175,11 @@ async function workspaceMain(argv: string[], dependencies: CliDependencies) {
         language: { type: "string" },
         workdir: { type: "string" },
         partition: { type: "string" },
+        concurrency: { type: "string" },
+        "env-file": { type: "string" },
+        standalone: { type: "boolean", default: false },
       },
-    }) as { values: CliValues & { workdir?: string; partition?: string }; positionals: string[] };
+    }) as { values: CliValues & { workdir?: string; partition?: string; concurrency?: string }; positionals: string[] };
     if (!values.workdir) {
       stderr(language === "en" ? "Missing --workdir" : "缺少 --workdir");
       return 2;
@@ -191,12 +195,41 @@ async function workspaceMain(argv: string[], dependencies: CliDependencies) {
       stdout(JSON.stringify(workOrder, null, 2));
       return 0;
     }
+    if (command === "complete" && positionals.length === 0) {
+      const environment: Record<string, string | undefined> = { ...(dependencies.environment ?? process.env) };
+      if (values["env-file"]) {
+        const parsed = parseEnvironmentFile(await readFile(resolve(values["env-file"]), "utf8"));
+        for (const key of ["AI_BASE_URL", "AI_API_KEY", "AI_MODEL"] as const) {
+          if (environment[key] === undefined && parsed[key] !== undefined) environment[key] = parsed[key];
+        }
+      }
+      const backend = resolveCompletionBackend({ environment, standalone: values.standalone === true || Boolean(values["env-file"]), host: environment.CODELPHI_SKILL_HOST?.trim() });
+      if (backend.kind === "unavailable") {
+        stderr(language === "en"
+          ? `No completion backend available.\n  Tried:\n    - ${backend.reasons.join("\n    - ")}\n  Options: (1) pass --env-file or set AI_API_KEY/AI_MODEL for standalone; (2) have the host inject CODELPHI_HOST_AI_BRIDGE_URL/TOKEN or CODELPHI_HOST_AI_COMMAND (+CODELPHI_HOST_AI_ARGS_JSON); (3) run the host-native agent flow (SKILL.md step 3).`
+          : `没有可用的完成通道。\n  已尝试：\n    - ${backend.reasons.join("\n    - ")}\n  可选：(1) 用 --env-file 或设置 AI_API_KEY/AI_MODEL 走 standalone；(2) 由宿主注入 CODELPHI_HOST_AI_BRIDGE_URL/TOKEN 或 CODELPHI_HOST_AI_COMMAND（+CODELPHI_HOST_AI_ARGS_JSON）；(3) 按 SKILL.md 第 3 步由宿主代理逐个完成工作单。`);
+        return 1;
+      }
+      stdout(language === "en"
+        ? `Completion backend: ${backend.kind === "standalone" ? `standalone (${backend.client.displayName ?? "configured model"})` : `host bridge (${backend.client.displayName ?? "host current model"})`}`
+        : `完成通道：${backend.kind === "standalone" ? `standalone（${backend.client.displayName ?? "已配置模型"}）` : `宿主桥（${backend.client.displayName ?? "宿主当前模型"}）`}`);
+      const outcome = await completeSnapshotWorkspace({
+        directory,
+        client: backend.client,
+        concurrency: Number(values.concurrency) || 4,
+        onProgress: (message) => stderr(message),
+      });
+      stdout(language === "en"
+        ? `Complete finished: ${outcome.completed.length} completed, ${outcome.failed.length} failed, ${outcome.skippedExisting} reused`
+        : `完成结束：${outcome.completed.length} 个成功，${outcome.failed.length} 个失败，复用已有 ${outcome.skippedExisting} 个`);
+      return outcome.failed.length > 0 ? 1 : 0;
+    }
     if (command === "finalize" && positionals.length === 0) {
       const result = await finalizeSnapshotWorkspace(directory);
       stdout(language === "en" ? `Radar report written to ${result.outputPath}` : `Radar 报告已生成：${result.outputPath}`);
       return 0;
     }
-    stderr(language === "en" ? "Usage: prepare <target> --workdir <dir> | finalize --workdir <dir>" : "用法：prepare <目标> --workdir <目录> | finalize --workdir <目录>");
+    stderr(language === "en" ? "Usage: prepare <target> --workdir <dir> | show --workdir <dir> --partition <id> | complete --workdir <dir> | finalize --workdir <dir>" : "用法：prepare <目标> --workdir <目录> | show --workdir <目录> --partition <id> | complete --workdir <目录> | finalize --workdir <目录>");
     return 2;
   } catch (error) {
     stderr(errorText(error, language));
@@ -205,7 +238,7 @@ async function workspaceMain(argv: string[], dependencies: CliDependencies) {
 }
 
 export async function main(argv = process.argv.slice(2), dependencies: CliDependencies = {}) {
-  if (argv[0] === "prepare" || argv[0] === "finalize" || argv[0] === "show") return workspaceMain(argv, dependencies);
+  if (argv[0] === "prepare" || argv[0] === "finalize" || argv[0] === "show" || argv[0] === "complete") return workspaceMain(argv, dependencies);
   const language = languageFromArgv(argv);
   const stdout = dependencies.stdout ?? ((message: string) => console.log(message));
   const stderr = dependencies.stderr ?? ((message: string) => console.error(message));

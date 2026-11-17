@@ -3,6 +3,7 @@ import { basename, dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { buildAnalysisMessages, parseAnalysisContent } from "../ai";
 import { CONTRACT_VERSION, type ExtractionWorkOrder } from "../extraction-contract";
+import type { StructuredCompletionClient } from "../llm-client";
 import { sanitizeEvidence } from "../extraction-pass";
 import type { AnalysisPartition } from "../remote-analysis";
 import { createRemoteSourceIndex, type SourceScopeRoot } from "../remote-source-index";
@@ -170,4 +171,70 @@ export async function readSnapshotWorkOrder(directory: string, workOrderId: stri
     ...workOrder,
     messages: buildAnalysisMessages(workOrder.sources, workOrder.change, { ...workOrder.context, previousFeatureNames }),
   };
+}
+
+export interface CompleteSnapshotWorkspaceOptions {
+  directory: string;
+  /** 完成通道（standalone / 宿主桥 / 宿主 headless CLI），由 resolveCompletionBackend 探测得出。 */
+  client: StructuredCompletionClient;
+  concurrency?: number;
+  retries?: number;
+  retryDelayMs?: number;
+  onProgress?: (message: string) => void;
+}
+
+export interface CompleteSnapshotWorkspaceOutcome {
+  completed: string[];
+  failed: string[];
+  skippedExisting: number;
+}
+
+/**
+ * 用完成通道批量填完工作单并落盘 results。每个分区先经 parseAnalysisContent 预检
+ * （与 finalize 同一校验：schema、别名归一、场景帽），不合格即重试；已有结果的分区跳过，
+ * 断点可续。命名连续性由 readSnapshotWorkOrder 从已完成结果注入。
+ */
+export async function completeSnapshotWorkspace(options: CompleteSnapshotWorkspaceOptions): Promise<CompleteSnapshotWorkspaceOutcome> {
+  const manifest = await readManifest(options.directory);
+  const skippedExisting: string[] = [];
+  const todo: string[] = [];
+  for (const id of manifest.workOrderIds) {
+    try {
+      await readFile(join(options.directory, "results", `${id}.json`), "utf8");
+      skippedExisting.push(id);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      todo.push(id);
+    }
+  }
+  const completed: string[] = [];
+  const failed: string[] = [];
+  const retries = Math.max(1, options.retries ?? 3);
+  const retryDelayMs = options.retryDelayMs ?? 3_000;
+  let cursor = 0;
+  const runOne = async (id: string): Promise<boolean> => {
+    const workOrder = await readSnapshotWorkOrder(options.directory, id);
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const content = await options.client.complete(workOrder.messages);
+        parseAnalysisContent(content);
+        await writeSnapshotResult(options.directory, id, content);
+        options.onProgress?.(`${id}: completed`);
+        return true;
+      } catch (error) {
+        options.onProgress?.(`${id}: attempt ${attempt}/${retries} failed: ${error instanceof Error ? error.message : String(error)}`);
+        if (attempt < retries) await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+      }
+    }
+    return false;
+  };
+  const worker = async () => {
+    while (cursor < todo.length) {
+      const id = todo[cursor++];
+      if (await runOne(id)) completed.push(id);
+      else failed.push(id);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, options.concurrency ?? 4), todo.length || 1) }, () => worker()));
+  return { completed, failed, skippedExisting: skippedExisting.length };
 }
