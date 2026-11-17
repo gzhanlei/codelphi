@@ -261,7 +261,7 @@ class DeterministicSlicePlanner implements SlicePlanner {
       // W0-7：窗口 diff 文件必选装配（W0-2 solo 重跑残余根因：装配 126 < diff 131，
       // 行为证据的一手面未被保证入选）。diff 文件跳过噪声过滤与子树份额（被本窗口修改
       // 本身就是入选理由），仍尊重文件数 / 行数 / 字节预算；路径序保证跨分区稳定分片。
-      const diffPaths = [...new Set(input.diffPaths ?? [])]
+      const diffPaths = [...new Set(input.requiredPaths ?? input.diffPaths ?? [])]
         .filter((path) => !state.input.excludePaths?.has(path))
         .sort();
       for (const path of diffPaths) {
@@ -273,8 +273,10 @@ class DeterministicSlicePlanner implements SlicePlanner {
           throw error;
         }
       }
-      for (const scopeRoot of scope.scopeRoots) {
-        await this.walkScopeDirectories(index, state, scopeRoot.path);
+      if ((input.discovery ?? "full") === "full") {
+        for (const scopeRoot of scope.scopeRoots) {
+          await this.walkScopeDirectories(index, state, scopeRoot.path);
+        }
       }
       return this.completePlan(index, state);
     } catch (error) {

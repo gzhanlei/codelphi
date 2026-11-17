@@ -78,7 +78,7 @@ function backendFrom(files: Map<string, string>, trees: Map<string, SourceTreeAp
 const tree = (path: string) => ({ path, type: "tree" as const, sha: `tree-${path}` });
 const blob = (path: string) => ({ path, type: "blob" as const, sha: "filled-by-backend" });
 
-async function planSelection(budgets: Partial<SliceBudgets>, files: Map<string, string>, trees: Map<string, SourceTreeApiEntry[]>, scopeRoots: Array<{ path: string }> = [{ path: "" }], onList?: (path: string) => void, diffPaths?: string[], excludePaths?: ReadonlySet<string>) {
+async function planSelection(budgets: Partial<SliceBudgets>, files: Map<string, string>, trees: Map<string, SourceTreeApiEntry[]>, scopeRoots: Array<{ path: string }> = [{ path: "" }], onList?: (path: string) => void, diffPaths?: string[], excludePaths?: ReadonlySet<string>, discovery?: { mode?: "full" | "required_only"; requiredPaths?: string[] }) {
   const index = await createRemoteSourceIndex(ref, { access: {}, scopeRoots, backend: backendFrom(files, trees, onList) });
   return createSlicePlanner({ now: () => 20 }).plan({
     product: { id: 1, slug: "commerce", name: "Commerce" },
@@ -89,6 +89,8 @@ async function planSelection(budgets: Partial<SliceBudgets>, files: Map<string, 
     profileVersion: "v1",
     diffPaths,
     excludePaths,
+    discovery: discovery?.mode,
+    requiredPaths: discovery?.requiredPaths,
   }, index);
 }
 
@@ -256,6 +258,44 @@ describe("planner selection policy", () => {
     const result = await planSelection({ maxSelectedFiles: 2 }, files, trees, [{ path: "" }]);
     // 两个普通源文件无优先级差，按 basename 字母序（routes < server）
     expect(result.slice?.files.map((file) => file.path)).toEqual(["go.mod", "internal/routes.go"]);
+  });
+
+  it("selects only unique required paths without full-tree discovery", async () => {
+    const files = new Map([
+      ["lib/change.ts", "export const change = 1;\n"],
+      ["lib/context.ts", "export const context = 1;\n"],
+      ["lib/unrelated.ts", "export const unrelated = 1;\n"],
+    ]);
+    const trees = new Map<string, SourceTreeApiEntry[]>([
+      ["", [blob("lib/change.ts"), blob("lib/context.ts"), blob("lib/unrelated.ts"), tree("lib")]],
+      ["lib", [blob("lib/change.ts"), blob("lib/context.ts"), blob("lib/unrelated.ts")]],
+    ]);
+    const listed: string[] = [];
+    const result = await planSelection({}, files, trees, [{ path: "" }], (path) => listed.push(path), ["lib/change.ts"], undefined, {
+      mode: "required_only",
+      requiredPaths: ["lib/context.ts", "lib/change.ts", "lib/context.ts"],
+    });
+
+    expect(result.slice?.files.map((file) => file.path)).toEqual(["lib/change.ts", "lib/context.ts"]);
+    expect(listed).not.toContain("lib");
+  });
+
+  it("falls back to diff paths in required-only mode and walks scope by default", async () => {
+    const files = new Map([
+      ["lib/change.ts", "export const change = 1;\n"],
+      ["lib/unrelated.ts", "export const unrelated = 1;\n"],
+    ]);
+    const trees = new Map<string, SourceTreeApiEntry[]>([
+      ["", [blob("lib/change.ts"), blob("lib/unrelated.ts"), tree("lib")]],
+      ["lib", [blob("lib/change.ts"), blob("lib/unrelated.ts")]],
+    ]);
+    const scoped = await planSelection({}, files, trees, [{ path: "" }], undefined, ["lib/change.ts"], undefined, { mode: "required_only" });
+    expect(scoped.slice?.files.map((file) => file.path)).toEqual(["lib/change.ts"]);
+
+    const listed: string[] = [];
+    const full = await planSelection({}, files, trees, [{ path: "" }], (path) => listed.push(path), ["lib/change.ts"], undefined, { requiredPaths: ["lib/change.ts"] });
+    expect(full.slice?.files.map((file) => file.path)).toContain("lib/unrelated.ts");
+    expect(listed).toContain("lib");
   });
 });
 

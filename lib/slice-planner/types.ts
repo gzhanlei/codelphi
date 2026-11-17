@@ -44,6 +44,8 @@ export interface ProductSliceInput {
   excludePaths?: ReadonlySet<string>;
   /** W0-7：窗口 diff 文件路径（行为证据的一手面）——分区装配必选，优先于遍历选择。 */
   diffPaths?: readonly string[];
+  discovery?: "full" | "required_only";
+  requiredPaths?: readonly string[];
 }
 
 export interface SliceBudgets {
