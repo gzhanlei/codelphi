@@ -22,7 +22,7 @@ function completeOverview() {
 }
 
 describe("product overview rendering (Specsight 原则版式)", () => {
-  it("renders ask box, release timeline, capabilities and trust line without architecture content", () => {
+  it("renders the overview without architecture content or internal assembly metrics", () => {
     const html = renderToStaticMarkup(createElement(ProductOverview, { data: completeOverview() }));
     // 简介与 ✎ 编辑移到页头（单头部整合）；总览从提问框开始
     expect(html).toContain("代码生成 · 1 个证据文件");
@@ -39,12 +39,11 @@ describe("product overview rendering (Specsight 原则版式)", () => {
     // 发布时间线标题优先用合成 headline，commit 标题仅作回退
     expect(html).toContain("首个公开版本");
     expect(html).not.toContain(">首版</a>");
-    expect(html).toContain("overview-trust-line");
+    expect(html).not.toContain("overview-trust-line");
     expect(html).not.toContain("知识健康");
-    // 覆盖率统一字节口径（设计 §9.1）：字节比例与文件数量是两个并排事实，不合成第二个百分比
-    expect(html).toContain("源码装配覆盖率（按文件字节）42.1%");
-    expect(html).toContain("已装配实现文件 12/28 个");
-    expect(html).toContain("证据文件");
+    expect(html).not.toContain("源码装配覆盖率");
+    expect(html).not.toContain("已装配实现文件");
+    expect(html).not.toContain("无覆盖率回执");
     expect(html).not.toContain("低于 100% 是设计内行为");
     expect(html).not.toContain("不代表分析出错或结论不可信");
     expect(html).not.toContain("规格未覆盖不等于产品不支持");
@@ -66,7 +65,8 @@ describe("product overview rendering (Specsight 原则版式)", () => {
       latestRun: { status: "succeeded" },
     });
     const html = renderToStaticMarkup(createElement(ProductOverview, { data }));
-    const timeline = html.slice(html.indexOf("overview-timeline"), html.indexOf("overview-trust-line"));
+    const timelineStart = html.indexOf("overview-timeline");
+    const timeline = html.slice(timelineStart, html.indexOf("</section>", timelineStart));
     expect(timeline).toContain("一次推送中的全部提交都会进入发布说明。");
     // 时间线是一句话投影：不逐条罗列场景级变化
     expect(timeline).not.toContain("场景更新一");
@@ -101,7 +101,7 @@ describe("product overview rendering (Specsight 原则版式)", () => {
     const html = renderToStaticMarkup(createElement(ProductOverview, { data }));
     expect(html).toContain("尚无功能规格");
     expect(html).not.toContain("尚未生成架构文档");
-    expect(html).toContain("源码装配覆盖率 —");
+    expect(html).not.toContain("源码装配覆盖率");
   });
 
   it("renders quiet releases in the timeline (release happened, nothing changed)", () => {
@@ -143,7 +143,7 @@ describe("product overview rendering (Specsight 原则版式)", () => {
     data.trust.specVersionId = 0;
     const html = renderToStaticMarkup(createElement(ProductOverview, { data }));
     expect(html).toContain("人工维护");
-    expect(html).toContain("Spec v0");
+    expect(html).not.toContain("Spec v0");
   });
 
   it("aggregates latest-release changes per feature in the overview data (供发布产品对话框勾选)", () => {

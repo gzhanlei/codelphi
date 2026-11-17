@@ -71,13 +71,6 @@ function ReleaseTimeline({ data, locale = "zh-CN" }: { data: ProductOverviewData
   );
 }
 
-function TrustLine({ data, locale = "zh-CN" }: { data: ProductOverviewData; locale?: UiLocale }) {
-  const { trust, coverageByte, coverageFiles } = data;
-  return (
-    <p className="overview-trust-line">{coverageByte ?? pick(locale, PRODUCT_OVERVIEW.trustCoverageMissing)}{coverageFiles ? ` · ${coverageFiles}` : ""} · {pick(locale, PRODUCT_OVERVIEW.trustEvidenceFiles).replace("{count}", String(trust.evidencePathCount))} · {pick(locale, PRODUCT_OVERVIEW.trustManualEntries).replace("{count}", String(trust.manualFeatureCount + trust.manualScenarioCount))}{trust.specVersionId !== null ? ` · Spec v${trust.specVersionId}` : ""}</p>
-  );
-}
-
 export function ProductOverview({ data, canEdit = false, locale = "zh-CN" }: { data: ProductOverviewData; canEdit?: boolean; locale?: UiLocale }) {
   return (
     <div className="product-overview">
@@ -98,7 +91,6 @@ export function ProductOverview({ data, canEdit = false, locale = "zh-CN" }: { d
       </div>
       <div className="overview-secondary">
         <ReleaseTimeline data={data} locale={locale} />
-        <TrustLine data={data} locale={locale} />
       </div>
     </div>
   );

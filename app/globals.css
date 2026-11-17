@@ -380,9 +380,9 @@ p { line-height: 1.7; }
 .completeness-disclosure.completeness-bad { color: #c0392b; }
 .completeness-disclosure.completeness-ok { color: var(--green); }
 
-/* 披露块：完整性行 + 覆盖率行竖排横跨全宽（spec-workspace 是两列 grid，直接子元素会掉进功能树列） */
+/* 披露块：完整性行 + 静态分析边界竖排横跨全宽（spec-workspace 是两列 grid，直接子元素会掉进功能树列） */
 .spec-disclosures { grid-column: 1 / -1; display: grid; gap: 6px; margin-bottom: 14px; font-size: 13px; line-height: 1.7; }
-.coverage-disclosure { margin: 0; color: #94a19c; }
+.analysis-boundary { margin: 0; color: #94a19c; }
 .completeness-disclosure { margin: 0; }
 
 /* 发布稿动线（release-card 内：勾选生成 → 块级校对 → 发布/公开链接） */
@@ -537,7 +537,6 @@ dialog.publish-dialog h3 { margin: 0 0 8px; font-size: 16px; }
 .tl-title { display: inline-block; margin-top: 2px; color: var(--ink); font-weight: 600; text-decoration: none; }
 .tl-title:hover { color: var(--green); }
 .tl-summary { margin: 3px 0 0; font-size: 13px; color: #66716b; }
-.overview-trust-line { font-size: 12px; color: var(--muted); margin: 14px 0 0; }
 
 /* 产品页头部整合（单头部：简介全文展示；发布产品/导出收进行内） */
 .product-desc-row { display: flex; gap: 10px; align-items: baseline; max-width: 680px; }

@@ -7,7 +7,6 @@ import type { FeatureRow, ScenarioRow } from "@/lib/types";
 import { deleteConfirmedFeature } from "@/lib/spec-editor-client";
 import { errorMessage } from "@/lib/error-message";
 import { entityId, featureHref, scenariosForFeature, scenariosForFeatureTree } from "@/lib/spec-editor-ui";
-import { coverageByteLabel, coverageFilesLabel } from "@/lib/coverage-display";
 import { FeatureTree } from "./feature-tree";
 import { SpecSearch } from "./spec-search";
 import { SpecAsk } from "./spec-ask";
@@ -23,7 +22,7 @@ import { COVERAGE, LEDGER, SPEC_EDITOR } from "@/lib/ui-strings/product";
 import type { FeatureFlowGraph } from "@/lib/semantic-feature-flow";
 
 
-export function SpecWorkspace({ slug, productBase, tree, feature, scenarios, mode, coverage, completeness, featureFlows, featureFlowErrors, locale = "zh-CN" }: { slug: string; productBase: string; tree: FeatureTreeItem[]; feature?: FeatureRow; scenarios: ScenarioRow[]; mode: string; coverage?: CoverageReceiptRow | null; completeness?: CompletenessLedgerRow | null; featureFlows?: Map<string, FeatureFlowGraph>; featureFlowErrors?: Map<string, string>; locale?: UiLocale }) {
+export function SpecWorkspace({ slug, productBase, tree, feature, scenarios, mode, completeness, featureFlows, featureFlowErrors, locale = "zh-CN" }: { slug: string; productBase: string; tree: FeatureTreeItem[]; feature?: FeatureRow; scenarios: ScenarioRow[]; mode: string; coverage?: CoverageReceiptRow | null; completeness?: CompletenessLedgerRow | null; featureFlows?: Map<string, FeatureFlowGraph>; featureFlowErrors?: Map<string, string>; locale?: UiLocale }) {
   const router = useRouter();
   const guard = useDemoGuard();
   const [editor, setEditor] = useState<FeatureEditorMode>(null);
@@ -55,8 +54,7 @@ export function SpecWorkspace({ slug, productBase, tree, feature, scenarios, mod
         const details = toLedgerDetailsView(completeness.details);
         if (!details) return null;
         const overall = describeLedgerOverall(details.overall, locale);
-        // 源码覆盖的量化事实已在上面的覆盖率披露行，内联清单不重复；维度状态保留在悬浮明细
-        const issues = summarizeLedgerIssues(details, coverage ? ["sourceCoverage"] : [], locale);
+        const issues = summarizeLedgerIssues(details, [], locale);
         return (
           <p className={`completeness-disclosure completeness-${overall.tone}`} title={pick(locale, LEDGER.dimensionsTitle).replace("{states}", formatLedgerDimensions(details))}>
             {pick(locale, LEDGER.disclosurePrefix).replace("{overall}", overall.label)}
@@ -65,17 +63,11 @@ export function SpecWorkspace({ slug, productBase, tree, feature, scenarios, mod
           </p>
         );
       })() : null}
-      {coverage ? (
-        <p className="coverage-disclosure" title={pick(locale, COVERAGE.disclosureTitle)}>
-          {coverageByteLabel(coverage, locale)}（{coverageFilesLabel(coverage, locale)}，{pick(locale, COVERAGE.partitionsUnit).replace("{count}", String(coverage.partitionsUsed))}）
-          {coverage.partitionsCapped ? pick(locale, COVERAGE.cappedNote) : ""}
-          。
-          {/* R6：静态提取盲区的人工补充入口要可发现——指向数据说明页（边界声明）与页内编辑器 */}
-          {pick(locale, COVERAGE.runtimeBlindSpotPrefix)}
-          <a href="/data-notice" target="_blank" rel="noreferrer">{pick(locale, COVERAGE.boundaryLabel)}</a>
-          {pick(locale, COVERAGE.runtimeBlindSpotTail)}
-        </p>
-      ) : null}
+      <p className="analysis-boundary">
+        {pick(locale, COVERAGE.runtimeBlindSpotPrefix)}
+        <a href="/data-notice" target="_blank" rel="noreferrer">{pick(locale, COVERAGE.boundaryLabel)}</a>
+        {pick(locale, COVERAGE.runtimeBlindSpotTail)}
+      </p>
       </div>
       <div className="spec-search-bar">
         <SpecSearch slug={slug} productBase={productBase} />

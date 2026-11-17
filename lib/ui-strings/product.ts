@@ -63,9 +63,6 @@ export const PRODUCT_OVERVIEW = {
   capabilitiesNote: { "zh-CN": "按场景覆盖排序，点击进入规格工作台。", en: "Sorted by scenario coverage; click to open the spec workspace." },
   emptyCapabilities: { "zh-CN": "尚无功能规格。", en: "No feature specs yet." },
   capabilityScenarios: { "zh-CN": " 个场景 · ", en: " scenarios · " },
-  trustCoverageMissing: { "zh-CN": "源码装配覆盖率 —（无覆盖率回执）", en: "Source assembly coverage — (no coverage receipt)" },
-  trustEvidenceFiles: { "zh-CN": "证据文件 {count} 个", en: "{count} evidence files" },
-  trustManualEntries: { "zh-CN": "人工条目 {count} 条", en: "{count} manually maintained entries" },
 } satisfies Record<string, LocaleEntry>;
 
 // ── 产品总览数据标签（lib/product-overview.ts） ──
@@ -344,9 +341,6 @@ export const LEDGER = {
 export const COVERAGE = {
   byteLabel: { "zh-CN": "源码装配覆盖率（按文件字节）", en: "Source assembly coverage (by file bytes) " },
   filesLabel: { "zh-CN": "已装配实现文件 {assembled}/{total} 个", en: "Assembled implementation files {assembled}/{total}" },
-  disclosureTitle: { "zh-CN": "源码装配覆盖率按本规格版本对应的完整实现面（文件字节）计算", en: "Source assembly coverage is computed over the full implementation surface (file bytes) of this spec version" },
-  partitionsUnit: { "zh-CN": "{count} 趟提取", en: "{count} extraction pass(es)" },
-  cappedNote: { "zh-CN": "；本规格未覆盖全部实现面（提取趟数触顶），未覆盖部分不产生结论", en: "; this spec does not cover the full implementation surface (extraction pass cap reached); uncovered parts produce no conclusions" },
   runtimeBlindSpotPrefix: { "zh-CN": "运行时开关与数据依赖行为静态提取不可见（", en: "Runtime switches and data-dependent behavior are invisible to static extraction (" },
   boundaryLabel: { "zh-CN": "边界说明", en: "boundary notice" },
   runtimeBlindSpotTail: {

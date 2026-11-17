@@ -3,7 +3,6 @@ import { buildProductFocus } from "./product-focus";
 import { pick, type UiLocale } from "./ui-locale";
 import { OVERVIEW_DATA } from "./ui-strings/product";
 import { evidenceItems, isTestOnlyEvidence } from "./evidence";
-import { coverageByteLabel, coverageFilesLabel } from "./coverage-display";
 import { buildBusinessDomainCards } from "./business-domains";
 import type { RegressionTaskView } from "./regression-task-view";
 import { featureHref } from "./spec-editor-ui";
@@ -25,7 +24,7 @@ interface ProductOverviewInput {
   latestReleaseNote?: { status: string; releaseId: number; publishedAt: Date | string | null; blocks: number } | null;
   /** 发布稿映射（总览时间线的状态徽章用）。 */
   releaseNotes?: Array<{ releaseId: number; status: string; headline: string | null }>;
-  /** 覆盖率回执（信任行用）。 */
+  /** 覆盖率回执仅用于内部分析诊断，不在总览展示。 */
   coverage?: { coverageRatio: number; implFilesAssembled: number; implFilesTotal: number; partitionsCapped: boolean } | null;
 }
 
@@ -228,8 +227,6 @@ export function buildProductOverview(input: ProductOverviewInput, locale: "zh-CN
     const group = timelineGroups[index];
     if (group.kind === "quiet-run" && group.count === 1) timelineGroups[index] = { kind: "single", release: group.releases[0] };
   }
-  const coverageByte = input.coverage ? coverageByteLabel(input.coverage, locale) : null;
-  const coverageFiles = input.coverage ? coverageFilesLabel(input.coverage, locale) : null;
   const userImpact = buildUserImpact(input, latestRelease, latestChanges, changeStats, locale);
   // 业务分组（Task 2）：有人工确认的「父节点 + 子级」树时，首页能力卡聚合为业务域卡片；
   // 没有分组的产品保持现有平铺卡片。组织用父节点不进入问答建议——检索身份始终是原始功能。
@@ -268,8 +265,6 @@ export function buildProductOverview(input: ProductOverviewInput, locale: "zh-CN
     latestReleaseNote: input.latestReleaseNote ?? null,
     noteByRelease: Object.fromEntries((input.releaseNotes ?? []).map((note) => [String(note.releaseId), { status: note.status, headline: note.headline }])),
     timelineGroups,
-    coverageByte,
-    coverageFiles,
     trust: {
       featureCount: input.features.length,
       scenarioCount: input.scenarios.length,
