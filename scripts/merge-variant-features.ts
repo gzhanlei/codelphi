@@ -2,6 +2,8 @@ import "dotenv/config";
 import mysql, { type Pool, type PoolConnection } from "mysql2/promise";
 import { databaseConfig } from "../lib/database-config";
 import { featureScenarioPairMatch, featureVariantSimilar, type SpecFeature, type SpecScenario } from "../lib/spec-diff";
+import { evidenceItems } from "../lib/evidence";
+import type { Evidence } from "../lib/types";
 
 /**
  * BM-11 存量清理：把跨 run 重建出的功能级变体（「无壳页面语言切换」vs「无外壳页面语言
@@ -22,6 +24,8 @@ export interface PlannableScenario {
   outcome: string;
   category: string;
   source: string;
+  /** 真实证据（DB JSON 列解析）：双信号判据（证据交集 AND summary 近似）的离线输入。 */
+  evidence: Evidence[];
   /** 人工核实过（spec_verifications 命中）——只搬不删。 */
   verified?: boolean;
 }
@@ -52,7 +56,7 @@ export interface FeatureMergePlan {
 }
 
 const asSpecScenario = (scenario: PlannableScenario): SpecScenario =>
-  ({ ...scenario, category: scenario.category as SpecScenario["category"], evidence: [], step: null }) as SpecScenario;
+  ({ ...scenario, category: scenario.category as SpecScenario["category"], evidence: scenario.evidence ?? [], step: null }) as SpecScenario;
 
 const asSpecFeature = (feature: PlannableFeature): SpecFeature =>
   ({ name: feature.name, summary: feature.summary, scenarios: feature.scenarios.map(asSpecScenario) }) as unknown as SpecFeature;
@@ -142,7 +146,7 @@ async function loadSnapshotFeatures(db: Pool, versionId: number, verifiedIds: Se
   );
   const features = featureRows as Array<{ id: number; name: string; summary: string; source: string }>;
   const [scenarioRows] = await db.execute(
-    `SELECT s.id, s.spec_feature_id AS featureId, s.reference, s.context, s.action, s.outcome, s.category, s.source
+    `SELECT s.id, s.spec_feature_id AS featureId, s.reference, s.context, s.action, s.outcome, s.category, s.source, s.evidence
      FROM spec_scenarios s JOIN spec_features f ON f.id = s.spec_feature_id
      WHERE f.spec_version_id = ? ORDER BY s.spec_feature_id, s.id`,
     [versionId],
@@ -152,9 +156,9 @@ async function loadSnapshotFeatures(db: Pool, versionId: number, verifiedIds: Se
     name: feature.name,
     summary: feature.summary,
     source: feature.source,
-    scenarios: (scenarioRows as Array<{ id: number; featureId: number; reference: string; context: string; action: string; outcome: string; category: string; source: string }>)
+    scenarios: (scenarioRows as Array<{ id: number; featureId: number; reference: string; context: string; action: string; outcome: string; category: string; source: string; evidence: unknown }>)
       .filter((scenario) => scenario.featureId === feature.id)
-      .map((scenario) => ({ ...scenario, verified: verifiedIds.has(scenario.id) })),
+      .map((scenario) => ({ ...scenario, evidence: evidenceItems(scenario.evidence), verified: verifiedIds.has(scenario.id) })),
   }));
 }
 
@@ -168,7 +172,7 @@ async function loadWorkbenchFeatures(db: Pool, productId: number): Promise<Plann
   const ids = features.map((feature) => feature.id);
   const placeholders = ids.map(() => "?").join(",");
   const [scenarioRows] = await db.execute(
-    `SELECT id, feature_id AS featureId, reference, context, action, outcome, category, source
+    `SELECT id, feature_id AS featureId, reference, context, action, outcome, category, source, evidence
      FROM scenarios WHERE feature_id IN (${placeholders}) AND active = 1 ORDER BY feature_id, id`,
     ids,
   );
@@ -177,9 +181,9 @@ async function loadWorkbenchFeatures(db: Pool, productId: number): Promise<Plann
     name: feature.name,
     summary: feature.summary,
     source: feature.source,
-    scenarios: (scenarioRows as Array<{ id: number; featureId: number; reference: string; context: string; action: string; outcome: string; category: string; source: string }>)
+    scenarios: (scenarioRows as Array<{ id: number; featureId: number; reference: string; context: string; action: string; outcome: string; category: string; source: string; evidence: unknown }>)
       .filter((scenario) => scenario.featureId === feature.id)
-      .map((scenario) => ({ ...scenario })),
+      .map((scenario) => ({ ...scenario, evidence: evidenceItems(scenario.evidence) })),
   }));
 }
 

@@ -14,6 +14,7 @@ const scenario = (id: number, reference: string, outcome: string, overrides: Par
   outcome,
   category: "happy",
   source: "generated",
+  evidence: [] as Array<{ path: string; startLine?: number }>,
   ...overrides,
 });
 
@@ -107,5 +108,41 @@ describe("planFeatureMerges (BM-11 存量清理规划器)", () => {
       { id: 2, name: "管理端退款流水", summary: "超管退款流水视图：按订单维度记录退款请求与退款态。", source: "generated", scenarios: [scenario(2, "HP-1", "按订单维度展示退款请求与退款态")] },
     ];
     expect(planFeatureMerges(features)).toEqual([]);
+  });
+});
+
+describe("planFeatureMerges 双信号离线输入（T2 根治：asSpecScenario 不再清空 evidence）", () => {
+  // 名字差太远过不了名门禁（release 226 形态），但共享证据文件 + summary 高度近似——
+  // 修复前 offline evidence=[] 恒不可达双信号；修复后 DB 真实证据进入判定。
+  const sharedPath = { path: "lib/billing/manual-grant.ts", startLine: 42 };
+  const grantVariants: PlannableFeature[] = [
+    {
+      id: 1,
+      name: "运营手工充值",
+      summary: "运营按邮箱给用户个人工作区的 Trial 钱包发放额度，流水与钱包同事务。",
+      source: "generated",
+      scenarios: [scenario(1, "HP-1", "定位个人工作区与 Trial 钱包，写 granted 流水并更新余额", { evidence: [sharedPath] })],
+    },
+    {
+      id: 2,
+      name: "手动配额发放",
+      summary: "管理员按邮箱给用户个人工作区的 Trial 钱包发放额度，事务内写钱包流水并更新余额。",
+      source: "generated",
+      scenarios: [scenario(2, "HP-2", "定位个人工作区与 Trial 钱包，写 granted 流水并更新余额", { evidence: [sharedPath] })],
+    },
+  ];
+
+  it("folds summary near-pairs via the evidence+summary dual signal when real evidence is present", () => {
+    const plans = planFeatureMerges(grantVariants);
+    expect(plans).toHaveLength(1);
+    expect(plans[0]).toMatchObject({ keeperId: 1, variantId: 2 });
+  });
+
+  it("does not fold when summaries diverge beyond the dual-signal floor even with shared evidence", () => {
+    const divergent: PlannableFeature[] = [
+      { ...grantVariants[0] },
+      { ...grantVariants[1], summary: "导出矩阵按产品维度生成 CSV 附件并投递到订阅邮箱，缓存命中零渲染调用。" },
+    ];
+    expect(planFeatureMerges(divergent)).toHaveLength(0);
   });
 });
