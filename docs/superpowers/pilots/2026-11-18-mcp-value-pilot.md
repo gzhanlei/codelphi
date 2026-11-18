@@ -343,3 +343,13 @@
 | MCP 附加成本（非净成本） | ≈150KB ≈40k token | 5 任务 planning 阶段；对 agent 是真实上下文成本 |
 
 **停止规则判定**：A 层独立发现 ≥1 且决策促成 ≥1 → **不触发终止，继续 tranche 2**。初步结论方向：lookup_by_files（反查）在计划阶段有真实价值且可纠正错误先验；search_scenarios 语义召回是短板（词形敏感 + 历史噪声 + 响应膨胀待修）。
+
+## 三项遗留收口（2026-11-19，用户指令「逐一进行」）
+
+**① stale 门（P0）——已上线 sha-3856984（release 283，对账 unexpected=[]）**：`lib/mcp/freshness.ts` 版本级新鲜度（analyzedSha vs 默认分支，GitHub compare 一次调用，5 分钟缓存，失败诚实降级 available=false 绝不伪装新鲜）+ V2-lite 逐场景（证据路径落在 analyzedSha..HEAD 行为变更集内标 stale=true）；接入 search_scenarios（投影逐场景+顶层块）与 lookup_by_files（三视图顶层块）。ChatGPT 四态中的「当前代码尚未核实」维度过价值环后再议。
+
+**② 变体折叠残余——根因修复+两轮清理已执行 sha-7287b8a（release 285）**：a) T2 根因修复落地：`merge-variant-features.ts` 离线规划器喂真实证据（spec_scenarios/scenarios evidence 列解析进 asSpecScenario），判定器 featureVariantSimilar 零改动——双信号离线可达；特性级 dry-run 结果=**当前 v297 特性级干净**（修复前评估器根本不可用）。b) 场景级清理：merge-variant-scenarios dry-run 19 条真变体 → apply 删除（审计 JSON 保留），账本 1190→1171 条。**执行中途发现并根治了更深的洞**：run 401（本次 push 分析）走「受影响集为空→保持全量」回退分支，affectedKeys=null 使 carried=[]，裸全量输出整批替换积累账本——**222 条跨功能流失**（含刚复活的 30 条与修复自身新场景）。第二次根治：`insertSpecVersion` 的锚点级保真改为**全模式生效**（全量输出与上一版按锚点 carry 合并，唯一丢弃依据=锚点与本次行为 hunk 相交或无行号）；run 402（release 285）生产验证通过：v297=1190 条零流失。BM-11 全模式折叠断言随新语义更新（renamed→merged，终态不变）。
+
+**③ release 280 radar 线对账（代 radar 线补记录）**：全意图 reconcile 尝试——移除类变更未被 matcher 认可（not_covered_by_intents，即便意图显式含全部移除证据路径），工具局限已上报 feedback #26（建议 removed 按 beforePaths 匹配或提供「预期移除」意图形态）。实质问题已闭环：行为经代码 grep 验证全部在 HEAD 存在（非真实删除）→ 已由确定性复活回填 → 280 的移除定性=锚点漂移非行为丢失。radar 线的遗留义务仅剩：其后续 push 若再触发同类移除，按本记录口径自行核对。
+
+**部署链**：sha-3856984（stale 门）→ sha-7287b8a（全模式 carry+变体脚本修复，现役，prev=3856984）。账本现况：v297 1171 场景/235 功能，比事故前（1131）净多 40 条修复自身知识与复活场景。
