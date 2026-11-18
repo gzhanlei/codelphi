@@ -28,7 +28,7 @@ Radar is a standalone skill that analyzes a local Git repository or a public Git
 In a skill-capable agent host (Claude Code, Kimi Code, etc.), just tell it:
 
 ```
-安装 https://github.com/gzhanlei/codelphi/releases/latest/download/codelphi-radar.zip 这个 skill
+Install this skill: https://github.com/gzhanlei/codelphi/releases/latest/download/codelphi-radar.zip
 ```
 
 The host downloads the zip and unpacks it into its skill directory (`~/.claude/skills/codelphi-radar/` for Claude Code). You can also [download the zip](https://github.com/gzhanlei/codelphi/releases/latest/download/codelphi-radar.zip) and unpack it manually. (Maintainers publish the zip as a GitHub release asset: rebuild with `npm run radar:package` and attach `dist/codelphi-radar.zip` to a release; the `releases/latest/download` link always serves the newest one.)
@@ -38,7 +38,7 @@ The host downloads the zip and unpacks it into its skill directory (`~/.claude/s
 After installing, tell your host:
 
 ```
-用 codelphi radar skill 分析 https://github.com/owner/repo
+Use the codelphi radar skill to analyze https://github.com/owner/repo
 ```
 
 The target can also be a local repository path. The host runs `prepare` to pin the commit and split work orders, completes them concurrently via the `complete` fast path, then `finalize` writes `radar.html` under `.radar-work/` in the working directory.

@@ -24,7 +24,7 @@ export default async function RadarInstallPage() {
       <section className="overview-panel">
         <h2>{t("一句话安装", "Install in one sentence")}</h2>
         <p>{t("在支持技能的 agent 宿主（Claude Code、Kimi Code 等）里，直接对它说：", "In a skill-capable agent host (Claude Code, Kimi Code, etc.), just tell it:")}</p>
-        <pre><code>{`安装 ${ZIP_URL} 这个 skill`}</code></pre>
+        <pre><code>{t(`安装 ${ZIP_URL} 这个 skill`, `Install this skill: ${ZIP_URL}`)}</code></pre>
         <p>{t("宿主会下载 zip 并解压到自己的技能目录（Claude Code 为 ~/.claude/skills/codelphi-radar/）。也可以手动下载后自行解压到对应目录。", "The host downloads the zip and unpacks it into its skill directory (~/.claude/skills/codelphi-radar/ for Claude Code). You can also download the zip and unpack it manually.")}</p>
         <p><a href={ZIP_URL}>{t("下载 codelphi-radar.zip（GitHub Releases）", "Download codelphi-radar.zip (GitHub Releases)")}</a></p>
       </section>
@@ -32,7 +32,7 @@ export default async function RadarInstallPage() {
       <section className="overview-panel">
         <h2>{t("一句话使用", "Use in one sentence")}</h2>
         <p>{t("安装后对宿主说：", "After installing, tell your host:")}</p>
-        <pre><code>{`用 codelphi radar skill 分析 https://github.com/owner/repo`}</code></pre>
+        <pre><code>{t(`用 codelphi radar skill 分析 https://github.com/owner/repo`, `Use the codelphi radar skill to analyze https://github.com/owner/repo`)}</code></pre>
         <p>{t("目标也可以是本地仓库路径。宿主会运行 prepare 固定 commit 并切分工作单，用 complete 快路径并发完成，最后 finalize 生成 radar.html；产物默认写在工作目录的 .radar-work/ 下。", "The target can also be a local repository path. The host runs prepare to pin the commit and split work orders, completes them concurrently via the complete fast path, then finalize writes radar.html; output lands under .radar-work/ in the working directory.")}</p>
       </section>
 
