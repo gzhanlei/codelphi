@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import type { ChangeContext, ChangeFile, RepositoryAccess, RepositoryRef } from "./code-hosting/types";
+import { loadRepositoryConnectionToken } from "./repository-connections";
 
 /**
  * C2 多 provider 接入层：GitLab（docs/specsight-gap-improvement-plan.md §6.2）。
@@ -16,8 +17,33 @@ export function gitlabApiBase() {
   return process.env.GITLAB_API_BASE ?? "https://gitlab.com/api/v4";
 }
 
-export function gitlabToken(access: RepositoryAccess = {}) {
+interface GitlabTokenCacheEntry { token: string; expiresAt: number }
+const tokenCache = new Map<string, GitlabTokenCacheEntry>();
+const GITLAB_TOKEN_CACHE_TTL_MS = 5 * 60_000;
+
+export function clearGitlabTokenCache() {
+  tokenCache.clear();
+}
+
+/**
+ * 令牌解析链（对齐 github-access 的 resolveGitHubToken）：显式 token > 按
+ * (connectionId, organizationId) 作用域取 repository_connections 的解密令牌（短 TTL
+ * 缓存，分析运行一次几十次 API 调用不能逐次打 DB）> 服务器级 env 令牌。
+ * organizationId 缺省即不走连接通道——跨租户拿错令牌是硬约束。
+ */
+export async function gitlabToken(access: RepositoryAccess = {}): Promise<string> {
   if (access.token) return access.token;
+  const organizationId = Number(access.organizationId);
+  if (access.connectionId != null && Number.isInteger(organizationId) && organizationId > 0) {
+    const cacheKey = `${organizationId}:${access.connectionId}`;
+    const cached = tokenCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) return cached.token;
+    const stored = await loadRepositoryConnectionToken(access.connectionId, organizationId);
+    if (stored) {
+      tokenCache.set(cacheKey, { token: stored, expiresAt: Date.now() + GITLAB_TOKEN_CACHE_TTL_MS });
+      return stored;
+    }
+  }
   const env = process.env.GITLAB_TOKEN;
   if (!env) throw new Error("GITLAB_TOKEN is not configured");
   return env;
@@ -34,7 +60,7 @@ export async function gitlabFetchResponse(path: string, access: RepositoryAccess
   return fetch(`${gitlabApiBase()}${path}`, {
     headers: {
       Accept: "application/json",
-      "PRIVATE-TOKEN": gitlabToken(access),
+      "PRIVATE-TOKEN": await gitlabToken(access),
       "User-Agent": "codelphi-chandler",
     },
     cache: "no-store",

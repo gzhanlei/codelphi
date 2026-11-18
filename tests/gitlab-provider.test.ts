@@ -1,5 +1,9 @@
-import { describe, expect, it, vi, afterEach } from "vitest";
-import { parseGitlabRepository, verifyGitlabSignature, getGitlabChangeContext, getGitlabBranchHead } from "../lib/gitlab";
+import { beforeEach, describe, expect, it, vi, afterEach } from "vitest";
+import { clearGitlabTokenCache, parseGitlabRepository, verifyGitlabSignature, getGitlabChangeContext, getGitlabBranchHead, gitlabToken } from "../lib/gitlab";
+import { encryptSecret } from "../lib/secret-box";
+import { getDb } from "../lib/db";
+
+vi.mock("../lib/db", () => ({ getDb: vi.fn() }));
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -46,5 +50,72 @@ describe("gitlab provider (C2 接入层)", () => {
       return new Response(JSON.stringify({ commit: { id: "head-sha" } }), { status: 200 });
     }));
     expect(await getGitlabBranchHead({ owner: "g", name: "p", defaultBranch: "main" }, access)).toBe("head-sha");
+  });
+});
+
+describe("gitlabToken resolution（连接令牌消费链）", () => {
+  const SECRET = "session-secret-test";
+
+  function connectionDb(rows: Array<Record<string, unknown>>) {
+    // 尊重真实 SQL 语义：status = 'active' 过滤由 DB 完成，mock 按行状态重放
+    const execute = vi.fn(async (sql: string) => {
+      if (sql.includes("status = 'active'")) return [rows.filter((row) => row.status === undefined || row.status === "active"), []];
+      return [rows, []];
+    });
+    const getConnection = vi.fn(async () => ({
+      execute,
+      release: vi.fn(),
+    }));
+    return { getConnection, execute };
+  }
+
+  beforeEach(() => {
+    vi.mocked(getDb).mockReset();
+    clearGitlabTokenCache();
+  });
+
+  it("resolves an active connection's decrypted token by scoped (connectionId, organizationId)", async () => {
+    vi.stubEnv("SESSION_SECRET", SECRET);
+    vi.stubEnv("GITLAB_TOKEN", "glpat-env-fallback");
+    const db = connectionDb([{ token_encrypted: encryptSecret("glpat-stored", SECRET) }]);
+    vi.mocked(getDb).mockReturnValue(db as never);
+    expect(await gitlabToken({ connectionId: 9, organizationId: 7 })).toBe("glpat-stored");
+    // 池级 execute（不 checkout 连接），SQL 内完成 (id, organization_id, active) 三重过滤
+    expect(db.execute).toHaveBeenCalledTimes(1);
+    expect(String(db.execute.mock.calls[0][0])).toContain("organization_id = ? AND status = 'active'");
+  });
+
+  it("falls back to the env token when the connection is missing, disconnected or org-mismatched", async () => {
+    vi.stubEnv("SESSION_SECRET", SECRET);
+    vi.stubEnv("GITLAB_TOKEN", "glpat-env-fallback");
+    for (const rows of [[], [{ token_encrypted: encryptSecret("x", SECRET), status: "disconnected" }]]) {
+      const db = connectionDb(rows);
+      vi.mocked(getDb).mockReturnValue(db as never);
+      // organizationId 缺省即拒绝走连接通道（跨租户面），行过滤在 SQL 里兜底
+      expect(await gitlabToken({ connectionId: 9 })).toBe("glpat-env-fallback");
+      expect(await gitlabToken({ connectionId: 9, organizationId: 7 })).toBe("glpat-env-fallback");
+    }
+    // 无 connectionId：保持纯 env 口径
+    expect(await gitlabToken({})).toBe("glpat-env-fallback");
+  });
+
+  it("caches the resolved token briefly so analysis runs do not hit the DB per API call", async () => {
+    vi.stubEnv("SESSION_SECRET", SECRET);
+    const db = connectionDb([{ token_encrypted: encryptSecret("glpat-stored", SECRET) }]);
+    vi.mocked(getDb).mockReturnValue(db as never);
+    await gitlabToken({ connectionId: 9, organizationId: 7 });
+    await gitlabToken({ connectionId: 9, organizationId: 7 });
+    expect(db.execute).toHaveBeenCalledTimes(1);
+    clearGitlabTokenCache();
+    await gitlabToken({ connectionId: 9, organizationId: 7 });
+    expect(db.execute).toHaveBeenCalledTimes(2);
+  });
+
+  it("throws a clear error when neither connection nor env token exists", async () => {
+    vi.stubEnv("SESSION_SECRET", SECRET);
+    delete process.env.GITLAB_TOKEN;
+    const db = connectionDb([]);
+    vi.mocked(getDb).mockReturnValue(db as never);
+    await expect(gitlabToken({ connectionId: 9, organizationId: 7 })).rejects.toThrow("GITLAB_TOKEN is not configured");
   });
 });

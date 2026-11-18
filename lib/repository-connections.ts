@@ -152,3 +152,23 @@ export function repositoryConnectionError(error: unknown) {
   if (error instanceof RepositoryConnectionError) return { status: error.status, message: error.message };
   return { status: 500, message: "无法保存代码仓库连接，请稍后重试" };
 }
+
+/**
+ * 供 provider 令牌解析链消费（GitLab 等按连接鉴权的托管方）：按 (id, organization_id)
+ * 双重作用域取 active 连接的解密令牌。连接不存在/非本工作区/已断开 → null（调用方回退
+ * 服务器级 env 令牌）。避免跨租户拿错令牌是硬约束，作用域过滤必须在 SQL 内完成。
+ */
+export async function loadRepositoryConnectionToken(
+  connectionId: number,
+  organizationId: number,
+  execute: Execute = (sql, parameters) => getDb().execute(sql, parameters),
+): Promise<string | null> {
+  const [rows] = await execute(
+    `SELECT token_encrypted FROM repository_connections
+     WHERE id = ? AND organization_id = ? AND status = 'active' LIMIT 1`,
+    [connectionId, organizationId],
+  ) as [Array<{ token_encrypted: string }>, unknown];
+  const row = rows[0];
+  if (!row) return null;
+  return decryptSecret(row.token_encrypted, requiredEnv("SESSION_SECRET"));
+}

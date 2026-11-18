@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { gitlabFetch, gitlabFetchResponse, gitlabToken, type GitlabRepository } from "../gitlab";
+import { gitlabFetch, gitlabFetchResponse, type GitlabRepository } from "../gitlab";
 import { SourceIndexError, type RemoteSourceBackend, type SourceRevisionRef, type SourceTreeApiEntry } from "./types";
 
 const treeEntrySchema = z.object({
@@ -33,8 +33,6 @@ export function createGitlabSourceBackend(options: GitlabSourceBackendOptions): 
   void timeoutMs;
 
   async function request(path: string) {
-    const token = gitlabToken(access);
-    void token;
     try {
       return await gitlabFetch(path, access);
     } catch (error) {
