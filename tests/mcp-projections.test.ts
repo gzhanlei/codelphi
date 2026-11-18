@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canonicalizeScenarios, paginateById, projectFileRisks, type CanonicalScenarioInput } from "../lib/mcp/projections";
+import { canonicalizeScenarios, compactSearchProjection, paginateById, projectFileRisks, type CanonicalScenarioInput } from "../lib/mcp/projections";
 
 function scenario(id: number, reference = "EC-1", path = "lib/a.ts"): CanonicalScenarioInput {
   return { id, featureName: "功能", reference, specReference: "v230", evidencePaths: [path] };
@@ -78,5 +78,68 @@ describe("projectFileRisks", () => {
     expect(result.uncoveredPaths).toEqual(["lib/missing.ts"]);
     expect(result.totalCount).toBe(12);
     expect(result.hasMore).toBe(true);
+  });
+});
+
+describe("compactSearchProjection (MCP 搜索输出压缩)", () => {
+  const fullScenario = (id: number, reference: string) => ({
+    id,
+    featureId: 1,
+    featureName: "统一登录",
+    featureStableKey: "统一登录",
+    reference,
+    context: "c".repeat(200),
+    action: "a".repeat(200),
+    outcome: "o".repeat(200),
+    evidence: [{ path: "lib/auth.ts", startLine: 10, endLine: 20, url: "https://github.com/x/blob/y/lib/auth.ts#L10", note: "n" }],
+  });
+  const fullHistory = (releaseId: number) => ({
+    source: "release" as const,
+    releaseId,
+    sha: `sha-${releaseId}`,
+    committedAt: new Date("2026-11-18T00:00:00Z"),
+    specChangeId: releaseId,
+    kind: "added",
+    featureName: "统一登录",
+    scenarioReference: "HP-1",
+    summary: "s",
+    before: { reference: "HP-1", category: "happy" as const, context: "b", action: "b", outcome: "b", evidence: [] },
+    after: { reference: "HP-1", category: "happy" as const, context: "a", action: "a", outcome: "a", evidence: [] },
+  });
+
+  it("caps top-K, strips scenario full text and history before/after bodies, keeps anchors", () => {
+    const result = compactSearchProjection({
+      features: Array.from({ length: 12 }, (_, index) => ({ id: index + 1, name: `功能${index}`, summary: "s", stableKey: `功能${index}` })),
+      scenarios: Array.from({ length: 14 }, (_, index) => fullScenario(index + 1, `HP-${index + 1}`)),
+      history: Array.from({ length: 12 }, (_, index) => fullHistory(index + 1)),
+    });
+    expect(result.features).toHaveLength(8);
+    expect(result.scenarios).toHaveLength(10);
+    expect(result.history).toHaveLength(10);
+    expect(result.truncated).toBe(true);
+    expect(result.scenarios[0]).toEqual({
+      id: 1,
+      featureName: "统一登录",
+      featureStableKey: "统一登录",
+      reference: "HP-1",
+      evidence: [{ path: "lib/auth.ts", startLine: 10 }],
+    });
+    expect(result.history[0]).toEqual(expect.objectContaining({ source: "release", releaseId: 1, sha: "sha-1" }));
+    expect(result.history[0]).not.toHaveProperty("before");
+    expect(result.history[0]).not.toHaveProperty("after");
+    expect(result.detailHint).toContain("get_scenario");
+  });
+
+  it("keeps ranked order, omits truncated flag within limits, and still returns the hint for empty results", () => {
+    const ranked = compactSearchProjection({
+      features: [{ id: 2, name: "B", summary: "s", stableKey: "b" }, { id: 1, name: "A", summary: "s", stableKey: "a" }],
+      scenarios: [fullScenario(9, "HP-9")],
+      history: [],
+    });
+    expect(ranked.features.map((feature) => feature.id)).toEqual([2, 1]); // 排序在 spec-search 已完成，这里不重排
+    expect(ranked.scenarios).toHaveLength(1);
+    expect(ranked.truncated).toBeUndefined();
+    expect(ranked.detailHint).toContain("get_release");
+    expect(compactSearchProjection({ features: [], scenarios: [], history: [] }).features).toEqual([]);
   });
 });

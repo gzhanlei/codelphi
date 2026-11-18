@@ -6,7 +6,7 @@ import { loadCoverageReceipt } from "../analysis-coverage";
 import { loadCompletenessLedgerBySpecVersion } from "../completeness-ledger";
 import { defaultExecute, type Execute } from "../db";
 import { reconcileRelease, evidencePathsFromSubject as evidencePathsForReconcile } from "./reconcile";
-import { canonicalizeScenarios, paginateById, projectFileRisks } from "./projections";
+import { canonicalizeScenarios, compactSearchProjection, paginateById, projectFileRisks } from "./projections";
 import { buildFeedbackLifecycle, buildReleaseHealth, waitForRelease } from "./operations";
 
 /**
@@ -91,7 +91,7 @@ export const MCP_TOOLS: McpToolDef[] = [
   { name: "get_project_summary", description: "产品概要：描述、功能/场景计数、最新证据覆盖率、最新发布", inputSchema: { type: "object", properties: { slug: { type: "string" } }, required: ["slug"] } },
   { name: "get_feature", description: "按稳定键取功能及其场景（含证据链接）", inputSchema: { type: "object", properties: { slug: { type: "string" }, stableKey: { type: "string" }, view: { type: "string", enum: ["raw", "canonical"] } }, required: ["slug", "stableKey"] } },
   { name: "get_scenario", description: "按功能稳定键 + 场景引用取单个场景（含证据链接）", inputSchema: { type: "object", properties: { slug: { type: "string" }, stableKey: { type: "string" }, reference: { type: "string" } }, required: ["slug", "stableKey", "reference"] } },
-  { name: "search_scenarios", description: "按关键词检索规格原文；scope=current 只看当前，history 只看发布历史，fallback 当前无场景时回退发布历史，all 同时返回。历史结果 source=release，不证明当前仍存在", inputSchema: { type: "object", properties: { slug: { type: "string" }, query: { type: "string" }, scope: { type: "string", enum: ["current", "history", "fallback", "all"] } }, required: ["slug", "query"] } },
+  { name: "search_scenarios", description: "按关键词检索规格（分词召回+相关度排序）；默认返回 top-K 摘要投影（功能名/场景引用/证据路径锚点），场景全文经 get_scenario(stableKey, reference) 深入，发布行为 before/after 经 get_release 展开；scope=current 只看当前，history 只看发布历史，fallback 当前无场景时回退发布历史，all 同时返回；历史结果 source=release，不证明当前仍存在", inputSchema: { type: "object", properties: { slug: { type: "string" }, query: { type: "string" }, scope: { type: "string", enum: ["current", "history", "fallback", "all"] } }, required: ["slug", "query"] } },
   { name: "lookup_by_files", description: "做计划或改文件前必查：按文件路径反查以该文件为证据的功能与场景（爆炸半径；paths 最多 20 个，每功能场景截前 10 条并附真实总数；账本未覆盖的文件返回空）", inputSchema: { type: "object", properties: { slug: { type: "string" }, paths: { type: "array", items: { type: "string" } }, view: { type: "string", enum: ["raw", "canonical", "risk"] } }, required: ["slug", "paths"] } },
   { name: "list_releases", description: "列产品的发布（per-push 一条，docs-only 也有零变化条目；时间倒序，默认 10 条）。push 后用本次 sha 找对应发布", inputSchema: { type: "object", properties: { slug: { type: "string" }, limit: { type: "number" } }, required: ["slug"] } },
   { name: "get_release", description: "单条发布的行为变化清单（含前后差异摘要与证据链接）。push 后对账：与本次提交意图核对，计划外变化要回查报告", inputSchema: { type: "object", properties: { slug: { type: "string" }, releaseId: { type: "number" }, view: { type: "string", enum: ["raw", "canonical"] }, offset: { type: "number" }, limit: { type: "number" } }, required: ["slug", "releaseId"] } },
@@ -309,7 +309,8 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
   if (name === "search_scenarios") {
     const scope = String(args.scope ?? "fallback");
     if (!["current", "history", "fallback", "all"].includes(scope)) throw new Error("invalid scope");
-    return searchBehavior(product.id, String(args.query ?? ""), execute, scope as "current" | "history" | "fallback" | "all");
+    const result = await searchBehavior(product.id, String(args.query ?? ""), execute, scope as "current" | "history" | "fallback" | "all");
+    return compactSearchProjection(result);
   }
 
   if (name === "lookup_by_files") {

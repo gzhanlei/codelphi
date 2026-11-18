@@ -1,3 +1,5 @@
+import type { BehaviorSearchResult } from "../spec-search";
+
 export interface CanonicalScenarioInput {
   id: number;
   featureName: string;
@@ -5,6 +7,53 @@ export interface CanonicalScenarioInput {
   specReference: string;
   evidencePaths: string[];
 }
+
+/** MCP 搜索输出压缩上限：召回池仍按排序取优，但默认只回摘要与定位锚点。 */
+export const SEARCH_FEATURE_LIMIT = 8;
+export const SEARCH_SCENARIO_LIMIT = 10;
+export const SEARCH_HISTORY_LIMIT = 10;
+
+/**
+ * MCP 搜索投影（输出压缩，2026-11-19 价值试点产出）：
+ * 分词召回会放大响应体，默认只回 top-K 摘要与定位锚点（featureStableKey + reference + 证据路径），
+ * 场景全文经 get_scenario、发布行为 before/after 经 get_release 按需展开——控制 agent 上下文负担。
+ * 排序在 spec-search 已完成，这里只裁剪不重排。
+ */
+export function compactSearchProjection(result: BehaviorSearchResult) {
+  const features = result.features.slice(0, SEARCH_FEATURE_LIMIT);
+  const scenarios = result.scenarios.slice(0, SEARCH_SCENARIO_LIMIT).map((scenario) => ({
+    id: scenario.id,
+    featureName: scenario.featureName,
+    featureStableKey: scenario.featureStableKey,
+    reference: scenario.reference,
+    evidence: scenario.evidence.slice(0, 5).map((item) => ({
+      path: item.path,
+      ...(item.startLine === undefined ? {} : { startLine: item.startLine }),
+    })),
+  }));
+  const history = result.history.slice(0, SEARCH_HISTORY_LIMIT).map((entry) => ({
+    source: entry.source,
+    releaseId: entry.releaseId,
+    sha: entry.sha,
+    committedAt: entry.committedAt,
+    specChangeId: entry.specChangeId,
+    kind: entry.kind,
+    featureName: entry.featureName,
+    scenarioReference: entry.scenarioReference,
+    summary: entry.summary,
+  }));
+  const truncated = result.features.length > features.length
+    || result.scenarios.length > scenarios.length
+    || result.history.length > history.length;
+  return {
+    features,
+    scenarios,
+    history,
+    detailHint: "摘要投影：场景全文与完整证据经 get_scenario(stableKey, reference) 深入；发布行为 before/after 经 get_release(releaseId) 展开",
+    ...(truncated ? { truncated: true } : {}),
+  };
+}
+
 
 function nameKey(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
