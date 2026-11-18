@@ -174,7 +174,7 @@
 | 重复确认 | 2 | run.ts ER-4 红线、spec-search scope 语义 |
 | 查询命中 | 3/3 | 裸词策略（tranche 1 教训）生效 |
 | 噪声 | 2 类 | 「密钥」多义混入；**4 功能同指一函数**（账本变体残渣） |
-| 净成本 | ≈120KB ≈30k token | 5 任务 planning |
+| MCP 附加成本（非净成本） | ≈120KB ≈30k token | 5 任务 planning |
 
 ## 累计读数（Tranche 1+2，10 任务）
 
@@ -196,6 +196,65 @@
 
 ---
 
+## Tranche 3（2026-11-18，修复后重测：登录方式改造规划）
+
+**部署基线**：sha-5d0d118 已部署生产（release 279 对账 unexpected=[]）；活体验证——tranche 1 三连空的查询词「反馈裁决 sweep 证据路径 needs_human」现已命中（含目标场景）。
+
+### T18 登录方式改造：Chandler 跳转 OAuth → 自建注册/登录 UI 调 Chandler API —— 初始判断（MCP 前）
+
+- **任务**：把「跳转 Chandler 网站登录」改造为「站内自建注册、登录界面，调用 Chandler API 完成注册与登录」。
+- **影响面猜想（先验，含污染源标注）**：OAuth 回调与安全跳转（lib/oauth.ts:11 safeNextPath、lib/oauth-request.ts:11 parseOAuthCallback——刚才部署验证的 search 白送的）；Chandler 用户令牌持久化与刷新（lib/chandler-token.ts，单连接刷新刚修过）；Chandler 令牌加密密钥环（lib/token-crypto.ts，32 字节 keyring）。会话建立点（cookie/DB session 表）**真未知**；登录页落点（记忆：login/403/terms 为无壳页）。
+- **真未知（重点）**：①Chandler 侧注册/登录 API 形态（password grant？注册端点？）——**账本只记载我们自己的代码，外部 API 契约大概率不在账本内**，预期 MCP 在此处无能为力，须问 Chandler 文档/团队；②会话表/中间件鉴权链的实现位置；③无壳登录页的现有渲染链。
+- **MCP 预期（修复后工具）**：一次宽词查询「登录 注册 会话 OAuth」应召回登录面全部功能（tranche 1 同类查询 3 连空，本次预期 1 查命中）；lookup lib/oauth.ts、lib/chandler-token.ts 应给出红线（safeNextPath 只许站内、令牌 keyring 32 字节、单连接刷新）；AGENTS.md 红线「不新增账号密码体系」被本任务显式推翻，计划中须声明。
+- **拟验证计划**：先确认 Chandler API 契约（外部），再定 UI 落点与会话链改造；令牌持久化/刷新链应零改动复用。
+
+### —— Tranche 3 执行结果（2026-11-18，修复后工具） ——
+
+**调用记录**：search ×1（「登录 注册 会话 OAuth」，~60KB）+ lookup ×2（lib/chandler.ts、lib/oauth-request.ts，各 ~8KB），**合计 3 调用 ≈76KB**。
+
+**召回对比（修复前 vs 后）**：tranche 1 同类定位 6 查 3 空、命中响应 73KB 且 ~80% 无关；本次 **1 查命中 16 功能 + 30 场景**，覆盖整个登录面（Chandler OAuth 登录/OAuth 回调与安全跳转/令牌持久化与刷新/个人工作区引导/登录错误提示/组织邀请/公开页外壳），排序把最相关功能置顶；lookup 响应无重复。**分词+CJK gram+排序+history 去重四项修复全部生效且被账本自动记为新场景**（15483 HP-3/HP-4）。
+
+**计划增量（登录改造的真实收获）**：
+- **独立发现 1 条**：「登录时自动认领无 token 的待处理邀请」（功能 6097 组织邀请与成员加入）——登录链的隐藏业务副作用，自建登录 UI 后必须保留该认领时机；初始判断完全未列出，grep 不可得（语义副作用）。
+- **决策促成 2 条**：①邮箱白名单 assertChandlerAllowed（lib/chandler.ts:37，EC-1 forbidden）在自建注册流中的位置成为显式设计决策（白名单是否拦截注册）；②getValidUserToken 的「4xx 清行引导重登录」语义（lib/chandler-token.ts:120）要求登录错误提示（功能 2623）扩展新错误码并与重登录路径对接。
+- **重复确认 5 条**：parseOAuthCallback/safeNextPath/storeChandlerTokens/getValidUserToken/ensureUserWorkspace 均与先验一致（这些是确认不是发现）。
+- **MCP 盲区确证（预测命中）**：Chandler 注册/登录 API 契约不在账本（账本只记自家代码）——改造计划必须外部求证，MCP 在外部依赖上诚实地无能为力。
+
+**残余噪声（下一轮产品项）**：①令牌功能 ER-1/ER-3 近重复（同文件不同引用，兴替去重管不到——账本侧变体折叠残余的读侧表现）；②分词召回的歧义命中（「注册」一词召回产品注册/业务分组等无关功能）——排序已缓解但未消除。
+
+## Tranche 3 读数与全试点小结（11 任务；2026-11-19 按 Kimi 外评修正口径）
+
+> **修正声明（2026-11-19）**：本节初版有三处口径错误，已按外部评审修正——①T18 成本实为 ≈76KB（初版「≈20KB」为算术错误）；②「成本降为 1/4」撤回（分母不可靠且未测无 MCP 反事实）；③独立发现严格口径重算为 4（T16 漏报已证误报撤回、EC-2 为宽松计入不计入严格头条数）。本节降格为**中期报告**，最终判决须补齐剩余 9 任务或完成决定性对照。
+
+| 指标 | T1-T2（修复前） | T18（修复后） |
+|---|---|---|
+| 定位查询数 | 6 查 3 空 | **1 查命中** |
+| 响应噪声占比 | ~80% / 重复条目 | 低（残渣仅近重复对） |
+| 独立发现（严格口径） | 3（纠先验覆盖/key scope/影子契约；另 EC-2 宽松 1） | 1（邀请认领） |
+| 决策促成 | 4 | 2 |
+| MCP 附加成本 | ≈270KB/10 任务（均值不可靠：含 3 个近零空任务） | ≈76KB/1 任务 |
+
+**已确立的结论**：
+- 决策质量提升是真实且最有说服力的信号——T14 key 无 scope 模型、T15 grantQuotaByEmail 幂等复用、T18 登录邀请认领，都会实质改变设计（避免错误方案进入实现），其价值不是省 token。
+- Face B 有效形态收敛为：**账本覆盖良好的仓库中、供 agent 计划阶段使用的行为约束索引与复用点发现工具**。不是默认编码工作流、不是持续判据、不是外部 API 契约来源。
+- 「有用性是工程变量不是固有属性」成立（修复确实改变了工具产出）。
+
+**未确立、不得宣称的**：
+- 「净收益转正」——只测了 MCP 附加成本，未测无 MCP 反事实（检索+阅读+错误计划+返工总成本）。
+- 「成本降为 1/4」——已撤回；查询 6→1 是真实的，但单次召回变大，上下文成本未必下降。
+- 「最终翻案」——11 任务只能中期结论；预先承诺的停止规则只规定了差则终止，未规定好则提前翻案。
+
+**归因隔离声明**：T18 改善同时混杂了①产品修复②裸词查询策略③工具语义理解加深④任务类型四个变量，不能全部归因于修复。决定性对照设计：干净上下文中对同类规划任务跑「grep/读代码」vs「MCP+grep/读代码」，记录全程 token，由独立评审判遗漏约束/错误假设/复用机会；最优方案是重跑 tranche 1 原始任务。
+
+**下一步（按 Kimi 建议采纳）**：①修正试点账本（本节）②决定性对照实验 ③输出压缩：search 默认 top-K 摘要+stableKey 深入、history 按需展开、红线/约束字段紧凑返回——否则召回越好上下文负担越大。
+
+## 输出压缩落地（2026-11-19，Kimi 建议③）
+
+- **改动**：MCP 边界新增 `compactSearchProjection`（lib/mcp/projections.ts）——features 截 top-8、scenarios 截 top-10（只留 id/featureName/stableKey/reference + 证据 path+startLine 锚点，全文与 url 剥离）、history 截 top-10（**剥离 before/after 正文**，只留定位字段）、附 `detailHint` 指明 get_scenario/get_release 深入路径、截断时 `truncated: true`。`lib/spec-search.ts` 排序与召回语义不动（explainer 等内部调用方不受影响）。
+- **工具描述同步**：search_scenarios 描述更新，明示摘要投影与深入路径。
+- **测试**：mcp-projections 新增 2 用例（top-K 截断+锚点保留+正文剥离+排序不重排+空态 hint）；全量 typecheck/test/build 绿。
+- **未提交未部署**——部署后跑决定性对照（Kimi 建议②：干净上下文重跑 tranche 1 原始任务 ±MCP，全程 token 记录+独立评审）。
+
 ## Tranche 1 中期读数
 
 | 指标 | 计数 | 备注 |
@@ -205,6 +264,6 @@
 | 重复确认 | 3 | 多仓库锚定 ×2、prompt 文件位置 |
 | 无效打扰 | 1 类 | lookup 响应重复条目（系统性，应修） |
 | 查询摩擦 | 3/6 空 | 语义召回对词形敏感 |
-| 净成本 | ≈150KB ≈40k token | 5 任务 planning 阶段；对 agent 是真实上下文成本 |
+| MCP 附加成本（非净成本） | ≈150KB ≈40k token | 5 任务 planning 阶段；对 agent 是真实上下文成本 |
 
 **停止规则判定**：A 层独立发现 ≥1 且决策促成 ≥1 → **不触发终止，继续 tranche 2**。初步结论方向：lookup_by_files（反查）在计划阶段有真实价值且可纠正错误先验；search_scenarios 语义召回是短板（词形敏感 + 历史噪声 + 响应膨胀待修）。
