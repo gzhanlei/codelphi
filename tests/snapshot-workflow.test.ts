@@ -66,6 +66,8 @@ describe("snapshot preparation and finalization", () => {
 
     expect(analysis.result.features.map((feature) => feature.name)).toEqual(["Packaged feature"]);
     expect(analysis.presentation?.coreCapabilities.length).toBeGreaterThan(0);
+    expect(analysis.presentation?.status).toBe("fallback");
+    expect(analysis.warnings.some((warning) => warning.code === "presentation_fallback")).toBe(true);
     expect(analysis.coverage.implFilesAssembled).toBeGreaterThan(0);
     expect(vi.mocked(client.complete).mock.calls[0][0]).toEqual(prepared.workOrders[0].messages);
     await target.cleanup();

@@ -35,6 +35,8 @@ CODELPHI_SKILL_HOST=<your-host-identity> node "<skill-directory>/scripts/snapsho
 
 Set `CODELPHI_SKILL_HOST` to the identity of the host you are running in (`claude-code`, `codex`, `gemini`, `cursor`, `kimi`, `qwen`, `opencode`, `antigravity`) so the command may use that host's own headless CLI as a completion backend; leave it unset to disable CLI autodetect. The command detects a backend in order: explicit standalone AI configuration (`--env-file` or `AI_API_KEY`/`AI_MODEL`), a host-injected bridge (`CODELPHI_HOST_AI_BRIDGE_URL`/`TOKEN` or `CODELPHI_HOST_AI_COMMAND`/`CODELPHI_HOST_AI_ARGS_JSON`), then the current host's own headless CLI (matched only against `CODELPHI_SKILL_HOST`, never across vendors). If it reports no available backend, fall back to the agent flow below.
 
+After the partition results are complete, the same command also generates and validates `presentation.json`: the product-domain map, evidence-linked user journeys, and domain concepts. Existing partition results are reused rather than extracted again.
+
 For every `work-orders/<partition-id>.json`:
 
 1. Run `node "<skill-directory>/scripts/snapshot.cjs" show --workdir <work-directory> --partition <partition-id>` and use the returned work order. This refreshes feature-name continuity from completed results.
@@ -44,6 +46,8 @@ For every `work-orders/<partition-id>.json`:
 
 Do not invent source evidence, emit Markdown fences, skip partitions, or write a report yourself. If a result is invalid, fix only that partition's result.
 
+After all partition results exist, run the same `complete` command once. It reuses every existing partition result and only generates the presentation. If presentation generation or validation fails, finalization visibly degrades to a complete feature index instead of presenting alphabetically selected features as core capabilities.
+
 ## 4. Finalize the report
 
 After all results exist, run:
@@ -52,7 +56,7 @@ After all results exist, run:
 node "<skill-directory>/scripts/snapshot.cjs" finalize --workdir <work-directory>
 ```
 
-The CLI applies the shared schema, evidence validation, merge, deterministic presentation, and HTML renderer. It rejects missing, duplicate, invalid, or contract-incompatible results without emitting a success report.
+The CLI applies the shared schema, evidence validation, merge, saved presentation validation, and HTML renderer. It rejects missing, duplicate, invalid, or contract-incompatible results without emitting a success report.
 
 Return only the clickable path to `<work-directory>/radar.html` in the invocation language. The work directory and intermediate JSON are not deliverables.
 
@@ -64,4 +68,4 @@ Use standalone mode only when the user explicitly chooses it or supplies `--env-
 node "<skill-directory>/scripts/snapshot.cjs" <target> --standalone --language <zh-CN|en> --output <report.html>
 ```
 
-Standalone uses `AI_BASE_URL`, `AI_API_KEY`, and `AI_MODEL`; never print those credentials. Do not silently fall back to standalone when host-native work orders are available.
+Standalone uses `AI_BASE_URL`, `AI_API_KEY`, and `AI_MODEL`; never print those credentials. `AI_TIMEOUT_MS` controls the request timeout. When usage accounting is requested, set `CODELPHI_USAGE_LOG` to a JSONL path to record each successful call's duration, request id, model, and raw gateway usage; the log contains no credentials. Do not silently fall back to standalone when host-native work orders are available.

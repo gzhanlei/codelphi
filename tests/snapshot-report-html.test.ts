@@ -12,6 +12,19 @@ function report(): SnapshotReportData {
   return value;
 }
 
+function generatedReport(): SnapshotReportData {
+  const value = report();
+  value.presentation = {
+    status: "generated",
+    tagline: "Understand any repository through portable, evidence-linked product maps.",
+    coreCapabilities: [{ id: "capability-1", name: "Portable product understanding", summary: "Turn repository behavior into a report.", featureNames: ["Product snapshots"], scenarioRefs: [{ featureName: "Product snapshots", reference: "HP-1" }] }],
+    journeys: [{ id: "journey-1", name: "Create and verify a snapshot", evidenceStatus: "scenario_composition", steps: [{ featureName: "Product snapshots", reference: "HP-1" }, { featureName: "Product snapshots", reference: "ER-1" }] }],
+    concepts: [{ id: "concept-1", name: "Snapshot", summary: "A portable view of product behavior.", scenarioRefs: [{ featureName: "Product snapshots", reference: "HP-1" }], relations: [{ targetName: "Source evidence", summary: "Supports the snapshot with traceable code", scenarioRef: { featureName: "Product snapshots", reference: "HP-1" } }] }, { id: "concept-2", name: "Source evidence", summary: "The code behind a reported behavior.", scenarioRefs: [{ featureName: "Product snapshots", reference: "HP-1" }], relations: [] }],
+  };
+  value.codebaseNavigation = [{ path: "src", featureNames: ["Product snapshots"], scenarioCount: 2, evidencePathCount: 2 }];
+  return value;
+}
+
 describe("single-file snapshot HTML", () => {
   it("renders product, features, scenarios, evidence and coverage without continuous-analysis workflows", () => {
     const html = renderSnapshotHtml(report());
@@ -25,8 +38,8 @@ describe("single-file snapshot HTML", () => {
     expect(html).not.toContain("Pull request");
   });
 
-  it("prioritizes core capabilities and typical use before full specifications and collapsed evidence", () => {
-    const html = renderSnapshotHtml(report());
+  it("prioritizes the project map and typical use before full specifications and collapsed evidence", () => {
+    const html = renderSnapshotHtml(generatedReport());
     const core = html.indexOf('id="core-capabilities"');
     const journeys = html.indexOf('id="journeys"');
     const specification = html.indexOf('id="specification"');
@@ -37,10 +50,43 @@ describe("single-file snapshot HTML", () => {
     expect(specification).toBeGreaterThan(journeys);
     expect(evidence).toBeGreaterThan(specification);
     expect(boundaries).toBeGreaterThan(evidence);
-    expect(html).toContain("Core capabilities");
+    expect(html).toContain("Project map");
     expect(html).toContain("Typical ways to use it");
     expect(html).toContain("Full product specification");
     expect(html).toContain('<details class="evidence-drawer report-section" id="evidence">');
+  });
+
+  it("renders evidence-linked domains, ordered journeys, concepts and codebase navigation", () => {
+    const html = renderSnapshotHtml(generatedReport());
+    expect(html).toContain("Understand any repository through portable, evidence-linked product maps.");
+    expect(html).toContain("Portable product understanding");
+    expect(html).toContain("unique feature assignment validated");
+    expect(html).toContain("Source-backed AI candidates");
+    expect(html).toContain('<ol class="journey-steps">');
+    expect(html).toContain('href="#feature-0-scenario-0"');
+    expect(html).toContain("Create and verify a snapshot");
+    expect(html).toContain("step order and cross-step dependencies unverified");
+    expect(html).toContain("Starting point");
+    expect(html).toContain("A user provides a Git repository");
+    expect(html).toContain("Final outcome");
+    expect(html).toContain("The command fails without a success report");
+    expect(html).toContain("Snapshot");
+    expect(html).toContain("Supports the snapshot with traceable code");
+    expect(html).toContain("relation types and defining evidence unverified");
+    expect(html).toContain('id="codebase-navigation"');
+    expect(html).toContain("Evidence code index");
+    expect(html).toContain("Deterministic from evidence paths");
+    expect(html).toContain("not a module-responsibility map");
+    expect(html).toContain('<code>src</code>');
+    expect(html).toContain("2 linked scenarios");
+  });
+
+  it("labels degraded presentation as a feature index and does not invent journeys", () => {
+    const html = renderSnapshotHtml(report());
+    expect(html).toContain("Complete feature index");
+    expect(html).toContain("Smart project mapping is unavailable");
+    expect(html).not.toContain('id="journeys"');
+    expect(html).toContain("Feature index");
   });
 
   it("folds each feature specification behind a details/summary while keeping the name visible", () => {
@@ -60,7 +106,9 @@ describe("single-file snapshot HTML", () => {
     const input = report();
     input.effectiveCoverage = { filesAssembled: 1, filesTotal: 4, ratio: 0.25, dataFilesAssembled: 0, excludedDataFiles: 206, excludedOtherFiles: 0, rawFilesTotal: 210 };
     const html = renderSnapshotHtml(input);
-    expect(html).toContain("Effective source coverage");
+    expect(html).toContain("Source input coverage");
+    expect(html).toContain("assembled into analysis partitions");
+    expect(html).toContain("not product-feature coverage, behavioral-evidence coverage, correctness, or test coverage");
     expect(html).toContain("25.0%");
     expect(html).toContain("206");
     expect(html).toContain("not included in the denominator");
@@ -84,6 +132,14 @@ describe("single-file snapshot HTML", () => {
     expect(chinese).toContain("未提交");
     expect(chinese).toContain('aria-label="快照导航"');
     expect(chinese).not.toContain("Search features or scenarios");
+
+    const chineseGenerated = generatedReport();
+    chineseGenerated.language = "zh-CN";
+    const chineseUnderstanding = renderSnapshotHtml(chineseGenerated);
+    expect(chineseUnderstanding).toContain("步骤顺序与跨步骤依赖未验证");
+    expect(chineseUnderstanding).toContain("证据代码索引");
+    expect(chineseUnderstanding).toContain("起始条件");
+    expect(chineseUnderstanding).toContain("最终结果");
   });
 
   it("renders a bilingual continuous-analysis call to action after boundaries and before the footer", () => {

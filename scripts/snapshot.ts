@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { link, lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { appendFile, link, lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { runSnapshot, type SnapshotRunOptions, type SnapshotRunResult } from "../lib/snapshot/run";
 import { completeSnapshotWorkspace, finalizeSnapshotWorkspace, prepareSnapshotWorkspace, readSnapshotWorkOrder } from "../lib/snapshot/workspace";
 import { resolveCompletionBackend } from "../lib/snapshot/host-ai";
-import { standaloneGatewayHost } from "../lib/llm-client";
+import { standaloneGatewayHost, type CompletionUsageHandler } from "../lib/llm-client";
 import type { SnapshotProgressEvent } from "../lib/snapshot/types";
 
 class SnapshotCliError extends Error {
@@ -132,15 +132,15 @@ function progressReporter(language: "zh-CN" | "en", stderr: (message: string) =>
       return;
     }
     if (event.stage === "presentation" && event.status === "start") {
-      stderr(language === "en" ? "Grouping core capabilities..." : "正在归组核心能力……");
+      stderr(language === "en" ? "Building the project map, journeys, and concepts..." : "正在生成项目地图、用户旅程与概念关系……");
       return;
     }
     if (event.stage === "presentation" && event.status === "complete") {
-      stderr(language === "en" ? `Core capabilities completed in ${seconds(event.durationMs)}s` : `核心能力归组完成，耗时 ${seconds(event.durationMs)} 秒`);
+      stderr(language === "en" ? `Project map completed in ${seconds(event.durationMs)}s` : `项目地图生成完成，耗时 ${seconds(event.durationMs)} 秒`);
       return;
     }
     if (event.stage === "presentation" && event.status === "fallback") {
-      stderr(language === "en" ? `Presentation grouping failed validation; using fallback in ${seconds(event.durationMs)}s` : `核心能力归组未通过校验，使用回退投影（耗时 ${seconds(event.durationMs)} 秒）`);
+      stderr(language === "en" ? `Presentation validation failed; using the complete feature index in ${seconds(event.durationMs)}s` : `展示结果未通过校验，使用完整功能索引（耗时 ${seconds(event.durationMs)} 秒）`);
     }
   };
 }
@@ -203,7 +203,14 @@ async function workspaceMain(argv: string[], dependencies: CliDependencies) {
           if (environment[key] === undefined && parsed[key] !== undefined) environment[key] = parsed[key];
         }
       }
-      const backend = resolveCompletionBackend({ environment, standalone: values.standalone === true || Boolean(values["env-file"]), host: environment.CODELPHI_SKILL_HOST?.trim() });
+      const usageLog = environment.CODELPHI_USAGE_LOG?.trim();
+      let pendingUsageWrites: Promise<void> = Promise.resolve();
+      const onUsage: CompletionUsageHandler | undefined = usageLog ? (usage, metadata) => {
+        const record = { timestamp: new Date().toISOString(), model: environment.AI_MODEL, requestId: metadata.requestId, durationMs: metadata.durationMs, usage };
+        pendingUsageWrites = pendingUsageWrites.then(() => appendFile(resolve(usageLog), `${JSON.stringify(record)}\n`, "utf8"));
+        return pendingUsageWrites;
+      } : undefined;
+      const backend = resolveCompletionBackend({ environment, standalone: values.standalone === true || Boolean(values["env-file"]), host: environment.CODELPHI_SKILL_HOST?.trim(), ...(onUsage ? { onUsage } : {}) });
       if (backend.kind === "unavailable") {
         stderr(language === "en"
           ? `No completion backend available.\n  Tried:\n    - ${backend.reasons.join("\n    - ")}\n  Options: (1) pass --env-file or set AI_API_KEY/AI_MODEL for standalone; (2) have the host inject CODELPHI_HOST_AI_BRIDGE_URL/TOKEN or CODELPHI_HOST_AI_COMMAND (+CODELPHI_HOST_AI_ARGS_JSON); (3) run the host-native agent flow (SKILL.md step 3).`
@@ -219,9 +226,10 @@ async function workspaceMain(argv: string[], dependencies: CliDependencies) {
         concurrency: Number(values.concurrency) || 4,
         onProgress: (message) => stderr(message),
       });
+      await pendingUsageWrites;
       stdout(language === "en"
-        ? `Complete finished: ${outcome.completed.length} completed, ${outcome.failed.length} failed, ${outcome.skippedExisting} reused`
-        : `完成结束：${outcome.completed.length} 个成功，${outcome.failed.length} 个失败，复用已有 ${outcome.skippedExisting} 个`);
+        ? `Complete finished: ${outcome.completed.length} completed, ${outcome.failed.length} failed, ${outcome.skippedExisting} reused; presentation: ${outcome.presentation}`
+        : `完成结束：${outcome.completed.length} 个成功，${outcome.failed.length} 个失败，复用已有 ${outcome.skippedExisting} 个；展示结果：${outcome.presentation}`);
       return outcome.failed.length > 0 ? 1 : 0;
     }
     if (command === "finalize" && positionals.length === 0) {

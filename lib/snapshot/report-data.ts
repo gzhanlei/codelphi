@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { AnalysisResult } from "../ai";
-import type { SnapshotAnalysis, SnapshotEvidenceSnippet, SnapshotReportData, SnapshotWarning } from "./types";
+import type { SnapshotAnalysis, SnapshotCodebaseArea, SnapshotEvidenceSnippet, SnapshotReportData, SnapshotWarning } from "./types";
 import { fallbackSnapshotPresentation } from "./presentation";
 
 interface NumberedLine {
@@ -97,6 +97,33 @@ function excerpt(lines: NumberedLine[], reference: EvidenceReference, maxLines: 
   return { lines: selected, truncated, unavailable: false };
 }
 
+function codebaseNavigation(features: AnalysisResult["features"]): SnapshotCodebaseArea[] {
+  const areas = new Map<string, { features: Set<string>; scenarios: Set<string>; evidencePaths: Set<string> }>();
+  for (const feature of features) {
+    for (const scenario of feature.scenarios) {
+      for (const evidence of scenario.evidence) {
+        const segments = evidence.path.split("/");
+        segments.pop();
+        const path = segments.join("/") || ".";
+        const area = areas.get(path) ?? { features: new Set<string>(), scenarios: new Set<string>(), evidencePaths: new Set<string>() };
+        area.features.add(feature.name);
+        area.scenarios.add(`${feature.name}\0${scenario.reference}`);
+        area.evidencePaths.add(evidence.path);
+        areas.set(path, area);
+      }
+    }
+  }
+  return [...areas.entries()]
+    .sort(([pathA, a], [pathB, b]) => b.features.size - a.features.size || b.scenarios.size - a.scenarios.size || pathA.localeCompare(pathB))
+    .slice(0, 8)
+    .map(([path, area]) => ({
+      path,
+      featureNames: features.map((feature) => feature.name).filter((name) => area.features.has(name)),
+      scenarioCount: area.scenarios.size,
+      evidencePathCount: area.evidencePaths.size,
+    }));
+}
+
 export function buildSnapshotReportData(analysis: SnapshotAnalysis, budgets: Partial<SnapshotEvidenceBudgets> = {}): SnapshotReportData {
   const limits = { ...defaultBudgets, ...budgets };
   const sources = numberedSources(analysis);
@@ -146,6 +173,7 @@ export function buildSnapshotReportData(analysis: SnapshotAnalysis, budgets: Par
     },
     features: analysis.result.features,
     presentation: analysis.presentation ?? fallbackSnapshotPresentation(analysis.result, analysis.language),
+    codebaseNavigation: codebaseNavigation(analysis.result.features),
     evidenceSnippets: snippets,
     coverage: analysis.coverage,
     ...(analysis.effectiveCoverage ? { effectiveCoverage: analysis.effectiveCoverage } : {}),

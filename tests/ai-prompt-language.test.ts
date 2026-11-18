@@ -37,6 +37,15 @@ describe("bilingual prompt assembly (EN output mode)", () => {
     expect(systemPrompt("en")).toMatch(/rigorous code analyzer/);
   });
 
+  it("requires non-empty internal release metadata without re-enabling release-note generation", () => {
+    const english = extractionInstructionLines("en", { coverageMandate: "cover" }).join("\n");
+    const chinese = extractionInstructionLines("zh-CN", { coverageMandate: "覆盖" }).join("\n");
+    expect(english).toContain("release.title and release.summary must be non-empty internal extraction metadata, not final release notes");
+    expect(chinese).toContain("release.title 和 release.summary 必须是非空的内部分区元数据，不是最终发布说明");
+    expect(english).toContain("changes is reserved for kind=reviewed");
+    expect(chinese).toContain("changes 仅用于 kind=reviewed");
+  });
+
   it("renders anchor, continuity, scope and partition sections in the requested language", () => {
     const anchorEn = specAnchoringSection(
       [{ name: "Login", summary: "OAuth sign-in", scenarios: [{ reference: "HP-1", context: "Visitor", action: "Signs in", outcome: "Dashboard", category: "happy" }] }],

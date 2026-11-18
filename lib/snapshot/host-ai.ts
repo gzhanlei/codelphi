@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { constants } from "node:fs";
 import { accessSync, existsSync } from "node:fs";
 import { delimiter, join } from "node:path";
-import { createHostBridgeClient, createStandaloneClientFromEnv, SnapshotLlmConfigurationError, type StructuredCompletionClient, type StructuredCompletionMessage } from "../llm-client";
+import { createHostBridgeClient, createStandaloneClientFromEnv, SnapshotLlmConfigurationError, type CompletionUsageHandler, type StructuredCompletionClient, type StructuredCompletionMessage } from "../llm-client";
 
 /**
  * complete 通道探测链（按优先级）：
@@ -290,6 +290,7 @@ export function resolveCompletionBackend(options: {
   standalone?: boolean;
   host?: string;
   pathEnv?: string;
+  onUsage?: CompletionUsageHandler;
 }): CompletionBackend {
   const environment = options.environment;
   const reasons: string[] = [];
@@ -297,7 +298,7 @@ export function resolveCompletionBackend(options: {
   const standaloneConfigured = Boolean(environment.AI_API_KEY?.trim() && environment.AI_MODEL?.trim());
   if (standaloneRequested || standaloneConfigured) {
     try {
-      return { kind: "standalone", client: createStandaloneClientFromEnv(environment) };
+      return { kind: "standalone", client: createStandaloneClientFromEnv(environment, { ...(options.onUsage ? { onUsage: options.onUsage } : {}) }) };
     } catch (error) {
       if (error instanceof SnapshotLlmConfigurationError && !standaloneRequested) {
         reasons.push("standalone AI configuration incomplete");

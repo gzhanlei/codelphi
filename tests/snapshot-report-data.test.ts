@@ -77,6 +77,31 @@ describe("snapshot report data", () => {
     expect(scenarioSnippet?.sourceUrl).not.toContain("evil.test");
   });
 
+  it("builds deterministic codebase navigation from evidence directories and linked features", () => {
+    const input = result();
+    input.features[0].scenarios[0].evidence = [{ path: "src/domain/accounts.ts", startLine: 2 }];
+    input.features.push({
+      name: "Transaction import",
+      summary: "Imports transactions",
+      scenarios: [{ reference: "HP-1", context: "A user", action: "Imports", outcome: "Transactions appear", category: "happy", evidence: [{ path: "src/domain/transactions.ts", startLine: 2 }, { path: "src/jobs/import.ts", startLine: 2 }] }],
+    });
+    const report = buildSnapshotReportData(analysis(input));
+    expect(report.codebaseNavigation[0]).toEqual({ path: "src/domain", featureNames: ["Feature", "Transaction import"], scenarioCount: 2, evidencePathCount: 2 });
+    expect(report.codebaseNavigation[1]).toEqual({ path: "src/jobs", featureNames: ["Transaction import"], scenarioCount: 1, evidencePathCount: 1 });
+  });
+
+  it("keeps monorepo package evidence in distinct navigation areas", () => {
+    const input = result();
+    input.features[0].scenarios[0].evidence = [{ path: "packages/web/src/export.ts", startLine: 2 }];
+    input.features.push({
+      name: "Worker import",
+      summary: "Imports in the worker package",
+      scenarios: [{ reference: "HP-1", context: "A job", action: "Imports", outcome: "Records appear", category: "happy", evidence: [{ path: "packages/worker/src/import.ts", startLine: 2 }] }],
+    });
+    const report = buildSnapshotReportData(analysis(input));
+    expect(report.codebaseNavigation.map((area) => area.path)).toEqual(["packages/web/src", "packages/worker/src"]);
+  });
+
   it("drops an untraceable product description instead of presenting it as fact", () => {
     const input = result();
     input.product.evidence = [];

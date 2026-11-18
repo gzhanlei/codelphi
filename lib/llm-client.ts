@@ -20,12 +20,20 @@ export class SnapshotLlmConfigurationError extends Error {
   }
 }
 
+export interface CompletionUsageMetadata {
+  requestId: string | null;
+  durationMs: number;
+}
+
+export type CompletionUsageHandler = (usage: unknown, metadata: CompletionUsageMetadata) => void | Promise<void>;
+
 export interface OpenAICompatibleClientOptions {
   baseUrl?: string;
   apiKey: string;
   model: string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  onUsage?: CompletionUsageHandler;
 }
 
 function completionsUrl(baseUrl: string | undefined) {
@@ -41,6 +49,7 @@ export function createOpenAICompatibleClient(options: OpenAICompatibleClientOpti
   return {
     displayName: options.model,
     async complete(messages) {
+      const startedAt = Date.now();
       const response = await request(completionsUrl(options.baseUrl), {
         method: "POST",
         headers: {
@@ -52,15 +61,16 @@ export function createOpenAICompatibleClient(options: OpenAICompatibleClientOpti
         signal: AbortSignal.timeout(options.timeoutMs ?? 180_000),
       });
       if (!response.ok) throw new Error(`AI gateway returned HTTP ${response.status}`);
-      const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+      const payload = await response.json() as { id?: string; choices?: Array<{ message?: { content?: string } }>; usage?: unknown };
       const content = payload.choices?.[0]?.message?.content;
       if (!content) throw new Error("AI gateway returned empty content");
+      await options.onUsage?.(payload.usage ?? null, { requestId: payload.id ?? null, durationMs: Date.now() - startedAt });
       return content;
     },
   };
 }
 
-export function createStandaloneClientFromEnv(environment: Record<string, string | undefined>): StructuredCompletionClient {
+export function createStandaloneClientFromEnv(environment: Record<string, string | undefined>, options: Pick<OpenAICompatibleClientOptions, "onUsage"> = {}): StructuredCompletionClient {
   const missing = ["AI_API_KEY", "AI_MODEL"].filter((name) => !environment[name]?.trim());
   if (missing.length > 0) {
     throw new SnapshotLlmConfigurationError("missing_ai_config", `Missing standalone AI configuration: ${missing.join(", ")}`);
@@ -69,6 +79,8 @@ export function createStandaloneClientFromEnv(environment: Record<string, string
     baseUrl: environment.AI_BASE_URL,
     apiKey: environment.AI_API_KEY!,
     model: environment.AI_MODEL!,
+    timeoutMs: Number(environment.AI_TIMEOUT_MS) || 180_000,
+    ...(options.onUsage ? { onUsage: options.onUsage } : {}),
   });
 }
 

@@ -3,6 +3,7 @@ import { basename, dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { buildAnalysisMessages, parseAnalysisContent } from "../ai";
 import { CONTRACT_VERSION, type ExtractionWorkOrder } from "../extraction-contract";
+import { mergeChunkResults } from "../extraction-merge";
 import type { StructuredCompletionClient } from "../llm-client";
 import { sanitizeEvidence } from "../extraction-pass";
 import type { AnalysisPartition } from "../remote-analysis";
@@ -11,6 +12,7 @@ import { resolveGitSnapshot, createLocalGitBackend } from "./git-backend";
 import { buildSnapshotReportData } from "./report-data";
 import { renderSnapshotHtml } from "./report-html";
 import { resolveSnapshotTarget } from "./target";
+import { createSnapshotPresentation } from "./presentation";
 import type { SnapshotIdentity } from "./types";
 import { finalizeSnapshotAnalysis, prepareSnapshotAnalysis, type PreparedSnapshotAnalysis, type PrepareSnapshotAnalysisOptions, type SnapshotExecution } from "./workflow";
 
@@ -126,10 +128,7 @@ async function preparedFromManifest(directory: string, manifest: SnapshotManifes
   };
 }
 
-export async function finalizeSnapshotWorkspace(directory: string) {
-  const manifest = await readManifest(directory);
-  if (manifest.contractVersion !== CONTRACT_VERSION) throw new Error(`Unsupported extraction contract version: ${manifest.contractVersion}`);
-  const prepared = await preparedFromManifest(directory, manifest);
+async function readSnapshotExecutions(directory: string, prepared: PreparedSnapshotAnalysis): Promise<SnapshotExecution[]> {
   const executions: SnapshotExecution[] = [];
   const missing: string[] = [];
   for (const workOrder of prepared.workOrders) {
@@ -144,7 +143,30 @@ export async function finalizeSnapshotWorkspace(directory: string) {
     }
   }
   if (missing.length > 0) throw new Error(`Missing snapshot results: ${missing.join(", ")}`);
-  const analysis = await finalizeSnapshotAnalysis(prepared, executions, { modelName: manifest.modelName });
+  return executions;
+}
+
+async function readStoredPresentation(directory: string): Promise<unknown> {
+  try {
+    const content = await readFile(join(directory, "presentation.json"), "utf8");
+    try {
+      return JSON.parse(content) as unknown;
+    } catch {
+      return content;
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
+export async function finalizeSnapshotWorkspace(directory: string) {
+  const manifest = await readManifest(directory);
+  if (manifest.contractVersion !== CONTRACT_VERSION) throw new Error(`Unsupported extraction contract version: ${manifest.contractVersion}`);
+  const prepared = await preparedFromManifest(directory, manifest);
+  const executions = await readSnapshotExecutions(directory, prepared);
+  const storedPresentation = await readStoredPresentation(directory);
+  const analysis = await finalizeSnapshotAnalysis(prepared, executions, { modelName: manifest.modelName, ...(storedPresentation !== undefined ? { presentation: storedPresentation } : {}) });
   const report = buildSnapshotReportData(analysis);
   const html = renderSnapshotHtml(report);
   const outputPath = join(directory, "radar.html");
@@ -161,7 +183,7 @@ export async function readSnapshotWorkOrder(directory: string, workOrderId: stri
   for (const id of manifest.workOrderIds) {
     if (id === workOrderId) break;
     try {
-      const result = JSON.parse(await readFile(join(directory, "results", `${id}.json`), "utf8"));
+      const result = parseAnalysisContent(await readFile(join(directory, "results", `${id}.json`), "utf8"));
       for (const feature of result.features ?? []) previousFeatureNames.push(String(feature.name));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
@@ -187,6 +209,7 @@ export interface CompleteSnapshotWorkspaceOutcome {
   completed: string[];
   failed: string[];
   skippedExisting: number;
+  presentation: "completed" | "reused" | "fallback" | "not_ready";
 }
 
 /**
@@ -236,5 +259,25 @@ export async function completeSnapshotWorkspace(options: CompleteSnapshotWorkspa
     }
   };
   await Promise.all(Array.from({ length: Math.min(Math.max(1, options.concurrency ?? 4), todo.length || 1) }, () => worker()));
-  return { completed, failed, skippedExisting: skippedExisting.length };
+  let presentation: CompleteSnapshotWorkspaceOutcome["presentation"] = "not_ready";
+  if (failed.length === 0) {
+    if (await readStoredPresentation(options.directory) !== undefined) {
+      presentation = "reused";
+    } else {
+      try {
+        const manifest = await readManifest(options.directory);
+        const prepared = await preparedFromManifest(options.directory, manifest);
+        const executions = await readSnapshotExecutions(options.directory, prepared);
+        const result = mergeChunkResults(executions.map((execution) => ({ result: execution.result })));
+        const value = await createSnapshotPresentation({ result, language: manifest.outputLanguage, client: options.client });
+        await writeAtomically(join(options.directory, "presentation.json"), JSON.stringify(value, null, 2), true);
+        presentation = "completed";
+        options.onProgress?.("presentation: completed");
+      } catch (error) {
+        presentation = "fallback";
+        options.onProgress?.(`presentation: fallback: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+  return { completed, failed, skippedExisting: skippedExisting.length, presentation };
 }

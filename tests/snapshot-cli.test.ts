@@ -123,7 +123,7 @@ describe("snapshot CLI", () => {
     expect(messages.join("\n")).toContain("共 2 个分区");
     expect(messages.join("\n")).toContain("分区 1/2：开始提取");
     expect(messages.join("\n")).toContain("完成，耗时 1.2 秒，重试 1 次");
-    expect(messages.join("\n")).toContain("核心能力归组完成");
+    expect(messages.join("\n")).toContain("项目地图生成完成");
   });
 
   it("uses an atomic no-clobber write for a new report", async () => {

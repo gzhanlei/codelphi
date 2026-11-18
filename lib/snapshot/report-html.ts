@@ -1,7 +1,7 @@
 import { snapshotEvidenceId } from "./report-data";
 import { fallbackSnapshotPresentation } from "./presentation";
 import { REPORT_COPY, REPORT_SCRIPT, REPORT_STYLES, type ReportCopy } from "./report-assets";
-import type { SnapshotCoreCapability, SnapshotEvidenceSnippet, SnapshotReportData, SnapshotWarning } from "./types";
+import type { SnapshotCoreCapability, SnapshotEvidenceSnippet, SnapshotReportData, SnapshotScenarioRef, SnapshotWarning } from "./types";
 
 function escapeHtml(value: unknown) {
   return String(value ?? "").replace(/[&<>"']/g, (character) => ({
@@ -81,33 +81,65 @@ function number(value: number, language: SnapshotReportData["language"]) {
   return new Intl.NumberFormat(language).format(value);
 }
 
+interface IndexedScenario {
+  scenario: SnapshotReportData["features"][number]["scenarios"][number];
+  featureIndex: number;
+  scenarioIndex: number;
+}
+
 function scenarioIndex(report: SnapshotReportData) {
-  const scenarios = new Map<string, SnapshotReportData["features"][number]["scenarios"][number]>();
-  for (const feature of report.features) {
-    for (const scenario of feature.scenarios) scenarios.set(`${feature.name}\0${scenario.reference}`, scenario);
+  const scenarios = new Map<string, IndexedScenario>();
+  for (const [featureIndex, feature] of report.features.entries()) {
+    for (const [scenarioIndex, scenario] of feature.scenarios.entries()) scenarios.set(`${feature.name}\0${scenario.reference}`, { scenario, featureIndex, scenarioIndex });
   }
   return scenarios;
 }
 
+function scenarioRefLink(ref: SnapshotScenarioRef, scenarios: Map<string, IndexedScenario>) {
+  const indexed = scenarios.get(`${ref.featureName}\0${ref.reference}`);
+  if (!indexed) return "";
+  return `<a href="#feature-${indexed.featureIndex}-scenario-${indexed.scenarioIndex}">${escapeHtml(ref.featureName)} · ${escapeHtml(ref.reference)}</a>`;
+}
+
 function renderCapability(capability: SnapshotCoreCapability, report: SnapshotReportData, copy: ReportCopy) {
-  const firstFeature = report.features.findIndex((feature) => feature.name === capability.featureNames[0]);
+  const features = capability.featureNames.flatMap((name) => {
+    const index = report.features.findIndex((feature) => feature.name === name);
+    return index >= 0 ? [{ name, index }] : [];
+  });
   return `<article class="capability-card">
   <h3>${escapeHtml(capability.name)}</h3>
   <p>${escapeHtml(capability.summary)}</p>
-  ${firstFeature >= 0 ? `<a href="#spec-feature-${firstFeature}">${number(capability.featureNames.length, report.language)} · ${escapeHtml(copy.specifications)}</a>` : ""}
+  <details class="capability-features"><summary>${number(features.length, report.language)} · ${escapeHtml(copy.specifications)}</summary><ul>${features.map((feature) => `<li><a href="#spec-feature-${feature.index}">${escapeHtml(feature.name)}</a></li>`).join("")}</ul></details>
 </article>`;
 }
 
-function renderJourneys(capabilities: SnapshotCoreCapability[], report: SnapshotReportData) {
+function renderJourneys(report: SnapshotReportData, copy: ReportCopy, snippets: Map<string, SnapshotEvidenceSnippet>) {
   const scenarios = scenarioIndex(report);
-  return capabilities.map((capability) => {
-    const selected = capability.scenarioRefs.flatMap((ref) => {
-      const scenario = scenarios.get(`${ref.featureName}\0${ref.reference}`);
-      return scenario ? [scenario] : [];
-    }).slice(0, 2);
-    if (selected.length === 0) return "";
-    return `<article class="journey-card"><p class="journey-capability">${escapeHtml(capability.name)}</p><div class="journey-steps">${selected.map((scenario) => `<div class="journey-step"><h3>${escapeHtml(scenario.outcome)}</h3><p>${escapeHtml(scenario.context)}</p><p>${escapeHtml(scenario.action)}</p></div>`).join("")}</div></article>`;
+  return (report.presentation?.journeys ?? []).map((journey) => {
+    const steps = journey.steps.flatMap((ref) => {
+      const indexed = scenarios.get(`${ref.featureName}\0${ref.reference}`);
+      return indexed ? [{ ref, indexed }] : [];
+    });
+    if (steps.length === 0) return "";
+    const startingPoint = steps[0].indexed.scenario.context;
+    const finalOutcome = steps.at(-1)!.indexed.scenario.outcome;
+    return `<article class="journey-card"><h3>${escapeHtml(journey.name)}</h3><div class="journey-summary"><p><strong>${escapeHtml(copy.startingPoint)}</strong>${escapeHtml(startingPoint)}</p><p><strong>${escapeHtml(copy.finalOutcome)}</strong>${escapeHtml(finalOutcome)}</p></div><ol class="journey-steps">${steps.map(({ ref, indexed }) => `<li class="journey-step"><h3>${escapeHtml(indexed.scenario.outcome)}</h3><p>${escapeHtml(indexed.scenario.context)}</p><p>${escapeHtml(indexed.scenario.action)}</p>${scenarioRefLink(ref, scenarios)}<div class="evidence-links">${renderEvidenceLinks(indexed.scenario.evidence, snippets)}</div></li>`).join("")}</ol></article>`;
   }).join("");
+}
+
+function renderCodebaseNavigation(report: SnapshotReportData, copy: ReportCopy) {
+  return (report.codebaseNavigation ?? []).map((area) => {
+    const features = area.featureNames.flatMap((name) => {
+      const index = report.features.findIndex((feature) => feature.name === name);
+      return index >= 0 ? [{ name, index }] : [];
+    });
+    return `<li class="code-area" role="listitem"><code>${escapeHtml(area.path)}</code><p>${number(area.scenarioCount, report.language)} ${escapeHtml(copy.linkedScenarios)} · ${number(area.evidencePathCount, report.language)} ${escapeHtml(copy.evidenceFiles)}</p><div class="code-area-links">${features.map((feature) => `<a href="#spec-feature-${feature.index}">${escapeHtml(feature.name)}</a>`).join("")}</div></li>`;
+  }).join("");
+}
+
+function renderConcepts(report: SnapshotReportData) {
+  const scenarios = scenarioIndex(report);
+  return (report.presentation?.concepts ?? []).map((concept) => `<article class="concept-card"><h3>${escapeHtml(concept.name)}</h3><p>${escapeHtml(concept.summary)}</p><div class="evidence-links">${concept.scenarioRefs.map((ref) => scenarioRefLink(ref, scenarios)).join("")}</div>${concept.relations.length > 0 ? `<ul>${concept.relations.map((relation) => `<li><strong>${escapeHtml(relation.targetName)}</strong> — ${escapeHtml(relation.summary)} ${scenarioRefLink(relation.scenarioRef, scenarios)}</li>`).join("")}</ul>` : ""}</article>`).join("");
 }
 
 export function renderSnapshotHtml(report: SnapshotReportData) {
@@ -126,6 +158,10 @@ export function renderSnapshotHtml(report: SnapshotReportData) {
   }).join("");
   const warnings = report.warnings.length > 0 ? `<section class="boundary-notices" aria-labelledby="warnings-heading"><div class="section-heading"><h2 id="warnings-heading">${escapeHtml(copy.warnings)}</h2><span>${report.warnings.length}</span></div><ul class="notice-list">${report.warnings.map((warning) => `<li>${escapeHtml(warningText(copy, warning))}</li>`).join("")}</ul></section>` : "";
   const description = presentation.tagline ?? report.product.description ?? copy.noDescription;
+  const mapTitle = presentation.status === "fallback" ? copy.featureIndex : copy.coreCapabilities;
+  const hasJourneys = presentation.journeys.length > 0;
+  const hasConcepts = presentation.concepts.length > 0;
+  const hasCodebaseNavigation = (report.codebaseNavigation ?? []).length > 0;
   const effectiveCoverage = report.effectiveCoverage ?? {
     filesAssembled: report.coverage.implFilesAssembled,
     filesTotal: report.coverage.implFilesTotal,
@@ -166,8 +202,10 @@ export function renderSnapshotHtml(report: SnapshotReportData) {
   </header>
   <nav class="snapshot-nav" aria-label="${escapeHtml(copy.navLabel)}"><div class="container">
     <a href="#overview">${escapeHtml(copy.overview)}</a>
-    <a href="#core-capabilities">${escapeHtml(copy.coreCapabilities)}</a>
-    <a href="#journeys">${escapeHtml(copy.journeys)}</a>
+    <a href="#core-capabilities">${escapeHtml(mapTitle)}</a>
+    ${hasJourneys ? `<a href="#journeys">${escapeHtml(copy.journeys)}</a>` : ""}
+    ${hasCodebaseNavigation ? `<a href="#codebase-navigation">${escapeHtml(copy.codebaseNavigation)}</a>` : ""}
+    ${hasConcepts ? `<a href="#concepts">${escapeHtml(copy.concepts)}</a>` : ""}
     <a href="#specification">${escapeHtml(copy.specifications)}</a>
     <a href="#evidence">${escapeHtml(copy.evidence)}</a>
     <a href="#boundaries">${escapeHtml(copy.boundaries)}</a>
@@ -175,15 +213,28 @@ export function renderSnapshotHtml(report: SnapshotReportData) {
   <noscript><div class="noscript">${escapeHtml(copy.noScript)}</div></noscript>
   <main class="container">
     <section class="report-section" id="core-capabilities" aria-labelledby="core-heading">
-      <div class="section-heading"><h2 id="core-heading">${escapeHtml(copy.coreCapabilities)}</h2><span>${presentation.coreCapabilities.length}</span></div>
+      <div class="section-heading"><h2 id="core-heading">${escapeHtml(mapTitle)}</h2><span>${presentation.coreCapabilities.length}</span></div>
+      ${presentation.status === "generated" ? `<p class="section-note">${escapeHtml(copy.projectMapNote)}</p>` : ""}
       <div class="capability-grid">${presentation.coreCapabilities.map((capability) => renderCapability(capability, report, copy)).join("")}</div>
     </section>
-    <section class="report-section" id="journeys" aria-labelledby="journeys-heading">
+    ${hasJourneys ? `<section class="report-section" id="journeys" aria-labelledby="journeys-heading">
       <div class="section-heading"><h2 id="journeys-heading">${escapeHtml(copy.journeys)}</h2></div>
-      <div class="journey-list">${renderJourneys(presentation.coreCapabilities, report)}</div>
-    </section>
+      <p class="section-note">${escapeHtml(copy.journeyNote)}</p>
+      <div class="journey-list">${renderJourneys(report, copy, snippets)}</div>
+    </section>` : ""}
+    ${hasCodebaseNavigation ? `<section class="report-section" id="codebase-navigation" aria-labelledby="codebase-heading">
+      <div class="section-heading"><h2 id="codebase-heading">${escapeHtml(copy.codebaseNavigation)}</h2></div>
+      <p class="section-note">${escapeHtml(copy.codebaseNote)}</p>
+      <ul class="code-area-list" role="list">${renderCodebaseNavigation(report, copy)}</ul>
+    </section>` : ""}
+    ${hasConcepts ? `<section class="report-section" id="concepts" aria-labelledby="concepts-heading">
+      <div class="section-heading"><h2 id="concepts-heading">${escapeHtml(copy.concepts)}</h2></div>
+      <p class="section-note">${escapeHtml(copy.conceptsNote)}</p>
+      <div class="concept-list">${renderConcepts(report)}</div>
+    </section>` : ""}
     <section class="report-section" id="specification" aria-labelledby="specification-heading">
       <div class="section-heading"><h2 id="specification-heading">${escapeHtml(copy.specifications)}</h2><span>${report.features.length}</span></div>
+      <p class="section-note">${escapeHtml(copy.specificationNote)}</p>
       <div class="controls">
         <div class="control"><label for="snapshot-search">${escapeHtml(copy.searchLabel)}</label><input id="snapshot-search" type="search" placeholder="${escapeHtml(copy.searchPlaceholder)}" autocomplete="off"></div>
         <div class="control"><label for="snapshot-category">${escapeHtml(copy.categoryLabel)}</label><select id="snapshot-category"><option value="all">${escapeHtml(copy.allCategories)}</option><option value="happy">${escapeHtml(copy.happy)}</option><option value="edge">${escapeHtml(copy.edge)}</option><option value="error">${escapeHtml(copy.error)}</option></select></div>
@@ -193,6 +244,7 @@ export function renderSnapshotHtml(report: SnapshotReportData) {
     </section>
     <details class="evidence-drawer report-section" id="evidence">
       <summary><span>${escapeHtml(copy.expandEvidence)}</span><span>${report.evidenceSnippets.length}</span></summary>
+      <p class="section-note">${escapeHtml(copy.evidenceNote)}</p>
       <div class="evidence-list">${report.evidenceSnippets.map((snippet) => renderSnippet(snippet, copy)).join("")}</div>
     </details>
     <section class="report-section" id="boundaries" aria-labelledby="boundaries-heading">

@@ -6,7 +6,7 @@ import type { StructuredCompletionClient } from "../llm-client";
 import { analysisSliceBudgets, getPartitionedAnalysisSources } from "../remote-analysis";
 import { createSlicePlanner } from "../slice-planner";
 import { computeEffectiveSnapshotCoverage } from "./effective-coverage";
-import { createSnapshotPresentation, fallbackSnapshotPresentation } from "./presentation";
+import { createSnapshotPresentation, fallbackSnapshotPresentation, parseSnapshotPresentation } from "./presentation";
 import type { SnapshotAnalysis, SnapshotAnalysisPass, SnapshotProgressEvent, SnapshotWarning } from "./types";
 import type { AnalyzeProductSnapshotOptions } from "./analyze";
 
@@ -101,6 +101,7 @@ export async function executeSnapshotWorkOrder(workOrder: ExtractionWorkOrder, o
 export async function finalizeSnapshotAnalysis(prepared: PreparedSnapshotAnalysis, executions: SnapshotExecution[], options: {
   modelName: string;
   client?: StructuredCompletionClient;
+  presentation?: unknown;
 }): Promise<SnapshotAnalysis> {
   if (executions.length === 0) {
     const { SnapshotAnalysisError } = await import("./analyze");
@@ -116,7 +117,13 @@ export async function finalizeSnapshotAnalysis(prepared: PreparedSnapshotAnalysi
 
   let presentation = fallbackSnapshotPresentation(result, prepared.language);
   let presentationFallback = false;
-  if (options.client) {
+  if (options.presentation !== undefined) {
+    try {
+      presentation = parseSnapshotPresentation(typeof options.presentation === "string" ? options.presentation : JSON.stringify(options.presentation), result);
+    } catch {
+      presentationFallback = true;
+    }
+  } else if (options.client) {
     const presentationStartedAt = Date.now();
     prepared.onProgress?.({ stage: "presentation", status: "start" });
     try {
@@ -126,6 +133,8 @@ export async function finalizeSnapshotAnalysis(prepared: PreparedSnapshotAnalysi
       presentationFallback = true;
       prepared.onProgress?.({ stage: "presentation", status: "fallback", durationMs: Date.now() - presentationStartedAt });
     }
+  } else {
+    presentationFallback = true;
   }
 
   const implSurface = await prepared.enumerateSurface(prepared.index);

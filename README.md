@@ -21,7 +21,7 @@ CoDelphi turns a GitHub repository into a traceable product spec: AI-extracted f
 
 ## CoDelphi Radar skill
 
-Radar is a standalone skill that analyzes a local Git repository or a public GitHub repository and produces a single-file, offline-openable HTML product brief — description, core capabilities, typical scenarios, the full feature spec, and per-claim source evidence. It does no continuous analysis and writes no database; it shares the same prompts, schema, evidence validation and deterministic merge as the main product.
+Radar is a standalone skill that analyzes a local Git repository or a public GitHub repository and produces a single-file, offline-openable HTML product brief — description, a product-domain map, evidence-linked user journeys with explicit verification boundaries, an evidence code index, key concepts, the full feature spec, and per-claim source evidence. It does no continuous analysis and writes no database; it shares the same prompts, schema, evidence validation and deterministic merge as the main product.
 
 ### Install
 

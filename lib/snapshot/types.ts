@@ -45,17 +45,44 @@ export interface SnapshotMergeStats {
   featuresFolded: number;
 }
 
+export interface SnapshotScenarioRef {
+  featureName: string;
+  reference: string;
+}
+
 export interface SnapshotCoreCapability {
   id: string;
   name: string;
   summary: string;
   featureNames: string[];
-  scenarioRefs: Array<{ featureName: string; reference: string }>;
+  scenarioRefs: SnapshotScenarioRef[];
+}
+
+export interface SnapshotJourney {
+  id: string;
+  name: string;
+  evidenceStatus: "scenario_composition";
+  steps: SnapshotScenarioRef[];
+}
+
+export interface SnapshotConcept {
+  id: string;
+  name: string;
+  summary: string;
+  scenarioRefs: SnapshotScenarioRef[];
+  relations: Array<{
+    targetName: string;
+    summary: string;
+    scenarioRef: SnapshotScenarioRef;
+  }>;
 }
 
 export interface SnapshotPresentation {
+  status: "generated" | "fallback";
   tagline?: string;
   coreCapabilities: SnapshotCoreCapability[];
+  journeys: SnapshotJourney[];
+  concepts: SnapshotConcept[];
 }
 
 export interface SnapshotAnalysis {
@@ -86,6 +113,13 @@ export interface SnapshotEvidenceSnippet {
   sourceUrl?: string;
 }
 
+export interface SnapshotCodebaseArea {
+  path: string;
+  featureNames: string[];
+  scenarioCount: number;
+  evidencePathCount: number;
+}
+
 export interface SnapshotReportData {
   schemaVersion: 1;
   language: OutputLanguage;
@@ -98,6 +132,7 @@ export interface SnapshotReportData {
   };
   features: AnalysisResult["features"];
   presentation?: SnapshotPresentation;
+  codebaseNavigation: SnapshotCodebaseArea[];
   evidenceSnippets: SnapshotEvidenceSnippet[];
   coverage: AnalysisCoverageReceipt;
   effectiveCoverage?: SnapshotEffectiveCoverage;

@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { completeSnapshotWorkspace, finalizeSnapshotWorkspace, prepareSnapshotWorkspace, readSnapshotWorkOrder, writeSnapshotResult } from "../lib/snapshot/workspace";
 import { resolveCompletionBackend } from "../lib/snapshot/host-ai";
 import { main } from "../scripts/snapshot";
@@ -19,6 +19,12 @@ const validResult = JSON.stringify({
     summary: "Feature",
     scenarios: [{ reference: "HP-1", context: "User", action: "Runs feature", outcome: "Succeeds", category: "happy", evidence: [{ path: "index.ts", startLine: 1 }] }],
   }],
+});
+const validPresentation = JSON.stringify({
+  tagline: "A packaged product for first-time users.",
+  coreCapabilities: [{ name: "Packaged capability", summary: "Run the packaged feature.", featureNames: ["Packaged feature"], scenarioRefs: [{ featureName: "Packaged feature", reference: "HP-1" }] }],
+  journeys: [],
+  concepts: [],
 });
 
 async function repository() {
@@ -41,6 +47,8 @@ async function workspace() {
 }
 
 afterEach(async () => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -58,6 +66,8 @@ describe("host-native snapshot workspace", () => {
     expect(finalized.html).toContain('<html lang="en">');
     expect(finalized.html).toContain("Packaged feature");
     expect(finalized.html).toContain("index.ts");
+    expect(finalized.html).toContain("Complete feature index");
+    expect(finalized.html).toContain("Smart project mapping is unavailable");
   });
 
   it("identifies missing, duplicate, invalid, and incompatible results without emitting HTML", async () => {
@@ -149,12 +159,29 @@ describe("host-native snapshot workspace", () => {
     expect(second.messages[1].content).toContain("Packaged feature");
   });
 
+  it("reads prior results with the same envelope tolerance as the extraction parser", async () => {
+    const directory = await workspace();
+    const prepared = await prepareSnapshotWorkspace({ directory, target: await repository(), outputLanguage: "en" });
+    const firstId = prepared.manifest.workOrderIds[0];
+    const secondId = "partition-002";
+    const first = await readFile(join(directory, "work-orders", `${firstId}.json`), "utf8");
+    await writeFile(join(directory, "work-orders", `${secondId}.json`), first);
+    const manifestPath = join(directory, "manifest.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    manifest.workOrderIds.push(secondId);
+    await writeFile(manifestPath, JSON.stringify(manifest));
+    await writeSnapshotResult(directory, firstId, `• ${validResult}`);
+
+    const second = await readSnapshotWorkOrder(directory, secondId);
+    expect(second.messages[1].content).toContain("Packaged feature");
+  });
+
   it("completes work orders through a host bridge and finalizes the report", async () => {
     const directory = await workspace();
     const prepared = await prepareSnapshotWorkspace({ directory, target: await repository(), outputLanguage: "en" });
     expect(prepared.manifest.workOrderIds).toHaveLength(1);
 
-    const bridgeScript = `const fs=require("fs");const d=JSON.parse(fs.readFileSync(0,"utf8"));if(!d.messages||!d.messages.length)process.exit(9);const result=${JSON.stringify(JSON.parse(validResult))};process.stdout.write(JSON.stringify({content:JSON.stringify(result)}));`;
+    const bridgeScript = `const fs=require("fs");const d=JSON.parse(fs.readFileSync(0,"utf8"));if(!d.messages||!d.messages.length)process.exit(9);const presentation=d.messages[1].content.includes("Existing features:");const result=presentation?${JSON.stringify(JSON.parse(validPresentation))}:${JSON.stringify(JSON.parse(validResult))};process.stdout.write(JSON.stringify({content:JSON.stringify(result)}));`;
     const backend = resolveCompletionBackend({
       environment: { CODELPHI_HOST_AI_COMMAND: process.execPath, CODELPHI_HOST_AI_ARGS_JSON: JSON.stringify(["-e", bridgeScript]) },
       host: "TestHost",
@@ -165,13 +192,44 @@ describe("host-native snapshot workspace", () => {
     expect(outcome.completed).toEqual(prepared.manifest.workOrderIds);
     expect(outcome.failed).toEqual([]);
 
+    expect(JSON.parse(await readFile(join(directory, "presentation.json"), "utf8"))).toMatchObject({ status: "generated", tagline: "A packaged product for first-time users." });
     const finalized = await finalizeSnapshotWorkspace(directory);
     expect(finalized.html).toContain("Packaged feature");
+    expect(finalized.html).toContain("Packaged capability");
+    expect(finalized.html).not.toContain("Complete feature index");
 
     // 断点续跑：已有结果时 complete 全部跳过。
     const rerun = await completeSnapshotWorkspace({ directory, client: backend.client });
     expect(rerun.completed).toEqual([]);
     expect(rerun.skippedExisting).toBe(1);
+  });
+
+  it("records standalone usage and duration while honoring the standalone timeout", async () => {
+    const directory = await workspace();
+    await prepareSnapshotWorkspace({ directory, target: await repository(), outputLanguage: "en" });
+    const usageLog = join(directory, "usage.jsonl");
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    vi.stubGlobal("fetch", vi.fn(async (_url: unknown, init?: { body?: string }) => {
+      const body = JSON.parse(init?.body ?? "{}") as { messages?: Array<{ content: string }> };
+      const presentation = body.messages?.[1]?.content.includes("Existing features:");
+      const result = presentation ? JSON.parse(validPresentation) : JSON.parse(validResult);
+      return new Response(JSON.stringify({ id: "req-1", choices: [{ message: { content: JSON.stringify(result) } }], usage: { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 } }), { status: 200 });
+    }));
+
+    const code = await main(["complete", "--workdir", directory, "--standalone"], {
+      environment: { AI_API_KEY: "secret", AI_MODEL: "standalone-model", AI_BASE_URL: "http://gateway.test/v1", AI_TIMEOUT_MS: "900000", CODELPHI_USAGE_LOG: usageLog },
+      stdout: vi.fn(),
+      stderr: vi.fn(),
+    });
+    expect(code).toBe(0);
+    expect(timeout).toHaveBeenCalledWith(900000);
+    const records = (await readFile(usageLog, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+    expect(records).toHaveLength(2);
+    for (const record of records) {
+      expect(record.requestId).toBe("req-1");
+      expect(record.durationMs).toEqual(expect.any(Number));
+      expect(record.usage).toEqual({ prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 });
+    }
   });
 
   it("reports no backend when neither standalone config nor host bridge exists", async () => {
