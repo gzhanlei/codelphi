@@ -107,6 +107,19 @@ describe("getValidUserToken", () => {
     expect(h.conns[0].release).toHaveBeenCalled();
   });
 
+  it("holds exactly one pool connection across the whole refresh (nested getConnection would deadlock a 10-conn pool)", async () => {
+    // 持锁连接期间再取第二条连接：≥10 个用户并发刷新时全池互等且无获取超时可打破
+    const h = harness([makeRow()]);
+    vi.mocked(getDb).mockReturnValue(h.db as never);
+    vi.stubEnv("TOKEN_ENCRYPTION_KEYS", KEYS);
+    stubRefresh(true, { data: { access_token: "new-access", refresh_token: "new-refresh", expires_in: 3600 } });
+    await getValidUserToken(1);
+    expect(h.db.getConnection).toHaveBeenCalledTimes(1);
+    // 写回发生在持锁连接上（锁语义不变），不是第二条连接
+    const upsert = h.calls.find((c) => c.sql.includes("INSERT INTO chandler_tokens"))!;
+    expect(upsert).toBeDefined();
+  });
+
   it("clears the row and reports not_bound when refresh is rejected (4xx, rotated token)", async () => {
     const h = harness([makeRow()]);
     vi.mocked(getDb).mockReturnValue(h.db as never);

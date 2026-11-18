@@ -379,6 +379,12 @@ describe("capture", () => {
     await expect(capture(8, 2)).rejects.toMatchObject({ code: "billing_state_conflict" });
     expect(h.paramsOf("INSERT IGNORE INTO billing_settlement_exceptions")[0]).toEqual([8, 1, 7, "inconsistent_reservation", 2, 0, 2, "exc:8:1:inconsistent_reservation"]);
     expect(h.committed()).toBe(0);
+    // exception 必须写在独立连接上：外层 BillingError 会回滚事务连接，事务内写入的行会被抹掉（对账可见性丢失）
+    const exceptionConn = h.conns.find((c) => c.execute.mock.calls.some(([sql]) => String(sql).includes("INSERT IGNORE INTO billing_settlement_exceptions")));
+    const rolledBackConn = h.conns.find((c) => c.rollback.mock.calls.length > 0);
+    expect(exceptionConn).toBeDefined();
+    expect(exceptionConn).not.toBe(rolledBackConn);
+    expect(exceptionConn!.release).toHaveBeenCalled();
   });
 
   it("flags a captured attempt without a settlement record as an inconsistency (D8)", async () => {
@@ -390,6 +396,10 @@ describe("capture", () => {
     });
     await expect(capture(8, 1)).rejects.toMatchObject({ code: "billing_state_conflict" });
     expect(h.paramsOf("INSERT IGNORE INTO billing_settlement_exceptions")[0]).toEqual([8, 1, 7, "inconsistent_reservation", 1, 0, 1, "exc:8:1:inconsistent_reservation"]);
+    // 同 D10：独立连接持久化，不被外层回滚抹掉
+    const exceptionConn = h.conns.find((c) => c.execute.mock.calls.some(([sql]) => String(sql).includes("INSERT IGNORE INTO billing_settlement_exceptions")));
+    const rolledBackConn = h.conns.find((c) => c.rollback.mock.calls.length > 0);
+    expect(exceptionConn).not.toBe(rolledBackConn);
   });
 });
 

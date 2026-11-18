@@ -53,12 +53,14 @@ async function withTokenLock<T>(userId: number, work: (conn: PoolConnection) => 
   }
 }
 
-/** OAuth 回调 / 刷新成功后写入（upsert）；GET_LOCK 已串行化同用户，无并发覆写窗口。 */
-export async function storeChandlerTokens(userId: number, payload: ChandlerTokenPayload): Promise<void> {
+/** OAuth 回调 / 刷新成功后写入（upsert）；GET_LOCK 已串行化同用户，无并发覆写窗口。
+ *  scopedConnection：调用方已持有的连接（如 withTokenLock 刷新路径）——复用它而不是再取
+ *  第二条池连接（connectionLimit=10 且无获取超时，嵌套取连接在并发刷新下全池互等死锁）。 */
+export async function storeChandlerTokens(userId: number, payload: ChandlerTokenPayload, scopedConnection?: PoolConnection): Promise<void> {
   const access = encryptToken(payload.accessToken);
   const refresh = payload.refreshToken ? encryptToken(payload.refreshToken) : null;
   const expiresAt = payload.expiresIn ? new Date(Date.now() + payload.expiresIn * 1_000) : null;
-  const conn = await getDb().getConnection();
+  const conn = scopedConnection ?? await getDb().getConnection();
   try {
     await conn.execute(
       `INSERT INTO chandler_tokens (user_id, access_token, refresh_token, key_version, token_expires_at)
@@ -71,7 +73,7 @@ export async function storeChandlerTokens(userId: number, payload: ChandlerToken
       [userId, access.cipher, refresh?.cipher ?? null, access.keyVersion, expiresAt],
     );
   } finally {
-    conn.release();
+    if (!scopedConnection) conn.release();
   }
 }
 
@@ -120,7 +122,8 @@ export async function getValidUserToken(userId: number): Promise<string> {
       }
       throw error;
     }
-    await storeChandlerTokens(userId, payload);
+    // 写回复用持锁连接：持锁期间再取第二条池连接是全池互等死锁面（见 storeChandlerTokens 注释）
+    await storeChandlerTokens(userId, payload, conn);
     return payload.accessToken;
   });
 }

@@ -388,6 +388,22 @@ async function insertSettlementException(
   );
 }
 
+/**
+ * 独立连接持久化 settlement exception（对账可见性）：capture 的两个异常分支（D10/D8）抛出
+ * BillingError 后外层 runInBillingTransaction 统一回滚——事务内写入的 exception 行会被一并
+ * 抹掉，账面异常对每日对账完全静默。必须在抛错前用独立连接写入（裸 execute 自动提交，
+ * INSERT IGNORE 幂等键兜底重复）；落库失败只告警，BillingError 照常上抛。
+ * 仅异常分支走此路径（单条快速 INSERT，无网络等待），嵌套取第二条连接的死锁面可忽略。
+ */
+async function persistSettlementException(input: { runId: number; attempt: number; accountId: number; type: string; actual: number; captured: number; unfunded: number }): Promise<void> {
+  const conn = await getDb().getConnection();
+  try {
+    await insertSettlementException(conn, input);
+  } finally {
+    conn.release();
+  }
+}
+
 async function mirrorRequestStatus(conn: PoolConnection, runId: number, attempt: number, status: string) {
   await conn.execute(`UPDATE billing_reserve_requests SET status = ? WHERE run_id = ? AND reservation_attempt = ?`, [status, runId, attempt]);
 }
@@ -1028,15 +1044,24 @@ export async function capture(runId: number, actualUnits: number, options: Reser
 
     // 第 1 步：四状态分支（D10）
     if (statuses.size > 1) {
-      // 混合状态 = 账务异常：禁止猜测补救（多钱包分摊本应同事务同状态）
-      await insertSettlementException(conn, { runId, attempt, accountId, type: "inconsistent_reservation", actual: actualUnits, captured: 0, unfunded: actualUnits });
+      // 混合状态 = 账务异常：禁止猜测补救（多钱包分摊本应同事务同状态）；
+      // exception 独立持久化——外层回滚会抹掉事务内写入（对账可见性）
+      try {
+        await persistSettlementException({ runId, attempt, accountId, type: "inconsistent_reservation", actual: actualUnits, captured: 0, unfunded: actualUnits });
+      } catch (persistError) {
+        console.error("[billing] settlement exception persist failed; reconciliation visibility lost", persistError);
+      }
       throw new BillingError("billing_state_conflict", `run ${runId} attempt ${attempt} has mixed reservation statuses; reconciliation required`);
     }
     const state = rows.length === 0 ? "none" : [...statuses][0];
 
     if (state === "captured") {
-      // settlements 应已在第 0 步命中；无记录 = 账务异常
-      await insertSettlementException(conn, { runId, attempt, accountId, type: "inconsistent_reservation", actual: actualUnits, captured: 0, unfunded: actualUnits });
+      // settlements 应已在第 0 步命中；无记录 = 账务异常（同 D10：独立持久化后再抛）
+      try {
+        await persistSettlementException({ runId, attempt, accountId, type: "inconsistent_reservation", actual: actualUnits, captured: 0, unfunded: actualUnits });
+      } catch (persistError) {
+        console.error("[billing] settlement exception persist failed; reconciliation visibility lost", persistError);
+      }
       throw new BillingError("billing_state_conflict", `run ${runId} attempt ${attempt} is captured without a settlement record`);
     }
     if (state === "released" || state === "none") {
