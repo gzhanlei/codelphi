@@ -19,6 +19,7 @@ import { computeCoverageReceipt, loadInheritedCoverageReceipt, enumerateImplemen
 import { mergeChunkResults, type ExtractionChunk } from "./extraction-merge";
 import { behavioralEnumerationEnabled } from "./env";
 import { behavioralChangePaths } from "./patch-scan";
+import { parsePatchHunks } from "./spec-diff";
 import { enumerateBehavioralChunks } from "./behavioral-enumeration";
 import { detectOutcomeConflicts } from "./spec-consistency";
 import { syncFeatureFlowsForVersion } from "./feature-flow-service";
@@ -198,7 +199,14 @@ async function saveResult(run: RunContext, result: AnalysisResult, change: Chang
       [result.product.description, JSON.stringify(result.product.evidence), run.productId],
     );
     const behavioralPaths = behavioralChangePaths(change.files);
-    const { specVersionId, specChanges, baseline, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds } = await insertSpecVersion(connection, run, result, { ...(affectedKeys ? { affectedKeys } : {}), behavioralChangePaths: behavioralPaths });
+    // 逐锚点保真判定（2026-11-19 根治 release 280 丢 20 场景）：行为文件的 hunk 供
+    // preserveUnchangedEvidence 做锚点级相交判定与确定性行号重映射。
+    const changedHunksByPath = new Map(
+      change.files
+        .filter((file) => behavioralPaths.has(file.path))
+        .map((file) => [file.path, parsePatchHunks(file.patch)] as const),
+    );
+    const { specVersionId, specChanges, baseline, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds } = await insertSpecVersion(connection, run, result, { ...(affectedKeys ? { affectedKeys } : {}), behavioralChangePaths: behavioralPaths, changedHunksByPath });
     // BM-11 别名登记：变体名 → canonical 旧键，走 feature_aliases 显式归并通道
     // （migrations/030；progress-summary 的历史 spec_changes 归并已消费该表）。幂等 INSERT IGNORE。
     for (const fold of featureFolds) {

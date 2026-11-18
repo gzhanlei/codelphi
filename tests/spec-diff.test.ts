@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diffSpec, diffSpecWithFolded, mergeSpecSources, normalizeSpecText, scenarioVariantSimilar, scenarioBehaviorEqual, specChangeWordingOnly, specFeatureKey, specScenarioKey, specTextEquivalent, type SpecFeature } from "../lib/spec-diff";
+import { diffSpec, diffSpecWithFolded, mergeSpecSources, normalizeSpecText, parsePatchHunks, preserveUnchangedEvidence, scenarioVariantSimilar, scenarioBehaviorEqual, specChangeWordingOnly, specFeatureKey, specScenarioKey, specTextEquivalent, type SpecFeature } from "../lib/spec-diff";
 
 const authentication: SpecFeature = {
   name: "Authentication",
@@ -478,5 +478,107 @@ describe("bilingual equivalence gates (EN output mode)", () => {
       { language: "en" },
     );
     expect(englishScenario[0].summary).toBe('"Login" removed scenario HP-1');
+  });
+});
+
+describe("preserveUnchangedEvidence (锚点级保真, 2026-11-19 根治)", () => {
+  const feature = (scenarios: Array<{ reference: string; startLine?: number; endLine?: number; paths: string[]; source?: "generated" | "manual" }>): SpecFeature => ({
+    name: "统一登录",
+    summary: "s",
+    source: "generated",
+    scenarios: scenarios.map((s) => ({
+      reference: s.reference,
+      context: "c",
+      action: "a",
+      outcome: "o",
+      category: "happy" as const,
+      source: s.source ?? "generated",
+      evidence: s.paths.map((path, index) => ({ path, ...(index === 0 && s.startLine !== undefined ? { startLine: s.startLine, ...(s.endLine !== undefined ? { endLine: s.endLine } : {}) } : {}) })),
+    })),
+  });
+  const changePaths = new Set(["lib/ai.ts"]);
+
+  it("carries a scenario whose changed-file anchor sits outside all hunks, remapping line numbers", () => {
+    const hunks = new Map([["lib/ai.ts", parsePatchHunks("@@ -100,3 +100,5 @@\n+x\n+y\n ctx\n old\n-old\n+z\n+z")]]); // 插 2 行于旧行 100-102 区段
+    const result = preserveUnchangedEvidence(
+      [feature([{ reference: "HP-1", startLine: 438, paths: ["lib/ai.ts", "lib/analysis.ts"] }])],
+      [feature([{ reference: "HP-2", startLine: 10, paths: ["lib/analysis.ts"] }])],
+      changePaths,
+      { changedHunksByPath: hunks },
+    );
+    const carried = result[0].scenarios.find((scenario) => scenario.reference === "HP-1");
+    expect(carried).toBeDefined();
+    expect(carried!.evidence[0].startLine).toBe(440); // 438 + 2
+  });
+
+  it("does not carry a scenario whose anchor intersects a changed hunk (AI re-decides)", () => {
+    const hunks = new Map([["lib/ai.ts", parsePatchHunks("@@ -430,12 +430,14 @@")]]); // 旧行 430-441 变更
+    const result = preserveUnchangedEvidence(
+      [feature([{ reference: "HP-1", startLine: 438, paths: ["lib/ai.ts"] }])],
+      [],
+      changePaths,
+      { changedHunksByPath: hunks },
+    );
+    const carried = result[0]?.scenarios.some((scenario) => scenario.reference === "HP-1") ?? false;
+    expect(carried).toBe(false); // 功能整体未被 AI 重发时也不复活（不保=交 AI 裁决）
+  });
+
+  it("treats pure insertions (oldCount=0) as non-intersecting and shifts anchors past the insertion", () => {
+    const hunks = new Map([["lib/ai.ts", parsePatchHunks("@@ -50,0 +51,2 @@")]]); // 纯插入 2 行
+    const result = preserveUnchangedEvidence(
+      [feature([{ reference: "HP-1", startLine: 200, paths: ["lib/ai.ts"] }])],
+      [],
+      changePaths,
+      { changedHunksByPath: hunks },
+    );
+    expect(result[0].scenarios[0].evidence[0].startLine).toBe(202);
+  });
+
+  it("does not carry anchors without line numbers on changed paths (conservative)", () => {
+    const hunks = new Map([["lib/ai.ts", parsePatchHunks("@@ -100,3 +100,5 @@")]]);
+    const noLine: SpecFeature = {
+      name: "统一登录",
+      summary: "s",
+      source: "generated",
+      scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy", source: "generated", evidence: [{ path: "lib/ai.ts" }] }],
+    };
+    const result = preserveUnchangedEvidence([noLine], [], changePaths, { changedHunksByPath: hunks });
+    const carried = result[0]?.scenarios.some((scenario) => scenario.reference === "HP-1") ?? false;
+    expect(carried).toBe(false);
+  });
+
+  it("preserves legacy all-paths semantics when no hunks are provided", () => {
+    const result = preserveUnchangedEvidence(
+      [feature([{ reference: "HP-1", startLine: 438, paths: ["lib/ai.ts"] }])],
+      [],
+      changePaths,
+    );
+    const carried = result[0]?.scenarios.some((scenario) => scenario.reference === "HP-1") ?? false;
+    expect(carried).toBe(false); // 行为路径被触碰=不保（旧行为）
+  });
+
+  it("never carries manual scenarios and skips references already re-emitted by AI", () => {
+    const hunks = new Map([["lib/ai.ts", parsePatchHunks("@@ -100,3 +100,5 @@")]]);
+    const result = preserveUnchangedEvidence(
+      [
+        feature([{ reference: "HP-M", source: "manual", startLine: 500, paths: ["lib/analysis.ts"] }, { reference: "HP-1", startLine: 438, paths: ["lib/ai.ts"] }]),
+      ],
+      [feature([{ reference: "HP-1", startLine: 10, paths: ["lib/analysis.ts"] }])],
+      changePaths,
+      { changedHunksByPath: hunks },
+    );
+    const merged = result[0];
+    // manual 场景不经本函数（走 loadManualSpec 通道），这里只验证 generated 侧不重复、carried 不并列
+    expect(merged.scenarios.some((scenario) => scenario.reference === "HP-M")).toBe(false);
+    expect(merged.scenarios.filter((scenario) => scenario.reference === "HP-1")).toHaveLength(1); // AI 版优先，不并入 carried 副本
+  });
+});
+
+describe("parsePatchHunks", () => {
+  it("parses default and explicit counts and ignores non-hunk lines", () => {
+    expect(parsePatchHunks("diff --git a/x b/x\n@@ -100,3 +100,5 @@\n@@ -50 +51,0 @@\ncontext")).toEqual([
+      { oldStart: 100, oldCount: 3, newStart: 100, newCount: 5 },
+      { oldStart: 50, oldCount: 1, newStart: 51, newCount: 0 },
+    ]);
   });
 });

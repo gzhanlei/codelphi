@@ -5,7 +5,7 @@ import { defaultExecute, type Execute } from "./db";
 import { evidenceItems } from "./evidence";
 import { nextReference } from "./extraction-merge";
 import type { ReleaseChangeFact } from "./release-change-projection";
-import { diffSpec, featureScenarioPairMatch, featureVariantSimilar, mergeSpecSources, preserveUnchangedEvidence, scenarioBehaviorEqual, specFeatureKey, specScenarioKey, type SpecChange, type SpecFeature, type SpecScenario, type SpecTombstones } from "./spec-diff";
+import { diffSpec, featureScenarioPairMatch, featureVariantSimilar, mergeSpecSources, preserveUnchangedEvidence, scenarioBehaviorEqual, specFeatureKey, specScenarioKey, type PatchHunk, type SpecChange, type SpecFeature, type SpecScenario, type SpecTombstones } from "./spec-diff";
 import { classifySpecHighlight } from "./spec-highlights";
 
 interface FeatureRow {
@@ -304,7 +304,7 @@ export function foldVariantFeatures(previousFeatures: SpecFeature[], features: S
   return { features: result, folds };
 }
 
-export async function insertSpecVersion(connection: PoolConnection, run: RunContext, result: AnalysisResult, options: { affectedKeys?: ReadonlySet<string>; behavioralChangePaths?: ReadonlySet<string> } = {}): Promise<{ specVersionId: number; specChanges: ReleaseChangeFact[]; baseline?: boolean; features: ReturnType<typeof mergeSpecSources>; collapse: SpecVersionCollapse | null; featureCollapses: FeatureCollapse[]; misplacedScenarios: MisplacedScenario[]; identityHijacksDropped: number; featureFolds: FeatureFold[] }> {
+export async function insertSpecVersion(connection: PoolConnection, run: RunContext, result: AnalysisResult, options: { affectedKeys?: ReadonlySet<string>; behavioralChangePaths?: ReadonlySet<string>; changedHunksByPath?: ReadonlyMap<string, readonly PatchHunk[]> } = {}): Promise<{ specVersionId: number; specChanges: ReleaseChangeFact[]; baseline?: boolean; features: ReturnType<typeof mergeSpecSources>; collapse: SpecVersionCollapse | null; featureCollapses: FeatureCollapse[]; misplacedScenarios: MisplacedScenario[]; identityHijacksDropped: number; featureFolds: FeatureFold[] }> {
   const [previous, manual, tombstones] = await Promise.all([loadPreviousSpec(connection, run), loadManualSpec(connection, run.productId), loadManualTombstones(connection, run.productId)]);
   // M9 增量模式：受影响集之外的 generated 条目原样沿用上一版（三分合并：carried 种子 < AI < manual）。
   const affectedKeys = options.affectedKeys;
@@ -336,7 +336,7 @@ export async function insertSpecVersion(connection: PoolConnection, run: RunCont
     }
   }
   if (affectedKeys) {
-    generated = preserveUnchangedEvidence(previous?.features ?? [], generated, options.behavioralChangePaths ?? new Set<string>());
+    generated = preserveUnchangedEvidence(previous?.features ?? [], generated, options.behavioralChangePaths ?? new Set<string>(), { changedHunksByPath: options.changedHunksByPath });
   }
   const features = mergeSpecSources(generated, manual, tombstones, carried);
   // BM-11 功能级变体折叠（跨 run）：变体命名并入上一版既有身份，改名型重命名回旧键、

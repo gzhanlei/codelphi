@@ -640,23 +640,97 @@ export function mergeSpecSources(generated: SpecFeature[], manual: SpecFeature[]
 }
 
 /** 增量提取未覆盖的旧证据不等于行为已移除：只有证据进入本次行为变更集，才允许旧场景退出。 */
-export function preserveUnchangedEvidence(previousFeatures: SpecFeature[], generated: SpecFeature[], behavioralChangePaths: ReadonlySet<string>): SpecFeature[] {
+export function preserveUnchangedEvidence(
+  previousFeatures: SpecFeature[],
+  generated: SpecFeature[],
+  behavioralChangePaths: ReadonlySet<string>,
+  options: { changedHunksByPath?: ReadonlyMap<string, readonly PatchHunk[]> } = {},
+): SpecFeature[] {
   const result = generated.map((feature) => ({ ...feature, scenarios: [...feature.scenarios] }));
   const byKey = new Map(result.map((feature) => [specFeatureKey(feature.name), feature] as const));
   for (const previousFeature of previousFeatures) {
     if (previousFeature.source === "manual") continue;
-    const unchanged = previousFeature.scenarios.filter((scenario) => scenario.source !== "manual"
-      && scenario.evidence.every((item) => !behavioralChangePaths.has(item.path)));
-    if (unchanged.length === 0) continue;
+    // 逐锚点保真判定（2026-11-19 根治）：旧行为=「任一证据文件被触碰即整条不保」，+2 行
+    // 提交曾致 20 条场景因重提取召回波动整批丢失（release 280 实证）。新语义=锚点级判定：
+    // 路径不在行为变更集→安全；在变更集但旧行锚点不与任何 hunk 相交→安全（锚点随 hunk
+    // 确定性重映射到新行号）；锚点落进变更 hunk 或无行号→保守不保，仍交 AI 重提取裁决。
+    const carried: SpecScenario[] = [];
+    for (const scenario of previousFeature.scenarios) {
+      if (scenario.source === "manual") continue;
+      let allSafe = true;
+      let shifted = false;
+      const evidence = scenario.evidence.map((item) => {
+        if (!behavioralChangePaths.has(item.path)) return item;
+        const hunks = options.changedHunksByPath?.get(item.path);
+        if (!hunks || hunks.length === 0 || item.startLine == null) {
+          allSafe = false;
+          return item;
+        }
+        const start = item.startLine;
+        const end = item.endLine ?? item.startLine;
+        const touched = oldSideRanges(hunks).some((range) => start <= range.end && end >= range.start);
+        if (touched) {
+          allSafe = false;
+          return item;
+        }
+        shifted = true;
+        const newStart = remapOldLine(start, hunks);
+        const newEnd = remapOldLine(end, hunks);
+        return { ...item, ...(newStart === item.startLine ? {} : { startLine: newStart }), ...(item.endLine === undefined || newEnd === item.endLine ? {} : { endLine: newEnd }) };
+      });
+      if (!allSafe) continue;
+      carried.push(shifted ? { ...scenario, evidence } : scenario);
+    }
+    if (carried.length === 0) continue;
     const current = byKey.get(specFeatureKey(previousFeature.name));
     if (!current) {
-      const restored = { ...previousFeature, scenarios: unchanged };
+      const restored = { ...previousFeature, scenarios: carried };
       result.push(restored);
       byKey.set(specFeatureKey(restored.name), restored);
       continue;
     }
     const references = new Set(current.scenarios.map((scenario) => scenario.reference));
-    current.scenarios.push(...unchanged.filter((scenario) => !references.has(scenario.reference)));
+    current.scenarios.push(...carried.filter((scenario) => !references.has(scenario.reference)));
   }
   return result;
+}
+
+/** 统一 diff hunk 头：@@ -oldStart,oldCount +newStart,newCount @@（缺省计数=1，纯插入 oldCount=0）。 */
+export interface PatchHunk {
+  oldStart: number;
+  oldCount: number;
+  newStart: number;
+  newCount: number;
+}
+
+export function parsePatchHunks(patch: string): PatchHunk[] {
+  const hunks: PatchHunk[] = [];
+  for (const line of patch.split("\n")) {
+    const match = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
+    if (!match) continue;
+    hunks.push({
+      oldStart: Number(match[1]),
+      oldCount: match[2] === undefined ? 1 : Number(match[2]),
+      newStart: Number(match[3]),
+      newCount: match[4] === undefined ? 1 : Number(match[4]),
+    });
+  }
+  return hunks;
+}
+
+/** 旧行坐标系的变更区间：纯插入（oldCount=0）为空区间，不与任何锚点相交。 */
+function oldSideRanges(hunks: readonly PatchHunk[]): Array<{ start: number; end: number }> {
+  return hunks
+    .filter((hunk) => hunk.oldCount > 0)
+    .map((hunk) => ({ start: hunk.oldStart, end: hunk.oldStart + hunk.oldCount - 1 }));
+}
+
+/** 旧行号 → 新行号：锚点之前的 hunk 逐个累计位移（调用前提=锚点不与任何 hunk 相交）。 */
+function remapOldLine(line: number, hunks: readonly PatchHunk[]): number {
+  let delta = 0;
+  for (const hunk of hunks) {
+    const before = hunk.oldCount === 0 ? hunk.oldStart <= line : hunk.oldStart + hunk.oldCount - 1 < line;
+    if (before) delta += hunk.newCount - hunk.oldCount;
+  }
+  return line + delta;
 }
