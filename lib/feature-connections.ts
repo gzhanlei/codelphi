@@ -176,6 +176,8 @@ export function buildFileImpact(rows: ScenarioEvidenceRow[], paths: string[], sc
   const wantedSet = new Set(wanted);
   // path → (featureId → 命中)
   const hits = new Map<string, Map<number, FileImpactFeature>>();
+  // 同一场景的多条证据指向同一路径时只计一次（scenarioCount 必须是场景去重总数，不是证据条数）
+  const seenScenarios = new Map<string, Set<number>>();
   for (const row of rows) {
     for (const path of evidencePaths(row.evidence)) {
       if (!wantedSet.has(path)) continue;
@@ -184,6 +186,11 @@ export function buildFileImpact(rows: ScenarioEvidenceRow[], paths: string[], sc
         perFeature = new Map();
         hits.set(path, perFeature);
       }
+      const seenKey = `${path}#${row.featureId}`;
+      const seenIds = seenScenarios.get(seenKey) ?? new Set<number>();
+      if (seenIds.has(row.id)) continue;
+      seenIds.add(row.id);
+      seenScenarios.set(seenKey, seenIds);
       const feature = perFeature.get(row.featureId) ?? {
         featureId: row.featureId,
         featureName: row.featureName,

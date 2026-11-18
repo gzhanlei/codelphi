@@ -101,6 +101,25 @@ describe("buildFileImpact (文件反查受影响功能)", () => {
     expect(impact[0].features[0].scenarios[0].reference).toBe("HP-1");
   });
 
+  it("counts a scenario once even when multiple evidence items cite the same requested path", () => {
+    const impact = buildFileImpact(
+      [
+        // HP-2 两条证据都指向 hot.ts（真实案例：target.ts:74 + :93 曾导致场景重复入列、scenarioCount 虚高）
+        impactRow(1, 1, "A", "HP-2", ["hot.ts", "hot.ts"], { context: "浅克隆" }),
+        // 同一场景跨两个请求路径：每个路径各计一次
+        impactRow(2, 1, "A", "HP-3", ["hot.ts", "cold.ts"]),
+      ],
+      ["hot.ts", "cold.ts"],
+    );
+    const hot = impact.find((entry) => entry.path === "hot.ts")!;
+    expect(hot.features[0].scenarios).toHaveLength(2);
+    expect(hot.features[0].scenarioCount).toBe(2);
+    expect(hot.features[0].scenarios.map((scenario) => scenario.reference)).toEqual(["HP-2", "HP-3"]);
+    const cold = impact.find((entry) => entry.path === "cold.ts")!;
+    expect(cold.features[0].scenarios).toHaveLength(1);
+    expect(cold.features[0].scenarioCount).toBe(1);
+  });
+
   it("returns an empty list for an empty path set", () => {
     expect(buildFileImpact([impactRow(1, 1, "A", "HP-1", ["a.ts"])], [])).toEqual([]);
   });
