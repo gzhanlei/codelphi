@@ -335,9 +335,12 @@ export async function insertSpecVersion(connection: PoolConnection, run: RunCont
       });
     }
   }
-  if (affectedKeys) {
-    generated = preserveUnchangedEvidence(previous?.features ?? [], generated, options.behavioralChangePaths ?? new Set<string>(), { changedHunksByPath: options.changedHunksByPath });
-  }
+  // 锚点级保真（2026-11-19 第二次根治，release 284 实证）：全量重提取——含「受影响集为空→
+  // 保持全量」回退分支（affectedKeys=null 使 carried=[]）——此前整批替换积累账本，一次
+  // scripts/ 弱覆盖 push 流失 222 条跨功能场景。全模式生效：全量输出与上一版按锚点级
+  // carry 合并，唯一丢弃依据=证据锚点与本次行为变更 hunk 相交（行为真变了）或证据无行号
+  // （保守）。manual 保护与 AI 重发同引用去重不受影响；首分析 previous=null 时为 no-op。
+  generated = preserveUnchangedEvidence(previous?.features ?? [], generated, options.behavioralChangePaths ?? new Set<string>(), { changedHunksByPath: options.changedHunksByPath });
   const features = mergeSpecSources(generated, manual, tombstones, carried);
   // BM-11 功能级变体折叠（跨 run）：变体命名并入上一版既有身份，改名型重命名回旧键、
   // 并存型场景并入 carried 特征——快照/diff/工作台三个面共用这份折叠结果。

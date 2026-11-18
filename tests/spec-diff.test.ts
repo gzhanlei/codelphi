@@ -582,3 +582,32 @@ describe("parsePatchHunks", () => {
     ]);
   });
 });
+
+describe("preserveUnchangedEvidence 全模式 carry（release 284 根治）", () => {
+  it("carries accumulated scenarios in full rebuilds when anchors sit outside this release's hunks", () => {
+    // 全量模式 affectedKeys=null：此前 carried=[] 使裸全量输出整批替换积累账本
+    // （release 284：222 条跨功能流失）。全模式生效后，锚点不在本次 hunk 内的场景保留。
+    const accumulated: SpecFeature = {
+      name: "统一登录",
+      summary: "s",
+      source: "generated",
+      scenarios: [
+        { reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy", source: "generated", evidence: [{ path: "lib/auth.ts", startLine: 10 }] },
+        { reference: "HP-2", context: "c2", action: "a2", outcome: "o2", category: "edge", source: "generated", evidence: [{ path: "lib/auth.ts", startLine: 500 }] },
+      ],
+    };
+    // 本次发布只改了 ai.ts（auth.ts 不在变更集→两条都保）；AI 全量输出漏发了 HP-2
+    const regenerated: SpecFeature = {
+      name: "统一登录",
+      summary: "s2",
+      source: "generated",
+      scenarios: [{ reference: "HP-1", context: "c-new", action: "a-new", outcome: "o-new", category: "happy", source: "generated", evidence: [{ path: "lib/auth.ts", startLine: 10 }] }],
+    };
+    const result = preserveUnchangedEvidence([accumulated], [regenerated], new Set(["lib/ai.ts"]), {
+      changedHunksByPath: new Map([["lib/ai.ts", parsePatchHunks("@@ -400,2 +400,3 @@\n+x")]]),
+    });
+    const merged = result.find((f) => f.name === "统一登录")!;
+    expect(merged.scenarios.some((s) => s.reference === "HP-1" && s.outcome === "o-new")).toBe(true); // AI 新版优先
+    expect(merged.scenarios.some((s) => s.reference === "HP-2")).toBe(true); // 积累场景锚点安全→保
+  });
+});

@@ -400,6 +400,9 @@ describe("BM-11 功能级变体折叠 (foldVariantFeatures)", () => {
 
 describe("insertSpecVersion BM-11 装配折叠集成", () => {
   it("folds a rename variant in full mode: no removed+added pair, feature written under the old name", async () => {
+    // 2026-11-19 全模式锚点级 carry（release 284 根治）：全量模式下旧键场景不再整批消失，
+    // 改名变体从 renamed 语义转为 merged（旧键经 carried 幸存，变体并入）——终态不变：
+    // 无 removed+added 对，功能写在旧名下。
     const db = connection([{ id: 11 }]);
     const rebuilt = {
       ...result,
@@ -410,7 +413,7 @@ describe("insertSpecVersion BM-11 装配折叠集成", () => {
     };
     const { features, featureFolds } = await insertSpecVersion(db, run, rebuilt);
     expect(featureFolds).toHaveLength(1);
-    expect(featureFolds[0]).toMatchObject({ mode: "renamed", intoName: "Authentication" });
+    expect(featureFolds[0]).toMatchObject({ mode: "merged", intoName: "Authentication" });
     const removed = db.changes.find((change) => change[2] === "feature" && change[3] === "removed");
     expect(removed?.[5]).not.toBe("Authentication");
     expect(db.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO spec_features"), expect.arrayContaining(["Authentication"]));
