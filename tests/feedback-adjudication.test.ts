@@ -103,8 +103,18 @@ describe("adjudicateFeedbackReport disposition", () => {
     expect(deps.queueAnalysis).not.toHaveBeenCalled();
   });
 
-  it("zero code evidence never auto-confirms a defect (guard bypass closed)", async () => {
-    // 近期变化无证据路径：confirm_defect+high 不得在零代码证据下触发全量重建
+  it("anchors evidence reading on the report's own repository (repository_full_name), not an arbitrary product repo", async () => {
+    // 多仓库产品下按 product 任取仓库读证据 = 读错仓库的代码；报告行已存 repository_full_name
+    const deps = setupDeps();
+    await adjudicateFeedbackReport(12, deps);
+    const loadCall = (deps.execute as ReturnType<typeof vi.fn>).mock.calls.find(([sql]) => String(sql).includes("FROM feedback_reports"));
+    const loadSql = String(loadCall?.[0]);
+    expect(loadSql).toContain("repository_full_name");
+    expect(loadSql).toContain("ORDER BY");
+    expect(loadCall?.[1]).toEqual([12]);
+  });
+
+  it("zero code evidence never auto-confirms a defect (guard bypass closed)", async () => {    // 近期变化无证据路径：confirm_defect+high 不得在零代码证据下触发全量重建
     const deps = setupDeps({
       execute: vi.fn(async (sql: string) => {
         if (sql.includes("FROM feedback_reports")) return [[{ id: 12, productId: 1, repositoryId: 1, revision: "95db983", claim: report.claim, kind: "bug" }]];
@@ -124,7 +134,7 @@ describe("runFeedbackAdjudicationSweepOnce", () => {
   it("picks pending bug reports older than the threshold and adjudicates each", async () => {
     const execute = vi.fn(async (sql: string) => {
       if (sql.includes("ORDER BY f.id LIMIT")) return [[{ id: 12, productId: 1, repositoryId: 1, revision: "95db983", claim: "c", kind: "bug" }]];
-      if (sql.includes("FROM feedback_reports f JOIN repositories")) return [[{ id: 12, productId: 1, repositoryId: 1, revision: "95db983", claim: "c", kind: "bug" }]];
+      if (sql.includes("FROM feedback_reports f") && sql.includes("repositories r")) return [[{ id: 12, productId: 1, repositoryId: 1, revision: "95db983", claim: "c", kind: "bug" }]];
       if (sql.includes("FROM spec_changes")) return [[]];
       if (sql.includes("FROM releases")) return [[{ sha: "95db983" }]];
       return [[]];

@@ -104,10 +104,16 @@ interface AdjudicationReportRow {
 }
 
 async function loadReport(id: number, execute: Execute): Promise<AdjudicationReportRow | null> {
+  // 多仓库产品下不能按 product 任取仓库读代码证据。报告行已存 repository_full_name
+  // （报告时的主仓库），锚定优先级：①全名精确匹配的仓库 → ②实际拥有该 revision 发布的
+  // 仓库 → ③最小 id 兜底（确定性，避免任意取）。
   const result = await execute(
     `SELECT f.id, f.product_id AS productId, r.id AS repositoryId, f.revision, f.error_message AS claim, f.kind
-     FROM feedback_reports f JOIN repositories r ON r.product_id = f.product_id
+     FROM feedback_reports f
+     JOIN repositories r ON r.product_id = f.product_id
+     LEFT JOIN releases rel ON rel.repository_id = r.id AND rel.sha = f.revision
      WHERE f.id = ? AND f.verdict IS NULL AND f.kind = 'bug' AND f.status = 'new'
+     ORDER BY (CONCAT(r.owner, '/', r.name) = f.repository_full_name) DESC, rel.id DESC, r.id ASC
      LIMIT 1`,
     [id],
   );

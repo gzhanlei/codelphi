@@ -37,12 +37,14 @@ interface OrderRefundRow {
   plan_id: string | null;
 }
 
-const MS_PER_DAY = 86_400_000;
 const DAYS_PER_MONTH = 30;
 
 async function loadOrderForRefund(orderNo: string): Promise<OrderRefundRow | undefined> {
+  // servedDays 用 SQL 侧时钟计算：paid_at 是 DB 墙钟（CURRENT_TIMESTAMP），连接以
+  // timezone:"Z" 解析后比真实时刻超前 8 小时——JS 侧 Date.now() 相减少算一天
   const [rows] = await getDb().execute(
-    `SELECT order_no, platform_order_no, account_id, kind, duration_months, units, amount, status, refund_status, paid_at, plan_id
+    `SELECT order_no, platform_order_no, account_id, kind, duration_months, units, amount, status, refund_status, paid_at, plan_id,
+            GREATEST(0, FLOOR(TIMESTAMPDIFF(SECOND, paid_at, NOW(3)) / 86400)) AS servedDays
      FROM payment_orders WHERE order_no = ?`,
     [orderNo],
   );
@@ -61,7 +63,7 @@ export async function previewRefund(orderNo: string): Promise<RefundPreview> {
   let totalDays: number | null = null;
   if (order.kind === "subscription" && order.duration_months && order.paid_at) {
     totalDays = order.duration_months * DAYS_PER_MONTH;
-    servedDays = Math.max(0, Math.floor((Date.now() - new Date(order.paid_at).getTime()) / MS_PER_DAY));
+    servedDays = Number((order as { servedDays?: number | string | null }).servedDays ?? 0);
     remainingDays = Math.max(0, totalDays - servedDays);
     suggested = Math.floor((order.amount * remainingDays) / totalDays);
     prorated = true;
