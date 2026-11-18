@@ -18,19 +18,30 @@ export const SEARCH_HISTORY_LIMIT = 10;
  * 分词召回会放大响应体，默认只回 top-K 摘要与定位锚点（featureStableKey + reference + 证据路径），
  * 场景全文经 get_scenario、发布行为 before/after 经 get_release 按需展开——控制 agent 上下文负担。
  * 排序在 spec-search 已完成，这里只裁剪不重排。
+ * 新鲜度（2026-11-19 P0 stale 门）：freshness 可用时，证据路径落在 analyzedSha..HEAD 行为变更集
+ * 内的场景标 stale=true——「历史正确≠当前正确」的逐场景诚实披露。
  */
-export function compactSearchProjection(result: BehaviorSearchResult) {
+export function compactSearchProjection(
+  result: BehaviorSearchResult,
+  options: { freshness?: Record<string, unknown>; staleEvidencePaths?: ReadonlySet<string> } = {},
+) {
+  const stalePaths = options.staleEvidencePaths;
+  const staleAvailable = options.freshness?.available === true && stalePaths !== undefined && stalePaths.size > 0;
   const features = result.features.slice(0, SEARCH_FEATURE_LIMIT);
-  const scenarios = result.scenarios.slice(0, SEARCH_SCENARIO_LIMIT).map((scenario) => ({
-    id: scenario.id,
-    featureName: scenario.featureName,
-    featureStableKey: scenario.featureStableKey,
-    reference: scenario.reference,
-    evidence: scenario.evidence.slice(0, 5).map((item) => ({
-      path: item.path,
-      ...(item.startLine === undefined ? {} : { startLine: item.startLine }),
-    })),
-  }));
+  const scenarios = result.scenarios.slice(0, SEARCH_SCENARIO_LIMIT).map((scenario) => {
+    const stale = staleAvailable && scenario.evidence.some((item) => stalePaths!.has(item.path));
+    return {
+      id: scenario.id,
+      featureName: scenario.featureName,
+      featureStableKey: scenario.featureStableKey,
+      reference: scenario.reference,
+      ...(stale ? { stale: true } : {}),
+      evidence: scenario.evidence.slice(0, 5).map((item) => ({
+        path: item.path,
+        ...(item.startLine === undefined ? {} : { startLine: item.startLine }),
+      })),
+    };
+  });
   const history = result.history.slice(0, SEARCH_HISTORY_LIMIT).map((entry) => ({
     source: entry.source,
     releaseId: entry.releaseId,
@@ -50,6 +61,7 @@ export function compactSearchProjection(result: BehaviorSearchResult) {
     scenarios,
     history,
     detailHint: "摘要投影：场景全文与完整证据经 get_scenario(stableKey, reference) 深入；发布行为 before/after 经 get_release(releaseId) 展开",
+    ...(options.freshness ? { freshness: options.freshness } : {}),
     ...(truncated ? { truncated: true } : {}),
   };
 }

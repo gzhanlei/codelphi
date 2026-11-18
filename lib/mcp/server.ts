@@ -7,6 +7,7 @@ import { loadCompletenessLedgerBySpecVersion } from "../completeness-ledger";
 import { defaultExecute, type Execute } from "../db";
 import { reconcileRelease, evidencePathsFromSubject as evidencePathsForReconcile } from "./reconcile";
 import { canonicalizeScenarios, compactSearchProjection, paginateById, projectFileRisks } from "./projections";
+import { loadLedgerFreshnessForServer } from "./freshness";
 import { buildFeedbackLifecycle, buildReleaseHealth, waitForRelease } from "./operations";
 
 /**
@@ -310,7 +311,18 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
     const scope = String(args.scope ?? "fallback");
     if (!["current", "history", "fallback", "all"].includes(scope)) throw new Error("invalid scope");
     const result = await searchBehavior(product.id, String(args.query ?? ""), execute, scope as "current" | "history" | "fallback" | "all");
-    return compactSearchProjection(result);
+    // stale 门（2026-11-19 P0）：账本事实锚定最新 release sha，HEAD 领先且证据路径在行为变更集内
+    // 的场景逐条标 stale；比较失败时 available=false 诚实降级，绝不伪装新鲜。
+    let freshness: Record<string, unknown> | undefined;
+    let staleEvidencePaths: ReadonlySet<string> | undefined;
+    try {
+      const data = await loadLedgerFreshnessForServer(product.id);
+      freshness = data.block as unknown as Record<string, unknown>;
+      staleEvidencePaths = data.changedBehavioralPaths;
+    } catch (error) {
+      freshness = { available: false, reason: error instanceof Error ? error.message.slice(0, 160) : "unknown_error" };
+    }
+    return compactSearchProjection(result, { freshness, staleEvidencePaths });
   }
 
   if (name === "lookup_by_files") {
@@ -320,8 +332,17 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
     if (paths.length === 0) throw new Error("paths must be a non-empty array of file paths");
     if (paths.length > 20) throw new Error("paths must contain at most 20 file paths");
     const files = await lookupFilesImpact(execute, product.id, paths, { scenarioCap: view === "risk" ? Number.MAX_SAFE_INTEGER : FILE_IMPACT_SCENARIO_CAP });
+    // stale 门：反查结果同样新鲜度标注（爆炸半径里的事实锚定在 analyzedSha）
+    let freshness: Record<string, unknown> | undefined;
+    try {
+      const data = await loadLedgerFreshnessForServer(product.id);
+      freshness = data.block as unknown as Record<string, unknown>;
+    } catch (error) {
+      freshness = { available: false, reason: error instanceof Error ? error.message.slice(0, 160) : "unknown_error" };
+    }
+    const freshnessFooter = { freshness };
     if (view === "risk") {
-      return projectFileRisks({
+      return { ...freshnessFooter, ...projectFileRisks({
         requestedPaths: paths,
         snapshotSha: source?.repo.sha ?? null,
         rows: files.flatMap((entry) => entry.features.flatMap((feature) => feature.scenarios.map((scenario) => ({
@@ -330,7 +351,7 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
           changeIds: [scenario.id],
           evidencePaths: Array.isArray(scenario.evidence) ? scenario.evidence.map((item) => String((item as { path?: string }).path ?? "")).filter(Boolean) : [],
         })))),
-      });
+      }) };
     }
     if (view === "canonical") {
       const scenarios = files.flatMap((entry) => entry.features.flatMap((feature) => feature.scenarios.map((scenario) => ({
@@ -341,9 +362,10 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
         evidencePaths: Array.isArray(scenario.evidence) ? scenario.evidence.map((item) => String((item as { path?: string }).path ?? "")).filter(Boolean) : [],
       }))));
       const canonical = canonicalizeScenarios(scenarios);
-      return { ...canonical, coveredPaths: files.map((entry) => entry.path), uncoveredPaths: paths.filter((path) => !files.some((entry) => entry.path === path)) };
+      return { ...freshnessFooter, ...canonical, coveredPaths: files.map((entry) => entry.path), uncoveredPaths: paths.filter((path) => !files.some((entry) => entry.path === path)) };
     }
     return {
+      ...freshnessFooter,
       files: files.map((entry) => ({
         path: entry.path,
         features: entry.features.map((feature) => ({

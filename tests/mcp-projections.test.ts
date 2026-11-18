@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { canonicalizeScenarios, compactSearchProjection, paginateById, projectFileRisks, type CanonicalScenarioInput } from "../lib/mcp/projections";
+import { loadLedgerFreshness, resetFreshnessCacheForTests } from "../lib/mcp/freshness";
 
 function scenario(id: number, reference = "EC-1", path = "lib/a.ts"): CanonicalScenarioInput {
   return { id, featureName: "功能", reference, specReference: "v230", evidencePaths: [path] };
@@ -141,5 +142,82 @@ describe("compactSearchProjection (MCP 搜索输出压缩)", () => {
     expect(ranked.truncated).toBeUndefined();
     expect(ranked.detailHint).toContain("get_release");
     expect(compactSearchProjection({ features: [], scenarios: [], history: [] }).features).toEqual([]);
+  });
+});
+
+describe("compactSearchProjection stale 门", () => {
+  const baseScenario = {
+    id: 1,
+    featureId: 1,
+    featureName: "统一登录",
+    featureStableKey: "统一登录",
+    reference: "HP-1",
+    context: "c",
+    action: "a",
+    outcome: "o",
+    evidence: [{ path: "lib/auth.ts", startLine: 10 }],
+  };
+
+  it("marks scenarios stale when their evidence paths intersect the behavioral change set", () => {
+    const result = compactSearchProjection(
+      { features: [], scenarios: [baseScenario, { ...baseScenario, id: 2, reference: "HP-2", evidence: [{ path: "lib/other.ts" }] }], history: [] },
+      { freshness: { available: true, analyzedSha: "a", comparedAgainst: "main", changedBehavioralFiles: 1, changedFiles: 2 }, staleEvidencePaths: new Set(["lib/auth.ts"]) },
+    );
+    expect(result.freshness).toMatchObject({ available: true, analyzedSha: "a" });
+    expect(result.scenarios[0].stale).toBe(true);
+    expect(result.scenarios[1].stale).toBeUndefined();
+  });
+
+  it("omits stale flags and freshness when the comparison is unavailable (诚实降级)", () => {
+    const result = compactSearchProjection(
+      { features: [], scenarios: [baseScenario], history: [] },
+      { freshness: { available: false, reason: "rate_limited" }, staleEvidencePaths: new Set(["lib/auth.ts"]) },
+    );
+    expect(result.freshness).toMatchObject({ available: false });
+    expect(result.scenarios[0].stale).toBeUndefined();
+  });
+});
+
+describe("loadLedgerFreshness (stale 门数据源)", () => {
+  it("computes behavioral change set from the compare window and caches per repository+sha", async () => {
+    resetFreshnessCacheForTests();
+    let compareCalls = 0;
+    const execute = (async (sql: string) => {
+      if (String(sql).includes("FROM releases rel")) return [[{ repositoryId: 8, owner: "gzhanlei", name: "codelphi", connectionId: 1, provider: "github", analyzedSha: "aaa" }]];
+      if (String(sql).includes("FROM products WHERE id")) return [[{ id: 9, slug: "codelphi", name: "CoDelphi", organizationId: 2 }]];
+      return [[]];
+    }) as never;
+    const fakeChange = { files: [{ path: "lib/ai.ts", patch: "@@ -1,2 +1,3 @@\n+x" }, { path: "README.md", patch: "@@ -1,1 +1,2 @@\n+doc" }] };
+    const data = await loadLedgerFreshness(9, execute, {
+      getRepository: async () => ({ defaultBranch: "main" }),
+      getChangeContext: async () => { compareCalls += 1; return fakeChange; },
+    });
+    expect(data.block).toMatchObject({ available: true, analyzedSha: "aaa", comparedAgainst: "main", changedBehavioralFiles: 1, changedFiles: 2 });
+    expect(data.changedBehavioralPaths.has("lib/ai.ts")).toBe(true);
+    expect(data.changedBehavioralPaths.has("README.md")).toBe(false); // 文档变更不计入行为变更集
+    await loadLedgerFreshness(9, execute, { getRepository: async () => ({ defaultBranch: "main" }), getChangeContext: async () => { compareCalls += 1; return fakeChange; } });
+    expect(compareCalls).toBe(1); // 缓存命中，GitHub compare 不重跑（本地 release 查询廉价，不缓存）
+  });
+
+  it("degrades to available=false when the comparison fails (never fakes freshness)", async () => {
+    resetFreshnessCacheForTests();
+    const execute = (async (sql: string) => {
+      if (String(sql).includes("FROM releases rel")) return [[{ repositoryId: 8, owner: "gzhanlei", name: "codelphi", connectionId: 1, provider: "github", analyzedSha: "aaa" }]];
+      if (String(sql).includes("FROM products WHERE id")) return [[{ id: 9, slug: "codelphi", name: "CoDelphi", organizationId: 2 }]];
+      return [[]];
+    }) as never;
+    const data = await loadLedgerFreshness(9, execute, {
+      getRepository: async () => ({ defaultBranch: "main" }),
+      getChangeContext: async () => { throw new Error("rate limited"); },
+    });
+    expect(data.block).toMatchObject({ available: false, reason: "rate limited" });
+    expect(data.changedBehavioralPaths.size).toBe(0);
+  });
+
+  it("returns no_release when the product has no releases", async () => {
+    resetFreshnessCacheForTests();
+    const execute = (async () => [[]]) as never;
+    const data = await loadLedgerFreshness(9, execute);
+    expect(data.block).toEqual({ available: false, reason: "no_release" });
   });
 });
