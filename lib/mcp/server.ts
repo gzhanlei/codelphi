@@ -243,8 +243,8 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
     // BYO 导入草稿披露（2026-11-19，§7）+ 账本新鲜度（stale 门 V1）：都按诚实披露口径返回。
     const seededRows = await queryRows<{ seededSnapshotSha: string; seededTreeSha: string | null; seededDirty: number; seededContractVersion: string | null; seededAt: Date; importedScenarios: number }>(
       execute(
-        `SELECT p.seeded_snapshot_sha AS seededSnapshotSha, p.seeded_tree_sha AS seededTreeSha, p.seeded_dirty AS seededDirty,
-                p.seeded_contract_version AS seededContractVersion, p.seeded_at AS seededAt,
+        `SELECT product.seeded_snapshot_sha AS seededSnapshotSha, product.seeded_tree_sha AS seededTreeSha, product.seeded_dirty AS seededDirty,
+                product.seeded_contract_version AS seededContractVersion, product.seeded_at AS seededAt,
                 (SELECT COUNT(*) FROM scenarios s JOIN features f ON f.id = s.feature_id WHERE f.product_id = product.id AND s.source = 'ai_snapshot_import') AS importedScenarios
          FROM products product WHERE product.id = ? LIMIT 1`,
         [product.id],
