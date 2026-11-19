@@ -216,12 +216,13 @@ export async function importSnapshotArtifact(deps: ImportDeps, raw: unknown, ide
       if (taken.length === 0) break;
       slug = `${base}-${attempt}`;
     }
-    const insert = rowsOf(await deps.execute(
+    const insertResult = await deps.execute(
       `INSERT INTO products (slug, name, description, organization_id, analyze_mode, output_language)
        VALUES (?, ?, '', ?, 'incremental', ?)`,
       [slug, identity.name.slice(0, 191), deps.organizationId, artifact.language === "en" ? "en" : "zh-CN"],
-    ));
-    const productId = Number((insert[0] as { insertId: number }).insertId);
+    );
+    const insert = (Array.isArray(insertResult) ? insertResult[0] : insertResult) as { insertId: number };
+    const productId = Number(insert.insertId);
     binding = origin ? "created" : "unbound";
   }
 
@@ -240,11 +241,12 @@ export async function importSnapshotArtifact(deps: ImportDeps, raw: unknown, ide
 
   let scenariosImported = 0;
   for (const feature of features) {
-    const featureInsert = rowsOf(await deps.execute(
+    const featureInsertResult = await deps.execute(
       `INSERT INTO features (product_id, name, summary, source, active) VALUES (?, ?, ?, '${IMPORT_SOURCE}', 1)`,
       [productId, feature.name, feature.summary],
-    ));
-    const featureId = Number((featureInsert[0] as { insertId: number }).insertId);
+    );
+    const featureInsert = (Array.isArray(featureInsertResult) ? featureInsertResult[0] : featureInsertResult) as { insertId: number };
+    const featureId = Number(featureInsert.insertId);
     for (const scenario of feature.scenarios) {
       await deps.execute(
         `INSERT INTO scenarios (feature_id, reference, context, action, outcome, category, source, active, evidence, step_order)

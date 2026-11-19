@@ -34,11 +34,22 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
   try {
-    const receipt = await importSnapshotArtifact(
-      { execute: db.execute.bind(db) as unknown as (sql: string, params?: unknown[]) => Promise<unknown>, currentContractVersion: CONTRACT_VERSION, organizationId: identity.organizationId },
-      artifact,
-    );
-    return NextResponse.json({ imported: receipt.mode !== "idempotent", idempotent: receipt.mode === "idempotent", ...receipt });
+    // 单事务：导入失败（含 FK/规模异常）整体回滚，不留孤儿产品/功能行
+    const connection = await db.getConnection();
+    try {
+      await connection.beginTransaction();
+      const receipt = await importSnapshotArtifact(
+        { execute: connection.execute.bind(connection) as unknown as (sql: string, params?: unknown[]) => Promise<unknown>, currentContractVersion: CONTRACT_VERSION, organizationId: identity.organizationId },
+        artifact,
+      );
+      await connection.commit();
+      return NextResponse.json({ imported: receipt.mode !== "idempotent", idempotent: receipt.mode === "idempotent", ...receipt });
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
   } catch (error) {
     if (error instanceof ImportValidationError) {
       const status = error.code === "invalid_artifact" || error.code === "duplicate_reference" ? 400 : 409;
