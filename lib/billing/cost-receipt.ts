@@ -24,6 +24,8 @@ const usageSchema = z
 
 export type LlmOutcome = "success" | "failed" | "timeout";
 export type ChargeComponent = "main" | "platform_shadow";
+/** 行为清单全量分析的调用阶段（migration 080 call_stage）：复述/判定/语义复核/产品摘要。 */
+export type LlmCallStage = "describe" | "judge" | "semantic_repair" | "product_summary";
 
 export interface LlmCallReceiptInput {
   /** 分析口径绑定 analysis_runs；独立生成（call_kind='intro_material' 等）无 run，为 null。 */
@@ -32,6 +34,11 @@ export interface LlmCallReceiptInput {
   chargeComponent: ChargeComponent;
   /** 调用类别（migration 062）：'intro_material' 等；分析口径留空。 */
   callKind?: string | null;
+  /** 执行任务与尝试身份（migration 080）：旧分区/W0-8 调用不传，全部写 NULL。 */
+  taskKey?: string | null;
+  unitKey?: string | null;
+  attemptId?: string | null;
+  callStage?: LlmCallStage | null;
   model: string;
   outcome: LlmOutcome;
   /** 网关原始 usage 对象；null/undefined = usage 不可得（usage_status=unknown）。 */
@@ -90,8 +97,9 @@ export async function recordLlmCallReceipt(input: LlmCallReceiptInput): Promise<
       `INSERT INTO llm_call_receipts
         (run_id, account_id, charge_component, model, provider_request_id, outcome, usage_status,
          input_tokens, output_tokens, cache_hit_tokens, cache_miss_tokens, usage_json,
-         pricing_version, input_price, output_price, cache_price, currency, llm_cost_amount, pricing_status, call_kind)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         pricing_version, input_price, output_price, cache_price, currency, llm_cost_amount, pricing_status, call_kind,
+         task_key, unit_key, attempt_id, call_stage)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         input.runId,
         input.accountId,
@@ -113,10 +121,74 @@ export async function recordLlmCallReceipt(input: LlmCallReceiptInput): Promise<
         cost,
         priced ? "priced" : "unpriced",
         input.callKind ?? null,
+        input.taskKey ?? null,
+        input.unitKey ?? null,
+        input.attemptId ?? null,
+        input.callStage ?? null,
       ],
     );
   } catch (error) {
     // 契约：回执写入失败仅告警，不阻断分析主链路（每日对账复核缺失）
     console.error("[billing] llm call receipt write failed", error);
   }
+}
+
+/** 单次执行任务尝试（attempt）的真实 LLM 消耗，供共享预算结算（Task 7）。
+ *  缺回执或任一未知都不是零成本：usage/tokens/cost 无法确认时字段为 null、状态按未知报。 */
+export interface AttemptLlmUsage {
+  /** 该 attempt 的回执条数；0 = 没有任何回执。 */
+  llmCalls: number;
+  /** 全部回执 usage_status=known 才为 known；无回执或任一 unknown → unknown。 */
+  usageStatus: "known" | "unknown";
+  /** 全部回执 priced 才为 priced；无回执或任一 unpriced → unpriced。 */
+  pricingStatus: "priced" | "unpriced";
+  /** 真实输入/输出 token 合计；任一回执未知则为 null（未知 ≠ 0）。 */
+  inputTokens: number | null;
+  outputTokens: number | null;
+  /** 费用合计；任一回执未定价/未知则为 null（未知 ≠ 0）。 */
+  costAmount: number | null;
+}
+
+interface AttemptReceiptRow {
+  usage_status: unknown;
+  pricing_status: unknown;
+  input_tokens: unknown;
+  output_tokens: unknown;
+  llm_cost_amount: unknown;
+}
+
+function numericOrNull(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+/** 聚合某次执行任务尝试的全部 LLM 回执（run_id + attempt_id）。 */
+export async function loadAttemptLlmUsage(runId: number, attemptId: string): Promise<AttemptLlmUsage> {
+  const [rows] = (await getDb().execute(
+    `SELECT usage_status, pricing_status, input_tokens, output_tokens, llm_cost_amount
+       FROM llm_call_receipts
+      WHERE run_id = ? AND attempt_id = ?`,
+    [runId, attemptId],
+  )) as [AttemptReceiptRow[], unknown];
+  const usageStatus = rows.length > 0 && rows.every((row) => row.usage_status === "known") ? "known" : "unknown";
+  const pricingStatus = rows.length > 0 && rows.every((row) => row.pricing_status === "priced") ? "priced" : "unpriced";
+  const sumOrNull = (pick: (row: AttemptReceiptRow) => unknown): number | null => {
+    if (rows.length === 0) return null;
+    let total = 0;
+    for (const row of rows) {
+      const value = numericOrNull(pick(row));
+      if (value === null) return null;
+      total += value;
+    }
+    return total;
+  };
+  return {
+    llmCalls: rows.length,
+    usageStatus,
+    pricingStatus,
+    inputTokens: sumOrNull((row) => row.input_tokens),
+    outputTokens: sumOrNull((row) => row.output_tokens),
+    costAmount: sumOrNull((row) => row.llm_cost_amount),
+  };
 }

@@ -315,4 +315,8 @@ describe("migration 080 dependencies", () => {
     expect(sql).toMatch(/ADD COLUMN call_stage/);
     expect(sql).not.toMatch(/MODIFY COLUMN task_key|CHANGE COLUMN task_key/);
   });
+
+  it("indexes (run_id, attempt_id) for attempt usage lookups (Task 6 loadAttemptLlmUsage)", () => {
+    expect(sql).toMatch(/ADD KEY llm_call_receipts_run_attempt_idx \(run_id, attempt_id\)/);
+  });
 });

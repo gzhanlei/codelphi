@@ -2,7 +2,7 @@ import { z } from "zod";
 import { requiredEnv } from "./env";
 import type { StructuredCompletionClient } from "./llm-client";
 import type { SourceFile } from "./github";
-import { recordLlmCallReceipt, type ChargeComponent } from "./billing/cost-receipt";
+import { recordLlmCallReceipt, type ChargeComponent, type LlmCallStage } from "./billing/cost-receipt";
 import type { OutputLanguage } from "./analysis-language";
 
 const evidenceSchema = z.object({
@@ -387,6 +387,11 @@ export interface LlmBillingContext {
   accountId: number | null;
   chargeComponent: ChargeComponent;
   callKind?: string | null;
+  /** 行为清单全量分析的执行任务与尝试身份（migration 080）；旧分区/W0-8 调用不传，回执全部写 NULL。 */
+  taskKey?: string | null;
+  unitKey?: string | null;
+  attemptId?: string | null;
+  callStage?: LlmCallStage | null;
 }
 
 /** 主提取 JSON 契约模板（语言无关共享：键名/编号/枚举是英文结构约定）。 */
@@ -514,6 +519,10 @@ export async function requestStructuredCompletion(messages: Array<{ role: string
         accountId: billing.accountId,
         chargeComponent: billing.chargeComponent,
         callKind: billing.callKind ?? null,
+        taskKey: billing.taskKey ?? null,
+        unitKey: billing.unitKey ?? null,
+        attemptId: billing.attemptId ?? null,
+        callStage: billing.callStage ?? null,
         model,
         outcome: isAbortTimeout(error) ? "timeout" : "failed",
         usageRaw: null,
@@ -529,6 +538,10 @@ export async function requestStructuredCompletion(messages: Array<{ role: string
         accountId: billing.accountId,
         chargeComponent: billing.chargeComponent,
         callKind: billing.callKind ?? null,
+        taskKey: billing.taskKey ?? null,
+        unitKey: billing.unitKey ?? null,
+        attemptId: billing.attemptId ?? null,
+        callStage: billing.callStage ?? null,
         model,
         outcome: "failed",
         usageRaw: null,
@@ -553,6 +566,10 @@ export async function requestStructuredCompletion(messages: Array<{ role: string
         accountId: billing.accountId,
         chargeComponent: billing.chargeComponent,
         callKind: billing.callKind ?? null,
+        taskKey: billing.taskKey ?? null,
+        unitKey: billing.unitKey ?? null,
+        attemptId: billing.attemptId ?? null,
+        callStage: billing.callStage ?? null,
         model,
         outcome: "failed",
         usageRaw: payloadRecord?.usage ?? null,
@@ -569,6 +586,10 @@ export async function requestStructuredCompletion(messages: Array<{ role: string
         accountId: billing.accountId,
         chargeComponent: billing.chargeComponent,
         callKind: billing.callKind ?? null,
+        taskKey: billing.taskKey ?? null,
+        unitKey: billing.unitKey ?? null,
+        attemptId: billing.attemptId ?? null,
+        callStage: billing.callStage ?? null,
         model,
         outcome: "failed",
         usageRaw: usage,
@@ -583,6 +604,10 @@ export async function requestStructuredCompletion(messages: Array<{ role: string
       accountId: billing.accountId,
       chargeComponent: billing.chargeComponent,
       callKind: billing.callKind ?? null,
+      taskKey: billing.taskKey ?? null,
+      unitKey: billing.unitKey ?? null,
+      attemptId: billing.attemptId ?? null,
+      callStage: billing.callStage ?? null,
       model,
       outcome: "success",
       usageRaw: usage,

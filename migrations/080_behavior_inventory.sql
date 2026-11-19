@@ -104,8 +104,10 @@ CREATE TABLE IF NOT EXISTS analysis_run_budgets (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- 单元级 LLM 回执元数据（Task 6 写入）：旧调用与历史行保持 NULL；重复执行不得删除回执。
+-- (run_id, attempt_id) 复合索引服务 Task 6 loadAttemptLlmUsage 的尝试级用量聚合（Task 7 结算）。
 ALTER TABLE llm_call_receipts
   ADD COLUMN task_key VARCHAR(512) NULL AFTER call_kind,
   ADD COLUMN unit_key VARCHAR(512) NULL AFTER task_key,
   ADD COLUMN attempt_id VARCHAR(64) NULL AFTER unit_key,
-  ADD COLUMN call_stage VARCHAR(24) NULL AFTER attempt_id;
+  ADD COLUMN call_stage VARCHAR(24) NULL AFTER attempt_id,
+  ADD KEY llm_call_receipts_run_attempt_idx (run_id, attempt_id);
