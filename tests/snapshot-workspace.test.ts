@@ -65,6 +65,15 @@ describe("host-native snapshot workspace", () => {
     const finalized = await finalizeSnapshotWorkspace(directory);
     expect(finalized.html).toContain('<html lang="en">');
     expect(finalized.html).toContain("Packaged feature");
+    // BYO 导入物：finalize 同时产出 snapshot.json（确定性导出，重复 finalize 逐字节一致）
+    const exportPath = join(directory, "snapshot.json");
+    const firstExport = await readFile(exportPath, "utf8");
+    const artifact = JSON.parse(firstExport);
+    expect(artifact).toMatchObject({ artifactKind: "codelphi-radar-snapshot", exportVersion: 1, language: "en" });
+    expect(artifact.identity.name).toBeTruthy();
+    expect(artifact.features[0].name).toBe("Packaged feature");
+    const second = await finalizeSnapshotWorkspace(directory);
+    expect(await readFile(second.snapshotExportPath, "utf8")).toBe(firstExport);
     expect(finalized.html).toContain("index.ts");
     expect(finalized.html).toContain("Complete feature index");
     expect(finalized.html).toContain("Smart project mapping is unavailable");

@@ -13,6 +13,10 @@ export interface SnapshotIdentity {
   target: string;
   repositoryUrl?: string;
   revision: string;
+  /** 内容寻址树哈希（BYO 导入「内容一致」锚；git-backend 已计算，本地分支透传）。 */
+  treeSha?: string;
+  /** 本地分析时记录的 origin 远端（归一化为 https，无 remote 时为空）。 */
+  originRemote?: string | null;
   branch: string | null;
   message: string;
   committedAt: string;

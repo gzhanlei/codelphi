@@ -171,8 +171,29 @@ export async function finalizeSnapshotWorkspace(directory: string) {
   const html = renderSnapshotHtml(report);
   const outputPath = join(directory, "radar.html");
   await writeAtomically(outputPath, html, true);
+  // BYO 导入物（设计 2026-11-18-radar-import-byo §4.1）：report-data 已含 identity/features/
+  // presentation/coverage/warnings 全部导入所需字段，补 artifactKind/exportVersion/contractVersion
+  // 即为确定性导出。同 work dir 重复 finalize 必须产出逐字节相同的 snapshot.json。
+  const snapshotExportPath = join(directory, "snapshot.json");
+  await writeAtomically(snapshotExportPath, JSON.stringify({
+    artifactKind: "codelphi-radar-snapshot",
+    exportVersion: 1,
+    contractVersion: manifest.contractVersion,
+    identity: report.snapshot,
+    language: report.language,
+    modelName: report.modelName,
+    product: report.product,
+    features: report.features,
+    presentation: report.presentation,
+    codebaseNavigation: report.codebaseNavigation,
+    evidenceSnippets: report.evidenceSnippets,
+    coverage: report.coverage,
+    effectiveCoverage: report.effectiveCoverage,
+    warnings: report.warnings,
+    analysis: report.analysis,
+  }), true);
   if (manifest.cleanupRoot) await rm(manifest.cleanupRoot, { recursive: true, force: true }).catch(() => undefined);
-  return { analysis, report, html, outputPath };
+  return { analysis, report, html, outputPath, snapshotExportPath };
 }
 
 export async function readSnapshotWorkOrder(directory: string, workOrderId: string) {

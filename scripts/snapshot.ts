@@ -235,9 +235,61 @@ async function workspaceMain(argv: string[], dependencies: CliDependencies) {
     if (command === "finalize" && positionals.length === 0) {
       const result = await finalizeSnapshotWorkspace(directory);
       stdout(language === "en" ? `Radar report written to ${result.outputPath}` : `Radar 报告已生成：${result.outputPath}`);
+      stdout(language === "en" ? `Import artifact written to ${result.snapshotExportPath}` : `导入产物已生成：${result.snapshotExportPath}`);
+      // BYO 自动上传（设计 §9）：CODELPHI_IMPORT_URL + CODELPHI_SNAPSHOT_KEY 同时在位时，
+      // finalize 即上传 snapshot.json（失败只告警，不阻断 finalize 产物）。
+      const uploadUrl = process.env.CODELPHI_IMPORT_URL;
+      const uploadKey = process.env.CODELPHI_SNAPSHOT_KEY;
+      if (uploadUrl && uploadKey) {
+        try {
+          const body = await readFile(result.snapshotExportPath, "utf8");
+          const response = await fetch(`${uploadUrl.replace(/\/$/, "")}/api/products/import-snapshot`, {
+            method: "POST",
+            headers: { "content-type": "application/json", authorization: `Bearer ${uploadKey}` },
+            body,
+          });
+          const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+          if (!response.ok) {
+            stderr(language === "en"
+              ? `Upload failed: HTTP ${response.status} ${JSON.stringify(payload)} (artifacts remain local; set CODELPHI_IMPORT_URL/CODELPHI_SNAPSHOT_KEY or unset to disable)`
+              : `上传失败：HTTP ${response.status} ${JSON.stringify(payload)}（产物保留在本地；可修正环境变量重试，或取消这两个变量以关闭自动上传）`);
+          } else {
+            stdout(language === "en"
+              ? `Uploaded to CoDelphi: product #${payload.productId} (${payload.slug ?? "?"}), imported=${payload.imported}, scenarios=${payload.scenariosImported}`
+              : `已上传到 CoDelphi：产品 #${payload.productId}（${payload.slug ?? "?"}），imported=${payload.imported}，场景数=${payload.scenariosImported}`);
+          }
+        } catch (error) {
+          stderr(language === "en" ? `Upload failed: ${error instanceof Error ? error.message : String(error)}` : `上传失败：${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
       return 0;
     }
-    stderr(language === "en" ? "Usage: prepare <target> --workdir <dir> | show --workdir <dir> --partition <id> | complete --workdir <dir> | finalize --workdir <dir>" : "用法：prepare <目标> --workdir <目录> | show --workdir <目录> --partition <id> | complete --workdir <目录> | finalize --workdir <目录>");
+    if (command === "upload" && positionals.length === 0) {
+      // 独立上传：已 finalize 过的工作目录，读 snapshot.json 直接重传（幂等键=revision+treeSha）。
+      const uploadPath = join(directory, "snapshot.json");
+      const uploadUrl = process.env.CODELPHI_IMPORT_URL;
+      const uploadKey = process.env.CODELPHI_SNAPSHOT_KEY;
+      if (!uploadUrl || !uploadKey) {
+        stderr(language === "en"
+          ? "upload requires CODELPHI_IMPORT_URL and CODELPHI_SNAPSHOT_KEY in the environment"
+          : "upload 需要环境变量 CODELPHI_IMPORT_URL 与 CODELPHI_SNAPSHOT_KEY");
+        return 2;
+      }
+      const body = await readFile(uploadPath, "utf8");
+      const response = await fetch(`${uploadUrl.replace(/\/$/, "")}/api/products/import-snapshot`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${uploadKey}` },
+        body,
+      });
+      const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!response.ok) {
+        stderr(`Upload failed: HTTP ${response.status} ${JSON.stringify(payload)}`);
+        return 1;
+      }
+      stdout(`Uploaded: product #${payload.productId} (${payload.slug ?? "?"}), imported=${payload.imported}, scenarios=${payload.scenariosImported}`);
+      return 0;
+    }
+    stderr(language === "en" ? "Usage: prepare <target> --workdir <dir> | show --workdir <dir> --partition <id> | complete --workdir <dir> | finalize --workdir <dir> | upload --workdir <dir>" : "用法：prepare <目标> --workdir <目录> | show --workdir <目录> --partition <id> | complete --workdir <目录> | finalize --workdir <目录> | upload --workdir <目录>");
     return 2;
   } catch (error) {
     stderr(errorText(error, language));
@@ -246,7 +298,7 @@ async function workspaceMain(argv: string[], dependencies: CliDependencies) {
 }
 
 export async function main(argv = process.argv.slice(2), dependencies: CliDependencies = {}) {
-  if (argv[0] === "prepare" || argv[0] === "finalize" || argv[0] === "show" || argv[0] === "complete") return workspaceMain(argv, dependencies);
+  if (argv[0] === "prepare" || argv[0] === "finalize" || argv[0] === "show" || argv[0] === "complete" || argv[0] === "upload") return workspaceMain(argv, dependencies);
   const language = languageFromArgv(argv);
   const stdout = dependencies.stdout ?? ((message: string) => console.log(message));
   const stderr = dependencies.stderr ?? ((message: string) => console.error(message));

@@ -46,6 +46,26 @@ export interface ResolvedSnapshotTarget {
   cleanup: () => Promise<void>;
 }
 
+/** BYO 身份锚：读 origin 远端并归一化为 https 形式（git@ → https、剥凭证段）；无 remote 返回 null。 */
+export async function readOriginRemote(repoRoot: string): Promise<string | null> {
+  try {
+    const raw = (await runGit(["-C", repoRoot, "remote", "get-url", "origin"])).toString("utf8").trim();
+    if (!raw) return null;
+    const sshMatch = /^(?:ssh:\/\/)?git@([^/:]+)[:/](.+?)(?:\.git)?$/.exec(raw);
+    if (sshMatch) return `https://${sshMatch[1]}/${sshMatch[2]}`;
+    try {
+      const parsed = new URL(raw);
+      parsed.username = "";
+      parsed.password = "";
+      return parsed.toString().replace(/\/$/, "");
+    } catch {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+}
+
 export interface ResolveSnapshotTargetOptions {
   clone?: (url: string, destination: string) => Promise<void>;
 }
@@ -60,6 +80,8 @@ export async function resolveSnapshotTarget(target: string, ref?: string, option
         source: "local",
         name: basename(snapshot.repoRoot),
         target: snapshot.repoRoot,
+        repositoryUrl: (await readOriginRemote(snapshot.repoRoot)) ?? undefined,
+        treeSha: snapshot.treeSha,
         revision: snapshot.revision,
         branch: snapshot.branch,
         message: snapshot.message,
@@ -103,6 +125,8 @@ export async function resolveSnapshotTarget(target: string, ref?: string, option
         owner: repository.owner,
         target: repository.url,
         repositoryUrl: repository.url,
+        treeSha: snapshot.treeSha,
+        originRemote: repository.url,
         revision: snapshot.revision,
         branch: snapshot.branch,
         message: snapshot.message,

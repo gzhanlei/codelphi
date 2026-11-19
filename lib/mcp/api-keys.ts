@@ -18,12 +18,14 @@ export interface CreatedApiKey {
   plaintext: string;
 }
 
-export async function createApiKey(connection: { execute: Execute }, input: { organizationId: number; name: string; createdBy: string }): Promise<CreatedApiKey> {
+export type ApiKeyScope = "mcp_read" | "snapshot_write";
+
+export async function createApiKey(connection: { execute: Execute }, input: { organizationId: number; name: string; createdBy: string; scope?: ApiKeyScope }): Promise<CreatedApiKey> {
   const plaintext = MCP_KEY_PREFIX + randomBytes(16).toString("hex");
   const insertResult = (await connection.execute(
-    `INSERT INTO mcp_api_keys (organization_id, name, key_hash, key_prefix, key_hint, created_by)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [input.organizationId, input.name, hashApiKey(plaintext), MCP_KEY_PREFIX, plaintext.slice(MCP_KEY_PREFIX.length, MCP_KEY_PREFIX.length + 8), input.createdBy],
+    `INSERT INTO mcp_api_keys (organization_id, name, key_hash, key_prefix, key_hint, created_by, scope)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [input.organizationId, input.name, hashApiKey(plaintext), MCP_KEY_PREFIX, plaintext.slice(MCP_KEY_PREFIX.length, MCP_KEY_PREFIX.length + 8), input.createdBy, input.scope ?? "mcp_read"],
   )) as unknown;
   const first = Array.isArray(insertResult) ? insertResult[0] : insertResult;
   return { id: Number((first as { insertId: number }).insertId), plaintext };
@@ -32,18 +34,19 @@ export async function createApiKey(connection: { execute: Execute }, input: { or
 export interface McpKeyIdentity {
   keyId: number;
   organizationId: number;
+  scope: ApiKeyScope;
 }
 
 /** 无效 / 未知 / 已撤销 key 一律返回 null（防枚举，不区分原因）。 */
 export async function verifyApiKey(connection: { execute: Execute }, plaintext: string): Promise<McpKeyIdentity | null> {
   if (!plaintext.startsWith(MCP_KEY_PREFIX)) return null;
   const [rows] = (await connection.execute(
-    "SELECT id, organization_id AS organizationId, revoked_at AS revokedAt FROM mcp_api_keys WHERE key_hash = ?",
+    "SELECT id, organization_id AS organizationId, revoked_at AS revokedAt, scope FROM mcp_api_keys WHERE key_hash = ?",
     [hashApiKey(plaintext)],
-  )) as [Array<{ id: number; organizationId: number; revokedAt: Date | null }>, unknown];
+  )) as [Array<{ id: number; organizationId: number; revokedAt: Date | null; scope: ApiKeyScope }>, unknown];
   const row = rows[0];
   if (!row || row.revokedAt) return null;
-  return { keyId: Number(row.id), organizationId: Number(row.organizationId) };
+  return { keyId: Number(row.id), organizationId: Number(row.organizationId), scope: row.scope };
 }
 
 export interface McpApiKeyView {
