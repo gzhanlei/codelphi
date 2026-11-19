@@ -1,4 +1,5 @@
 import type { AnalysisResult } from "./ai";
+import type { AnchorScenarioLink } from "./behavior-unit-state";
 import { featureScenarioPairMatch, featureVariantSimilar, normalizeSpecText, scenarioBehaviorEqual, scenarioVariantSimilar, specFeatureKey, type SpecFeature } from "./spec-diff";
 
 /**
@@ -6,10 +7,27 @@ import { featureScenarioPairMatch, featureVariantSimilar, normalizeSpecText, sce
  * 只做规则合并（无 AI 通道）：功能按 stable key 分组、场景按行为等价去重、引用冲突
  * 重编号、reviewed 审计候选精确去重截断。每趟结果在提取层已过 zod 与 assertEvidence（分区局部口径），
  * 合并对象有意绕过 zod 的 ≤50 功能/≤40 场景上限（DB 无对应上限）。
+ *
+ * Task 11 · originKeys 传播：合并输入场景可携带 Task 10 的局部场景身份（originKeys）。
+ * 去重（BM-5 等价 / BM-6 变体）、BM-11 跨 group 功能折叠、引用冲突重编号都只决定
+ * 「哪条文案存活」，originKeys 一律求并集挂到存活场景上——身份与呈现分离：
+ * origin 绝不进入 scenarioBehaviorEqual / scenarioVariantSimilar / featureVariantSimilar
+ * 判定，也不进入 prompt 与展示文本。无 origin 的旧分区结果输出逐字段保持旧行为。
  */
 
+type BaseScenario = AnalysisResult["features"][number]["scenarios"][number];
+type BaseFeature = AnalysisResult["features"][number];
+
+/** 合并层输入/输出场景：提取结果场景 + 可选的 Task 10 局部场景身份并集。 */
+export type MergeScenario = BaseScenario & { originKeys?: string[] };
+export type MergeFeature = Omit<BaseFeature, "scenarios"> & { scenarios: MergeScenario[] };
+export type MergeResult = Omit<AnalysisResult, "features"> & { features: MergeFeature[] };
+
 export interface ExtractionChunk {
-  result: AnalysisResult;
+  result: MergeResult;
+  /** Task 11 · 可选：Task 10 产出的锚点↔局部场景关联行（含每个 linkedAnchorKey，
+   *  不只是 ordinal 归属锚点）。旧分区结果没有来源信息时缺省。 */
+  anchorLinks?: AnchorScenarioLink[];
 }
 
 /** 前缀重编号：取同前缀现有最大序号 +1（HP-9 → HP-10）。分区合并与坍缩回填共用。 */
@@ -25,7 +43,16 @@ export function nextReference(used: string[], reference: string) {
   return `${prefix}-${max + 1}`;
 }
 
-export function mergeChunkResults(chunks: ExtractionChunk[], onStats?: (stats: { changesTruncated: number; scenariosDeduped: number; featuresFolded: number }) => void): AnalysisResult {
+/** Task 11：去重/折叠保留先到者文案，行为来源求并集（先到者原有 origin 在前，保持确定性）。
+ *  只读 originKeys，不改写行为字段；incoming 无 origin 时 kept 原样（旧分区语义不变）。 */
+function unionOriginKeys(kept: MergeScenario, incoming: MergeScenario) {
+  if (!incoming.originKeys || incoming.originKeys.length === 0) return;
+  const union = kept.originKeys ? [...kept.originKeys] : [];
+  for (const key of incoming.originKeys) if (!union.includes(key)) union.push(key);
+  kept.originKeys = union;
+}
+
+export function mergeChunkResults(chunks: ExtractionChunk[], onStats?: (stats: { changesTruncated: number; scenariosDeduped: number; featuresFolded: number }) => void): MergeResult {
   if (chunks.length === 0) throw new Error("mergeChunkResults requires at least one chunk");
   const first = chunks[0].result;
 
@@ -33,7 +60,7 @@ export function mergeChunkResults(chunks: ExtractionChunk[], onStats?: (stats: {
     name: string;
     summary: string;
     summaryScenarioCount: number;
-    scenarios: AnalysisResult["features"][number]["scenarios"];
+    scenarios: MergeScenario[];
     references: string[];
   }
   const groups = new Map<string, FeatureGroup>();
@@ -42,9 +69,12 @@ export function mergeChunkResults(chunks: ExtractionChunk[], onStats?: (stats: {
   // 去重判定函数由调用方选择——主分组走 BM-5/BM-6 严通道（HP-3 红线口径不变），
   // BM-11 折叠通道内走 featureScenarioPairMatch（被大段改写的同行为场景也须收口，
   // 否则折叠后的 keeper 内部还留着用户看到的那三条重复文案）。
-  const addScenarioToGroup = (group: FeatureGroup, scenario: (typeof group)["scenarios"][number], isDuplicate: (existing: (typeof group)["scenarios"][number], incoming: (typeof group)["scenarios"][number]) => boolean) => {
-    if (group.scenarios.some((existing) => isDuplicate(existing, scenario))) {
+  const addScenarioToGroup = (group: FeatureGroup, scenario: MergeScenario, isDuplicate: (existing: MergeScenario, incoming: MergeScenario) => boolean) => {
+    const duplicate = group.scenarios.find((existing) => isDuplicate(existing, scenario));
+    if (duplicate) {
       scenariosDeduped += 1;
+      // Task 11：文案保留先到者，但每个行为来源（originKeys）都必须存活。
+      unionOriginKeys(duplicate, scenario);
       return;
     }
     // 引用冲突：同引用已存在但行为不同 → 前缀重编号（spec_scenarios 唯一键 (feature, reference)）

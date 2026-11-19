@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AnalysisResult } from "../lib/ai";
-import { mergeChunkResults, nextReference } from "../lib/extraction-merge";
+import { mergeChunkResults, nextReference, type MergeFeature } from "../lib/extraction-merge";
 
 const scenario = (reference: string, outcome: string, category: AnalysisResult["features"][number]["scenarios"][number]["category"] = "happy") => ({
   reference,
@@ -11,7 +11,7 @@ const scenario = (reference: string, outcome: string, category: AnalysisResult["
   evidence: [{ path: "lib/auth.ts", startLine: 10 }],
 });
 
-const chunk = (features: AnalysisResult["features"], changes: AnalysisResult["changes"] = []): { result: AnalysisResult } => ({
+const chunk = (features: MergeFeature[], changes: AnalysisResult["changes"] = []): { result: AnalysisResult } => ({
   result: {
     product: { description: "代码驱动的产品知识库。", evidence: [{ path: "lib/auth.ts", startLine: 1 }] },
     release: { title: "v1", summary: "summary" },
@@ -181,4 +181,86 @@ describe("mergeChunkResults reviewed-only audit boundary", () => {
     expect(merged.changes).toEqual([]);
   });
 
+});
+
+describe("mergeChunkResults origin propagation (Task 11)", () => {
+  const originScenario = (reference: string, outcome: string, originKeys: string[], category: AnalysisResult["features"][number]["scenarios"][number]["category"] = "happy") => ({
+    ...scenario(reference, outcome, category),
+    originKeys,
+  });
+
+  it("unions originKeys when behavior-equivalent duplicates merge (keeper text wins, origins survive)", () => {
+    const merged = mergeChunkResults([
+      chunk([{ name: "统一登录", summary: "s", scenarios: [originScenario("HP-1", "登录成功跳转 dashboard", ["scenario|[\"u1\",\"a1\",\"001\"]"])] }]),
+      chunk([{ name: "统一登录", summary: "s", scenarios: [originScenario("HP-1", "登录成功跳转 dashboard", ["scenario|[\"u2\",\"a2\",\"001\"]"], "edge")] }]),
+    ]);
+    expect(merged.features[0].scenarios).toHaveLength(1);
+    expect(merged.features[0].scenarios[0].originKeys).toEqual(["scenario|[\"u1\",\"a1\",\"001\"]", "scenario|[\"u2\",\"a2\",\"001\"]"]);
+  });
+
+  it("unions originKeys on the BM-6 variant fold path within a group", () => {
+    const merged = mergeChunkResults([
+      chunk([{
+        name: "产品发布入口", summary: "s",
+        scenarios: [
+          { ...originScenario("EC-5", "不渲染任何发布入口，登录引导集中在顶栏", ["scenario|[\"u1\",\"a1\",\"001\"]"], "edge"), context: "匿名演示访客查看总览页", action: "渲染发布入口" },
+          { ...originScenario("EC-6", "不渲染任何发布入口，登录引导集中在顶栏", ["scenario|[\"u1\",\"a1\",\"002\"]"], "edge"), context: "匿名 demo 访客查看总览页", action: "渲染发布入口" },
+        ],
+      }]),
+    ]);
+    expect(merged.features[0].scenarios).toHaveLength(1);
+    expect(merged.features[0].scenarios[0].originKeys).toEqual(["scenario|[\"u1\",\"a1\",\"001\"]", "scenario|[\"u1\",\"a1\",\"002\"]"]);
+  });
+
+  it("unions originKeys when the cross-group BM-11 feature fold merges scenarios", () => {
+    const merged = mergeChunkResults([
+      chunk([{ name: "管理端支付台账", summary: "超管支付操作面板", scenarios: [originScenario("HP-1", "创建测试单并展示扫码支付入口", ["scenario|[\"u1\",\"a1\",\"001\"]"])] }]),
+      chunk([{ name: "管理端支付订单台账", summary: "超管支付页的联调测试单与订单台账面板", scenarios: [originScenario("HP-1", "创建测试单并展示扫码支付入口", ["scenario|[\"u2\",\"a2\",\"001\"]"])] }]),
+    ]);
+    expect(merged.features).toHaveLength(1);
+    expect(merged.features[0].name).toBe("管理端支付台账");
+    expect(merged.features[0].scenarios).toHaveLength(1);
+    expect(merged.features[0].scenarios[0].originKeys).toEqual(["scenario|[\"u1\",\"a1\",\"001\"]", "scenario|[\"u2\",\"a2\",\"001\"]"]);
+  });
+
+  it("keeps originKeys when a reference collision renumbers the scenario", () => {
+    const merged = mergeChunkResults([
+      chunk([{ name: "规格导出", summary: "s", scenarios: [originScenario("HP-1", "导出 Markdown 附件", ["scenario|[\"u1\",\"a1\",\"001\"]"])] }]),
+      chunk([{ name: "规格导出", summary: "s", scenarios: [originScenario("HP-1", "导出 Explainer HTML 页面", ["scenario|[\"u2\",\"a2\",\"001\"]"])] }]),
+    ]);
+    const scenarios = merged.features[0].scenarios;
+    expect(scenarios.map((item) => item.reference)).toEqual(["HP-1", "HP-2"]);
+    expect(scenarios[0].originKeys).toEqual(["scenario|[\"u1\",\"a1\",\"001\"]"]);
+    expect(scenarios[1].originKeys).toEqual(["scenario|[\"u2\",\"a2\",\"001\"]"]);
+  });
+
+  it("never lets origins influence behavior equality: same origin with different behavior stays two scenarios", () => {
+    const merged = mergeChunkResults([
+      chunk([{ name: "统一登录", summary: "s", scenarios: [originScenario("HP-1", "返回结果页", ["scenario|[\"u1\",\"a1\",\"001\"]"])] }]),
+      chunk([{ name: "统一登录", summary: "s", scenarios: [originScenario("HP-1", "拒绝并返回 401", ["scenario|[\"u1\",\"a1\",\"001\"]"], "edge")] }]),
+    ]);
+    expect(merged.features[0].scenarios).toHaveLength(2);
+  });
+
+  it("keeps keeper origins when the incoming duplicate carries none", () => {
+    const merged = mergeChunkResults([
+      chunk([{ name: "统一登录", summary: "s", scenarios: [originScenario("HP-1", "登录成功跳转 dashboard", ["scenario|[\"u1\",\"a1\",\"001\"]"])] }]),
+      chunk([{ name: "统一登录", summary: "s", scenarios: [scenario("HP-1", "登录成功跳转 dashboard")] }]),
+    ]);
+    expect(merged.features[0].scenarios).toHaveLength(1);
+    expect(merged.features[0].scenarios[0].originKeys).toEqual(["scenario|[\"u1\",\"a1\",\"001\"]"]);
+  });
+
+  it("never fabricates originKeys for origin-less chunks (old partition output stays field-identical)", () => {
+    const merged = mergeChunkResults([
+      chunk([{ name: "统一登录", summary: "A 版摘要", scenarios: [scenario("HP-1", "登录成功跳转 dashboard")] }]),
+      chunk([{ name: "统一登录", summary: "B 版摘要（更长覆盖）", scenarios: [scenario("HP-1", "登录成功跳转 dashboard"), scenario("HP-1", "密码错误锁定账户", "error")] }]),
+    ]);
+    expect(merged.features[0].scenarios).toHaveLength(2);
+    for (const feature of merged.features) {
+      for (const item of feature.scenarios) {
+        expect("originKeys" in item).toBe(false);
+      }
+    }
+  });
 });

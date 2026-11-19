@@ -13,6 +13,11 @@ export interface SpecScenario {
    *  （docs/w-decision-scenario-sequence-plan.md §2），但 before/after 序列化如实记录。 */
   step?: number | null;
   evidence: Evidence[];
+  /** Task 11 行为来源：Task 10 分配的 localScenarioKey 集合（合并层在去重/折叠时求并集）。
+   *  只用于 Task 12 最终 spec_scenario 映射回填；不进入 prompt、展示文本，
+   *  也不参与 scenarioBehaviorChanged / scenarioBehaviorEqual / scenarioVariantSimilar /
+   *  featureVariantSimilar 任何行为等价与变体判定。 */
+  originKeys?: string[];
   source?: "generated" | "manual";
 }
 
