@@ -249,3 +249,18 @@ radar run 完成时在 work dir 持久化合并快照 `snapshot.json`：
 - **L3 BYO**：定价拍板后一个季度无付费客户，下线 L3 面板与通道，保留导入能力（L2 价值独立成立）。
 - **滥用**：赠予去重失效或批量刷赠出现，先关赠予再查因，宁可错关不可放任。
 - 以上任一停止条件触发时，对应能力降级或下线，不以「已投入」为由保留。
+
+## 实施记录（2026-11-19，P0 六项完成）
+
+已落地（sha-cd2c944，release 290 起）：
+
+- **P0-1** `SnapshotIdentity` + `treeSha`/`originRemote`（本地读 origin 归一化 https、GitHub 分支透传）。
+- **P0-2** finalize 确定性导出 `snapshot.json`（report-data 为基，剔除 generatedAt 时间戳保证重复 finalize 逐字节一致；测试断言两次导出逐字节相等）。
+- **P0-7a** 迁移 078：mcp_api_keys.scope（默认 mcp_read 零回归）+ products seeded 五列 + features/scenarios.source 加宽到 32。
+- **P0-4** `app/api/products/import-snapshot`：scope=snapshot_write 才放行（mcp_read 403）；校验链（schema/contractVersion 门/引用唯一/锚点路径卫生）；幂等键=org+seeded_snapshot_sha（treeSha 漂移拒绝）；单事务（失败回滚零孤儿）；数量上限撤销（2026-11-19 用户裁决：知识数量不设上限，传输防护=nginx 20m + 分片）。
+- **P0-7b** `upload --workdir` 子命令 + finalize 自动上传钩子（CODELPHI_IMPORT_URL/CODELPHI_SNAPSHOT_KEY），**4MB 分片流式上传**（x-import-id/index/total，服务端按 org+importId 组装、末块计限流、30 分钟惰性过期）——请求体上限从产品天花板降级为单块传输参数。
+- 规模按现实校准：SalesBuddy 实测 1024 功能/4495 场景。
+
+**端到端验证**：本地 finalize SalesBuddy workdir（4.5MB snapshot.json）→ 分片上传 → 产品 #20（airecord）1024 功能落库 → 二次上传幂等命中（imported=false）→ MCP get_project_summary 读侧确认。修了三个真 bug：INSERT 结果解包（rowsOf 不适用 ResultSetHeader）、productId 块作用域遮蔽（features 落在 0 上，编排测试补回归）、事务包裹（失败回滚零孤儿，之前两次尝试的孤儿已清理）。
+
+**Stage B 待办**：三级匹配的 SHA 可达性验证（level 1/2 自动绑定现在的行为=origin github 解析即建 repositories 行，未做远端校验）；gift SAU；读侧 draft 来源注脚渲染；私有仓库披露文案；settings 页 snapshot_write key 签发 UI；本地收敛趟数（W2 客户端语义）；evidence mode B（锚点-only 剥离）。
