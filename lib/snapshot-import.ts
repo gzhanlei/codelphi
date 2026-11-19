@@ -189,56 +189,61 @@ async function findReusableEmptyProduct(deps: ImportDeps, origin: { owner: strin
   return { mode: "reuse_empty_product", productId: Number(row.productId), slug: String(row.slug) };
 }
 
-export async function importSnapshotArtifact(deps: ImportDeps, raw: unknown, identityInput?: { slug?: string }): Promise<{ productId: number; slug: string; featuresImported: number; scenariosImported: number; mode: ImportDecision["mode"]; binding: "created" | "existing" | "unbound" }> {
-  const features = validateImportArtifact(raw, deps.currentContractVersion);
-  const artifact = raw as ImportArtifact;
-  const identity = artifact.identity;
+interface ResolvedTarget {
+  mode: ImportDecision["mode"];
+  productId: number;
+  slug: string;
+  binding: "created" | "existing" | "unbound";
+}
 
+/** 目标产品解析（§5）：幂等命中 > 复用空产品 > 新建（slug 冲突自动加后缀）。 */
+async function resolveTargetProduct(deps: ImportDeps, identity: ImportArtifact["identity"], language: "zh-CN" | "en", origin: { owner: string; name: string } | null, slugHint?: string): Promise<ResolvedTarget> {
   const existing = await findIdempotentImport(deps, { revision: identity.revision, treeSha: identity.treeSha });
   if (existing) {
-    return { productId: existing.productId!, slug: existing.slug!, featuresImported: 0, scenariosImported: 0, mode: "idempotent", binding: "existing" };
+    return { mode: "idempotent", productId: existing.productId!, slug: existing.slug!, binding: "existing" };
   }
-
-  const origin = parseGithubOrigin(identity.originRemote ?? identity.repositoryUrl);
   const reusable = await findReusableEmptyProduct(deps, origin);
-  let productId: number = 0;
-  let slug: string = "";
-  let binding: "created" | "existing" | "unbound" = "unbound";
   if (reusable) {
-    productId = reusable.productId!;
-    slug = reusable.slug!;
-    binding = "existing";
-  } else {
-    const base = slugifyRepoName(identityInput?.slug ?? identity.name);
-    slug = base;
-    for (let attempt = 2; attempt < 50; attempt += 1) {
-      const taken = rowsOf(await deps.execute("SELECT id FROM products WHERE organization_id = ? AND slug = ? LIMIT 1", [deps.organizationId, slug]));
-      if (taken.length === 0) break;
-      slug = `${base}-${attempt}`;
-    }
-    const insertResult = await deps.execute(
-      `INSERT INTO products (slug, name, description, organization_id, analyze_mode, output_language)
-       VALUES (?, ?, '', ?, 'incremental', ?)`,
-      [slug, identity.name.slice(0, 191), deps.organizationId, artifact.language === "en" ? "en" : "zh-CN"],
+    return { mode: "reuse_empty_product", productId: reusable.productId!, slug: reusable.slug!, binding: "existing" };
+  }
+  const base = slugifyRepoName(slugHint ?? identity.name);
+  let slug = base;
+  for (let attempt = 2; attempt < 50; attempt += 1) {
+    const taken = rowsOf(await deps.execute("SELECT id FROM products WHERE organization_id = ? AND slug = ? LIMIT 1", [deps.organizationId, slug]));
+    if (taken.length === 0) break;
+    slug = `${base}-${attempt}`;
+  }
+  const insertResult = await deps.execute(
+    `INSERT INTO products (slug, name, description, organization_id, analyze_mode, output_language)
+     VALUES (?, ?, '', ?, 'incremental', ?)`,
+    [slug, identity.name.slice(0, 191), deps.organizationId, language],
+  );
+  const insert = (Array.isArray(insertResult) ? insertResult[0] : insertResult) as { insertId: number };
+  return {
+    mode: "create_product",
+    productId: Number(insert.insertId),
+    slug,
+    binding: origin ? "created" : "unbound",
+  };
+}
+
+/** 仓库行登记：origin 是 github 且该仓库行尚不存在时补建（已属其他产品则留待 Stage B 绑定）。 */
+async function ensureRepositoryRow(deps: ImportDeps, origin: { owner: string; name: string } | null, productId: number): Promise<void> {
+  if (!origin) return;
+  const repoRows = rowsOf(await deps.execute(
+    "SELECT id, product_id AS productId FROM repositories WHERE provider = 'github' AND owner = ? AND name = ? LIMIT 1",
+    [origin.owner, origin.name],
+  ));
+  if (repoRows.length === 0) {
+    await deps.execute(
+      "INSERT INTO repositories (product_id, owner, name, provider, connection_id) VALUES (?, ?, ?, 'github', NULL)",
+      [productId, origin.owner, origin.name],
     );
-    const insert = (Array.isArray(insertResult) ? insertResult[0] : insertResult) as { insertId: number };
-    productId = Number(insert.insertId);
-    binding = origin ? "created" : "unbound";
   }
+}
 
-  if (origin && binding !== "existing") {
-    const repoRows = rowsOf(await deps.execute(
-      "SELECT id, product_id AS productId FROM repositories WHERE provider = 'github' AND owner = ? AND name = ? LIMIT 1",
-      [origin.owner, origin.name],
-    ));
-    if (repoRows.length === 0) {
-      await deps.execute(
-        "INSERT INTO repositories (product_id, owner, name, provider, connection_id) VALUES (?, ?, ?, 'github', NULL)",
-        [productId, origin.owner, origin.name],
-      );
-    }
-  }
-
+/** 草稿落库：features/scenarios 双写（source='ai_snapshot_import'），返回导入场景数。 */
+async function insertDraftFeatures(deps: ImportDeps, productId: number, features: ImportArtifactFeatures[]): Promise<number> {
   let scenariosImported = 0;
   for (const feature of features) {
     const featureInsertResult = await deps.execute(
@@ -256,11 +261,22 @@ export async function importSnapshotArtifact(deps: ImportDeps, raw: unknown, ide
       scenariosImported += 1;
     }
   }
+  return scenariosImported;
+}
 
+export async function importSnapshotArtifact(deps: ImportDeps, raw: unknown, identityInput?: { slug?: string }): Promise<{ productId: number; slug: string; featuresImported: number; scenariosImported: number; mode: ImportDecision["mode"]; binding: "created" | "existing" | "unbound" }> {
+  const features = validateImportArtifact(raw, deps.currentContractVersion);
+  const artifact = raw as ImportArtifact;
+  const identity = artifact.identity;
+  const origin = parseGithubOrigin(identity.originRemote ?? identity.repositoryUrl);
+  const target = await resolveTargetProduct(deps, identity, artifact.language, origin, identityInput?.slug);
+  if (origin && target.binding !== "existing") {
+    await ensureRepositoryRow(deps, origin, target.productId);
+  }
+  const scenariosImported = await insertDraftFeatures(deps, target.productId, features);
   await deps.execute(
     `UPDATE products SET seeded_snapshot_sha = ?, seeded_tree_sha = ?, seeded_dirty = ?, seeded_contract_version = ?, seeded_at = CURRENT_TIMESTAMP(3) WHERE id = ?`,
-    [identity.revision, identity.treeSha ?? null, identity.workingTreeDirty ? 1 : 0, (raw as ImportArtifact).contractVersion, productId],
+    [identity.revision, identity.treeSha ?? null, identity.workingTreeDirty ? 1 : 0, artifact.contractVersion, target.productId],
   );
-
-  return { productId, slug, featuresImported: features.length, scenariosImported, mode: binding === "existing" ? "reuse_empty_product" : "create_product", binding };
+  return { productId: target.productId, slug: target.slug, featuresImported: features.length, scenariosImported, mode: target.mode, binding: target.binding };
 }

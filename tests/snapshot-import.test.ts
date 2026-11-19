@@ -103,3 +103,58 @@ describe("importSnapshotArtifact 编排（遮蔽 bug 回归：features 必须落
     expect(receipt.scenariosImported).toBe(1);
   });
 });
+
+describe("importSnapshotArtifact 分支覆盖（resolveTargetProduct 三路径）", () => {
+  const artifact = () => JSON.parse(JSON.stringify(validArtifact));
+  const fakeDeps = (script: (sql: string) => unknown) => ({
+    execute: (async (sql: string) => script(String(sql))) as unknown as (sql: string, params?: unknown[]) => Promise<unknown>,
+    currentContractVersion: "1.0.0",
+    organizationId: 2,
+  });
+
+  it("reuses an empty product bound to the origin repo without inserting a new product", async () => {
+    const { importSnapshotArtifact } = await import("../lib/snapshot-import");
+    const calls: string[] = [];
+    const deps = fakeDeps((sql) => {
+      calls.push(String(sql));
+      if (String(sql).includes("seeded_snapshot_sha = ?")) return [[]];
+      if (String(sql).includes("FROM repositories r JOIN products p")) return [[{ productId: 55, slug: "sample-repo", activeFeatures: 0 }]];
+      return [[]];
+    });
+    const receipt = await importSnapshotArtifact(deps, artifact());
+    expect(receipt).toMatchObject({ productId: 55, mode: "reuse_empty_product", binding: "existing" });
+    expect(calls.some((sql) => sql.startsWith("INSERT INTO products"))).toBe(false);
+  });
+
+  it("rejects with product_has_content when the origin product already has ledger content", async () => {
+    const { importSnapshotArtifact } = await import("../lib/snapshot-import");
+    const deps = fakeDeps((sql) => {
+      if (sql.includes("seeded_snapshot_sha = ?")) return [[]];
+      if (sql.includes("FROM repositories r JOIN products p")) return [[{ productId: 55, slug: "sample-repo", activeFeatures: 7 }]];
+      return [[]];
+    });
+    try {
+      await importSnapshotArtifact(deps, artifact());
+      throw new Error("should have thrown");
+    } catch (error) {
+      expect((error as { code?: string }).code).toBe("product_has_content");
+    }
+  });
+
+  it("registers the repository row when the origin is new (created binding)", async () => {
+    const { importSnapshotArtifact } = await import("../lib/snapshot-import");
+    const calls: string[] = [];
+    const deps = fakeDeps((sql) => {
+      calls.push(String(sql));
+      if (sql.startsWith("INSERT INTO repositories")) return [{ insertId: 900 }];
+      if (sql.startsWith("INSERT INTO products")) return [{ insertId: 77 }];
+      if (sql.startsWith("INSERT INTO features")) return [{ insertId: 501 }];
+      return [[]];
+    });
+    const receipt = await importSnapshotArtifact(deps, artifact());
+    expect(receipt.binding).toBe("created");
+    const repoCall = calls.findIndex((sql) => sql.startsWith("INSERT INTO repositories"));
+    expect(repoCall).toBeGreaterThan(-1);
+    expect(receipt.productId).toBe(77);
+  });
+});
