@@ -268,6 +268,63 @@ describe("extractBehaviorTask", () => {
     expect(judgeBilling).toMatchObject({ runId: 7, taskKey: task.taskKey, unitKey: task.unitKey, attemptId: "attempt-1", callStage: "judge" });
   });
 
+  it("keeps surviving scenarios unresolved when no region claims extracted attribution", async () => {
+    // D5：no_behavior 要求 scenarioCount===0 且全部区域为有效 reviewed_internal——
+    // 有存活场景却无任何 extracted 归属时是核算漏洞，必须 unresolved 而非 no_behavior
+    const requestCompletion = completionMock(
+      describeResponse(),
+      judgeResponse([internalRegion("R1", "pure_technical"), internalRegion("R2", "data_transform")], [feature]),
+    );
+    const result = await extractBehaviorTask(input({ requestCompletion }));
+    expect(result.scenarioCount).toBe(1);
+    expect(result.outcome).toBe("unresolved");
+    expect(result.anchorReceipts.every((receipt) => receipt.disposition === "reviewed_internal")).toBe(true);
+  });
+
+  it("keeps surviving scenarios unresolved when some have no extracted attribution", async () => {
+    const unattributed = {
+      ...feature,
+      scenarios: [
+        feature.scenarios[0],
+        { reference: "EC-1", context: "并发提交", action: "重复提交订单", outcome: "幂等拒绝", category: "edge", evidence: [{ path: "src/foo.ts", startLine: 4 }] },
+      ],
+    };
+    const requestCompletion = completionMock(
+      describeResponse(),
+      judgeResponse([extractedRegion("R1"), internalRegion("R2", "data_transform")], [unattributed]),
+    );
+    const result = await extractBehaviorTask(input({ requestCompletion }));
+    expect(result.scenarioCount).toBe(2);
+    expect(result.outcome).toBe("unresolved");
+  });
+
+  it("renders complete English prompts without Chinese instruction leakage", async () => {
+    const englishDescriptions: BehaviorRegionDescription[] = [
+      { id: "R1", facts: "validates and stores the order", inputs: "request body", controlFlow: "sequential", externalEffects: "writes to the database" },
+      { id: "R2", facts: "formats a log line", inputs: "string", controlFlow: "sequential", externalEffects: "no external effect observed" },
+    ];
+    const describePrompt = describeBehaviorTaskPrompt(task, sources, "en");
+    expect(describePrompt).toContain("Restate only the facts");
+    expect(describePrompt).not.toMatch(/[一-鿿]/);
+    const judgePrompt = judgeBehaviorTaskPrompt({ task, sources, descriptions: englishDescriptions, language: "en" });
+    expect(judgePrompt).toContain("called by another unit");
+    expect(judgePrompt).toContain("covered_elsewhere");
+    expect(judgePrompt).not.toMatch(/[一-鿿]/);
+    expect(judgePrompt).not.toMatch(/1-5 scenarios|most important/i);
+
+    const requestCompletion = completionMock(
+      JSON.stringify({ regions: englishDescriptions }),
+      judgeResponse([extractedRegion("R1"), internalRegion("R2", "data_transform")], [feature]),
+    );
+    const billing: LlmBillingContext = { runId: 7, accountId: 3, chargeComponent: "main", taskKey: task.taskKey, unitKey: task.unitKey, attemptId: "attempt-1" };
+    const result = await extractBehaviorTask(input({ requestCompletion, billing, outputLanguage: "en" }));
+    expect(result.outcome).toBe("extracted");
+    // system 消息随语言切换，billing 阶段身份保持不变
+    expect(requestCompletion.mock.calls[0][0][0].content).toContain("rigorous code analyzer");
+    expect(requestCompletion.mock.calls[0][1]).toMatchObject({ callStage: "describe", taskKey: task.taskKey, attemptId: "attempt-1" });
+    expect(requestCompletion.mock.calls[1][1]).toMatchObject({ callStage: "judge", taskKey: task.taskKey, attemptId: "attempt-1" });
+  });
+
   it("validates boundary inputs before any AI call", async () => {
     const requestCompletion = completionMock(describeResponse());
     await expect(extractBehaviorTask({ task, sources: [], requestCompletion })).rejects.toThrow(/source/i);

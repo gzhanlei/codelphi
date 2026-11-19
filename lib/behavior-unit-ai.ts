@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { analysisSchema, normalizeScenarioAliases, type AnalysisResult } from "./ai";
+import type { OutputLanguage } from "./analysis-language";
 import type { TaskSource } from "./behavior-inventory/planner";
 import type { BehaviorExecutionTask } from "./behavior-inventory/types";
 
@@ -45,6 +46,8 @@ export interface JudgePromptInput {
   sources: TaskSource[];
   descriptions: BehaviorRegionDescription[];
   knownFeatureNames?: string[];
+  /** 输出语言（Task 13 传 run.outputLanguage）；缺省 zh-CN，既有调用形态不变。 */
+  language?: OutputLanguage;
 }
 
 /** 区域 id 只从任务分片顺序派生（R1…Rn）；AI 回显的 id 映射回确定性 fragment，不承担身份。 */
@@ -59,24 +62,47 @@ function renderNumbered(source: TaskSource): string {
     .join("\n");
 }
 
-function renderSourceSections(sources: TaskSource[], role: TaskSource["role"]): string {
+function renderSourceSections(sources: TaskSource[], role: TaskSource["role"], language: OutputLanguage): string {
   return sources
     .filter((source) => source.role === role)
-    .map((source) => `--- ${source.path} 行 ${source.startLine}-${source.endLine} ---\n${renderNumbered(source)}`)
-    .join("\n");
-}
-
-function renderRegionList(task: BehaviorExecutionTask): string {
-  const ids = taskRegionIds(task);
-  return task.anchorFragments
-    .map((fragment, index) => {
-      const ranges = fragment.ranges.map((range) => `${range.startLine}-${range.endLine}`).join("、");
-      return `- ${ids[index]}：行 ${ranges}`;
+    .map((source) => {
+      const header = language === "en"
+        ? `--- ${source.path} lines ${source.startLine}-${source.endLine} ---`
+        : `--- ${source.path} 行 ${source.startLine}-${source.endLine} ---`;
+      return `${header}\n${renderNumbered(source)}`;
     })
     .join("\n");
 }
 
-export function describeBehaviorTaskPrompt(task: BehaviorExecutionTask, sources: TaskSource[]): string {
+function renderRegionList(task: BehaviorExecutionTask, language: OutputLanguage): string {
+  const ids = taskRegionIds(task);
+  return task.anchorFragments
+    .map((fragment, index) => {
+      const ranges = fragment.ranges.map((range) => `${range.startLine}-${range.endLine}`).join(language === "en" ? ", " : "、");
+      return language === "en" ? `- ${ids[index]}: lines ${ranges}` : `- ${ids[index]}：行 ${ranges}`;
+    })
+    .join("\n");
+}
+
+export function describeBehaviorTaskPrompt(task: BehaviorExecutionTask, sources: TaskSource[], language: OutputLanguage = "zh-CN"): string {
+  if (language === "en") {
+    return [
+      "You are relaying code facts to an engineer who does not know this code. Restate only the facts; do not judge whether the code is worth recording in a product spec, whether it is user-perceivable, or whether it is important — judgment happens in a later step.",
+      "For every review region listed below, output one restatement: what the code does (facts), its inputs (inputs), its control flow (controlFlow), and its external effects (externalEffects, e.g. database reads/writes, external API calls, permission or state changes, event publication, response content).",
+      "Every region must have exactly one restatement — no merging, no omission, no cross-referencing conclusions between regions; when no external effect is observed, write \"no external effect observed\" in externalEffects and still output the region.",
+      "Auxiliary context is provided only to understand the primary content; it is not part of the review regions — do not restate it.",
+      'Return JSON only, no Markdown. Structure: {"regions":[{"id":"R1","facts":"","inputs":"","controlFlow":"","externalEffects":""}]}',
+      "",
+      "[Review regions]",
+      renderRegionList(task, language),
+      "",
+      "[Primary content (with line numbers)]",
+      renderSourceSections(sources, "primary", language),
+      "",
+      "[Auxiliary context (with line numbers, for understanding only)]",
+      renderSourceSections(sources, "context", language) || "(none)",
+    ].join("\n");
+  }
   return [
     "你在向一位不了解此代码的工程师转述代码事实。只复述事实，不要判断是否值得写入产品规格、是否用户可感知、是否重要——判定由后续步骤完成。",
     "对下面列出的每个审查区域各输出一条复述：这段代码做什么（facts）、它的输入（inputs）、控制流（controlFlow）、对外部产生的效果（externalEffects，如数据库读写、外部 API 调用、权限或状态变化、事件发布、响应内容）。",
@@ -85,25 +111,63 @@ export function describeBehaviorTaskPrompt(task: BehaviorExecutionTask, sources:
     '只返回 JSON，不要 Markdown。结构：{"regions":[{"id":"R1","facts":"","inputs":"","controlFlow":"","externalEffects":""}]}',
     "",
     "【审查区域】",
-    renderRegionList(task),
+    renderRegionList(task, language),
     "",
     "【主内容（带行号）】",
-    renderSourceSections(sources, "primary"),
+    renderSourceSections(sources, "primary", language),
     "",
     "【辅助上下文（带行号，仅供理解）】",
-    renderSourceSections(sources, "context") || "（无）",
+    renderSourceSections(sources, "context", language) || "（无）",
   ].join("\n");
 }
 
 export function judgeBehaviorTaskPrompt(input: JudgePromptInput): string {
+  const language: OutputLanguage = input.language ?? "zh-CN";
   const ids = taskRegionIds(input.task);
   const descriptionById = new Map(input.descriptions.map((description) => [description.id, description]));
   const descriptionLines = ids.map((id) => {
     const description = descriptionById.get(id);
-    if (!description) return `- ${id}：（无复述，直接核对源码判定）`;
-    return `- ${id}：facts：${description.facts}；inputs：${description.inputs}；controlFlow：${description.controlFlow}；externalEffects：${description.externalEffects}`;
+    if (!description) {
+      return language === "en" ? `- ${id}: (no restatement; judge directly from the source)` : `- ${id}：（无复述，直接核对源码判定）`;
+    }
+    return language === "en"
+      ? `- ${id}: facts: ${description.facts}; inputs: ${description.inputs}; controlFlow: ${description.controlFlow}; externalEffects: ${description.externalEffects}`
+      : `- ${id}：facts：${description.facts}；inputs：${description.inputs}；controlFlow：${description.controlFlow}；externalEffects：${description.externalEffects}`;
   });
   const names = (input.knownFeatureNames ?? []).map((name) => name.trim()).filter(Boolean).slice(0, 60);
+  const template = '{"regions":[{"id":"R1","disposition":"extracted|reviewed_internal|unresolved","internalKind":"pure_technical|covered_elsewhere|data_transform|other_evidence_backed","reason":"","evidence":[{"path":"","startLine":1}],"scenarioRefs":["HP-1"],"relatedUnitKeys":[],"relatedScenarioRefs":[]}],"features":[{"name":"","summary":"","scenarios":[{"reference":"HP-1","context":"","action":"","outcome":"","category":"happy","evidence":[{"path":"","startLine":1}]}]}]}';
+  if (language === "en") {
+    return [
+      "You are maintaining a product knowledge base. Below are per-region factual restatements of code review regions with the corresponding source. Establish the facts from the restatements and the source first, then judge every region — each region must have exactly one conclusion; none may be skipped.",
+      "For each region choose exactly one of three dispositions:",
+      "- extracted: the region contains behavior visible to an external observer (new/changed parameters, responses, permission boundaries, state transitions, error paths, retry/skip and other control flow) → output the corresponding scenarios in features and fill the region's scenarioRefs with the references of the scenarios you output.",
+      "- reviewed_internal: evidence shows the region is internal implementation with no independent external effect → internalKind, reason and evidence are required, and scenarioRefs must be empty:",
+      "  - pure_technical: purely technical assistance with no independent external effect;",
+      "  - covered_elsewhere: its behavior is already expressed by another unit or scenario → you must also provide relatedUnitKeys or relatedScenarioRefs; missing relations are treated as unresolved;",
+      "  - data_transform: internal data transformation with no independent external effect;",
+      "  - other_evidence_backed: other internal implementation with explicit evidence; reason must explain why no independent external effect exists.",
+      "- unresolved: insufficient evidence, uncertain judgment, or unreadable code.",
+      "When in doubt, judge extracted and output the scenario (one extra entry is better than one missed); judge reviewed_internal only when you can clearly assert there is no independent external effect and provide evidence.",
+      'Red line: shared database writes, external API calls, permission and state transitions, and event publication functions must not be judged internal merely because they are "called by another unit" — being called does not mean having no behavior.',
+      "Every conclusion and every scenario must carry evidence: path must come from the files actually read below, and startLine must use the input line numbers.",
+      "Organize the spec by features; each scenario contains a context, an action and an outcome, classified happy/edge/error, with references HP-n/EC-n/ER-n; JSON field names must be exactly context/action/outcome — never synonym keys such as result. Cover all external behavior in the regions; there is no scenario-count limit.",
+      names.length > 0 ? `Prefer reusing these existing feature names (scenarios belonging to one product capability go into one feature): ${names.join(", ")}` : "Group scenarios belonging to one product capability under one feature name.",
+      "Return JSON only, no Markdown. Structure:",
+      template,
+      "",
+      "[Review regions]",
+      renderRegionList(input.task, language),
+      "",
+      "[Per-region factual restatements]",
+      descriptionLines.join("\n"),
+      "",
+      "[Primary content (with line numbers)]",
+      renderSourceSections(input.sources, "primary", language),
+      "",
+      "[Auxiliary context (with line numbers, for understanding only)]",
+      renderSourceSections(input.sources, "context", language) || "(none)",
+    ].join("\n");
+  }
   return [
     "你在维护一个产品知识库。下面是对一批代码审查区域的逐区域事实复述与对应源码。先依据复述与源码看到事实，再逐区域判定——每个区域都必须有一条结论，不得跳过。",
     "对每个区域三选一判定：",
@@ -120,19 +184,19 @@ export function judgeBehaviorTaskPrompt(input: JudgePromptInput): string {
     "规格按功能组织；场景包含情境、操作、结果，分类 happy/edge/error，reference 使用 HP-n/EC-n/ER-n；JSON 字段名逐字使用 context/action/outcome，禁止 result 等同义键。覆盖区域内的全部外部行为，不设置场景条数上限。",
     names.length > 0 ? `功能名优先复用以下既有功能名（同属一个产品能力的场景归入同一功能）：${names.join("、")}` : "将同属一个产品能力的场景归入同一功能名。",
     "只返回 JSON，不要 Markdown。结构：",
-    '{"regions":[{"id":"R1","disposition":"extracted|reviewed_internal|unresolved","internalKind":"pure_technical|covered_elsewhere|data_transform|other_evidence_backed","reason":"","evidence":[{"path":"","startLine":1}],"scenarioRefs":["HP-1"],"relatedUnitKeys":[],"relatedScenarioRefs":[]}],"features":[{"name":"","summary":"","scenarios":[{"reference":"HP-1","context":"","action":"","outcome":"","category":"happy","evidence":[{"path":"","startLine":1}]}]}]}',
+    template,
     "",
     "【审查区域】",
-    renderRegionList(input.task),
+    renderRegionList(input.task, language),
     "",
     "【区域事实复述】",
     descriptionLines.join("\n"),
     "",
     "【主内容（带行号）】",
-    renderSourceSections(input.sources, "primary"),
+    renderSourceSections(input.sources, "primary", language),
     "",
     "【辅助上下文（带行号，仅供理解）】",
-    renderSourceSections(input.sources, "context") || "（无）",
+    renderSourceSections(input.sources, "context", language) || "（无）",
   ].join("\n");
 }
 

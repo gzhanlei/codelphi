@@ -1,4 +1,5 @@
 import { AiOutputTruncatedError, requestStructuredCompletion, systemPrompt, type AnalysisResult, type LlmBillingContext } from "./ai";
+import type { OutputLanguage } from "./analysis-language";
 import type { LlmCallStage } from "./billing/cost-receipt";
 import type { EvidenceSanitizeSummary } from "./completeness-ledger";
 import { sanitizeEvidence } from "./extraction-pass";
@@ -61,6 +62,8 @@ export interface ExtractBehaviorTaskInput {
   /** Task 6 计费身份；本模块为两次调用分别盖上 describe/judge 的 callStage。 */
   billing?: LlmBillingContext;
   knownFeatureNames?: string[];
+  /** 输出语言（Task 13 传 run.outputLanguage）；缺省 zh-CN。 */
+  outputLanguage?: OutputLanguage;
   label?: string;
   /** 测试/宿主注入点；生产保持 requestStructuredCompletion。 */
   requestCompletion?: StructuredRequest;
@@ -172,11 +175,27 @@ function deriveTaskResult(
   const unresolvedAnchorCount = anchorReceipts.filter((receipt) => receipt.disposition === "unresolved").length;
   const reviewedCount = anchorReceipts.filter((receipt) => receipt.disposition === "reviewed_internal").length;
   const scenarioCount = candidate.features.reduce((total, feature) => total + feature.scenarios.length, 0);
+  const hasExtracted = anchorReceipts.some((receipt) => receipt.disposition === "extracted");
+  const attributedRefs = new Set(anchorReceipts.flatMap((receipt) => receipt.scenarioRefs));
+  const unattributedCount = candidate.features.reduce(
+    (total, feature) => total + feature.scenarios.filter((scenario) => !attributedRefs.has(scenario.reference)).length,
+    0,
+  );
   let outcome: BehaviorTaskOutcome;
   // 候选全部被清洗（含「有内部结论但场景证据全越界」）不得成为 no_behavior（D5）
-  if (unresolvedAnchorCount > 0 || sanitize.allCandidatesRejected) outcome = "unresolved";
-  else if (anchorReceipts.some((receipt) => receipt.disposition === "extracted")) outcome = "extracted";
-  else outcome = "no_behavior";
+  if (unresolvedAnchorCount > 0 || sanitize.allCandidatesRejected) {
+    outcome = "unresolved";
+  } else if (unattributedCount > 0) {
+    // 存活场景缺少有效 extracted 归属（含全部区域 reviewed_internal 却有场景存活）是核算漏洞：
+    // 无锚点来源的事实不得静默进入规格，按 unresolved 定向复核，绝不落入 no_behavior（D5）。
+    console.warn("[analysis] surviving scenarios lack extracted attribution; task stays unresolved", { label, unattributedCount, scenarioCount });
+    outcome = "unresolved";
+  } else if (hasExtracted) {
+    outcome = "extracted";
+  } else {
+    // 到达此处：scenarioCount===0 且全部区域为有效 reviewed_internal——合法 no_behavior
+    outcome = "no_behavior";
+  }
   return { outcome, features: candidate.features, anchorReceipts, scenarioCount, reviewedCount, unresolvedAnchorCount, sanitize };
 }
 
@@ -206,19 +225,20 @@ export async function extractBehaviorTask(input: ExtractBehaviorTaskInput): Prom
   }
   const request = input.requestCompletion ?? requestStructuredCompletion;
   const label = input.label ?? input.task.taskKey;
+  const language: OutputLanguage = input.outputLanguage ?? "zh-CN";
   try {
     const describeContent = await request(
       [
-        { role: "system", content: systemPrompt() },
-        { role: "user", content: describeBehaviorTaskPrompt(input.task, input.sources) },
+        { role: "system", content: systemPrompt(language) },
+        { role: "user", content: describeBehaviorTaskPrompt(input.task, input.sources, language) },
       ],
       withCallStage(input.billing, "describe"),
     );
     const descriptions = parseDescribeContent(describeContent, input.task);
     const judgeContent = await request(
       [
-        { role: "system", content: systemPrompt() },
-        { role: "user", content: judgeBehaviorTaskPrompt({ task: input.task, sources: input.sources, descriptions, knownFeatureNames: input.knownFeatureNames }) },
+        { role: "system", content: systemPrompt(language) },
+        { role: "user", content: judgeBehaviorTaskPrompt({ task: input.task, sources: input.sources, descriptions, knownFeatureNames: input.knownFeatureNames, language }) },
       ],
       withCallStage(input.billing, "judge"),
     );
