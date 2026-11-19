@@ -158,6 +158,20 @@ function budgetDb(initial: FakeBudgetRow, receipts: FakeReceiptRow[] = []) {
       row.version += 1;
       return [{ affectedRows: 1 }];
     }
+    if (
+      sql.startsWith("UPDATE analysis_run_budgets SET reserved_llm_calls = reserved_llm_calls - ?") &&
+      sql.includes("summary_reserved = 0")
+    ) {
+      const [rCalls, rIn, rOut, rCost, runId] = parameters;
+      if (row.run_id !== Number(runId)) return [{ affectedRows: 0 }];
+      row.reserved_llm_calls -= Number(rCalls);
+      row.reserved_input_tokens -= Number(rIn);
+      row.reserved_output_tokens -= Number(rOut);
+      row.reserved_cost_micros -= toMicros(rCost);
+      row.summary_reserved = 0;
+      row.version += 1;
+      return [{ affectedRows: 1 }];
+    }
     if (sql.startsWith("UPDATE analysis_run_budgets SET reserved_llm_calls = reserved_llm_calls - ?")) {
       const [rCalls, rIn, rOut, rCost, runId] = parameters;
       if (row.run_id !== Number(runId)) return [{ affectedRows: 0 }];
@@ -662,6 +676,43 @@ describe("releaseUnusedBehaviorBudget", () => {
     const error = await releaseUnusedBehaviorBudget("00000000-0000-0000-0000-000000000000").catch((caught) => caught);
     expectBudgetError(error, "behavior_budget_exceeded");
     expect(db.statements().filter((statement) => statement.startsWith("UPDATE analysis_run_budgets"))).toHaveLength(0);
+  });
+
+  it("resets summary_reserved in the same transaction when releasing a product_summary reservation", async () => {
+    const db = budgetDb(budgetRow({ max_llm_calls: 4 }));
+    stubDb(db);
+    const summary = await reserveProductSummaryBudget(42);
+    expect(db.row.summary_reserved).toBe(1);
+    const commitsBefore = db.connection.commit.mock.calls.length;
+    await releaseUnusedBehaviorBudget(summary.reservationId);
+    expect(db.row.summary_reserved).toBe(0);
+    expect(db.row.reserved_llm_calls).toBe(0);
+    expect(fromMicros(db.row.reserved_cost_micros)).toBeCloseTo(0, 6);
+    expect(db.reservations()[0].status).toBe("released");
+    // 复位与预留状态转移在同一个短事务内提交（release 自身只多一次 commit）
+    expect(db.connection.commit.mock.calls.length).toBe(commitsBefore + 1);
+    const ledgerUpdate = db
+      .statements()
+      .find(
+        (statement) =>
+          statement.startsWith("UPDATE analysis_run_budgets SET reserved_llm_calls = reserved_llm_calls - ?") &&
+          statement.includes("summary_reserved = 0"),
+      );
+    expect(ledgerUpdate).toBeDefined();
+    // 复位后允许重新预留：下一次激活尝试不被泄漏的摘要份额阻断
+    const again = await reserveProductSummaryBudget(42);
+    expect(again.reservationId).not.toBe(summary.reservationId);
+    expect(db.row.summary_reserved).toBe(1);
+  });
+
+  it("does not touch summary_reserved when releasing a task reservation", async () => {
+    const db = budgetDb(budgetRow({ max_llm_calls: 6 }));
+    stubDb(db);
+    await reserveProductSummaryBudget(42);
+    const task = await reserveBehaviorBudget(reservationInput({ attemptId: "attempt-1" }));
+    await releaseUnusedBehaviorBudget(task.reservationId);
+    expect(db.row.summary_reserved).toBe(1);
+    expect(db.row.reserved_llm_calls).toBe(PRODUCT_SUMMARY_RESERVED_LLM_CALLS);
   });
 });
 

@@ -22,7 +22,10 @@ import { getDb } from "./db";
  *  - I1：缺回执（0 条）时调用次数同样未知——按预留的 maxLlmCalls 入账而非 0；
  *    配置 calls 硬上限时同样抛 behavior_budget_usage_unknown。
  *  - 任务终态（settle）把整笔预留转出、实际消耗转入 settled，未发生部分随之释放；
- *    releaseUnused 仅用于从未消耗即放弃的预留（领取租约失败）。
+ *    releaseUnused 仅用于从未消耗即放弃的预留（领取租约失败，或摘要首次 LLM 调用前
+ *    的编排退出）。fix round 2（Task 13 review）：释放 kind=product_summary 的预留必须
+ *    在同一事务内把 summary_reserved 复位为 0——否则摘要份额在门禁失败等预摘要退出后
+ *    永久泄漏，该 run 无法再取得摘要预留。
  *  - 实际超过预留（并发在途/估算误差）不截断：settled 可如实超过 max，overshoot 显式可见。
  *  - 旧 attempt 预留在结算或租约回收前保持占用；重新领取必须重新预留（新 attemptId）。
  *
@@ -498,10 +501,11 @@ export async function settleBehaviorBudget(input: BudgetSettlementInput): Promis
 }
 
 /**
- * 释放从未消耗即放弃的预留（领取租约失败路径）：短事务内验证并转移该预留自身状态，
- * 同事务把整笔预留从聚合账本转回。重复释放（含崩溃重试）是真 no-op——绝不因后续
- * 新 attempt 取得预留而误释放他人份额。已结算的预留再走释放视为编排缺陷，抛
- * behavior_budget_exceeded。
+ * 释放从未消耗即放弃的预留（领取租约失败 / 摘要首次 LLM 调用前的编排退出路径）：短事务内
+ * 验证并转移该预留自身状态，同事务把整笔预留从聚合账本转回。kind=product_summary 的释放
+ * 在同一事务内复位 summary_reserved = 0（fix round 2：不复位则摘要份额永久泄漏）。
+ * 重复释放（含崩溃重试）是真 no-op——绝不因后续新 attempt 取得预留而误释放他人份额。
+ * 已结算的预留再走释放视为编排缺陷，抛 behavior_budget_exceeded。
  */
 export async function releaseUnusedBehaviorBudget(reservationId: string): Promise<void> {
   await withBudgetTransaction(async (execute) => {
@@ -532,13 +536,15 @@ export async function releaseUnusedBehaviorBudget(reservationId: string): Promis
         `behavior budget reservation ${reservationId} transitioned concurrently; refusing to release`,
       );
     }
+    // kind=product_summary：summary_reserved 复位必须与预留状态转移在同一事务（fix round 2）
+    const summaryReset = reservation.kind === "product_summary" ? ", summary_reserved = 0" : "";
     await applyLedgerUpdate(
       execute,
       `UPDATE analysis_run_budgets
           SET reserved_llm_calls = reserved_llm_calls - ?,
               reserved_input_tokens = reserved_input_tokens - ?,
               reserved_output_tokens = reserved_output_tokens - ?,
-              reserved_cost_amount = reserved_cost_amount - ?,
+              reserved_cost_amount = reserved_cost_amount - ?${summaryReset},
               version = version + 1
         WHERE run_id = ?`,
       [

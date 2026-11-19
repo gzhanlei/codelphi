@@ -5,12 +5,14 @@ import { evaluateBehaviorActivationGate, resolveProductDescription, type Activat
 const budgetMocks = vi.hoisted(() => ({
   settleBehaviorBudget: vi.fn(),
   releaseUnusedBehaviorBudget: vi.fn(),
+  reserveProductSummaryBudget: vi.fn(),
 }));
 
 vi.mock("../lib/behavior-run-budget", () => ({
   PRODUCT_SUMMARY_ATTEMPT_ID: "product_summary",
   settleBehaviorBudget: budgetMocks.settleBehaviorBudget,
   releaseUnusedBehaviorBudget: budgetMocks.releaseUnusedBehaviorBudget,
+  reserveProductSummaryBudget: budgetMocks.reserveProductSummaryBudget,
   BehaviorBudgetError: class BehaviorBudgetError extends Error {
     code: string;
     constructor(code: string, message: string) {
@@ -185,6 +187,7 @@ describe("resolveProductDescription (D10 摘要降级)", () => {
   beforeEach(() => {
     budgetMocks.settleBehaviorBudget.mockReset().mockResolvedValue(undefined);
     budgetMocks.releaseUnusedBehaviorBudget.mockReset().mockResolvedValue(undefined);
+    budgetMocks.reserveProductSummaryBudget.mockReset().mockResolvedValue(reservation);
   });
 
   it("generates a summary with in-surface evidence and settles the independent reservation", async () => {
@@ -193,7 +196,7 @@ describe("resolveProductDescription (D10 摘要降级)", () => {
     expect(outcome.status).toBe("generated");
     expect(outcome.product.description).toBe("面向编辑者的产品知识工作台。");
     expect(outcome.product.evidence).toEqual([{ path: "lib/auth.ts", startLine: 8 }]);
-    // 摘要预留独立结算（D9/D10）：settle 一次，绝不走 releaseUnused（summary_reserved 复位未实现）
+    // 摘要预留独立结算（D9/D10）：settle 恰好一次，绝不走 releaseUnused
     expect(budgetMocks.settleBehaviorBudget).toHaveBeenCalledTimes(1);
     expect(budgetMocks.settleBehaviorBudget).toHaveBeenCalledWith({ reservationId: "res-1" });
     expect(budgetMocks.releaseUnusedBehaviorBudget).not.toHaveBeenCalled();
@@ -274,5 +277,25 @@ describe("resolveProductDescription (D10 摘要降级)", () => {
     const userContent = String(request.mock.calls[0][0].find((message: { role: string }) => message.role === "user")?.content ?? "");
     expect(userContent).toContain("audience");
     expect(userContent).not.toContain("面向");
+  });
+
+  it("skips reserveProductSummaryBudget when a pre-reserved reservation is supplied (Task 13 review fix)", async () => {
+    const outcome = await resolveProductDescription(baseInput());
+    expect(outcome.status).toBe("generated");
+    expect(budgetMocks.reserveProductSummaryBudget).not.toHaveBeenCalled();
+    expect(budgetMocks.settleBehaviorBudget).toHaveBeenCalledTimes(1);
+    expect(budgetMocks.settleBehaviorBudget).toHaveBeenCalledWith({ reservationId: "res-1" });
+  });
+
+  it("reserves the summary budget internally when no reservation is supplied and settles it exactly once", async () => {
+    const input = baseInput();
+    delete input.reservation;
+    budgetMocks.reserveProductSummaryBudget.mockResolvedValue({ ...reservation, reservationId: "res-auto" });
+    const outcome = await resolveProductDescription(input);
+    expect(outcome.status).toBe("generated");
+    expect(budgetMocks.reserveProductSummaryBudget).toHaveBeenCalledTimes(1);
+    expect(budgetMocks.reserveProductSummaryBudget).toHaveBeenCalledWith(7);
+    expect(budgetMocks.settleBehaviorBudget).toHaveBeenCalledTimes(1);
+    expect(budgetMocks.settleBehaviorBudget).toHaveBeenCalledWith({ reservationId: "res-auto" });
   });
 });

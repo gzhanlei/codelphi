@@ -2,7 +2,7 @@ import { z } from "zod";
 import { requestStructuredCompletion, systemPrompt, type LlmBillingContext } from "./ai";
 import type { OutputLanguage } from "./analysis-language";
 import { compareCodePoints } from "./behavior-inventory/identity";
-import { PRODUCT_SUMMARY_ATTEMPT_ID, settleBehaviorBudget, type BudgetReservation } from "./behavior-run-budget";
+import { PRODUCT_SUMMARY_ATTEMPT_ID, reserveProductSummaryBudget, settleBehaviorBudget, type BudgetReservation } from "./behavior-run-budget";
 import type { BehaviorUnitStatus } from "./behavior-unit-state";
 import type { Evidence } from "./types";
 
@@ -16,8 +16,10 @@ import type { Evidence } from "./types";
  * - resolveProductDescription：D10 产品摘要生成与降级。摘要成功 → generated；失败时
  *   仅在语言未切换时沿用旧简介（preserved），否则 unavailable（空描述，绝不留旧语种
  *   文本）。摘要证据只取合并面内的路径，面外证据一律剔除，全面外视同失败（不加新
- *   事实）。独立预留统一走 settleBehaviorBudget 结算：成功失败都结算一次，绝不调用
- *   releaseUnusedBehaviorBudget（summary_reserved 复位未实现，Task 7 review 结论）；
+ *   事实）。预留两种供给方式（Task 13 review fix）：调用方已预挂号（Task 13 在任务派发前
+ *   按 D9 预占）经 reservation 传入时直接复用；缺省时本函数先 reserveProductSummaryBudget。
+ *   两种方式都统一走 settleBehaviorBudget 恰好结算一次，绝不调用 releaseUnusedBehaviorBudget
+ *   （预摘要退出的释放由编排方负责，summary_reserved 复位已在 Task 7 fix round 2 实现）；
  *   结算抛出（含 behavior_budget_usage_unknown 硬阻断）直接透传。
  */
 
@@ -98,8 +100,8 @@ export interface ProductDescriptionInput {
   /** 最终合并面（规格功能 + 场景证据）；摘要只允许引用该面内的证据路径。 */
   mergedFeatures: readonly { name: string; summary: string; scenarios: readonly { evidence: readonly Evidence[] }[] }[];
   outputLanguage: OutputLanguage;
-  /** Task 13 已挂号的独立摘要预留；本函数统一负责结算一次。 */
-  reservation: BudgetReservation;
+  /** 已预挂号的独立摘要预留（Task 13 派发前按 D9 预占）；缺省时本函数先 reserveProductSummaryBudget。 */
+  reservation?: BudgetReservation;
   /** 旧简介（language 为 null 视为无可用语种，语言切换判定按不通过处理）。 */
   previous: { description: string; evidence: Evidence[]; language: OutputLanguage | null } | null;
   /** 可注入的补全通道（测试替身）；默认走结构化补全。 */
@@ -169,6 +171,8 @@ function summaryUserPrompt(input: ProductDescriptionInput, allowedPaths: Readonl
 export async function resolveProductDescription(input: ProductDescriptionInput): Promise<ProductDescriptionOutcome> {
   const request = input.requestCompletion ?? requestStructuredCompletion;
   const allowedPaths = mergedSurfacePaths(input.mergedFeatures);
+  // 预挂号预留优先（Task 13 派发前预占）；缺省时现场预留——两种方式都恰好结算一次。
+  const reservation = input.reservation ?? (await reserveProductSummaryBudget(input.runId));
   let outcome: ProductDescriptionOutcome;
   try {
     const billing: LlmBillingContext = {
@@ -201,8 +205,8 @@ export async function resolveProductDescription(input: ProductDescriptionInput):
       outcome = { product: { description: "", evidence: [] }, status: "unavailable" };
     }
   }
-  // 摘要预留独立结算（D9/D10）：成功失败都结算一次；结算失败（含 usage 未知硬上限）
-  // 直接透传阻断；绝不走 releaseUnused（summary_reserved 复位未实现）。
-  await settleBehaviorBudget({ reservationId: input.reservation.reservationId });
+  // 摘要预留独立结算（D9/D10）：成功失败都恰好结算一次；结算失败（含 usage 未知硬上限）
+  // 直接透传阻断；绝不走 releaseUnused（预摘要退出的释放由编排方负责，见 Task 7 fix round 2）。
+  await settleBehaviorBudget({ reservationId: reservation.reservationId });
   return outcome;
 }

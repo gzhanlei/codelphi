@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BehaviorManifest, BehaviorUnit } from "../lib/behavior-inventory/types";
 import { manifestHash } from "../lib/behavior-inventory/manifest";
@@ -674,7 +676,13 @@ describe("runInventoryFullAnalysis orchestration", () => {
       expect(vi.mocked(reserveBehaviorBudget).mock.invocationCallOrder[indexOfCall]).toBeLessThan(vi.mocked(claimBehaviorTask).mock.invocationCallOrder[indexOfCall]);
     }
     expect(budget.released).toEqual([]);
-    expect(new Set(budget.settled).size).toBe(manifest.tasks.length);
+    // 任务预留各自恰好 settle 一次；摘要预留经 Task 12 共享解析器恰好 settle 一次（绝不泄漏、绝不重复）
+    expect(new Set(budget.settled.filter((id) => id !== "summary-res")).size).toBe(manifest.tasks.length);
+    expect(budget.settled.filter((id) => id === "summary-res")).toHaveLength(1);
+    expect(budget.released).not.toContain("summary-res");
+    // 摘要走共享解析器（Task 12）的计费身份：product_summary attempt + callStage + main
+    const summaryCall = requestCompletion.mock.calls[0] as unknown as [unknown, { attemptId?: string; callStage?: string; chargeComponent?: string }] | undefined;
+    expect(summaryCall?.[1]).toMatchObject({ attemptId: "product_summary", callStage: "product_summary", chargeComponent: "main" });
 
     // 提取计费身份：main + 任务/单元/预留 attemptId
     for (const call of vi.mocked(extractBehaviorTask).mock.calls) {
@@ -772,11 +780,13 @@ describe("runInventoryFullAnalysis orchestration", () => {
     await expect(actualFullAnalysis.runInventoryFullAnalysis(baseInput(), { activate: true })).rejects.toThrow(/gate|incomplete|pending/i);
     const reserves = vi.mocked(reserveBehaviorBudget).mock.calls.length;
     expect(reserves).toBeGreaterThan(0);
-    // 每个预留都在 claim 失败后立即释放；绝不 settle、绝不调用 LLM
-    expect(budget.released.length).toBe(reserves);
+    // 每个任务预留都在 claim 失败后立即释放；绝不 settle、绝不调用 LLM；
+    // 门禁失败后摘要预留（summary-res）也经安全路径释放（排尾），绝不泄漏
+    expect(budget.released.length).toBe(reserves + 1);
+    expect(budget.released[reserves]).toBe("summary-res");
     expect(budget.settled).toEqual([]);
     expect(vi.mocked(extractBehaviorTask)).not.toHaveBeenCalled();
-    for (const [indexOfCall] of budget.released.entries()) {
+    for (const [indexOfCall] of budget.released.slice(0, reserves).entries()) {
       expect(vi.mocked(reserveBehaviorBudget).mock.invocationCallOrder[indexOfCall]).toBeLessThan(vi.mocked(releaseUnusedBehaviorBudget).mock.invocationCallOrder[indexOfCall]);
     }
   });
@@ -822,9 +832,10 @@ describe("runInventoryFullAnalysis orchestration", () => {
     expect(marks).toEqual([expect.objectContaining({ taskKey: failedTask.taskKey })]);
     // 硬失败绝不是 abort（不恢复 pending、消耗 attempt 预算）
     expect(marks[0].abortedBeforeExecution).not.toBe(true);
-    // 两次 attempt 各自独立预留并各自结算一次
+    // 两次 attempt 各自独立预留并各自结算一次；摘要预留经共享解析器恰好结算一次
     expect(vi.mocked(reserveBehaviorBudget).mock.calls.length).toBe(2);
-    expect(budget.settled.length).toBe(2);
+    expect(budget.settled.filter((id) => id !== "summary-res").length).toBe(2);
+    expect(budget.settled.filter((id) => id === "summary-res")).toHaveLength(1);
     expect(budget.released).toEqual([]);
   });
 
@@ -870,6 +881,41 @@ describe("runInventoryFullAnalysis orchestration", () => {
     expect(aborts.some((mark) => mark.abortedBeforeExecution === true)).toBe(true);
     const pendingRows = [...store.tasks.values()].filter((row) => row.status === "pending");
     expect(pendingRows.length).toBeGreaterThan(0);
+    // 门禁失败（budgetBlocked）同属摘要前退出：摘要预留经安全路径释放，绝不泄漏
+    expect(budget.released).toContain("summary-res");
+    expect(budget.settled).not.toContain("summary-res");
+  });
+
+  it("releases the pre-reserved summary reservation on gate failure and never settles or leaks it", async () => {
+    vi.mocked(extractBehaviorTask).mockImplementation(async (input: { task: BehaviorExecutionTask }) => unresolvedResult(input.task));
+    await expect(actualFullAnalysis.runInventoryFullAnalysis(baseInput(), { activate: true })).rejects.toThrow(/inventory_activation_gate_failed/);
+    // 摘要预留已在派发前取得（D9），门禁失败 = 摘要首次 LLM 调用前的退出：
+    // 经 Task 7 修复后的安全路径释放（同事务复位 summary_reserved），绝不 settle、绝不调摘要 LLM
+    expect(vi.mocked(reserveProductSummaryBudget)).toHaveBeenCalledTimes(1);
+    expect(budget.released).toContain("summary-res");
+    expect(budget.settled).not.toContain("summary-res");
+    expect(requestCompletion).not.toHaveBeenCalled();
+  });
+
+  it("releases the summary reservation when dispatch fails fatally before the summary stage", async () => {
+    vi.mocked(settleBehaviorBudget).mockImplementation(async (input: { reservationId: string }) => {
+      if (input.reservationId === "summary-res") {
+        budget.settled.push(input.reservationId);
+        return;
+      }
+      throw new Error("ledger connection reset");
+    });
+    await expect(actualFullAnalysis.runInventoryFullAnalysis(baseInput(), { activate: true })).rejects.toThrow(/ledger connection reset/);
+    expect(budget.released).toContain("summary-res");
+    expect(budget.settled).not.toContain("summary-res");
+    expect(requestCompletion).not.toHaveBeenCalled();
+  });
+
+  it("delegates the product summary to the shared Task 12 resolver (no duplicate implementation)", () => {
+    const source = readFileSync(path.join(__dirname, "..", "lib", "full-analysis.ts"), "utf8");
+    expect(source).toMatch(/import \{[^}]*\bresolveProductDescription\b[^}]*\} from "\.\/behavior-activation"/);
+    expect(source).not.toContain("resolveInlineProductSummary");
+    expect(source).not.toContain("summaryUserPrompt");
   });
 
   it("shadow runs use platform_shadow billing, skip the summary reservation and never insert activation links", async () => {
