@@ -307,13 +307,14 @@ export function buildBehaviorInventoryWithRegistry(
   const semanticUnits: FinalizedUnit[] = [];
 
   for (const source of eligible) {
-    if (findDynamicRegistrationLines(source).length > 0) dynamicRegistrationFallback.add(source.path);
     const entry = registry.find(({ matches }) => matches(source.path));
-    if (entry == null) {
-      if (!dynamicRegistrationFallback.has(source.path)) detectorUnsupported.add(source.path);
-      continue;
-    }
     try {
+      // 动态扫描与 detect/finalize 同属每文件失败边界：区间解析抛错按 parse failure 整文件回退，不得逃逸。
+      if (findDynamicRegistrationLines(source).length > 0) dynamicRegistrationFallback.add(source.path);
+      if (entry == null) {
+        if (!dynamicRegistrationFallback.has(source.path)) detectorUnsupported.add(source.path);
+        continue;
+      }
       // 每个文件原子提交：任一草稿 finalize 失败时整文件不保留语义单元，统一交剩余清单。
       const buffered = entry.detector.detect(source).map((draft) => finalizeUnit(draft, entry.detector));
       semanticUnits.push(...buffered);

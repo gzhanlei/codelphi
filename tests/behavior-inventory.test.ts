@@ -365,6 +365,26 @@ describe("residual fallback inventory", () => {
     expect(residual.primaryRanges).toEqual([{ startLine: 1, endLine: lineCount(brokenSource.content) }]);
     expect(result.diagnostics.fallbackInventorySuccess).toBe(true);
   });
+
+  it("treats a truncated generic file with a well-formed registration as parse failure, not a crash", () => {
+    const truncatedSource = source(
+      "scripts/truncated.ts",
+      [
+        "import { eventBus } from \"./bus\";",
+        "eventBus.on(\"order.created\", handleOrder);",
+        "function handleOrder() {",
+        "",
+      ].join("\n"),
+    );
+    const result = buildBehaviorInventory({ afterSha: "sha-truncated", sources: [truncatedSource] });
+    expect(result.diagnostics.detectorParseFailure).toContain("scripts/truncated.ts");
+    expect(result.units.filter((unit) => unit.detector !== "residual")).toHaveLength(0);
+    const residual = result.units.filter((unit) => unit.primaryPath === "scripts/truncated.ts");
+    expect(residual).toHaveLength(1);
+    expect(residual[0].kind).toBe("file");
+    expect(residual[0].primaryRanges).toEqual([{ startLine: 1, endLine: lineCount(truncatedSource.content) }]);
+    expect(result.diagnostics.fallbackInventorySuccess).toBe(true);
+  });
 });
 
 describe("buildBehaviorInventory invariants", () => {
