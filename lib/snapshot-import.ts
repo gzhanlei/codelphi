@@ -13,12 +13,16 @@ export const SNAPSHOT_ARTIFACT_KIND = "codelphi-radar-snapshot";
 export const SNAPSHOT_EXPORT_VERSION = 1;
 export const IMPORT_SOURCE = "ai_snapshot_import";
 
+/**
+ * 字段宽度上限对齐 DB 列宽（防垃圾，不防规模）：知识数量没有上限——大仓库的合法快照
+ * 原样导入（2026-11-19 用户裁决，撤销数量天花板）。传输层防护 = nginx 20m 请求体上限。
+ */
 export const IMPORT_LIMITS = {
-  features: 2000,
-  scenariosPerFeature: 200,
-  scenariosTotal: 12000,
-  evidencePerScenario: 10,
   anchorPathLength: 300,
+  featureNameLength: 191,
+  summaryLength: 8000,
+  scenarioFieldLength: 8000,
+  referenceLength: 32,
 };
 
 const anchorSchema = z.object({
@@ -28,19 +32,19 @@ const anchorSchema = z.object({
 });
 
 const scenarioSchema = z.object({
-  reference: z.string().trim().min(1).max(32),
-  context: z.string().min(1).max(4000),
-  action: z.string().min(1).max(4000),
-  outcome: z.string().min(1).max(4000),
+  reference: z.string().trim().min(1).max(IMPORT_LIMITS.referenceLength),
+  context: z.string().min(1).max(IMPORT_LIMITS.scenarioFieldLength),
+  action: z.string().min(1).max(IMPORT_LIMITS.scenarioFieldLength),
+  outcome: z.string().min(1).max(IMPORT_LIMITS.scenarioFieldLength),
   category: z.enum(["happy", "edge", "error"]),
   step: z.number().int().positive().nullable().optional(),
-  evidence: z.array(anchorSchema).max(IMPORT_LIMITS.evidencePerScenario),
+  evidence: z.array(anchorSchema),
 });
 
 const featureSchema = z.object({
-  name: z.string().trim().min(1).max(191),
-  summary: z.string().max(2000),
-  scenarios: z.array(scenarioSchema).min(1).max(IMPORT_LIMITS.scenariosPerFeature),
+  name: z.string().trim().min(1).max(IMPORT_LIMITS.featureNameLength),
+  summary: z.string().max(IMPORT_LIMITS.summaryLength),
+  scenarios: z.array(scenarioSchema).min(1),
 });
 
 const identitySchema = z.object({
@@ -59,7 +63,7 @@ export const importArtifactSchema = z.object({
   contractVersion: z.string().trim().min(1).max(32),
   identity: identitySchema,
   language: z.enum(["zh-CN", "en"]),
-  features: z.array(featureSchema).min(1).max(IMPORT_LIMITS.features),
+  features: z.array(featureSchema).min(1),
 });
 
 export type ImportArtifact = z.infer<typeof importArtifactSchema>;
@@ -105,10 +109,6 @@ export function validateImportArtifact(raw: unknown, currentContractVersion: str
       }
       seen.add(scenario.reference);
     }
-  }
-  const total = parsed.data.features.reduce((sum, feature) => sum + feature.scenarios.length, 0);
-  if (total > IMPORT_LIMITS.scenariosTotal) {
-    throw new ImportValidationError("invalid_artifact", `scenario total ${total} exceeds import cap ${IMPORT_LIMITS.scenariosTotal}`);
   }
   return parsed.data.features.map((feature) => ({
     name: feature.name,

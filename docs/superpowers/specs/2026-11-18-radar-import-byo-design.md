@@ -83,7 +83,7 @@ radar run 完成时在 work dir 持久化合并快照 `snapshot.json`：
 1. `artifactKind` 与 `exportVersion` 识别；不识别的版本返回 upgrade 提示，不猜字段。
 2. `contractVersion` 门：仅接受与当前服务端提取契约兼容的版本；不兼容返回 409 review，不做自动转换。快照升级后允许重新导出再导。
 3. zod 全量 schema 校验（features/scenarios/证据锚点形状）；证据 `path` 规范化规则与账本一致（禁绝对路径与 `..`，上限沿用账本既有约束）。
-4. 规模上限：features/scenarios/证据条数超过当前产品型账本上限的，拒绝并提示分仓分析，不静默截断。
+4. ~~规模上限~~（2026-11-19 撤销）：知识数量不设上限——大仓库的合法快照原样导入，数量天花板与「全量名不副实」同属隐性限制错误。传输层防护 = nginx 请求体上限（20m）；字段宽度校验对齐 DB 列宽（防垃圾不防规模）。
 5. `identity.workingTreeDirty = true` 的快照可导入，但只能作为草稿，不得作为增量基线（§5）。
 
 ## 5. 身份锚定与三级匹配

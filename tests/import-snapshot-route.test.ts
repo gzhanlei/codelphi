@@ -7,7 +7,18 @@ const { verifyApiKey, consumeRateLimit, importSnapshotArtifact } = vi.hoisted(()
   importSnapshotArtifact: vi.fn(),
 }));
 
-vi.mock("@/lib/db", () => ({ getDb: () => ({ execute: vi.fn() }) }));
+vi.mock("@/lib/db", () => ({
+  getDb: () => ({
+    execute: vi.fn(),
+    getConnection: async () => ({
+      execute: vi.fn(),
+      beginTransaction: vi.fn(),
+      commit: vi.fn(),
+      rollback: vi.fn(),
+      release: vi.fn(),
+    }),
+  }),
+}));
 vi.mock("@/lib/mcp/api-keys", () => ({ verifyApiKey }));
 vi.mock("@/lib/rate-limit", () => ({ consumeRateLimit }));
 vi.mock("@/lib/snapshot-import", () => ({ ImportValidationError: class extends Error { code: string; details: unknown; constructor(code: string, message: string, details?: unknown) { super(message); this.code = code; this.details = details ?? null; } }, importSnapshotArtifact }));
