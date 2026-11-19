@@ -162,3 +162,41 @@ describe("importSnapshotArtifact 分支覆盖（resolveTargetProduct 三路径�
     expect(receipt.productId).toBe(77);
   });
 });
+
+describe("importSnapshotArtifact 产品简介随导入落库", () => {
+  it("writes description + evidence only when the product description is empty", async () => {
+    const { importSnapshotArtifact } = await import("../lib/snapshot-import");
+    const calls: Array<{ sql: string; params: unknown[] }> = [];
+    const execute = (async (sql: string, params: unknown[] = []) => {
+      calls.push({ sql, params });
+      if (sql.startsWith("INSERT INTO products")) return [{ insertId: 77 }];
+      if (sql.startsWith("INSERT INTO features")) return [{ insertId: 501 }];
+      return [[]];
+    }) as unknown as (sql: string, params?: unknown[]) => Promise<unknown>;
+    const artifact = JSON.parse(JSON.stringify(validArtifact));
+    artifact.product = { description: "给销售每一次沟通建档的产品。", evidence: [{ path: "lib/app.ts", startLine: 12 }] };
+    await importSnapshotArtifact({ execute, currentContractVersion: "1.0.0", organizationId: 2, probeRemote: async () => ({ state: "unverified" }) }, artifact);
+    const descCall = calls.find((call) => call.sql.includes("UPDATE products SET description"));
+    expect(descCall).toBeDefined();
+    expect(descCall!.sql).toContain("AND description = ''");
+    expect(descCall!.sql).toContain("description_source = 'ai_snapshot_import'");
+    expect(descCall!.params[0]).toBe("给销售每一次沟通建档的产品。");
+  });
+});
+
+describe("importSnapshotArtifact 幂等回归（refactor 曾丢早退）", () => {
+  it("performs zero inserts on idempotent re-import (structural, beyond UNIQUE fallback)", async () => {
+    const { importSnapshotArtifact } = await import("../lib/snapshot-import");
+    const calls: string[] = [];
+    const execute = (async (sql: string) => {
+      calls.push(String(sql));
+      if (String(sql).includes("seeded_snapshot_sha = ?")) return [[{ id: 20, slug: "airecord", seededTreeSha: "b".repeat(40) }]];
+      return [[]];
+    }) as unknown as (sql: string, params?: unknown[]) => Promise<unknown>;
+    const artifact = JSON.parse(JSON.stringify(validArtifact));
+    const receipt = await importSnapshotArtifact({ execute, currentContractVersion: "1.0.0", organizationId: 2 }, artifact);
+    expect(receipt.mode).toBe("idempotent");
+    expect(receipt.featuresImported).toBe(0);
+    expect(calls.some((sql) => sql.startsWith("INSERT INTO"))).toBe(false);
+  });
+});

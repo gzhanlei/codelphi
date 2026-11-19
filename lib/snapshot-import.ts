@@ -63,6 +63,10 @@ export const importArtifactSchema = z.object({
   contractVersion: z.string().trim().min(1).max(32),
   identity: identitySchema,
   language: z.enum(["zh-CN", "en"]),
+  product: z.object({
+    description: z.string().max(2000),
+    evidence: z.array(anchorSchema),
+  }).optional(),
   features: z.array(featureSchema).min(1),
 });
 
@@ -351,6 +355,19 @@ export async function importSnapshotArtifact(deps: ImportDeps, raw: unknown, ide
   const target = await resolveTargetProduct(deps, identity, artifact.language, origin, identityInput?.slug);
   if (origin && target.binding !== "existing") {
     await ensureRepositoryRow(deps, origin, target.productId);
+  }
+  // 产品简介随导入落库（2026-11-19 修复：BYO 无分析 run，简介不写则永远「尚无产品简介」）。
+  // 只在简介为空时写入，与「人工概况不被自动覆盖」的既有保护同向。
+  const artifactProduct = (raw as ImportArtifact).product;
+  if (artifactProduct?.description) {
+    await deps.execute(
+      "UPDATE products SET description = ?, description_source = 'ai_snapshot_import', description_evidence = ? WHERE id = ? AND description = ''",
+      [artifactProduct.description, JSON.stringify(artifactProduct.evidence.map((anchor) => ({ path: anchor.path, ...(anchor.startLine !== undefined ? { startLine: anchor.startLine } : {}) }))), target.productId],
+    );
+  }
+  if (target.mode === "idempotent") {
+    // 幂等重传：零插入（结构性保证，UNIQUE 兜底之外）；顺带回填空简介（上面的 only-when-empty 写入）
+    return { productId: target.productId, slug: target.slug, featuresImported: 0, scenariosImported: 0, mode: target.mode, binding: target.binding, gift: { granted: false }, remote: { state: "unverified" as const, reason: "idempotent" }, evidenceMode: "anchors" as const };
   }
   const scenariosImported = await insertDraftFeatures(deps, target.productId, features);
   await deps.execute(
