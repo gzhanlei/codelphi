@@ -14,9 +14,9 @@ export const SNAPSHOT_EXPORT_VERSION = 1;
 export const IMPORT_SOURCE = "ai_snapshot_import";
 
 export const IMPORT_LIMITS = {
-  features: 1000,
-  scenariosPerFeature: 40,
-  scenariosTotal: 20000,
+  features: 2000,
+  scenariosPerFeature: 200,
+  scenariosTotal: 12000,
   evidencePerScenario: 10,
   anchorPathLength: 300,
 };
