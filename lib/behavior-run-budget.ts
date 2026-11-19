@@ -1,20 +1,29 @@
+import { randomUUID } from "node:crypto";
 import { loadAttemptLlmUsage } from "./billing/cost-receipt";
 import { getDb } from "./db";
 
-/** Task 7 契约（2026-11-19 行为清单全量分析，D9）：共享运行预算的原子预留、回执结算与释放。
+/** Task 7 契约（2026-11-19 行为清单全量分析，D9；fix round 1 处理 C1/I1）：
+ *  共享运行预算的原子预留、回执结算与释放。
  *
- *  analysis_run_budgets 每 run 一行聚合计数（无逐笔预留表），所有变更只发条件 UPDATE
- *  （余额谓词 / summary_reserved 谓词），绝不先 SELECT 余额再无条件写入——
- *  余额竞争由数据库在写入时判定，worker 不根据各自读到的旧余额独立派发。
+ *  两张表协同：
+ *  - analysis_run_budgets：每 run 一行的聚合计数账本。预留余额判定只发条件 UPDATE
+ *    （余额谓词 / summary_reserved 谓词），绝不先 SELECT 余额再无条件写入——
+ *    余额竞争由数据库在写入时判定，worker 不根据各自读到的旧余额独立派发。
+ *  - analysis_behavior_budget_reservations：逐尝试预留状态行（C1），是预留身份与金额的
+ *    唯一权威。settle/release 在短事务内 SELECT ... FOR UPDATE 验证该预留自身状态并转移
+ *    （reserved → settled / settled_unknown / released），同事务完成聚合账本变更后提交。
+ *    重复 settle/release 是真 no-op（已 settled/released 的预留绝不再动账本），
+ *    与之后是否有新预留无关——聚合计数本身不作为身份判据。
  *
  *  - maxLlmCalls 严格原子预留：预留覆盖复述、判定、硬失败重试与语义复核的最大调用数。
  *  - token/费用按上界预留、按 llm_call_receipts 真实回执结算；usage/费用未知绝不按零入账——
- *    未知维度按该笔预留上界保守转入 settled；配置了对应硬上限时抛
- *    behavior_budget_usage_unknown，停止新的派发。
+ *    未知维度按该笔预留上界保守转入 settled；配置对应硬上限时抛
+ *    behavior_budget_usage_unknown，调用方必须停止新的派发。
+ *  - I1：缺回执（0 条）时调用次数同样未知——按预留的 maxLlmCalls 入账而非 0；
+ *    配置 calls 硬上限时同样抛 behavior_budget_usage_unknown。
  *  - 任务终态（settle）把整笔预留转出、实际消耗转入 settled，未发生部分随之释放；
- *    releaseUnused 仅用于从未消耗即放弃的预留（领取租约失败），每个 reservationId
- *    只能走 settle 或 releaseUnused 之一。
- *  - 实际超过预留（并发在途/估算误差）不截断：settled 可如实超过 max，overshoot 在账本上显式可见。
+ *    releaseUnused 仅用于从未消耗即放弃的预留（领取租约失败）。
+ *  - 实际超过预留（并发在途/估算误差）不截断：settled 可如实超过 max，overshoot 显式可见。
  *  - 旧 attempt 预留在结算或租约回收前保持占用；重新领取必须重新预留（新 attemptId）。
  *
  *  无对应上限的表示：Task 13 建行时写入下列 sentinel（列均 NOT NULL，不用 0 表示无上限）。
@@ -47,8 +56,8 @@ export const PRODUCT_SUMMARY_RESERVED_INPUT_TOKENS = 128_000;
 export const PRODUCT_SUMMARY_RESERVED_OUTPUT_TOKENS = 8_192;
 export const PRODUCT_SUMMARY_RESERVED_COST_AMOUNT = 5;
 
-const COST_MICROS = 1_000_000;
-const RESERVATION_ID_PREFIX = "bb1";
+type ReservationKind = "task" | "product_summary";
+type ReservationStatus = "reserved" | "settled" | "settled_unknown" | "released";
 
 export interface BudgetReservationInput {
   runId: number;
@@ -65,10 +74,11 @@ export interface BudgetReservationInput {
 }
 
 export interface BudgetReservation {
-  /** 自描述预留句柄：编码 run/attempt 与四维预留量，供 release 独立释放（账本无逐笔预留表）。 */
+  /** 服务端分配的不透明预留 ID（reservation_uuid）；金额与状态以服务端行 为权威。 */
   reservationId: string;
   runId: number;
   attemptId: string;
+  kind: ReservationKind;
   reservedLlmCalls: number;
   reservedInputTokens: number;
   reservedOutputTokens: number;
@@ -76,8 +86,33 @@ export interface BudgetReservation {
 }
 
 export interface BudgetSettlementInput {
-  /** 任务终态结算的预留；实际消耗从该 attempt 的 llm_call_receipts 聚合。 */
-  reservation: BudgetReservation;
+  /** 任务终态结算的预留 ID；金额与 attempt 以服务端预留行为准，实际消耗按回执聚合。 */
+  reservationId: string;
+}
+
+interface BudgetConnection {
+  beginTransaction(): Promise<unknown>;
+  execute(statement: string, parameters: Array<string | number | null>): Promise<unknown>;
+  commit(): Promise<unknown>;
+  rollback(): Promise<unknown>;
+  release(): void;
+}
+
+type Execute = (statement: string, parameters: Array<string | number | null>) => Promise<unknown>;
+
+async function withBudgetTransaction<T>(fn: (execute: Execute) => Promise<T>): Promise<T> {
+  const connection = (await getDb().getConnection()) as unknown as BudgetConnection;
+  try {
+    await connection.beginTransaction();
+    const result = await fn((statement, parameters) => connection.execute(statement, parameters));
+    await connection.commit();
+    return result;
+  } catch (error) {
+    await connection.rollback().catch(() => undefined);
+    throw error;
+  } finally {
+    connection.release();
+  }
 }
 
 function assertPositiveInt(value: number, field: string): void {
@@ -86,108 +121,86 @@ function assertPositiveInt(value: number, field: string): void {
   }
 }
 
-function costToMicros(cost: number): number {
-  return Math.round(cost * COST_MICROS);
-}
-
-function microsToCost(micros: number): number {
-  return micros / COST_MICROS;
-}
-
 /** DECIMAL(12,6) 参数统一走定点字符串，避免浮点进入 SQL。 */
-function microsToDecimal(micros: number): string {
-  return microsToCost(micros).toFixed(6);
-}
-
-function base64Url(value: string): string {
-  return Buffer.from(value, "utf8").toString("base64url");
-}
-
-function fromBase64Url(value: string): string {
-  return Buffer.from(value, "base64url").toString("utf8");
-}
-
-interface ParsedReservationId {
-  runId: number;
-  attemptId: string;
-  llmCalls: number;
-  inputTokens: number;
-  outputTokens: number;
-  costMicros: number;
-}
-
-function parseReservationId(reservationId: string): ParsedReservationId {
-  const parts = reservationId.split(":");
-  if (parts.length !== 7 || parts[0] !== RESERVATION_ID_PREFIX) {
-    throw new Error(`malformed behavior budget reservation id: ${reservationId}`);
-  }
-  const [, runIdPart, attemptPart, callsPart, inPart, outPart, costPart] = parts;
-  const runId = Number(runIdPart);
-  const llmCalls = Number(callsPart);
-  const inputTokens = Number(inPart);
-  const outputTokens = Number(outPart);
-  const costMicros = Number(costPart);
-  if (
-    !Number.isInteger(runId) ||
-    runId <= 0 ||
-    !Number.isInteger(llmCalls) ||
-    llmCalls < 0 ||
-    !Number.isInteger(inputTokens) ||
-    inputTokens < 0 ||
-    !Number.isInteger(outputTokens) ||
-    outputTokens < 0 ||
-    !Number.isInteger(costMicros) ||
-    costMicros < 0 ||
-    attemptPart.length === 0
-  ) {
-    throw new Error(`malformed behavior budget reservation id: ${reservationId}`);
-  }
-  return { runId, attemptId: fromBase64Url(attemptPart), llmCalls, inputTokens, outputTokens, costMicros };
-}
-
-function buildReservation(
-  runId: number,
-  attemptId: string,
-  llmCalls: number,
-  inputTokens: number,
-  outputTokens: number,
-  costMicros: number,
-): BudgetReservation {
-  const reservationId = [RESERVATION_ID_PREFIX, runId, base64Url(attemptId), llmCalls, inputTokens, outputTokens, costMicros].join(
-    ":",
-  );
-  return {
-    reservationId,
-    runId,
-    attemptId,
-    reservedLlmCalls: llmCalls,
-    reservedInputTokens: inputTokens,
-    reservedOutputTokens: outputTokens,
-    reservedCostAmount: microsToCost(costMicros),
-  };
+function toDecimal(cost: number): string {
+  return cost.toFixed(6);
 }
 
 interface UpdateResult {
   affectedRows: number;
 }
 
-interface BudgetConfigRow {
-  max_llm_calls: unknown;
-  max_total_tokens: unknown;
-  max_cost_amount: unknown;
+interface ReservationRow {
+  id: unknown;
+  reservation_uuid: unknown;
+  run_id: unknown;
+  attempt_id: unknown;
+  kind: unknown;
+  reserved_llm_calls: unknown;
+  reserved_input_tokens: unknown;
+  reserved_output_tokens: unknown;
+  reserved_cost_amount: unknown;
+  status: unknown;
 }
 
-async function executeBudgetUpdate(statement: string, parameters: Array<string | number | null>): Promise<number> {
-  const [result] = (await getDb().execute(statement, parameters)) as [UpdateResult, unknown];
+interface ParsedReservation {
+  reservationId: string;
+  runId: number;
+  attemptId: string;
+  kind: ReservationKind;
+  llmCalls: number;
+  inputTokens: number;
+  outputTokens: number;
+  costAmount: number;
+  status: ReservationStatus;
+}
+
+function parseReservationRow(row: ReservationRow): ParsedReservation {
+  return {
+    reservationId: String(row.reservation_uuid),
+    runId: Number(row.run_id),
+    attemptId: String(row.attempt_id),
+    kind: String(row.kind) as ReservationKind,
+    llmCalls: Number(row.reserved_llm_calls),
+    inputTokens: Number(row.reserved_input_tokens),
+    outputTokens: Number(row.reserved_output_tokens),
+    costAmount: Number(row.reserved_cost_amount),
+    status: String(row.status) as ReservationStatus,
+  };
+}
+
+const RESERVATION_COLUMNS =
+  "id, reservation_uuid, run_id, attempt_id, kind, reserved_llm_calls, reserved_input_tokens, reserved_output_tokens, reserved_cost_amount, status";
+
+async function lockReservation(execute: Execute, reservationId: string): Promise<ParsedReservation | null> {
+  const [rows] = (await execute(
+    `SELECT ${RESERVATION_COLUMNS} FROM analysis_behavior_budget_reservations WHERE reservation_uuid = ? FOR UPDATE`,
+    [reservationId],
+  )) as [ReservationRow[], unknown];
+  return rows.length > 0 ? parseReservationRow(rows[0]) : null;
+}
+
+async function applyLedgerUpdate(execute: Execute, statement: string, parameters: Array<string | number | null>): Promise<number> {
+  const [result] = (await execute(statement, parameters)) as [UpdateResult, unknown];
   return Number(result.affectedRows ?? 0);
 }
 
-/**
- * 原子预留任务预算：单条条件 UPDATE 在数据库侧判定余额，预算不足（或行不存在）抛
- * behavior_budget_exceeded；maxLlmCalls 维度严格，token 合并口径、费用按上界判定。
- */
-export async function reserveBehaviorBudget(input: BudgetReservationInput): Promise<BudgetReservation> {
+function toBudgetReservation(parsed: ParsedReservation): BudgetReservation {
+  return {
+    reservationId: parsed.reservationId,
+    runId: parsed.runId,
+    attemptId: parsed.attemptId,
+    kind: parsed.kind,
+    reservedLlmCalls: parsed.llmCalls,
+    reservedInputTokens: parsed.inputTokens,
+    reservedOutputTokens: parsed.outputTokens,
+    reservedCostAmount: parsed.costAmount,
+  };
+}
+
+function validateReservationInput(input: BudgetReservationInput): void {
   assertPositiveInt(input.runId, "runId");
+  if (input.runId === 0) throw new Error("runId must be positive");
   if (typeof input.attemptId !== "string" || input.attemptId.length === 0) {
     throw new Error("attemptId must be a non-empty string");
   }
@@ -198,209 +211,343 @@ export async function reserveBehaviorBudget(input: BudgetReservationInput): Prom
   if (!Number.isFinite(input.maxCostAmount) || input.maxCostAmount < 0) {
     throw new Error(`maxCostAmount must be a non-negative finite number, got ${String(input.maxCostAmount)}`);
   }
-  const costMicros = costToMicros(input.maxCostAmount);
-  const tokenUpperBound = input.maxInputTokens + input.maxOutputTokens;
-  const affected = await executeBudgetUpdate(
+}
+
+/** 聚合账本的原子预留扣减：余额谓词条件 UPDATE，sentinel 表示对应维度无上限。 */
+async function applyLedgerReservation(
+  execute: Execute,
+  input: { runId: number; llmCalls: number; inputTokens: number; outputTokens: number; costAmount: number; summary: boolean },
+): Promise<number> {
+  const tokenUpperBound = input.inputTokens + input.outputTokens;
+  const summarySet = input.summary ? ", summary_reserved = 1" : "";
+  const summaryPredicate = input.summary ? "AND summary_reserved = 0" : "";
+  return applyLedgerUpdate(
+    execute,
     `UPDATE analysis_run_budgets
         SET reserved_llm_calls = reserved_llm_calls + ?,
             reserved_input_tokens = reserved_input_tokens + ?,
             reserved_output_tokens = reserved_output_tokens + ?,
-            reserved_cost_amount = reserved_cost_amount + ?,
+            reserved_cost_amount = reserved_cost_amount + ?${summarySet},
             version = version + 1
       WHERE run_id = ?
+        ${summaryPredicate}
         AND (max_llm_calls = ? OR settled_llm_calls + reserved_llm_calls + ? <= max_llm_calls)
         AND (max_total_tokens = ? OR settled_input_tokens + reserved_input_tokens + settled_output_tokens + reserved_output_tokens + ? <= max_total_tokens)
         AND (max_cost_amount = ? OR settled_cost_amount + reserved_cost_amount + ? <= max_cost_amount)`,
     [
-      input.maxLlmCalls,
-      input.maxInputTokens,
-      input.maxOutputTokens,
-      microsToDecimal(costMicros),
+      input.llmCalls,
+      input.inputTokens,
+      input.outputTokens,
+      toDecimal(input.costAmount),
       input.runId,
       UNLIMITED_MAX_LLM_CALLS,
-      input.maxLlmCalls,
+      input.llmCalls,
       UNLIMITED_MAX_TOTAL_TOKENS,
       tokenUpperBound,
       UNLIMITED_MAX_COST_AMOUNT,
-      microsToDecimal(costMicros),
+      toDecimal(input.costAmount),
     ],
   );
-  if (affected !== 1) {
-    throw new BehaviorBudgetError(
-      "behavior_budget_exceeded",
-      `run ${input.runId} behavior budget cannot cover reservation of ${input.maxLlmCalls} llm calls / ${tokenUpperBound} tokens / ${microsToDecimal(costMicros)} for attempt ${input.attemptId}`,
-    );
-  }
-  return buildReservation(input.runId, input.attemptId, input.maxLlmCalls, input.maxInputTokens, input.maxOutputTokens, costMicros);
+}
+
+async function insertReservationRow(
+  execute: Execute,
+  input: { reservationId: string; runId: number; attemptId: string; kind: ReservationKind; llmCalls: number; inputTokens: number; outputTokens: number; costAmount: number },
+): Promise<void> {
+  await execute(
+    `INSERT INTO analysis_behavior_budget_reservations
+       (reservation_uuid, run_id, attempt_id, kind, reserved_llm_calls, reserved_input_tokens, reserved_output_tokens, reserved_cost_amount, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'reserved')`,
+    [
+      input.reservationId,
+      input.runId,
+      input.attemptId,
+      input.kind,
+      input.llmCalls,
+      input.inputTokens,
+      input.outputTokens,
+      toDecimal(input.costAmount),
+    ],
+  );
+}
+
+/**
+ * 原子预留任务预算：事务内先以条件 UPDATE 在数据库侧判定余额（maxLlmCalls 严格、
+ * token 合并口径、费用按上界），再插入该预留的状态行；预算不足（或行不存在）抛
+ * behavior_budget_exceeded，事务回滚不留半成品。
+ */
+export async function reserveBehaviorBudget(input: BudgetReservationInput): Promise<BudgetReservation> {
+  validateReservationInput(input);
+  const reservationId = randomUUID();
+  return withBudgetTransaction(async (execute) => {
+    const affected = await applyLedgerReservation(execute, {
+      runId: input.runId,
+      llmCalls: input.maxLlmCalls,
+      inputTokens: input.maxInputTokens,
+      outputTokens: input.maxOutputTokens,
+      costAmount: input.maxCostAmount,
+      summary: false,
+    });
+    if (affected !== 1) {
+      throw new BehaviorBudgetError(
+        "behavior_budget_exceeded",
+        `run ${input.runId} behavior budget cannot cover reservation of ${input.maxLlmCalls} llm calls / ${input.maxInputTokens + input.maxOutputTokens} tokens / ${toDecimal(input.maxCostAmount)} for attempt ${input.attemptId}`,
+      );
+    }
+    await insertReservationRow(execute, {
+      reservationId,
+      runId: input.runId,
+      attemptId: input.attemptId,
+      kind: "task",
+      llmCalls: input.maxLlmCalls,
+      inputTokens: input.maxInputTokens,
+      outputTokens: input.maxOutputTokens,
+      costAmount: input.maxCostAmount,
+    });
+    return {
+      reservationId,
+      runId: input.runId,
+      attemptId: input.attemptId,
+      kind: "task" as const,
+      reservedLlmCalls: input.maxLlmCalls,
+      reservedInputTokens: input.maxInputTokens,
+      reservedOutputTokens: input.maxOutputTokens,
+      reservedCostAmount: input.maxCostAmount,
+    };
+  });
 }
 
 /**
  * 产品摘要份额独立预留（D9/D10：摘要调用、token、费用不与单元抢占，不能因单元超支静默跳过）。
- * 每 run 一次：summary_reserved 0→1 与余额判定在同一条件 UPDATE；已预留时幂等返回同一预留。
+ * 每 run 一次：summary_reserved 0→1 与余额判定在同一条件 UPDATE；已预留时幂等返回
+ * 首次预留的服务端状态（同一 reservationId），绝不双倍预留。
  */
 export async function reserveProductSummaryBudget(runId: number): Promise<BudgetReservation> {
   assertPositiveInt(runId, "runId");
   if (runId === 0) throw new Error("runId must be positive");
-  const costMicros = costToMicros(PRODUCT_SUMMARY_RESERVED_COST_AMOUNT);
-  const tokenUpperBound = PRODUCT_SUMMARY_RESERVED_INPUT_TOKENS + PRODUCT_SUMMARY_RESERVED_OUTPUT_TOKENS;
-  const reservation = buildReservation(
-    runId,
-    PRODUCT_SUMMARY_ATTEMPT_ID,
-    PRODUCT_SUMMARY_RESERVED_LLM_CALLS,
-    PRODUCT_SUMMARY_RESERVED_INPUT_TOKENS,
-    PRODUCT_SUMMARY_RESERVED_OUTPUT_TOKENS,
-    costMicros,
-  );
-  const affected = await executeBudgetUpdate(
-    `UPDATE analysis_run_budgets
-        SET reserved_llm_calls = reserved_llm_calls + ?,
-            reserved_input_tokens = reserved_input_tokens + ?,
-            reserved_output_tokens = reserved_output_tokens + ?,
-            reserved_cost_amount = reserved_cost_amount + ?,
-            summary_reserved = 1,
-            version = version + 1
-      WHERE run_id = ?
-        AND summary_reserved = 0
-        AND (max_llm_calls = ? OR settled_llm_calls + reserved_llm_calls + ? <= max_llm_calls)
-        AND (max_total_tokens = ? OR settled_input_tokens + reserved_input_tokens + settled_output_tokens + reserved_output_tokens + ? <= max_total_tokens)
-        AND (max_cost_amount = ? OR settled_cost_amount + reserved_cost_amount + ? <= max_cost_amount)`,
-    [
-      PRODUCT_SUMMARY_RESERVED_LLM_CALLS,
-      PRODUCT_SUMMARY_RESERVED_INPUT_TOKENS,
-      PRODUCT_SUMMARY_RESERVED_OUTPUT_TOKENS,
-      microsToDecimal(costMicros),
+  const reservationId = randomUUID();
+  const created = await withBudgetTransaction(async (execute) => {
+    const affected = await applyLedgerReservation(execute, {
       runId,
-      UNLIMITED_MAX_LLM_CALLS,
-      PRODUCT_SUMMARY_RESERVED_LLM_CALLS,
-      UNLIMITED_MAX_TOTAL_TOKENS,
-      tokenUpperBound,
-      UNLIMITED_MAX_COST_AMOUNT,
-      microsToDecimal(costMicros),
-    ],
-  );
-  if (affected === 1) return reservation;
-  // 失败只有两种原因：已预留（幂等成功）或预算不足；summary_reserved 单调 0→1，读后判定无竞态。
-  const [rows] = (await getDb().execute("SELECT summary_reserved FROM analysis_run_budgets WHERE run_id = ?", [
+      llmCalls: PRODUCT_SUMMARY_RESERVED_LLM_CALLS,
+      inputTokens: PRODUCT_SUMMARY_RESERVED_INPUT_TOKENS,
+      outputTokens: PRODUCT_SUMMARY_RESERVED_OUTPUT_TOKENS,
+      costAmount: PRODUCT_SUMMARY_RESERVED_COST_AMOUNT,
+      summary: true,
+    });
+    if (affected !== 1) return null;
+    await insertReservationRow(execute, {
+      reservationId,
+      runId,
+      attemptId: PRODUCT_SUMMARY_ATTEMPT_ID,
+      kind: "product_summary",
+      llmCalls: PRODUCT_SUMMARY_RESERVED_LLM_CALLS,
+      inputTokens: PRODUCT_SUMMARY_RESERVED_INPUT_TOKENS,
+      outputTokens: PRODUCT_SUMMARY_RESERVED_OUTPUT_TOKENS,
+      costAmount: PRODUCT_SUMMARY_RESERVED_COST_AMOUNT,
+    });
+    return {
+      reservationId,
+      runId,
+      attemptId: PRODUCT_SUMMARY_ATTEMPT_ID,
+      kind: "product_summary" as const,
+      reservedLlmCalls: PRODUCT_SUMMARY_RESERVED_LLM_CALLS,
+      reservedInputTokens: PRODUCT_SUMMARY_RESERVED_INPUT_TOKENS,
+      reservedOutputTokens: PRODUCT_SUMMARY_RESERVED_OUTPUT_TOKENS,
+      reservedCostAmount: PRODUCT_SUMMARY_RESERVED_COST_AMOUNT,
+    };
+  });
+  if (created) return created;
+  // 失败只有两种原因：已预留（幂等返回首次预留）或预算不足；summary_reserved 单调 0→1，读后判定无竞态。
+  const [flagRows] = (await getDb().execute("SELECT summary_reserved FROM analysis_run_budgets WHERE run_id = ?", [
     runId,
   ])) as [Array<{ summary_reserved: unknown }>, unknown];
-  if (rows.length > 0 && Number(rows[0].summary_reserved) === 1) return reservation;
+  if (flagRows.length > 0 && Number(flagRows[0].summary_reserved) === 1) {
+    const [rows] = (await getDb().execute(
+      `SELECT ${RESERVATION_COLUMNS} FROM analysis_behavior_budget_reservations WHERE run_id = ? AND kind = 'product_summary' ORDER BY id ASC LIMIT 1`,
+      [runId],
+    )) as [ReservationRow[], unknown];
+    if (rows.length > 0) return toBudgetReservation(parseReservationRow(rows[0]));
+  }
   throw new BehaviorBudgetError(
     "behavior_budget_exceeded",
-    `run ${runId} behavior budget cannot cover the product summary reservation of ${PRODUCT_SUMMARY_RESERVED_LLM_CALLS} llm call / ${tokenUpperBound} tokens / ${microsToDecimal(costMicros)}`,
+    `run ${runId} behavior budget cannot cover the product summary reservation of ${PRODUCT_SUMMARY_RESERVED_LLM_CALLS} llm call / ${PRODUCT_SUMMARY_RESERVED_INPUT_TOKENS + PRODUCT_SUMMARY_RESERVED_OUTPUT_TOKENS} tokens / ${toDecimal(PRODUCT_SUMMARY_RESERVED_COST_AMOUNT)}`,
   );
 }
 
+interface BudgetConfig {
+  callsCapConfigured: boolean;
+  tokenCapConfigured: boolean;
+  costCapConfigured: boolean;
+}
+
+async function loadBudgetConfig(execute: Execute, runId: number): Promise<BudgetConfig | null> {
+  const [rows] = (await execute(
+    "SELECT max_llm_calls, max_total_tokens, max_cost_amount FROM analysis_run_budgets WHERE run_id = ?",
+    [runId],
+  )) as [Array<{ max_llm_calls: unknown; max_total_tokens: unknown; max_cost_amount: unknown }>, unknown];
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    callsCapConfigured: Number(row.max_llm_calls) !== UNLIMITED_MAX_LLM_CALLS,
+    tokenCapConfigured: String(row.max_total_tokens) !== UNLIMITED_MAX_TOTAL_TOKENS,
+    costCapConfigured: String(row.max_cost_amount) !== UNLIMITED_MAX_COST_AMOUNT,
+  };
+}
+
 /**
- * 任务终态结算：按 attempt 回执聚实际消耗，整笔预留转出、实际转入 settled（未发生部分随之释放）。
- * usage/费用未知绝不按零入账——未知维度按预留上界保守转入 settled；配置对应硬上限时
- * 在入账后抛 behavior_budget_usage_unknown，调用方必须停止新的派发。
- * 实际超过预留不截断（settled 可如实超过 max，overshoot 显式）；重复结算被余额谓词拒绝。
+ * 任务终态结算：短事务内锁定该预留自身状态行（身份与金额以服务端为准），
+ * 按 attempt 回执聚实际消耗，整笔预留转出、实际转入 settled（未发生部分随之释放）。
+ * 重复结算（含崩溃重试）是真 no-op——已 settled 的预留绝不再动账本，与后续新预留无关；
+ * 首次结算为 settled_unknown（有维度未知）时，重试继续抛 behavior_budget_usage_unknown，
+ * 停止派发信号不随重试丢失。已 released 的预留结算视为编排缺陷，抛 behavior_budget_exceeded。
+ * 未知维度（含 I1：0 回执的调用次数）按预留上界保守入账，绝不按零；实际超过预留不截断。
  */
 export async function settleBehaviorBudget(input: BudgetSettlementInput): Promise<void> {
-  const { reservation } = input;
-  const usage = await loadAttemptLlmUsage(reservation.runId, reservation.attemptId);
-  // 逐维度结算：已知按实际，未知按预留上界（未知 ≠ 零）。
-  const settledCalls = usage.llmCalls;
-  const settledInput = usage.inputTokens ?? reservation.reservedInputTokens;
-  const settledOutput = usage.outputTokens ?? reservation.reservedOutputTokens;
-  const settledCostMicros =
-    usage.costAmount === null ? costToMicros(reservation.reservedCostAmount) : costToMicros(usage.costAmount);
-  const reservedCostMicros = costToMicros(reservation.reservedCostAmount);
+  const usageUnknown = await withBudgetTransaction(async (execute) => {
+    const reservation = await lockReservation(execute, input.reservationId);
+    if (!reservation) {
+      throw new BehaviorBudgetError(
+        "behavior_budget_exceeded",
+        `behavior budget reservation ${input.reservationId} does not exist; refusing to settle`,
+      );
+    }
+    if (reservation.status === "settled") return null;
+    if (reservation.status === "settled_unknown") return "duplicate";
+    if (reservation.status === "released") {
+      throw new BehaviorBudgetError(
+        "behavior_budget_exceeded",
+        `behavior budget reservation ${input.reservationId} was already released; refusing to settle a released reservation`,
+      );
+    }
+    const usage = await loadAttemptLlmUsage(reservation.runId, reservation.attemptId);
+    // 逐维度结算：已知按实际，未知按预留上界（未知 ≠ 零；I1：0 回执时调用次数同样未知）。
+    const callsUnknown = usage.llmCalls === 0;
+    const settledCalls = callsUnknown ? reservation.llmCalls : usage.llmCalls;
+    const tokensUnknown = usage.inputTokens === null || usage.outputTokens === null;
+    const settledInput = usage.inputTokens ?? reservation.inputTokens;
+    const settledOutput = usage.outputTokens ?? reservation.outputTokens;
+    const costUnknown = usage.costAmount === null;
+    const settledCost = usage.costAmount ?? reservation.costAmount;
+    const anyUnknown = callsUnknown || tokensUnknown || costUnknown;
 
-  const [configRows] = (await getDb().execute(
-    "SELECT max_llm_calls, max_total_tokens, max_cost_amount FROM analysis_run_budgets WHERE run_id = ?",
-    [reservation.runId],
-  )) as [BudgetConfigRow[], unknown];
-  const config = configRows[0];
-  if (!config) {
-    throw new BehaviorBudgetError(
-      "behavior_budget_exceeded",
-      `run ${reservation.runId} has no behavior budget row; cannot settle reservation ${reservation.reservationId}`,
+    const transitioned = await applyLedgerUpdate(
+      execute,
+      `UPDATE analysis_behavior_budget_reservations
+          SET status = ?, settled_at = NOW(3)
+        WHERE reservation_uuid = ? AND status = 'reserved'`,
+      [anyUnknown ? "settled_unknown" : "settled", reservation.reservationId],
     );
-  }
-
-  const affected = await executeBudgetUpdate(
-    `UPDATE analysis_run_budgets
-        SET reserved_llm_calls = reserved_llm_calls - ?,
-            reserved_input_tokens = reserved_input_tokens - ?,
-            reserved_output_tokens = reserved_output_tokens - ?,
-            reserved_cost_amount = reserved_cost_amount - ?,
-            settled_llm_calls = settled_llm_calls + ?,
-            settled_input_tokens = settled_input_tokens + ?,
-            settled_output_tokens = settled_output_tokens + ?,
-            settled_cost_amount = settled_cost_amount + ?,
-            version = version + 1
-      WHERE run_id = ?
-        AND reserved_llm_calls >= ?
-        AND reserved_input_tokens >= ?
-        AND reserved_output_tokens >= ?
-        AND reserved_cost_amount >= ?`,
-    [
-      reservation.reservedLlmCalls,
-      reservation.reservedInputTokens,
-      reservation.reservedOutputTokens,
-      microsToDecimal(reservedCostMicros),
-      settledCalls,
-      settledInput,
-      settledOutput,
-      microsToDecimal(settledCostMicros),
-      reservation.runId,
-      reservation.reservedLlmCalls,
-      reservation.reservedInputTokens,
-      reservation.reservedOutputTokens,
-      microsToDecimal(reservedCostMicros),
-    ],
-  );
-  if (affected !== 1) {
-    throw new BehaviorBudgetError(
-      "behavior_budget_exceeded",
-      `reservation ${reservation.reservationId} is not outstanding (already settled/released or budget row missing); refusing to double-settle`,
+    if (transitioned !== 1) {
+      // 行锁下状态已核对为 reserved，转移必然成功；失败即并发/数据异常，回滚抛错。
+      throw new BehaviorBudgetError(
+        "behavior_budget_exceeded",
+        `behavior budget reservation ${input.reservationId} transitioned concurrently; refusing to settle`,
+      );
+    }
+    await applyLedgerUpdate(
+      execute,
+      `UPDATE analysis_run_budgets
+          SET reserved_llm_calls = reserved_llm_calls - ?,
+              reserved_input_tokens = reserved_input_tokens - ?,
+              reserved_output_tokens = reserved_output_tokens - ?,
+              reserved_cost_amount = reserved_cost_amount - ?,
+              settled_llm_calls = settled_llm_calls + ?,
+              settled_input_tokens = settled_input_tokens + ?,
+              settled_output_tokens = settled_output_tokens + ?,
+              settled_cost_amount = settled_cost_amount + ?,
+              version = version + 1
+        WHERE run_id = ?`,
+      [
+        reservation.llmCalls,
+        reservation.inputTokens,
+        reservation.outputTokens,
+        toDecimal(reservation.costAmount),
+        settledCalls,
+        settledInput,
+        settledOutput,
+        toDecimal(settledCost),
+        reservation.runId,
+      ],
     );
-  }
-
-  const tokenCapConfigured = String(config.max_total_tokens) !== UNLIMITED_MAX_TOTAL_TOKENS;
-  const costCapConfigured = String(config.max_cost_amount) !== UNLIMITED_MAX_COST_AMOUNT;
-  const tokensUnknown = usage.inputTokens === null || usage.outputTokens === null;
-  const costUnknown = usage.costAmount === null;
-  if ((tokensUnknown && tokenCapConfigured) || (costUnknown && costCapConfigured)) {
+    const config = await loadBudgetConfig(execute, reservation.runId);
+    if (!config) {
+      throw new BehaviorBudgetError(
+        "behavior_budget_exceeded",
+        `run ${reservation.runId} has no behavior budget row; cannot settle reservation ${input.reservationId}`,
+      );
+    }
+    const blocked = [
+      callsUnknown && config.callsCapConfigured ? "llm call count" : null,
+      tokensUnknown && config.tokenCapConfigured ? "token usage" : null,
+      costUnknown && config.costCapConfigured ? "cost" : null,
+    ].filter(Boolean);
+    return blocked.length > 0
+      ? `run ${reservation.runId} attempt ${reservation.attemptId} settled with unknown ${blocked.join(" and ")} under a configured hard cap; unknown usage was accounted at the reserved upper bound, not zero — stop dispatching new tasks`
+      : null;
+  });
+  if (usageUnknown === "duplicate") {
     throw new BehaviorBudgetError(
       "behavior_budget_usage_unknown",
-      `run ${reservation.runId} attempt ${reservation.attemptId} settled with unknown ` +
-        `${[tokensUnknown && tokenCapConfigured ? "token usage" : null, costUnknown && costCapConfigured ? "cost" : null]
-          .filter(Boolean)
-          .join(" and ")} under a configured hard cap; unknown usage was accounted at the reserved upper bound, not zero — stop dispatching new tasks`,
+      `behavior budget reservation ${input.reservationId} was already settled with unknown usage under a configured hard cap; dispatch remains blocked`,
     );
+  }
+  if (usageUnknown !== null) {
+    throw new BehaviorBudgetError("behavior_budget_usage_unknown", usageUnknown);
   }
 }
 
 /**
- * 释放从未消耗即放弃的预留（领取租约失败路径）。只发条件 UPDATE：预留余额不足
- * （已结算/已释放/从未存在）时为幂等 no-op。已 settle 的预留不得再走本函数。
+ * 释放从未消耗即放弃的预留（领取租约失败路径）：短事务内验证并转移该预留自身状态，
+ * 同事务把整笔预留从聚合账本转回。重复释放（含崩溃重试）是真 no-op——绝不因后续
+ * 新 attempt 取得预留而误释放他人份额。已结算的预留再走释放视为编排缺陷，抛
+ * behavior_budget_exceeded。
  */
 export async function releaseUnusedBehaviorBudget(reservationId: string): Promise<void> {
-  const parsed = parseReservationId(reservationId);
-  await executeBudgetUpdate(
-    `UPDATE analysis_run_budgets
-        SET reserved_llm_calls = reserved_llm_calls - ?,
-            reserved_input_tokens = reserved_input_tokens - ?,
-            reserved_output_tokens = reserved_output_tokens - ?,
-            reserved_cost_amount = reserved_cost_amount - ?,
-            version = version + 1
-      WHERE run_id = ?
-        AND reserved_llm_calls >= ?
-        AND reserved_input_tokens >= ?
-        AND reserved_output_tokens >= ?
-        AND reserved_cost_amount >= ?`,
-    [
-      parsed.llmCalls,
-      parsed.inputTokens,
-      parsed.outputTokens,
-      microsToDecimal(parsed.costMicros),
-      parsed.runId,
-      parsed.llmCalls,
-      parsed.inputTokens,
-      parsed.outputTokens,
-      microsToDecimal(parsed.costMicros),
-    ],
-  );
+  await withBudgetTransaction(async (execute) => {
+    const reservation = await lockReservation(execute, reservationId);
+    if (!reservation) {
+      throw new BehaviorBudgetError(
+        "behavior_budget_exceeded",
+        `behavior budget reservation ${reservationId} does not exist; refusing to release`,
+      );
+    }
+    if (reservation.status === "released") return;
+    if (reservation.status === "settled" || reservation.status === "settled_unknown") {
+      throw new BehaviorBudgetError(
+        "behavior_budget_exceeded",
+        `behavior budget reservation ${reservationId} was already settled; refusing to release a settled reservation`,
+      );
+    }
+    const transitioned = await applyLedgerUpdate(
+      execute,
+      `UPDATE analysis_behavior_budget_reservations
+          SET status = 'released', released_at = NOW(3)
+        WHERE reservation_uuid = ? AND status = 'reserved'`,
+      [reservation.reservationId],
+    );
+    if (transitioned !== 1) {
+      throw new BehaviorBudgetError(
+        "behavior_budget_exceeded",
+        `behavior budget reservation ${reservationId} transitioned concurrently; refusing to release`,
+      );
+    }
+    await applyLedgerUpdate(
+      execute,
+      `UPDATE analysis_run_budgets
+          SET reserved_llm_calls = reserved_llm_calls - ?,
+              reserved_input_tokens = reserved_input_tokens - ?,
+              reserved_output_tokens = reserved_output_tokens - ?,
+              reserved_cost_amount = reserved_cost_amount - ?,
+              version = version + 1
+        WHERE run_id = ?`,
+      [
+        reservation.llmCalls,
+        reservation.inputTokens,
+        reservation.outputTokens,
+        toDecimal(reservation.costAmount),
+        reservation.runId,
+      ],
+    );
+  });
 }

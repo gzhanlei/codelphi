@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { loadAttemptLlmUsage } from "../lib/billing/cost-receipt";
 import { getDb } from "../lib/db";
@@ -15,14 +17,15 @@ import {
   UNLIMITED_MAX_COST_AMOUNT,
   UNLIMITED_MAX_LLM_CALLS,
   UNLIMITED_MAX_TOTAL_TOKENS,
-  type BudgetReservation,
 } from "../lib/behavior-run-budget";
 
 vi.mock("../lib/db", () => ({ getDb: vi.fn() }));
 
-/** Task 7 契约（2026-11-19 行为清单全量分析，D9）：analysis_run_budgets 共享预算账本。
- *  maxLlmCalls 严格原子预留；token/费用按上界预留、真实回执结算；任务终态释放未发生部分；
- *  旧 attempt 预留在结算或租约回收前保持占用；usage/费用未知不得按零放行（硬门禁）。 */
+/** Task 7 契约（2026-11-19 行为清单全量分析，D9）：analysis_run_budgets 共享预算账本 +
+ *  analysis_behavior_budget_reservations 逐尝试预留状态（fix round 1，C1/I1）。
+ *  预留状态行是身份与金额的唯一权威；settle/release 在短事务内验证并转移该预留自身状态，
+ *  重复 settle/release 是真 no-op，不受后续新预留影响；0 回执的调用次数按预留上界入账，
+ *  配置 calls 硬上限时抛 behavior_budget_usage_unknown，绝不按零释放。 */
 
 const COST_MICROS = 1_000_000;
 
@@ -42,6 +45,19 @@ interface FakeBudgetRow {
   settled_cost_micros: number;
   summary_reserved: 0 | 1;
   version: number;
+}
+
+interface FakeReservationRow {
+  id: number;
+  reservation_uuid: string;
+  run_id: number;
+  attempt_id: string;
+  kind: string;
+  reserved_llm_calls: number;
+  reserved_input_tokens: number;
+  reserved_output_tokens: number;
+  reserved_cost_micros: number;
+  status: string;
 }
 
 interface FakeReceiptRow {
@@ -83,33 +99,26 @@ function budgetRow(overrides: Partial<FakeBudgetRow> = {}): FakeBudgetRow {
   };
 }
 
-/** 内存假表：只接受条件 UPDATE（余额谓词或 summary_reserved 谓词），按当前行状态在写入时
- *  判定 affectedRows——模拟 MySQL 原子条件更新；无条件写或 SELECT 余额一律 unrouted 报错。 */
+/** 内存假表：账本只接受条件 UPDATE（reserve）或事务内与预留状态转移配套的 ledger UPDATE
+ *  （settle/release）；预留状态行模拟 InnoDB 行锁语义——SELECT ... FOR UPDATE 读取当前状态，
+ *  状态转移 UPDATE 带 status='reserved' 谓词，重复转移 affectedRows=0。 */
 function budgetDb(initial: FakeBudgetRow, receipts: FakeReceiptRow[] = []) {
   const row = initial;
-  const execute = vi.fn(async (statement: string, parameters: Array<string | number | null>) => {
+  const reservations: FakeReservationRow[] = [];
+  let nextReservationId = 1;
+
+  const router = async (statement: string, parameters: Array<string | number | null>) => {
     const sql = String(statement).replace(/\s+/g, " ").trim();
     if (
       sql.startsWith("UPDATE analysis_run_budgets SET reserved_llm_calls = reserved_llm_calls + ?") &&
       sql.includes("summary_reserved = 1")
     ) {
-      // reserveProductSummaryBudget：summary_reserved 0→1 + 余额谓词，一次性完成。
       const [rCalls, rIn, rOut, rCost, runId, callsSentinel, rCallsFit, tokensSentinel, rInOutFit, costSentinel, rCostFit] =
         parameters;
       if (row.run_id !== Number(runId) || row.summary_reserved !== 0) return [{ affectedRows: 0 }];
-      const fits =
-        (Number(row.max_llm_calls) === Number(callsSentinel) ||
-          row.settled_llm_calls + row.reserved_llm_calls + Number(rCallsFit) <= row.max_llm_calls) &&
-        (String(row.max_total_tokens) === String(tokensSentinel) ||
-          row.settled_input_tokens +
-            row.reserved_input_tokens +
-            row.settled_output_tokens +
-            row.reserved_output_tokens +
-            Number(rInOutFit) <=
-            Number(row.max_total_tokens)) &&
-        (String(row.max_cost_amount) === String(costSentinel) ||
-          row.settled_cost_micros + row.reserved_cost_micros + toMicros(rCostFit) <= toMicros(row.max_cost_amount));
-      if (!fits) return [{ affectedRows: 0 }];
+      if (!fits(row, callsSentinel, rCallsFit, tokensSentinel, rInOutFit, costSentinel, rCostFit)) {
+        return [{ affectedRows: 0 }];
+      }
       row.reserved_llm_calls += Number(rCalls);
       row.reserved_input_tokens += Number(rIn);
       row.reserved_output_tokens += Number(rOut);
@@ -119,23 +128,12 @@ function budgetDb(initial: FakeBudgetRow, receipts: FakeReceiptRow[] = []) {
       return [{ affectedRows: 1 }];
     }
     if (sql.startsWith("UPDATE analysis_run_budgets SET reserved_llm_calls = reserved_llm_calls + ?")) {
-      // reserveBehaviorBudget：余额谓词条件 UPDATE。
       const [rCalls, rIn, rOut, rCost, runId, callsSentinel, rCallsFit, tokensSentinel, rInOutFit, costSentinel, rCostFit] =
         parameters;
       if (row.run_id !== Number(runId)) return [{ affectedRows: 0 }];
-      const fits =
-        (Number(row.max_llm_calls) === Number(callsSentinel) ||
-          row.settled_llm_calls + row.reserved_llm_calls + Number(rCallsFit) <= row.max_llm_calls) &&
-        (String(row.max_total_tokens) === String(tokensSentinel) ||
-          row.settled_input_tokens +
-            row.reserved_input_tokens +
-            row.settled_output_tokens +
-            row.reserved_output_tokens +
-            Number(rInOutFit) <=
-            Number(row.max_total_tokens)) &&
-        (String(row.max_cost_amount) === String(costSentinel) ||
-          row.settled_cost_micros + row.reserved_cost_micros + toMicros(rCostFit) <= toMicros(row.max_cost_amount));
-      if (!fits) return [{ affectedRows: 0 }];
+      if (!fits(row, callsSentinel, rCallsFit, tokensSentinel, rInOutFit, costSentinel, rCostFit)) {
+        return [{ affectedRows: 0 }];
+      }
       row.reserved_llm_calls += Number(rCalls);
       row.reserved_input_tokens += Number(rIn);
       row.reserved_output_tokens += Number(rOut);
@@ -147,15 +145,8 @@ function budgetDb(initial: FakeBudgetRow, receipts: FakeReceiptRow[] = []) {
       sql.startsWith("UPDATE analysis_run_budgets SET reserved_llm_calls = reserved_llm_calls - ?") &&
       sql.includes("settled_llm_calls = settled_llm_calls + ?")
     ) {
-      // settleBehaviorBudget：整笔预留转出 + 实际消耗转入 settled，预留余额谓词防重复结算。
-      const [rCalls, rIn, rOut, rCost, sCalls, sIn, sOut, sCost, runId, gCalls, gIn, gOut, gCost] = parameters;
+      const [rCalls, rIn, rOut, rCost, sCalls, sIn, sOut, sCost, runId] = parameters;
       if (row.run_id !== Number(runId)) return [{ affectedRows: 0 }];
-      const outstanding =
-        row.reserved_llm_calls >= Number(gCalls) &&
-        row.reserved_input_tokens >= Number(gIn) &&
-        row.reserved_output_tokens >= Number(gOut) &&
-        row.reserved_cost_micros >= toMicros(gCost);
-      if (!outstanding) return [{ affectedRows: 0 }];
       row.reserved_llm_calls -= Number(rCalls);
       row.reserved_input_tokens -= Number(rIn);
       row.reserved_output_tokens -= Number(rOut);
@@ -168,15 +159,8 @@ function budgetDb(initial: FakeBudgetRow, receipts: FakeReceiptRow[] = []) {
       return [{ affectedRows: 1 }];
     }
     if (sql.startsWith("UPDATE analysis_run_budgets SET reserved_llm_calls = reserved_llm_calls - ?")) {
-      // releaseUnusedBehaviorBudget：仅释放整笔未消耗预留（领取失败路径），余额谓词防重复释放。
-      const [rCalls, rIn, rOut, rCost, runId, gCalls, gIn, gOut, gCost] = parameters;
+      const [rCalls, rIn, rOut, rCost, runId] = parameters;
       if (row.run_id !== Number(runId)) return [{ affectedRows: 0 }];
-      const outstanding =
-        row.reserved_llm_calls >= Number(gCalls) &&
-        row.reserved_input_tokens >= Number(gIn) &&
-        row.reserved_output_tokens >= Number(gOut) &&
-        row.reserved_cost_micros >= toMicros(gCost);
-      if (!outstanding) return [{ affectedRows: 0 }];
       row.reserved_llm_calls -= Number(rCalls);
       row.reserved_input_tokens -= Number(rIn);
       row.reserved_output_tokens -= Number(rOut);
@@ -184,16 +168,59 @@ function budgetDb(initial: FakeBudgetRow, receipts: FakeReceiptRow[] = []) {
       row.version += 1;
       return [{ affectedRows: 1 }];
     }
+    if (sql.startsWith("INSERT INTO analysis_behavior_budget_reservations")) {
+      const [uuid, runId, attemptId, kind, rCalls, rIn, rOut, rCost] = parameters;
+      if (reservations.some((reservation) => reservation.reservation_uuid === String(uuid))) {
+        const error = new Error(`Duplicate entry '${String(uuid)}'`) as Error & { code?: string };
+        error.code = "ER_DUP_ENTRY";
+        throw error;
+      }
+      reservations.push({
+        id: nextReservationId++,
+        reservation_uuid: String(uuid),
+        run_id: Number(runId),
+        attempt_id: String(attemptId),
+        kind: String(kind),
+        reserved_llm_calls: Number(rCalls),
+        reserved_input_tokens: Number(rIn),
+        reserved_output_tokens: Number(rOut),
+        reserved_cost_micros: toMicros(rCost),
+        status: "reserved",
+      });
+      return [{ affectedRows: 1 }];
+    }
+    if (sql.includes("FROM analysis_behavior_budget_reservations WHERE reservation_uuid = ? FOR UPDATE")) {
+      const found = reservations.find((reservation) => reservation.reservation_uuid === String(parameters[0]));
+      return [found ? [serializeReservation(found)] : []];
+    }
+    if (
+      sql.startsWith("UPDATE analysis_behavior_budget_reservations SET status = ?") &&
+      sql.includes("settled_at")
+    ) {
+      const [status, uuid] = parameters;
+      const found = reservations.find((reservation) => reservation.reservation_uuid === String(uuid));
+      if (!found || found.status !== "reserved") return [{ affectedRows: 0 }];
+      found.status = String(status);
+      return [{ affectedRows: 1 }];
+    }
+    if (sql.startsWith("UPDATE analysis_behavior_budget_reservations SET status = 'released'")) {
+      const [uuid] = parameters;
+      const found = reservations.find((reservation) => reservation.reservation_uuid === String(uuid));
+      if (!found || found.status !== "reserved") return [{ affectedRows: 0 }];
+      found.status = "released";
+      return [{ affectedRows: 1 }];
+    }
+    if (sql.includes("FROM analysis_behavior_budget_reservations WHERE run_id = ? AND kind = 'product_summary'")) {
+      return [
+        reservations
+          .filter((reservation) => reservation.run_id === Number(parameters[0]) && reservation.kind === "product_summary")
+          .map(serializeReservation),
+      ];
+    }
     if (sql.startsWith("SELECT max_llm_calls, max_total_tokens, max_cost_amount FROM analysis_run_budgets")) {
       return [
         row.run_id === Number(parameters[0])
-          ? [
-              {
-                max_llm_calls: row.max_llm_calls,
-                max_total_tokens: row.max_total_tokens,
-                max_cost_amount: row.max_cost_amount,
-              },
-            ]
+          ? [{ max_llm_calls: row.max_llm_calls, max_total_tokens: row.max_total_tokens, max_cost_amount: row.max_cost_amount }]
           : [],
       ];
     }
@@ -215,9 +242,65 @@ function budgetDb(initial: FakeBudgetRow, receipts: FakeReceiptRow[] = []) {
       ];
     }
     throw new Error(`unrouted sql: ${sql}`);
+  };
+
+  const statements: string[] = [];
+  const execute = vi.fn(async (statement: string, parameters: Array<string | number | null>) => {
+    statements.push(String(statement).replace(/\s+/g, " ").trim());
+    return router(statement, parameters);
   });
-  const statements = () => execute.mock.calls.map(([statement]) => String(statement));
-  return { execute, row, statements };
+  const connection = {
+    beginTransaction: vi.fn(async () => undefined),
+    execute,
+    commit: vi.fn(async () => undefined),
+    rollback: vi.fn(async () => undefined),
+    release: vi.fn(() => undefined),
+  };
+  return {
+    connection,
+    row,
+    reservations: () => reservations,
+    statements: () => statements,
+  };
+}
+
+function fits(
+  row: FakeBudgetRow,
+  callsSentinel: unknown,
+  rCallsFit: unknown,
+  tokensSentinel: unknown,
+  rInOutFit: unknown,
+  costSentinel: unknown,
+  rCostFit: unknown,
+): boolean {
+  return (
+    (Number(row.max_llm_calls) === Number(callsSentinel) ||
+      row.settled_llm_calls + row.reserved_llm_calls + Number(rCallsFit) <= row.max_llm_calls) &&
+    (String(row.max_total_tokens) === String(tokensSentinel) ||
+      row.settled_input_tokens +
+        row.reserved_input_tokens +
+        row.settled_output_tokens +
+        row.reserved_output_tokens +
+        Number(rInOutFit) <=
+        Number(row.max_total_tokens)) &&
+    (String(row.max_cost_amount) === String(costSentinel) ||
+      row.settled_cost_micros + row.reserved_cost_micros + toMicros(rCostFit) <= toMicros(row.max_cost_amount))
+  );
+}
+
+function serializeReservation(found: FakeReservationRow) {
+  return {
+    id: found.id,
+    reservation_uuid: found.reservation_uuid,
+    run_id: found.run_id,
+    attempt_id: found.attempt_id,
+    kind: found.kind,
+    reserved_llm_calls: found.reserved_llm_calls,
+    reserved_input_tokens: found.reserved_input_tokens,
+    reserved_output_tokens: found.reserved_output_tokens,
+    reserved_cost_amount: fromMicros(found.reserved_cost_micros).toFixed(6),
+    status: found.status,
+  };
 }
 
 function receipt(overrides: Partial<FakeReceiptRow> = {}): FakeReceiptRow {
@@ -250,15 +333,15 @@ function expectBudgetError(error: unknown, code: "behavior_budget_exceeded" | "b
   expect((error as BehaviorBudgetError).code).toBe(code);
 }
 
-const execute = vi.fn();
-
 beforeEach(() => {
-  execute.mockReset();
-  vi.mocked(getDb).mockReturnValue({ execute } as never);
+  vi.clearAllMocks();
 });
 
-function stubDb(db: { execute: unknown }) {
-  vi.mocked(getDb).mockReturnValue({ execute: db.execute } as never);
+function stubDb(db: { connection: unknown }) {
+  vi.mocked(getDb).mockReturnValue({
+    getConnection: async () => db.connection,
+    execute: (db.connection as { execute: unknown }).execute,
+  } as never);
 }
 
 describe("reserveBehaviorBudget", () => {
@@ -270,20 +353,32 @@ describe("reserveBehaviorBudget", () => {
     expect(first.attemptId).toBe("attempt-1");
     expect(first.reservedLlmCalls).toBe(2);
     expect(db.row.reserved_llm_calls).toBe(2);
+    expect(db.reservations()).toHaveLength(1);
+    expect(db.reservations()[0]).toMatchObject({ run_id: 42, attempt_id: "attempt-1", kind: "task", status: "reserved" });
     const second = await reserveBehaviorBudget(reservationInput({ attemptId: "attempt-2" })).catch((caught) => caught);
     expectBudgetError(second, "behavior_budget_exceeded");
     const third = await reserveBehaviorBudget(reservationInput({ attemptId: "attempt-3" })).catch((caught) => caught);
     expectBudgetError(third, "behavior_budget_exceeded");
     expect(db.row.reserved_llm_calls).toBe(2);
+    expect(db.reservations()).toHaveLength(1);
+    expect(db.connection.rollback).toHaveBeenCalled();
   });
 
-  it("never reads balances before writing: reservation is a single conditional UPDATE", async () => {
+  it("keeps the atomic balance check inside the reserve conditional UPDATE (no balance SELECT)", async () => {
     const db = budgetDb(budgetRow({ max_llm_calls: 3 }));
     stubDb(db);
     await reserveBehaviorBudget(reservationInput());
-    expect(db.statements()).toHaveLength(1);
-    expect(db.statements()[0]).toMatch(/^UPDATE analysis_run_budgets/);
-    expect(db.statements()[0]).toContain("reserved_llm_calls + ?");
+    const balanceSelects = db
+      .statements()
+      .filter((statement) => /^SELECT/.test(statement) && /reserved_llm_calls|settled_llm_calls/.test(statement));
+    expect(balanceSelects).toHaveLength(0);
+    const reserveUpdate = db
+      .statements()
+      .find((statement) => statement.startsWith("UPDATE analysis_run_budgets SET reserved_llm_calls = reserved_llm_calls + ?"));
+    expect(reserveUpdate).toBeDefined();
+    expect(reserveUpdate).toContain("OR settled_llm_calls + reserved_llm_calls + ? <= max_llm_calls");
+    expect(db.connection.beginTransaction).toHaveBeenCalled();
+    expect(db.connection.commit).toHaveBeenCalled();
   });
 
   it("reserves tokens and cost by upper bound against the combined token cap", async () => {
@@ -298,10 +393,10 @@ describe("reserveBehaviorBudget", () => {
       reservationInput({ attemptId: "attempt-3", maxInputTokens: 100, maxOutputTokens: 100, maxCostAmount: 0.6 }),
     ).catch((caught) => caught);
     expectBudgetError(overCost, "behavior_budget_exceeded");
-    const fits = await reserveBehaviorBudget(
+    const fitsReservation = await reserveBehaviorBudget(
       reservationInput({ attemptId: "attempt-4", maxInputTokens: 200, maxOutputTokens: 200, maxCostAmount: 0.5 }),
     );
-    expect(fits.reservationId).toBeTruthy();
+    expect(fitsReservation.reservationId).toBeTruthy();
     expect(db.row.reserved_input_tokens).toBe(600);
     expect(db.row.reserved_output_tokens).toBe(400);
     expect(fromMicros(db.row.reserved_cost_micros)).toBeCloseTo(1.0, 6);
@@ -311,7 +406,6 @@ describe("reserveBehaviorBudget", () => {
     const db = budgetDb(budgetRow({ max_llm_calls: 5 }));
     stubDb(db);
     await reserveBehaviorBudget(reservationInput({ attemptId: "attempt-old" }));
-    // 租约过期 → 新 attempt 重新检查并重新预留；旧预留未结算，必须继续占用。
     const retry = await reserveBehaviorBudget(reservationInput({ attemptId: "attempt-new" }));
     expect(retry.attemptId).toBe("attempt-new");
     expect(db.row.reserved_llm_calls).toBe(4);
@@ -342,13 +436,13 @@ describe("settleBehaviorBudget", () => {
     ]);
     stubDb(db);
     const first = await reserveBehaviorBudget(reservationInput({ attemptId: "attempt-1" }));
-    await settleBehaviorBudget({ reservation: first });
-    // 实际 1 次调用：预留 2 全部转出，settled 记 1，未发生的 1 次随之释放。
+    await settleBehaviorBudget({ reservationId: first.reservationId });
     expect(db.row.reserved_llm_calls).toBe(0);
     expect(db.row.settled_llm_calls).toBe(1);
     expect(db.row.settled_input_tokens).toBe(120);
     expect(db.row.settled_output_tokens).toBe(40);
     expect(fromMicros(db.row.settled_cost_micros)).toBeCloseTo(0.012, 6);
+    expect(db.reservations()[0].status).toBe("settled");
     const next = await reserveBehaviorBudget(reservationInput({ attemptId: "attempt-2" }));
     expect(next.reservedLlmCalls).toBe(2);
     expect(db.row.reserved_llm_calls).toBe(2);
@@ -362,8 +456,7 @@ describe("settleBehaviorBudget", () => {
     ]);
     stubDb(db);
     const reservation = await reserveBehaviorBudget(reservationInput({ attemptId: "attempt-1" }));
-    await settleBehaviorBudget({ reservation });
-    // 超发不截断：settled 如实记 3（> max 2），占用归零，后续派发被预算谓词拒绝。
+    await settleBehaviorBudget({ reservationId: reservation.reservationId });
     expect(db.row.reserved_llm_calls).toBe(0);
     expect(db.row.settled_llm_calls).toBe(3);
     expect(db.row.settled_llm_calls).toBeGreaterThan(db.row.max_llm_calls);
@@ -375,27 +468,61 @@ describe("settleBehaviorBudget", () => {
 
   it("throws behavior_budget_usage_unknown and settles at the reserved bound when token usage is unknown under a configured token cap", async () => {
     const db = budgetDb(budgetRow({ max_total_tokens: "10000" }), [
-      receipt({ attempt_id: "attempt-1", usage_status: "unknown", input_tokens: null, output_tokens: null, llm_cost_amount: null, pricing_status: "priced" }),
+      receipt({
+        attempt_id: "attempt-1",
+        usage_status: "unknown",
+        input_tokens: null,
+        output_tokens: null,
+        llm_cost_amount: null,
+        pricing_status: "priced",
+      }),
     ]);
     stubDb(db);
     const reservation = await reserveBehaviorBudget(reservationInput({ attemptId: "attempt-1" }));
-    const error = await settleBehaviorBudget({ reservation }).catch((caught) => caught);
+    const error = await settleBehaviorBudget({ reservationId: reservation.reservationId }).catch((caught) => caught);
     expectBudgetError(error, "behavior_budget_usage_unknown");
-    // 未知 ≠ 零：token 按预留上界入账（保守），调用次数按回执实记。
     expect(db.row.reserved_llm_calls).toBe(0);
     expect(db.row.settled_llm_calls).toBe(1);
     expect(db.row.settled_input_tokens).toBe(400);
     expect(db.row.settled_output_tokens).toBe(200);
-    expect(db.row.settled_input_tokens + db.row.settled_output_tokens).toBeGreaterThan(0);
+    expect(db.reservations()[0].status).toBe("settled_unknown");
   });
 
-  it("throws behavior_budget_usage_unknown for zero-receipt attempts instead of counting zero usage", async () => {
+  it("books reserved calls and cost at the bound for zero-receipt attempts instead of counting zero usage", async () => {
     const db = budgetDb(budgetRow({ max_total_tokens: "10000", max_cost_amount: "10.000000" }));
     stubDb(db);
     const reservation = await reserveBehaviorBudget(reservationInput({ attemptId: "attempt-no-receipts" }));
-    const error = await settleBehaviorBudget({ reservation }).catch((caught) => caught);
+    const error = await settleBehaviorBudget({ reservationId: reservation.reservationId }).catch((caught) => caught);
     expectBudgetError(error, "behavior_budget_usage_unknown");
-    expect(db.row.settled_llm_calls).toBe(0);
+    // I1：缺回执 ≠ 零——调用次数按预留上界入账，不按 0 释放。
+    expect(db.row.settled_llm_calls).toBe(2);
+    expect(db.row.reserved_llm_calls).toBe(0);
+    expect(db.row.settled_input_tokens).toBe(400);
+    expect(fromMicros(db.row.settled_cost_micros)).toBeCloseTo(0.5, 6);
+    expect(db.reservations()[0].status).toBe("settled_unknown");
+  });
+
+  it("books reserved calls and blocks dispatch for a calls-only cap when receipts are missing (I1)", async () => {
+    const db = budgetDb(budgetRow({ max_llm_calls: 2 }));
+    stubDb(db);
+    const reservation = await reserveBehaviorBudget(reservationInput({ attemptId: "attempt-1" }));
+    const error = await settleBehaviorBudget({ reservationId: reservation.reservationId }).catch((caught) => caught);
+    expectBudgetError(error, "behavior_budget_usage_unknown");
+    expect(db.row.settled_llm_calls).toBe(2);
+    expect(db.row.reserved_llm_calls).toBe(0);
+    expect(db.reservations()[0].status).toBe("settled_unknown");
+    const blocked = await reserveBehaviorBudget(reservationInput({ attemptId: "attempt-2", maxLlmCalls: 1 })).catch(
+      (caught) => caught,
+    );
+    expectBudgetError(blocked, "behavior_budget_exceeded");
+  });
+
+  it("books zero-receipt calls at the bound without throwing when no hard cap is configured (I1)", async () => {
+    const db = budgetDb(budgetRow());
+    stubDb(db);
+    const reservation = await reserveBehaviorBudget(reservationInput({ attemptId: "attempt-1" }));
+    await expect(settleBehaviorBudget({ reservationId: reservation.reservationId })).resolves.toBeUndefined();
+    expect(db.row.settled_llm_calls).toBe(2);
     expect(db.row.settled_input_tokens).toBe(400);
     expect(fromMicros(db.row.settled_cost_micros)).toBeCloseTo(0.5, 6);
   });
@@ -406,9 +533,8 @@ describe("settleBehaviorBudget", () => {
     ]);
     stubDb(db);
     const reservation = await reserveBehaviorBudget(reservationInput({ attemptId: "attempt-1" }));
-    const error = await settleBehaviorBudget({ reservation }).catch((caught) => caught);
+    const error = await settleBehaviorBudget({ reservationId: reservation.reservationId }).catch((caught) => caught);
     expectBudgetError(error, "behavior_budget_usage_unknown");
-    // tokens 如实结算；费用按预留上界保守入账，不按零放行。
     expect(db.row.settled_input_tokens).toBe(100);
     expect(db.row.settled_output_tokens).toBe(50);
     expect(fromMicros(db.row.settled_cost_micros)).toBeCloseTo(0.5, 6);
@@ -416,24 +542,67 @@ describe("settleBehaviorBudget", () => {
 
   it("settles unknown usage conservatively without throwing when no hard cap is configured", async () => {
     const db = budgetDb(budgetRow(), [
-      receipt({ attempt_id: "attempt-1", usage_status: "unknown", input_tokens: null, output_tokens: null, llm_cost_amount: null, pricing_status: "unpriced" }),
+      receipt({
+        attempt_id: "attempt-1",
+        usage_status: "unknown",
+        input_tokens: null,
+        output_tokens: null,
+        llm_cost_amount: null,
+        pricing_status: "unpriced",
+      }),
     ]);
     stubDb(db);
     const reservation = await reserveBehaviorBudget(reservationInput({ attemptId: "attempt-1" }));
-    await expect(settleBehaviorBudget({ reservation })).resolves.toBeUndefined();
+    await expect(settleBehaviorBudget({ reservationId: reservation.reservationId })).resolves.toBeUndefined();
     expect(db.row.settled_input_tokens).toBe(400);
     expect(db.row.settled_output_tokens).toBe(200);
     expect(fromMicros(db.row.settled_cost_micros)).toBeCloseTo(0.5, 6);
   });
 
-  it("rejects a repeated settlement of the same reservation", async () => {
-    const db = budgetDb(budgetRow({ max_llm_calls: 3 }), [receipt({ attempt_id: "attempt-1" })]);
+  it("treats a crash-retry duplicate settle as a true no-op that never drains a newer reservation (C1)", async () => {
+    const db = budgetDb(budgetRow({ max_llm_calls: 5 }), [
+      receipt({ attempt_id: "attempt-1" }),
+      receipt({ attempt_id: "attempt-2", input_tokens: 300, output_tokens: 90, llm_cost_amount: "0.030000" }),
+    ]);
+    stubDb(db);
+    const first = await reserveBehaviorBudget(reservationInput({ attemptId: "attempt-1" }));
+    await settleBehaviorBudget({ reservationId: first.reservationId });
+    expect(db.row.settled_llm_calls).toBe(1);
+    // crash：调用方未记录结算完成；期间第二个任务取得新预留。
+    const second = await reserveBehaviorBudget(reservationInput({ attemptId: "attempt-2" }));
+    expect(db.row.reserved_llm_calls).toBe(2);
+    // retry：R1 已 settled → 真 no-op，不得二次入账、不得动 R2 的预留。
+    await expect(settleBehaviorBudget({ reservationId: first.reservationId })).resolves.toBeUndefined();
+    expect(db.row.settled_llm_calls).toBe(1);
+    expect(db.row.reserved_llm_calls).toBe(2);
+    expect(db.reservations().find((reservation) => reservation.reservation_uuid === second.reservationId)?.status).toBe(
+      "reserved",
+    );
+    // R2 仍可正常结算。
+    await settleBehaviorBudget({ reservationId: second.reservationId });
+    expect(db.row.settled_llm_calls).toBe(2);
+    expect(db.row.settled_input_tokens).toBe(400);
+    expect(db.row.reserved_llm_calls).toBe(0);
+  });
+
+  it("re-throws behavior_budget_usage_unknown on a retried settle of an unknown-usage settlement", async () => {
+    const db = budgetDb(budgetRow({ max_total_tokens: "10000" }));
     stubDb(db);
     const reservation = await reserveBehaviorBudget(reservationInput({ attemptId: "attempt-1" }));
-    await settleBehaviorBudget({ reservation });
-    const error = await settleBehaviorBudget({ reservation }).catch((caught) => caught);
+    const first = await settleBehaviorBudget({ reservationId: reservation.reservationId }).catch((caught) => caught);
+    expectBudgetError(first, "behavior_budget_usage_unknown");
+    const retry = await settleBehaviorBudget({ reservationId: reservation.reservationId }).catch((caught) => caught);
+    expectBudgetError(retry, "behavior_budget_usage_unknown");
+    expect(db.row.settled_llm_calls).toBe(2);
+  });
+
+  it("rejects settlement of an unknown reservation id", async () => {
+    const db = budgetDb(budgetRow());
+    stubDb(db);
+    const error = await settleBehaviorBudget({ reservationId: "00000000-0000-0000-0000-000000000000" }).catch(
+      (caught) => caught,
+    );
     expectBudgetError(error, "behavior_budget_exceeded");
-    expect(db.row.settled_llm_calls).toBe(1);
   });
 });
 
@@ -449,9 +618,8 @@ describe("mixed priced/unpriced receipts (Task 6 review follow-up)", () => {
     expect(usage.pricingStatus).toBe("unpriced");
     expect(usage.costAmount).toBeNull();
     expect(usage.inputTokens).toBe(200);
-    // 结算同样不得把混合成本当部分成本：费用按未知处理（预留上界保守入账）。
     const reservation = await reserveBehaviorBudget(reservationInput({ attemptId: "attempt-mix" }));
-    await settleBehaviorBudget({ reservation });
+    await settleBehaviorBudget({ reservationId: reservation.reservationId });
     expect(fromMicros(db.row.settled_cost_micros)).toBeCloseTo(0.5, 6);
   });
 });
@@ -466,24 +634,34 @@ describe("releaseUnusedBehaviorBudget", () => {
     expect(db.row.reserved_llm_calls).toBe(0);
     expect(db.row.reserved_input_tokens).toBe(0);
     expect(fromMicros(db.row.reserved_cost_micros)).toBeCloseTo(0, 6);
+    expect(db.reservations()[0].status).toBe("released");
     const next = await reserveBehaviorBudget(reservationInput({ attemptId: "attempt-2" }));
     expect(next.reservedLlmCalls).toBe(2);
   });
 
-  it("is a no-op when the same release is issued twice", async () => {
-    const db = budgetDb(budgetRow({ max_llm_calls: 2 }));
+  it("keeps a newer attempt's reservation intact when a duplicate release arrives late (C1)", async () => {
+    const db = budgetDb(budgetRow({ max_llm_calls: 4 }));
     stubDb(db);
-    const reservation = await reserveBehaviorBudget(reservationInput({ attemptId: "attempt-1" }));
-    await releaseUnusedBehaviorBudget(reservation.reservationId);
-    await expect(releaseUnusedBehaviorBudget(reservation.reservationId)).resolves.toBeUndefined();
+    const first = await reserveBehaviorBudget(reservationInput({ attemptId: "attempt-1" }));
+    await releaseUnusedBehaviorBudget(first.reservationId);
     expect(db.row.reserved_llm_calls).toBe(0);
+    // crash：调用方未记录释放完成；期间新 attempt 取得新预留。
+    const second = await reserveBehaviorBudget(reservationInput({ attemptId: "attempt-2" }));
+    expect(db.row.reserved_llm_calls).toBe(2);
+    // retry：重复释放是真 no-op，不得释放 R2 的预留（否则 maxLlmCalls 可被超发）。
+    await expect(releaseUnusedBehaviorBudget(first.reservationId)).resolves.toBeUndefined();
+    expect(db.row.reserved_llm_calls).toBe(2);
+    expect(db.reservations().find((reservation) => reservation.reservation_uuid === second.reservationId)?.status).toBe(
+      "reserved",
+    );
   });
 
-  it("rejects malformed reservation ids without touching the ledger", async () => {
+  it("rejects release of an unknown reservation id", async () => {
     const db = budgetDb(budgetRow());
     stubDb(db);
-    await expect(releaseUnusedBehaviorBudget("not-a-reservation")).rejects.toThrow(/reservation/);
-    expect(db.statements()).toHaveLength(0);
+    const error = await releaseUnusedBehaviorBudget("00000000-0000-0000-0000-000000000000").catch((caught) => caught);
+    expectBudgetError(error, "behavior_budget_exceeded");
+    expect(db.statements().filter((statement) => statement.startsWith("UPDATE analysis_run_budgets"))).toHaveLength(0);
   });
 });
 
@@ -498,16 +676,16 @@ describe("reserveProductSummaryBudget", () => {
     expect(summary.reservedOutputTokens).toBe(PRODUCT_SUMMARY_RESERVED_OUTPUT_TOKENS);
     expect(summary.reservedCostAmount).toBe(PRODUCT_SUMMARY_RESERVED_COST_AMOUNT);
     expect(db.row.summary_reserved).toBe(1);
-    // 剩余 3 次归单元：单元要 4 次被拒，要 3 次可预留——摘要份额不被抢占。
+    expect(db.reservations()[0]).toMatchObject({ kind: "product_summary", attempt_id: PRODUCT_SUMMARY_ATTEMPT_ID });
     const tooMuch = await reserveBehaviorBudget(reservationInput({ attemptId: "attempt-1", maxLlmCalls: 4 })).catch(
       (caught) => caught,
     );
     expectBudgetError(tooMuch, "behavior_budget_exceeded");
-    const fits = await reserveBehaviorBudget(reservationInput({ attemptId: "attempt-1", maxLlmCalls: 3 }));
-    expect(fits.reservedLlmCalls).toBe(3);
+    const fitsReservation = await reserveBehaviorBudget(reservationInput({ attemptId: "attempt-1", maxLlmCalls: 3 }));
+    expect(fitsReservation.reservedLlmCalls).toBe(3);
   });
 
-  it("is idempotent per run: a repeated summary reservation does not double-reserve", async () => {
+  it("is idempotent per run: a repeated summary reservation returns the same reservation without double-reserving", async () => {
     const db = budgetDb(budgetRow({ max_llm_calls: 4 }));
     stubDb(db);
     const first = await reserveProductSummaryBudget(42);
@@ -515,6 +693,7 @@ describe("reserveProductSummaryBudget", () => {
     expect(second.reservationId).toBe(first.reservationId);
     expect(db.row.reserved_llm_calls).toBe(PRODUCT_SUMMARY_RESERVED_LLM_CALLS);
     expect(db.row.version).toBe(1);
+    expect(db.reservations()).toHaveLength(1);
   });
 
   it("fails with behavior_budget_exceeded when the budget cannot cover the summary share", async () => {
@@ -523,6 +702,7 @@ describe("reserveProductSummaryBudget", () => {
     const error = await reserveProductSummaryBudget(42).catch((caught) => caught);
     expectBudgetError(error, "behavior_budget_exceeded");
     expect(db.row.summary_reserved).toBe(0);
+    expect(db.reservations()).toHaveLength(0);
   });
 
   it("settles the summary reservation through the same receipt-based path", async () => {
@@ -531,10 +711,23 @@ describe("reserveProductSummaryBudget", () => {
     ]);
     stubDb(db);
     const summary = await reserveProductSummaryBudget(42);
-    await settleBehaviorBudget({ reservation: summary });
+    await settleBehaviorBudget({ reservationId: summary.reservationId });
     expect(db.row.reserved_llm_calls).toBe(0);
     expect(db.row.settled_llm_calls).toBe(1);
     expect(db.row.settled_input_tokens).toBe(5000);
     expect(fromMicros(db.row.settled_cost_micros)).toBeCloseTo(0.2, 6);
+  });
+});
+
+describe("migration 080 budget reservation state", () => {
+  const sql = readFileSync(path.join(__dirname, "..", "migrations", "080_behavior_inventory.sql"), "utf8");
+
+  it("declares the per-attempt reservation state table with an opaque unique reservation id", () => {
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS analysis_behavior_budget_reservations");
+    expect(sql).toMatch(/reservation_uuid CHAR\(36\) NOT NULL/);
+    expect(sql).toMatch(/UNIQUE KEY analysis_behavior_budget_reservations_uuid_unique \(reservation_uuid\)/);
+    expect(sql).toMatch(/attempt_id VARCHAR\(64\) NOT NULL/);
+    expect(sql).toMatch(/kind VARCHAR\(24\) NOT NULL/);
+    expect(sql).toMatch(/status VARCHAR\(24\) NOT NULL DEFAULT 'reserved'/);
   });
 });

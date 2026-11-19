@@ -103,6 +103,31 @@ CREATE TABLE IF NOT EXISTS analysis_run_budgets (
   CONSTRAINT analysis_run_budgets_run_fk FOREIGN KEY (run_id) REFERENCES analysis_runs(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+-- 逐尝试预算预留状态（Task 7 fix round 1 / C1）：聚合账本无身份，崩溃重试下仅靠余额谓词
+-- 无法区分重复 settle/release 与新预留。本行是预留身份与金额的唯一权威——settle/release
+-- 在短事务内验证并转移该预留自身状态（reserved → settled/settled_unknown/released），
+-- 重复转移为真 no-op；聚合账本变更必须与状态转移同事务提交。
+CREATE TABLE IF NOT EXISTS analysis_behavior_budget_reservations (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  reservation_uuid CHAR(36) NOT NULL,
+  run_id BIGINT UNSIGNED NOT NULL,
+  attempt_id VARCHAR(64) NOT NULL,
+  kind VARCHAR(24) NOT NULL,
+  reserved_llm_calls INT NOT NULL,
+  reserved_input_tokens BIGINT UNSIGNED NOT NULL,
+  reserved_output_tokens BIGINT UNSIGNED NOT NULL,
+  reserved_cost_amount DECIMAL(12,6) NOT NULL,
+  status VARCHAR(24) NOT NULL DEFAULT 'reserved',
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  settled_at DATETIME(3) NULL,
+  released_at DATETIME(3) NULL,
+  UNIQUE KEY analysis_behavior_budget_reservations_uuid_unique (reservation_uuid),
+  KEY analysis_behavior_budget_reservations_run_idx (run_id),
+  KEY analysis_behavior_budget_reservations_run_attempt_idx (run_id, attempt_id),
+  CONSTRAINT analysis_behavior_budget_reservations_run_fk FOREIGN KEY (run_id) REFERENCES analysis_runs(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 -- 单元级 LLM 回执元数据（Task 6 写入）：旧调用与历史行保持 NULL；重复执行不得删除回执。
 -- (run_id, attempt_id) 复合索引服务 Task 6 loadAttemptLlmUsage 的尝试级用量聚合（Task 7 结算）。
 ALTER TABLE llm_call_receipts
