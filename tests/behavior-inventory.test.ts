@@ -2,8 +2,10 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   buildBehaviorInventory,
+  buildBehaviorInventoryWithRegistry,
   DETECTOR_REGISTRY_VERSION,
   INVENTORY_SCHEMA_VERSION,
+  type BehaviorDetector,
   type BehaviorInventoryResult,
   type InventorySource,
 } from "../lib/behavior-inventory";
@@ -267,6 +269,43 @@ describe("generic detector", () => {
     expect(result.diagnostics.fallbackInventorySuccess).toBe(true);
   });
 
+  it("records dynamicRegistrationFallback when a named handler cannot be resolved", () => {
+    const importedHandlerSource = source(
+      "scripts/imported-handler.ts",
+      [
+        "import { eventBus } from \"./bus\";",
+        "import { importedHandler } from \"./handlers\";",
+        "",
+        "eventBus.on(\"order.created\", importedHandler);",
+        "",
+      ].join("\n"),
+    );
+    const result = buildBehaviorInventory({ afterSha: "sha-imported", sources: [importedHandlerSource] });
+    expect(result.units.filter((unit) => unit.kind === "event")).toHaveLength(0);
+    expect(result.diagnostics.dynamicRegistrationFallback).toContain("scripts/imported-handler.ts");
+    expect(result.units.find((unit) => unit.primaryPath === "scripts/imported-handler.ts")).toBeDefined();
+    expect(result.diagnostics.fallbackInventorySuccess).toBe(true);
+  });
+
+  it("records dynamicRegistrationFallback for bare-parameter arrow handlers", () => {
+    const arrowSource = source(
+      "scripts/arrow.ts",
+      [
+        "import { eventBus } from \"./bus\";",
+        "",
+        "eventBus.on(\"x\", ev => {",
+        "  eventBus.emit(ev);",
+        "});",
+        "",
+      ].join("\n"),
+    );
+    const result = buildBehaviorInventory({ afterSha: "sha-arrow", sources: [arrowSource] });
+    expect(result.units.filter((unit) => unit.kind === "event")).toHaveLength(0);
+    expect(result.diagnostics.dynamicRegistrationFallback).toContain("scripts/arrow.ts");
+    expect(result.units.find((unit) => unit.primaryPath === "scripts/arrow.ts")).toBeDefined();
+    expect(result.diagnostics.fallbackInventorySuccess).toBe(true);
+  });
+
   it("normalizes empty-string locator components to null at the detector boundary", () => {
     const emptyIdSource = source(
       "scripts/empty.ts",
@@ -388,5 +427,44 @@ describe("buildBehaviorInventory invariants", () => {
       sources: [...allSources, source("lib/extra.ts", "export function extra(): number {\n  return 1;\n}\n")],
     });
     expect(expanded.scopeFingerprint).not.toBe(baseline.scopeFingerprint);
+  });
+});
+
+describe("per-file finalize atomicity", () => {
+  it("discards all drafts of a file when one of them fails finalization", () => {
+    const brokenSource = source("src/broken.ts", ["one", "two", "three", "four", ""].join("\n"));
+    const fragileDetector: BehaviorDetector = {
+      id: "fragile",
+      version: "1",
+      detect: () => [
+        {
+          locator: { kind: "public_api", exportPath: "src/broken.ts", symbol: "good", signature: null },
+          primaryPath: "src/broken.ts",
+          primaryRanges: [{ startLine: 1, endLine: 2 }],
+          anchors: [
+            { role: "behavior", symbol: "good", ranges: [{ startLine: 1, endLine: 2 }], coarse: false },
+          ],
+        },
+        {
+          locator: { kind: "public_api", exportPath: "src/broken.ts", symbol: "bad", signature: null },
+          primaryPath: "src/broken.ts",
+          primaryRanges: [{ startLine: 3, endLine: 3 }],
+          anchors: [
+            { role: "implicit_review", ranges: [{ startLine: 3, endLine: 4 }], coarse: true },
+          ],
+        },
+      ],
+    };
+    const result = buildBehaviorInventoryWithRegistry(
+      { afterSha: "sha-atomic", sources: [brokenSource] },
+      [{ detector: fragileDetector, matches: (path) => path === "src/broken.ts" }],
+    );
+    expect(result.diagnostics.detectorParseFailure).toContain("src/broken.ts");
+    expect(result.units.filter((unit) => unit.detector === "fragile")).toHaveLength(0);
+    const residual = result.units.filter((unit) => unit.primaryPath === "src/broken.ts");
+    expect(residual).toHaveLength(1);
+    expect(residual[0].kind).toBe("file");
+    expect(residual[0].detector).toBe("residual");
+    expect(result.diagnostics.fallbackInventorySuccess).toBe(true);
   });
 });

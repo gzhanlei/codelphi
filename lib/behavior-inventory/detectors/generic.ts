@@ -47,7 +47,7 @@ export function findDynamicRegistrationLines(source: InventorySource): number[] 
       lines.add(positionAt(starts, match.index).line);
     }
   }
-  const { dynamicLines } = scanRegistrations(source);
+  const { dynamicLines } = analyzeRegistrations(source);
   for (const line of dynamicLines) lines.add(line);
   return [...lines].sort((a, b) => a - b);
 }
@@ -63,6 +63,7 @@ interface ScannedRegistrations {
     kind: "cli" | "job" | "event";
     registrationId: string;
     handler: CallArgument;
+    line: number;
   }>;
   dynamicLines: number[];
 }
@@ -107,7 +108,7 @@ function scanRegistrations(source: InventorySource): ScannedRegistrations {
       dynamicLines.push(match.line);
       continue;
     }
-    registrations.push({ kind: match.kind, registrationId, handler });
+    registrations.push({ kind: match.kind, registrationId, handler, line: match.line });
   }
   return { registrations, dynamicLines };
 }
@@ -194,15 +195,28 @@ function publicExportDrafts(source: InventorySource, starts: readonly number[]):
   return drafts;
 }
 
+interface RegistrationAnalysis {
+  drafts: BehaviorUnitDraft[];
+  dynamicLines: number[];
+}
+
+/** handler 不可解析（未定义标识符、无法识别的匿名形态）时同样记动态兜底，不允许静默丢单元。 */
+function analyzeRegistrations(source: InventorySource): RegistrationAnalysis {
+  const starts = lineStarts(source.content);
+  const { registrations, dynamicLines } = scanRegistrations(source);
+  const drafts: BehaviorUnitDraft[] = [];
+  for (const registration of registrations) {
+    const draft = registrationDraft(source, starts, registration);
+    if (draft == null) dynamicLines.push(registration.line);
+    else drafts.push(draft);
+  }
+  return { drafts, dynamicLines };
+}
+
 export function detectGeneric(source: InventorySource): BehaviorUnitDraft[] {
   const starts = lineStarts(source.content);
   const drafts = publicExportDrafts(source, starts);
-  const { registrations } = scanRegistrations(source);
-  for (const registration of registrations) {
-    const draft = registrationDraft(source, starts, registration);
-    if (draft != null) drafts.push(draft);
-  }
-  return drafts;
+  return [...drafts, ...analyzeRegistrations(source).drafts];
 }
 
 export const genericDetector: BehaviorDetector = {

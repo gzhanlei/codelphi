@@ -20,17 +20,26 @@ export const INVENTORY_SCHEMA_VERSION = "1";
 
 const RESIDUAL_DETECTOR: Pick<BehaviorDetector, "id" | "version"> = { id: "residual", version: "1" };
 
-const DETECTOR_REGISTRY: Array<{ detector: BehaviorDetector; matches: (path: string) => boolean }> = [
+export interface BehaviorDetectorRegistryEntry {
+  detector: BehaviorDetector;
+  matches: (path: string) => boolean;
+}
+
+const DETECTOR_REGISTRY: BehaviorDetectorRegistryEntry[] = [
   { detector: nextDetector, matches: matchesNextPath },
   { detector: genericDetector, matches: matchesGenericPath },
 ];
 
-export const DETECTOR_REGISTRY_VERSION = [
-  ...DETECTOR_REGISTRY.map(({ detector }) => `${detector.id}@${detector.version}`),
-  `${RESIDUAL_DETECTOR.id}@${RESIDUAL_DETECTOR.version}`,
-]
-  .sort(compareCodePoints)
-  .join("+");
+function registryVersionOf(registry: readonly BehaviorDetectorRegistryEntry[]): string {
+  return [
+    ...registry.map(({ detector }) => `${detector.id}@${detector.version}`),
+    `${RESIDUAL_DETECTOR.id}@${RESIDUAL_DETECTOR.version}`,
+  ]
+    .sort(compareCodePoints)
+    .join("+");
+}
+
+export const DETECTOR_REGISTRY_VERSION = registryVersionOf(DETECTOR_REGISTRY);
 
 export interface BuildInventoryInput {
   afterSha: string;
@@ -277,6 +286,14 @@ function buildResidualUnits(
 }
 
 export function buildBehaviorInventory(input: BuildInventoryInput): BehaviorInventoryResult {
+  return buildBehaviorInventoryWithRegistry(input, DETECTOR_REGISTRY);
+}
+
+/** registry 注入入口：默认走 DETECTOR_REGISTRY，测试可注入检测器以构造确定性失败。 */
+export function buildBehaviorInventoryWithRegistry(
+  input: BuildInventoryInput,
+  registry: readonly BehaviorDetectorRegistryEntry[],
+): BehaviorInventoryResult {
   const eligible: InventorySource[] = [];
   const excludedNonImplementation: string[] = [];
   for (const source of input.sources) {
@@ -291,21 +308,21 @@ export function buildBehaviorInventory(input: BuildInventoryInput): BehaviorInve
 
   for (const source of eligible) {
     if (findDynamicRegistrationLines(source).length > 0) dynamicRegistrationFallback.add(source.path);
-    const entry = DETECTOR_REGISTRY.find(({ matches }) => matches(source.path));
+    const entry = registry.find(({ matches }) => matches(source.path));
     if (entry == null) {
       if (!dynamicRegistrationFallback.has(source.path)) detectorUnsupported.add(source.path);
       continue;
     }
     try {
-      for (const draft of entry.detector.detect(source)) {
-        semanticUnits.push(finalizeUnit(draft, entry.detector));
-      }
+      // 每个文件原子提交：任一草稿 finalize 失败时整文件不保留语义单元，统一交剩余清单。
+      const buffered = entry.detector.detect(source).map((draft) => finalizeUnit(draft, entry.detector));
+      semanticUnits.push(...buffered);
     } catch {
       detectorParseFailure.add(source.path);
     }
   }
 
-  // detect 要么整体返回要么抛错，解析失败的文件不会留下半成品单元，整文件交给剩余清单。
+  // detect/finalize 要么整文件成功要么抛错，解析失败的文件不会留下半成品单元，整文件交给剩余清单。
   const finalized = [
     ...semanticUnits,
     ...buildResidualUnits(eligible, semanticUnits.map(({ unit }) => unit)),
@@ -349,7 +366,7 @@ export function buildBehaviorInventory(input: BuildInventoryInput): BehaviorInve
 
   return {
     inventorySchemaVersion: INVENTORY_SCHEMA_VERSION,
-    detectorRegistryVersion: DETECTOR_REGISTRY_VERSION,
+    detectorRegistryVersion: registryVersionOf(registry),
     afterSha: input.afterSha,
     scopeFingerprint,
     units,
