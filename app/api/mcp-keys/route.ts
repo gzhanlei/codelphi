@@ -32,12 +32,13 @@ export async function POST(request: NextRequest) {
   } catch {
     return NextResponse.json(FORBIDDEN, { status: 403 });
   }
-  const body = (await request.json().catch(() => ({}))) as { name?: string };
+  const body = (await request.json().catch(() => ({}))) as { name?: string; scope?: string };
   const name = String(body.name ?? "").trim().slice(0, 191);
   if (!name) return NextResponse.json({ error: "请填写 key 名称" }, { status: 400 });
-  const created = await createApiKey(getDb(), { organizationId: organization.id, name, createdBy: user.sub });
+  const scope = body.scope === "snapshot_write" ? "snapshot_write" : "mcp_read";
+  const created = await createApiKey(getDb(), { organizationId: organization.id, name, createdBy: user.sub, scope });
   return NextResponse.json({
-    key: { id: created.id, name },
+    key: { id: created.id, name, scope },
     // 明文仅此一次（§4.1：库中只存哈希），前端必须提示立即保存
     plaintext: created.plaintext,
   });

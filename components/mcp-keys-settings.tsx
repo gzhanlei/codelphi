@@ -12,6 +12,7 @@ interface McpKeyView {
   id: number;
   name: string;
   keyHint: string;
+  scope?: "mcp_read" | "snapshot_write";
   createdBy: string;
   createdAt: string | Date | null;
   revokedAt: string | Date | null;
@@ -24,6 +25,7 @@ export function McpKeysSettings({ initialKeys, canManage, locale = "zh-CN" }: { 
   const formatDate = (value: string | Date | null) => formatDateTimeIn(locale, value);
   const [keys, setKeys] = useState(initialKeys);
   const [name, setName] = useState("");
+  const [scope, setScope] = useState<"mcp_read" | "snapshot_write">("mcp_read");
   const [plaintext, setPlaintext] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [copiedConfig, setCopiedConfig] = useState(false);
@@ -49,7 +51,7 @@ export function McpKeysSettings({ initialKeys, canManage, locale = "zh-CN" }: { 
       const response = await fetch("/api/mcp-keys", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ name, scope }),
       });
       const data = await response.json() as { plaintext?: string; error?: string };
       if (!response.ok) throw new Error(data.error ?? "签发失败");
@@ -124,6 +126,10 @@ export function McpKeysSettings({ initialKeys, canManage, locale = "zh-CN" }: { 
             aria-label={pick(locale, L.nameAria)}
             onChange={(event) => setName(event.target.value)}
           />
+          <select aria-label="scope" value={scope} onChange={(event) => setScope(event.target.value as "mcp_read" | "snapshot_write")}>
+            <option value="mcp_read">MCP 只读查询</option>
+            <option value="snapshot_write">本地快照导入（BYO）</option>
+          </select>
           <button className="secondary-button" type="button" disabled={pending || !name.trim()} onClick={create}>{pick(locale, L.issueButton)}</button>
         </div>
       ) : null}
@@ -139,6 +145,7 @@ export function McpKeysSettings({ initialKeys, canManage, locale = "zh-CN" }: { 
             <div>
               <strong>{key.name}</strong>
               <code className="mcp-key-hint">sk_cd_…{key.keyHint}</code>
+              {key.scope === "snapshot_write" ? <span className="mcp-key-meta">本地快照导入</span> : null}
               <span className="mcp-key-meta">{pick(locale, L.createdByPrefix)}{key.createdBy}{pick(locale, L.createdByMiddle)}{formatDate(key.createdAt)}</span>
             </div>
             {key.revokedAt ? (

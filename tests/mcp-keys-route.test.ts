@@ -41,7 +41,14 @@ describe("mcp keys management routes", () => {
     const response = await POST(new NextRequest("https://codelphi.example/api/mcp-keys", { method: "POST", body: JSON.stringify({ name: "ChatGPT" }), headers: { "Content-Type": "application/json" } }));
     const data = await response.json();
     expect(data.plaintext).toContain("sk_cd_");
-    expect(createApiKey).toHaveBeenCalledWith(expect.anything(), { organizationId: 7, name: "ChatGPT", createdBy: "user-1" });
+    expect(createApiKey).toHaveBeenCalledWith(expect.anything(), { organizationId: 7, name: "ChatGPT", createdBy: "user-1", scope: "mcp_read" });
+  });
+
+  it("POST passes an explicit snapshot_write scope through to createApiKey", async () => {
+    createApiKey.mockResolvedValue({ id: 6, plaintext: "sk_cd_ffffffffffffffffffffffffffffffff" });
+    const response = await POST(new NextRequest("https://codelphi.example/api/mcp-keys", { method: "POST", body: JSON.stringify({ name: "BYO", scope: "snapshot_write" }), headers: { "Content-Type": "application/json" } }));
+    expect(response.status).toBe(200);
+    expect(createApiKey).toHaveBeenCalledWith(expect.anything(), { organizationId: 7, name: "BYO", createdBy: "user-1", scope: "snapshot_write" });
   });
 
   it("POST rejects a blank name", async () => {

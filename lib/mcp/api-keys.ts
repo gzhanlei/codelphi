@@ -53,6 +53,7 @@ export interface McpApiKeyView {
   id: number;
   name: string;
   keyHint: string;
+  scope: ApiKeyScope;
   createdBy: string;
   createdAt: Date | null;
   revokedAt: Date | null;
@@ -61,15 +62,16 @@ export interface McpApiKeyView {
 /** 列表不含明文（库中只有哈希）；撤销行保留供审计。 */
 export async function listApiKeys(connection: { execute: Execute }, organizationId: number): Promise<McpApiKeyView[]> {
   const [rows] = (await connection.execute(
-    `SELECT id, name, key_hint AS keyHint, created_by AS createdBy,
+    `SELECT id, name, key_hint AS keyHint, scope, created_by AS createdBy,
             created_at AS createdAt, revoked_at AS revokedAt
      FROM mcp_api_keys WHERE organization_id = ? ORDER BY id DESC`,
     [organizationId],
-  )) as [Array<{ id: number; name: string; keyHint: string; createdBy: string; createdAt: Date | null; revokedAt: Date | null }>, unknown];
+  )) as [Array<{ id: number; name: string; keyHint: string; scope: ApiKeyScope; createdBy: string; createdAt: Date | null; revokedAt: Date | null }>, unknown];
   return rows.map((row) => ({
     id: Number(row.id),
     name: row.name,
     keyHint: row.keyHint,
+    scope: row.scope,
     createdBy: row.createdBy,
     createdAt: row.createdAt,
     revokedAt: row.revokedAt,
