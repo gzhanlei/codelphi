@@ -222,7 +222,7 @@ export async function importSnapshotArtifact(deps: ImportDeps, raw: unknown, ide
       [slug, identity.name.slice(0, 191), deps.organizationId, artifact.language === "en" ? "en" : "zh-CN"],
     );
     const insert = (Array.isArray(insertResult) ? insertResult[0] : insertResult) as { insertId: number };
-    const productId = Number(insert.insertId);
+    productId = Number(insert.insertId);
     binding = origin ? "created" : "unbound";
   }
 

@@ -81,3 +81,25 @@ describe("slugifyRepoName / parseGithubOrigin", () => {
     expect(parseGithubOrigin(null)).toBeNull();
   });
 });
+
+describe("importSnapshotArtifact 编排（遮蔽 bug 回归：features 必须落在 products 真实 insertId 上）", () => {
+  it("inserts scenarios against the created product's real id, not a shadowed zero", async () => {
+    const { importSnapshotArtifact } = await import("../lib/snapshot-import");
+    const calls: Array<{ sql: string; params: unknown[] }> = [];
+    const execute = (async (sql: string, params: unknown[] = []) => {
+      calls.push({ sql, params });
+      if (sql.startsWith("INSERT INTO products")) return [{ insertId: 77 }];
+      if (sql.startsWith("INSERT INTO features")) return [{ insertId: 501 }];
+      return [[]]; // 所有 SELECT：无幂等命中、无既有仓库、slug 可用
+    }) as unknown as (sql: string, params?: unknown[]) => Promise<unknown>;
+    const artifact = JSON.parse(JSON.stringify(validArtifact));
+    const receipt = await importSnapshotArtifact(
+      { execute, currentContractVersion: "1.0.0", organizationId: 2 },
+      artifact,
+    );
+    expect(receipt.productId).toBe(77);
+    const scenarioCall = calls.find((call) => call.sql.startsWith("INSERT INTO scenarios"))!;
+    expect(scenarioCall.params[0]).toBe(501); // 不是 0 / NaN（variable shadowing 回归）
+    expect(receipt.scenariosImported).toBe(1);
+  });
+});
