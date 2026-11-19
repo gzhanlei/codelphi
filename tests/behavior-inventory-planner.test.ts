@@ -144,6 +144,56 @@ describe("behavior execution task planning", () => {
     }
   });
 
+  it("never lets a split fragment cross the gap between disjoint anchor ranges", () => {
+    // 声明区间 [1,5] 与 [10,15] 不相交；间隙行 6-9 不属于锚点，其中第 7 行是超长行。
+    // 若拆分跨间隙合并出 [1,15]，既吞入间隙行虚增预算，也会让第 7 行误判为无法安全拆分。
+    const lines = paddedLines(15);
+    lines[6] = "y".repeat(500);
+    const content = contentOf(lines);
+    const path = "src/disjoint.ts";
+    const review = anchor(
+      path,
+      "implicit_review",
+      [
+        { startLine: 1, endLine: 5 },
+        { startLine: 10, endLine: 15 },
+      ],
+      true,
+    );
+    const disjoint = unit(path, [{ startLine: 1, endLine: 15 }], [review]);
+    const tasks = planBehaviorExecutionTasks({
+      units: [disjoint],
+      sources: [{ path, content }],
+      budgets: { primaryBytes: 45, contextBytes: 20, totalBytes: 80 },
+    });
+    // 间隙中的超长行不得触发「无法安全拆分」：单元照常排产
+    expect(tasks.length).toBeGreaterThanOrEqual(1);
+    const fragments = tasks.flatMap((task) => task.anchorFragments);
+    expect(fragments.length).toBeGreaterThanOrEqual(2);
+    // 全部 fragment 的并集恰好等于原锚点区间，既不是超集 [1,15] 也不丢行
+    const union = unionRanges(
+      fragments.flatMap((fragment) => fragment.ranges.map((range) => ({ path, ...range }))),
+    );
+    expect(union).toEqual([
+      { path, startLine: 1, endLine: 5 },
+      { path, startLine: 10, endLine: 15 },
+    ]);
+    // 任一 fragment 区间不得覆盖间隙行 6-9；字节只按实际锚点行计算且不超过预算
+    for (const fragment of fragments) {
+      for (const range of fragment.ranges) {
+        expect(range.endLine < 6 || range.startLine > 9).toBe(true);
+        expect(rangeBytes(content, range)).toBeLessThanOrEqual(45);
+      }
+    }
+    const coverage = evaluateInventoryCoverage({
+      eligibleRanges: [{ path, startLine: 1, endLine: 15 }],
+      units: [disjoint],
+      tasks,
+    });
+    expect(coverage.diagnostics.unresolvedUnits).toEqual([]);
+    expect(coverage.diagnostics.fragmentedAnchors).toEqual([review.anchorKey]);
+  });
+
   it("spreads fragments of a split anchor across tasks so no single task settles the whole anchor", () => {
     const content = contentOf(paddedLines(10));
     const path = "src/big.ts";

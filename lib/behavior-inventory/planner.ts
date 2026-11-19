@@ -79,6 +79,8 @@ interface SizedFragment {
 /**
  * 单个锚点超出分片上限时按稳定行区间拆分；单行超过上限即无法安全拆分（返回 null），
  * 调用方把整个单元留作 unresolved，绝不截断内容伪装成功。
+ * 拆分绝不跨声明区间边界：不相交区间之间的间隙行不属于锚点，
+ * 不得被合并进 fragment（否则 fragment 并集变成原锚点超集）。
  */
 function splitAnchorRanges(ranges: readonly LineRange[], index: LineByteIndex, cap: number): LineRange[][] | null {
   const fragments: LineRange[][] = [];
@@ -91,6 +93,7 @@ function splitAnchorRanges(ranges: readonly LineRange[], index: LineByteIndex, c
     currentBytes = 0;
   };
   for (const range of ranges) {
+    flush();
     for (let line = range.startLine; line <= range.endLine; line += 1) {
       const lineCost = index.lineBytes[line - 1];
       if (lineCost > cap) return null;
