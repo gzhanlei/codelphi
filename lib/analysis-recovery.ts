@@ -14,7 +14,18 @@ async function defaultGate(run: { id: number; triggerType: string; accountId: nu
 /**
  * 启动恢复：重启会杀掉 after() 里的在途分析，遗留的 running run（以及旧版本
  * 启动逻辑置为孤儿失败的 run）永远无人认领（loadRun 只认 queued/failed）。
- * saveResult 是原子事务——孤儿 run 必然没有落库，重新排队并派发是安全且幂等的：
+ * 重排队并重新派发对两种全量路径都安全，但安全依据不同（设计 D7）：
+ * - legacy（分区/收敛路径）：saveResult 是原子事务——孤儿 run 没有落库最终规格，
+ *   也没有可复用的中间产物，整 run 重跑即幂等。
+ * - inventory（行为清单编排，FULL_ANALYSIS_MODE=inventory/inventory_shadow）：
+ *   孤儿 run 可能已留下不可变 manifest、任务回执（成功终态的 result_json）、
+ *   共享预算行与未过期租约。重跑 runAnalysis 时由 runInventoryFullAnalysis
+ *   从校验过的 manifest 恢复：成功终态任务复用 result_json 不重复调用 LLM，
+ *   只领取 pending / 可重试 / 租约已过期的任务——绝不重新生成清单，也绝不清空
+ *   成功任务。manifest 被篡改或版本不一致的 run 以 inventory_manifest_tampered /
+ *   inventory_version_conflict 错误消息落库，与下方孤儿消息的等值谓词不匹配，
+ *   永远不会被本路径重排队——版本冲突必须在原 run 之外新建 run，不存在
+ *   「冲突 → 重跑 → 自动重建 manifest」的自愈循环。
  * 产品页显示「等待分析」直到补跑完成，用户不需要看到失败或手工处理。
  * 「queued 但 started_at 非空」= sweep 认领后、performAnalysis 置 running 前崩溃：
  * 两条恢复路径都按 started_at IS NULL 过滤会永久卡死它，启动时一并释放回可认领态。

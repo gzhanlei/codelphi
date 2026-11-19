@@ -22,6 +22,12 @@ export interface AnalysisCoverageReceipt {
   diffTotalPaths: number | null;
   diffSelectedPaths: number | null;
   diffOmittedPaths: number | null;
+  /**
+   * Task 14 · inventory 编排路径的主覆盖区间遗漏（唯一行数，evaluateInventoryCoverage
+   * 的 primaryCoverage 口径）。旧分区/继承回执为 null：sourceCoverage 完整性判定对
+   * 旧回执保持历史语义；新路径 complete 必须要求该值为零（设计 §6.3）。
+   */
+  primaryRangesOmitted?: number | null;
 }
 
 /** 与索引 assertAllowed("list") 同构的目录可见性：scope 内、scope 根祖先、或无 scope 配置。 */
@@ -119,6 +125,8 @@ export function computeCoverageReceipt(input: {
     diffTotalPaths: diffPaths.length > 0 ? diffTotal : null,
     diffSelectedPaths: diffPaths.length > 0 ? diffSelectedPaths.size : null,
     diffOmittedPaths: diffPaths.length > 0 ? diffTotal - diffSelectedPaths.size : null,
+    // Task 14：主覆盖区间遗漏是 inventory 编排的口径，旧分区回执恒为 null（历史语义不变）
+    primaryRangesOmitted: null,
   };
 }
 

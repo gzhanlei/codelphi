@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AnalysisCoverageReceipt } from "../lib/analysis-coverage";
-import type { BehavioralEnumerationMetrics } from "../lib/behavioral-enumeration";
+import type { BehavioralEnumerationMetrics, InventoryEnumerationSummary } from "../lib/behavioral-enumeration";
 import {
   deriveBehavioralEnumeration,
   deriveEvidenceIntegrity,
@@ -148,5 +148,84 @@ describe("deriveOverallState", () => {
     expect(deriveOverallState(["complete", "partial", "not_applicable"])).toBe("partial");
     expect(deriveOverallState(["partial", "failed", "complete"])).toBe("failed");
     expect(deriveOverallState(["complete", "complete"])).toBe("complete");
+  });
+});
+
+describe("deriveSourceCoverage with inventory primary-range accounting (Task 14)", () => {
+  it("new-path receipts require zero primary range omissions for complete", () => {
+    const dim = deriveSourceCoverage(receipt({ partitionsCapped: false, diffOmittedPaths: 0, primaryRangesOmitted: 0 }));
+    expect(dim.state).toBe("complete");
+    expect(dim.primaryRangesOmitted).toBe(0);
+  });
+
+  it("new-path receipts with primary range omissions are partial even when uncapped with full diff coverage", () => {
+    // 设计 §6.3：新路径不能仅凭「装配数大于零且未触分区帽」推导 complete——
+    // 主覆盖区间遗漏必须为零，文件数和字节数只作辅助诊断。
+    const dim = deriveSourceCoverage(receipt({ partitionsCapped: false, diffSelectedPaths: 131, diffOmittedPaths: 0, primaryRangesOmitted: 320 }));
+    expect(dim.state).toBe("partial");
+    expect(dim.primaryRangesOmitted).toBe(320);
+  });
+
+  it("legacy receipts without primary-range fields keep historical semantics", () => {
+    const legacy = receipt({ partitionsCapped: false, diffOmittedPaths: 0 });
+    const dim = deriveSourceCoverage(legacy);
+    expect(dim.state).toBe("complete");
+    expect(dim.primaryRangesOmitted).toBeNull();
+  });
+});
+
+describe("deriveBehavioralEnumeration with inventory details (Task 14)", () => {
+  const inventorySummary: InventoryEnumerationSummary = {
+    unitsTotal: 12,
+    unitsPending: 0,
+    unitsRunning: 1,
+    unitsExtracted: 9,
+    unitsNoBehavior: 2,
+    unitsUnresolved: 0,
+    unitsFailed: 0,
+    anchorsTotal: 20,
+    entryAnchors: 6,
+    behaviorAnchors: 8,
+    implicitReviewAnchors: 6,
+    coarseReviewAnchors: 4,
+    semanticUnits: 9,
+    residualUnits: 3,
+    unreadableUnits: 0,
+    primaryRangesCoveredLines: 4800,
+    primaryRangesOmittedLines: 0,
+    anchorRangesCoveredLines: 4800,
+    anchorRangesOmittedLines: 0,
+    tasksTotal: 15,
+    tasksReusedTerminal: 11,
+    tasksExecuted: 4,
+    tasksPending: 0,
+    leasesHeld: 1,
+    attemptsTotal: 17,
+    budgetBlocked: false,
+    productDescriptionStatus: "generated",
+  };
+
+  it("records running/coarse/implicit/fallback/lease/budget/summary metrics plus resumed-task accounting", () => {
+    const dim = deriveBehavioralEnumeration(enumMetrics({ status: "not_applicable", pathsTotal: 0, inventory: inventorySummary }));
+    expect(dim.state).toBe("not_applicable");
+    expect(dim.inventory).toEqual(inventorySummary);
+    // 关键披露面逐项钉死：running / coarse / implicit / fallback（residual）/ lease / budget / summary / 恢复会计
+    expect(dim.inventory?.unitsRunning).toBe(1);
+    expect(dim.inventory?.coarseReviewAnchors).toBe(4);
+    expect(dim.inventory?.implicitReviewAnchors).toBe(6);
+    expect(dim.inventory?.residualUnits).toBe(3);
+    expect(dim.inventory?.leasesHeld).toBe(1);
+    expect(dim.inventory?.attemptsTotal).toBe(17);
+    expect(dim.inventory?.budgetBlocked).toBe(false);
+    expect(dim.inventory?.productDescriptionStatus).toBe("generated");
+    expect(dim.inventory?.tasksReusedTerminal).toBe(11);
+    expect(dim.inventory?.tasksExecuted).toBe(4);
+  });
+
+  it("old diff-enumeration receipts without inventory details stay compatible", () => {
+    const dim = deriveBehavioralEnumeration(enumMetrics({ status: "partial", pathsOmitted: 3 }));
+    expect(dim.inventory).toBeUndefined();
+    expect(dim.state).toBe("partial");
+    expect(dim.pathsOmitted).toBe(3);
   });
 });

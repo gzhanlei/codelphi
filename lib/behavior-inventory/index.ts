@@ -20,6 +20,9 @@ export const INVENTORY_SCHEMA_VERSION = "1";
 
 const RESIDUAL_DETECTOR: Pick<BehaviorDetector, "id" | "version"> = { id: "residual", version: "1" };
 
+/** 剩余实现面兜底检测器 id（Task 14：编排层据此区分语义单元与兜底单元）。 */
+export const RESIDUAL_DETECTOR_ID = RESIDUAL_DETECTOR.id;
+
 export interface BehaviorDetectorRegistryEntry {
   detector: BehaviorDetector;
   matches: (path: string) => boolean;

@@ -1,9 +1,10 @@
-# CoDelphi 分析管线与提取策略（2026-11-10）
+# CoDelphi 分析管线与提取策略（2026-11-20）
 
 > 本文描述生产在跑的分析管线全貌与每一层的策略依据。能力状态以代码与基线文档对账为准（`specsight-gap-improvement-plan.md` 为改进工单簿）。superset 盲评四跑实测数据见 `pilot-blind-eval-superset-rerun-2026-11-10.md`（预标冻结件与判定口径见该报告 §1-§2）。
 >
 > 修订：2026-11-10 v2（外部评审采纳，含 P0 修正与可观测补齐）：「diff 必选」明确为**优先选择而非无条件全覆盖**，覆盖率回执新增 diff 面入选/遗漏计数（migration 058）；行为枚举容量上限与完整性状态显式披露；空结果三态区分（无变化/候选全被清洗/提取为空）；full 定义澄清；盲评结论加样本口径限定；行为等价去重规则成文；M9 一致率分母警示。
 > 修订：2026-11-17 v3：增量改为 diff 与受影响证据的定向装配；取消 run 级分区数量与总读取量止损线；覆盖回执按实际范围计算；用户视图移除内部装配指标。
+> 修订：2026-11-20 v4：全量分析三模式（`legacy` / `inventory_shadow` / `inventory`）与行为清单编排成文（§13）；不可变 manifest 恢复语义、双重覆盖门禁、at-least-once 执行、共享预算、摘要降级与激活门禁；完整性账本新增 inventory 枚举详情与新路径 sourceCoverage 口径（§9）。§0 概览修正「×6 分区」过时表述（v3 已取消分区数上限）。
 
 ## 0. 一页总览
 
@@ -12,8 +13,9 @@
   → 入队 + 额度预留（billing gate，拒绝留 queued 自动补区间）
   → 变更上下文（diff patch） + 上一版规格（措辞锚定 + 功能名清单）
   → 模式判定（增量 / RC2-carry / 全量，保守回退）
-  → 分区装配（diff 文件必选 + BFS 信号遍历 ×6 分区）        ← W0-7
-  → 逐趟提取（每趟允许集清洗 + 硬失败重试一次）
+  → 全量模式路由（FULL_ANALYSIS_MODE=legacy|inventory_shadow|inventory，默认 legacy，见 §13）
+  → 分区装配（diff 文件必选 + BFS 信号遍历，分区数不封顶）        ← W0-7（legacy 主路径）
+  → 逐趟提取（每趟允许集清洗 + 硬失败重试一次；全量另有收敛轮，边际新增 < ε 停止）
   → 行为面枚举（patch-scan 行为文件 → 分组 → 复述/判定两步提取）  ← W0-8/W0-9
   → 确定性合并（行为等价去重 + changes 截断 150 + 功能名排序）
   → 证据清洗（不可溯源声明剔除，warn 留痕）
@@ -137,9 +139,9 @@ run 级六维度完整性状态，落 `analysis_completeness_ledger`（run 唯�
 
 | 维度 | 状态来源 | 典型 partial 原因 |
 |---|---|---|
-| sourceCoverage | 覆盖率回执（impl 装配 + diff 入选/遗漏） | diff 路径遗漏或相关源码不可读 |
-| behavioralEnumeration | 枚举指标（paths_total/enumerated/omitted、groups 完成失败） | 组帽截断 / 组失败 |
-| extractionCompletion | 分区趟数 / 重试 / 空结果趟 | 重试发生 / 无行为变化趟 |
+| sourceCoverage | 覆盖率回执（impl 装配 + diff 入选/遗漏；inventory 编排回执另带主覆盖区间遗漏，complete 必须为零） | diff 路径遗漏或相关源码不可读 / 新路径主覆盖区间遗漏 |
+| behavioralEnumeration | 枚举指标（paths_total/enumerated/omitted、groups 完成失败；inventory 编排可挂可选详情：单元/锚点状态、coarse/implicit/fallback 计数、租约与预算、摘要状态、恢复任务会计） | 组帽截断 / 组失败 |
+| extractionCompletion | 分区趟数 / 重试 / 空结果趟（只计本 run 新执行的提取趟；inventory 恢复复用的成功任务计入 enumeration 详情的 tasksReusedTerminal，不计为趟数） | 重试发生 / 无行为变化趟 |
 | evidenceIntegrity | sanitize 剔除计数 + all_candidates_rejected | 有剔除 / 候选全被拒 |
 | mergeIntegrity | changes 截断 / 场景去重 / 一致性冲突 / 坍缩 | 截断 / 冲突 / 坍缩 |
 | verification | 一致性冲突 + M9 影子 | 冲突 / 影子不一致（人工核实在外部生命周期） |
@@ -156,11 +158,14 @@ superset 实测（run 63）：sourceCoverage partial（35/2149，diff 57/120 入
 | `BEHAVIORAL_ENUM_GROUP_SIZE` | 6 | 每组文件数 |
 | `BEHAVIORAL_ENUM_MAX_GROUPS` | 8 | 枚举组数帽 |
 | `INCREMENTAL_SHADOW` | false（生产已开启） | M9 影子对比（增量 run 落库后另跑一次单窗全量，只对比不落库） |
+| `FULL_ANALYSIS_MODE` | `legacy` | 全量分析三模式（§13）：`legacy`（分区/收敛，默认）/ `inventory_shadow`（旧路径唯一激活 + 新编排 best-effort 对照）/ `inventory`（新编排激活，Task 15 验收前不得启用）；垃圾值回退 legacy |
+| `ANALYSIS_BEHAVIOR_CONCURRENCY` | 4（clamp 1–16） | inventory 编排 worker 并发 |
+| `ANALYSIS_BEHAVIOR_MAX_LLM_CALLS` / `ANALYSIS_BEHAVIOR_MAX_TOTAL_TOKENS` / `ANALYSIS_BEHAVIOR_MAX_COST_AMOUNT` / `ANALYSIS_BEHAVIOR_COST_CURRENCY` | 缺省 = 无对应上限（绝不用 0 表示），currency 默认 CNY | inventory 编排共享预算三维度上限（原子预留 + 按回执结算；usage 未知即停止派发） |
 | `AI_TIMEOUT_MS` | 180000 | 单次网关超时 |
 | `PR_PREVIEW_ENABLED` | true | PR 预演 |
 | `LLM_PRICES` | 生产已配置（deepseek-flash 高峰/错峰两档，USD） | LLM 调用成本核算——缺失时回执成本 NULL（未定价 ≠ 零成本） |
 
-**成本特征**：一次 run 的 LLM 调用数 C = 分区趟数 P（≤6）+ 枚举组 G（≤8）×2（复述+判定）+ 影子 S（增量 1，生产已开）+ 重试 R——极端仓库满载 23 次基础调用。**1 SAU/run 是「按分析任务收费」的产品定价（用户购买的是一次分析任务）；计费稳定 ≠ 单位经济稳定**：不同仓库规模的单 run 成本差异不可控，成本观测已建立（R5，/admin/costs，21c16dd：每 run 总 token/实际成本、P50/P95/P99、影子与独立生成拆分、未定价披露；按仓库规模分位与单 SAU 毛利分布随数据积累复核）。影子分析应视为独立质量验证成本，具备采样率/规模门槛/退出条件。
+**成本特征**：一次 legacy run 的 LLM 调用数 C = 分区趟数 P（不封顶，随实现面规模增长）+ 收敛轮额外趟（全量模式 ANALYSIS_CONVERGENCE_ROUNDS>1 时每轮再扫一遍分区）+ 枚举组 G（≤8）×2（复述+判定）+ 影子 S（增量 1，生产已开）+ 重试 R；inventory 编排 run = 每执行任务复述+判定各 1 次（+允许的重试）+ 摘要 1 次，逐任务经共享预算预留并按 `llm_call_receipts` 结算。**1 SAU/run 是「按分析任务收费」的产品定价（用户购买的是一次分析任务）；计费稳定 ≠ 单位经济稳定**：不同仓库规模的单 run 成本差异不可控，成本观测已建立（R5，/admin/costs，21c16dd：每 run 总 token/实际成本、P50/P95/P99、影子与独立生成拆分、未定价披露；按仓库规模分位与单 SAU 毛利分布随数据积累复核）。影子分析应视为独立质量验证成本，具备采样率/规模门槛/退出条件。
 
 **计价口径（2026-11-10 配置）**：`LLM_PRICES` 按 deepseek-flash 官方两档配置（USD/百万 token）：高峰（UTC 周一至周五 01:00-04:00、06:00-10:00，即北京工作日 09:00-12:00、14:00-18:00）输入命中 $0.006 / 未命中 $0.30 / 输出 $1.20；错峰（其余时段含周末）全部半价。**缓存命中按 cache 价替代 input 价计费（DeepSeek 语义，勿叠加）**。档位写入 pricing_version 后缀（:peak/:offPeak）供审计；中国法定节假日官方按错峰但未内置日历，节假日白天成本会偏高（宁高勿低）。superset 实测（缓存命中 ~90%）单 run 成本 ≈ $0.07–0.19（¥0.49–1.35），对照 1 SAU = ¥0.99：打平或微利，按 R5 两周数据复核。
 
@@ -190,7 +195,52 @@ superset 实测（run 63）：sourceCoverage partial（35/2149，diff 57/120 入
 
 **改进方向**（提取层升级时纳入）：对源码中抛错/校验用的数值常量与默认参数值，作为边界条件事实提取进场景 outcome（「超过 500 MB 上限时报错」比「超过最大字节限制时报错」可回答的问题多得多）。案例归档：本节 + `lib/release-notes-enhance.ts` 拒答 reason 通道（用户可见的缺口说明）。
 
-## 13. 实测锚点（superset 盲评，同窗口同基线四跑）
+## 13. 全量分析三模式与行为清单编排（2026-11-20，Task 13/14 落地）
+
+**模式路由**（`lib/env.ts fullAnalysisMode`；仅作用于 `affectedKeys === null` 的全量提取，增量与 RC2-carry 永不进入新编排）：
+
+| 模式 | 行为 |
+|---|---|
+| `legacy`（默认） | 现状分区/收敛路径（§2–§7 全部内容），唯一激活来源；垃圾模式值回退 legacy |
+| `inventory_shadow` | 旧路径完整执行并唯一激活；主事务提交后 best-effort 跑一遍库存编排（activate:false，LLM 计费 `platform_shadow`），只产出门禁/覆盖遥测，失败只 console.error，绝不翻 run 状态 |
+| `inventory` | 库存编排替代全量提取并激活；**Task 15 人工验收通过前不得在生产/开发启用** |
+
+**编排流程**（`lib/full-analysis.ts`）：实现面枚举 + 逐文件读取 → `buildBehaviorInventory`（语义单元 + 剩余实现面兜底）→ `planBehaviorExecutionTasks`（锚点/符号/安全区间确定性分片：主内容 ≤96KB、上下文 ≤32KB、合计 ≤128KB）→ 不可变 manifest insert-only 落库 → 共享预算原子预留 → 有界并发领取带租约任务 → 逐任务复述/判定/清洗/条件提交 → 聚合单元状态与局部场景身份 → 确定性合并（originKeys 传播）→ 双重覆盖与激活门禁 → 摘要生成/降级 → saveResult 同事务回填锚点 ↔ 最终场景映射。
+
+**manifest 与恢复语义（D7）**：
+
+- manifest 在首次派发前 insert-only 持久化（`analysis_behavior_manifests`：afterSha / scope fingerprint / detector registry / inventory schema 版本 + canonical JSON + hash）；已存在即拒绝覆盖，恢复时重算 hash 校验。
+- 孤儿/失败 run 重跑：存在 manifest 则校验加载，成功终态（extracted/no_behavior）任务复用 result_json 不重复调用 LLM，只领取 pending / 可重试 / 租约已过期的任务；不存在才首跑扫描。**绝不重新生成清单，绝不清空成功任务**。
+- `inventory_manifest_tampered` / `inventory_version_conflict` 直接失败（错误码进 run 的 error_message），必须在原 run 之外新建 run——启动恢复只等值匹配孤儿消息，冲突失败永远不会被重排队，不存在「冲突 → 重跑 → 自动重建 manifest」的自愈循环。
+- 扫描期读失败直接 throw，绝不持久化残缺 manifest；0 行空文件排除出 sources。
+
+**双重覆盖门禁（D2，两个维度分别计算、互不替代）**：
+
+- primaryCoverage：实现面区间（eligible）vs 单元主覆盖区间并集，按 path 分组闭区间并集计算唯一行数，禁止重叠求和；
+- anchorCoverage：单元主区间 vs behavior/implicit_review 锚点区间并集；entry 锚点只用于定位、不计入核销分子；
+- `primaryRanges=null` 的不可读占位单元使主覆盖门禁保持不通过；无法安全拆到预算内的单元标 unresolved，绝不截断后伪装成功；
+- 新路径覆盖回执带 `primaryRangesOmitted`：完整性账本 sourceCoverage 的 complete 必须要求主覆盖区间遗漏为零，文件数/字节数只作辅助诊断（旧回执该字段为 null，历史语义不变）。
+
+**执行语义：at-least-once + 条件提交（不是 exactly-once）**：
+
+- claim：条件 UPDATE 原子置 running + lease_owner + lease_expires_at + attempt_id 并 attempts+1；只有 pending、`attempts < maxAttempts` 的 failed/unresolved、或租约已过期的 running 才可领取（默认 maxAttempts=3、租约 600s）；
+- commit：校验 run_id + task_key + attempt_id + lease_owner + running，只接受当前 attempt；过期 attempt 的迟到提交拒绝覆盖已有终态（仅 warn），其 LLM 回执保留可审计；
+- 重复调用经 task_key / unit_key / attempt_id 回执可审计；恢复不重复预留、不重复结算 SAU。
+
+**共享运行预算（D9，`analysis_run_budgets`）**：
+
+- 三维度上限 maxLlmCalls / maxTotalTokens / maxCostAmount（+currency）：缺省 = 无对应上限（绝不用 0 表示）；env 配置在首次派发前写入预算行；
+- 每个任务先 `reserveBehaviorBudget`（按 2 次调用 / 200k 输入 / 16k 输出 / 2 元上界预留）再 claim；**预算不足绝不领取租约**，停止派发并记 budgetBlocked（激活门禁 fail closed）；
+- 每 attempt 恰好 settle 一次（按 `llm_call_receipts` 实际回执结算）；claim 失败或首次 LLM 调用前中止走 releaseUnused 全额释放，绝不 settle；token/费用硬上限下 usage 未知 → 停止派发，不按零成本放行；
+- 摘要预留独立（D9：份额不被单元抢占），activate 模式在任务派发前取得；门禁失败 / 派发致命错误等摘要首次 LLM 调用前的任何退出，经安全路径释放该预留（同事务复位 summary_reserved）；进入共享解析器后由它恰好 settle 一次。
+
+**摘要处理（D10）**：全部单元合并后一次独立摘要调用（证据面 = 合并面，面外证据剔除），状态三态 `generated / preserved / unavailable`——全量重建失败保留既有简介（语言切换不保留旧语种）、首分析或无可用简介时保存空简介并记 unavailable。摘要失败不阻断行为规格激活，也不计作单元失败。
+
+**激活门禁（D8，fail closed）**：`evaluateBehaviorActivationGate` 七项检查——inventoryManifestValid、primaryCoverageComplete、anchorCoverageComplete、anchorAccountingComplete（unresolved 锚点不计入）、allUnitsInAllowedTerminalStates（仅 extracted / no_behavior）、existingEvidenceChecksPassed（含 all_candidates_rejected 复查）、existingMergeChecksPassed。任一不过或 budgetBlocked：activate 模式 throw（run 失败，saveResult 不可达，**既有激活规格不变**，已持久化单元回执保留供断点续跑）；shadow 不 throw，返回 activated:false。
+
+**观测口径**：编排 outcome 的 enumerationMetrics 挂 inventory 详情（units 各状态计数、entry/behavior/implicit_review/coarse 锚点计数、semantic/residual 单元、主覆盖与锚点覆盖唯一行数、unreadable 占位、leasesHeld / attemptsTotal、budgetBlocked、productDescriptionStatus、tasks total / reusedTerminal / executed / pending）。恢复复用的成功任务计入 tasksReusedTerminal；passInfos 只计本 run 新执行的任务，绝不把恢复工作误报为新执行趟。单元处理比例只是诊断计数，不产生新的综合质量分（整体状态仍由完整性账本最差维度规则推导）。
+
+## 14. 实测锚点（superset 盲评，同窗口同基线四跑）
 
 | 轮次 | 机制 | 召回（15 条冻结预标） | 精确率（功能级） |
 |---|---|---|---|

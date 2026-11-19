@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { dispatchStuckQueuedRuns, orphanedRunMessage, QUEUED_RUN_RECOVERY_THRESHOLD_MINUTES, recoverInterruptedRuns, supersededRunMessagePrefix, type QueuedRunGate } from "../lib/analysis-recovery";
 
@@ -147,6 +149,52 @@ describe("stuck queued run recovery (sweep entry)", () => {
     const { execute } = sqlRouter();
     await expect(dispatchStuckQueuedRuns(runAnalysis, execute, gatePass)).resolves.toEqual({ superseded: 0, dispatched: 0 });
     expect(runAnalysis).not.toHaveBeenCalled();
+  });
+});
+
+describe("inventory run recovery semantics (Task 14)", () => {
+  const source = readFileSync(path.join(__dirname, "..", "lib", "analysis-recovery.ts"), "utf8");
+
+  it("documents that inventory runs resume from the verified manifest, result_json and leases", () => {
+    // 新路径（inventory 编排）的孤儿 run 可能已有中间产物：不可变 manifest、成功终态
+    // 任务的 result_json、共享预算行与租约。恢复语义必须成文——重跑由编排层复用这些
+    // 产物续跑，而不是按 legacy 假设整 run 裸重跑。
+    expect(source).toContain("manifest");
+    expect(source).toContain("result_json");
+    expect(source).toContain("inventory_version_conflict");
+  });
+
+  it("no longer claims every orphaned run has no recoverable intermediate products", () => {
+    // 「所有孤儿 run 都没有落库、重跑即幂等」只对 legacy 分区路径成立；
+    // inventory 路径的恢复绝不清空成功任务、绝不重新生成清单。
+    expect(source).not.toContain("孤儿 run 必然没有落库");
+  });
+
+  it("never requeues inventory_version_conflict failures: the orphan predicate is an exact message match", async () => {
+    // inventory_version_conflict 的 run 以各自错误消息落库、必须在原 run 之外新建 run。
+    // 孤儿恢复只等值匹配 orphanedRunMessage——冲突失败永远不会被重排队，
+    // 不存在「冲突 → 重跑 → 自动重建 manifest」的自愈循环。
+    const { execute } = sqlRouter();
+    await recoverInterruptedRuns(runAnalysis, execute, gatePass);
+    const [sql, params] = (execute.mock.calls as unknown as Array<[string, unknown[]]>)[0];
+    expect(sql).toContain("error_message = ?");
+    expect(sql).not.toMatch(/error_message\s+(LIKE|IN)/i);
+    expect(params).toEqual([orphanedRunMessage]);
+    expect(orphanedRunMessage).not.toContain("inventory_version_conflict");
+  });
+
+  it("never touches inventory persistence tables: successful tasks are never cleared by recovery", async () => {
+    // 恢复只重置 analysis_runs 状态并重新派发；任务回执/manifest/预算行由编排层自己
+    // 恢复与清理，本路径任何 SQL 都不得触碰它们（清空成功任务 = 重复 LLM 调用与账单）。
+    const { execute, state } = sqlRouter();
+    state.requeueAffected = 1;
+    state.bootQueue = [{ id: 51, triggerType: "push", accountId: 7 }];
+    await recoverInterruptedRuns(runAnalysis, execute, gatePass);
+    for (const [sql] of execute.mock.calls as unknown as Array<[string, unknown[]]>) {
+      expect(sql).not.toContain("analysis_behavior_tasks");
+      expect(sql).not.toContain("analysis_behavior_manifests");
+      expect(sql).not.toContain("analysis_run_budgets");
+    }
   });
 });
 

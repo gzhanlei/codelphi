@@ -112,6 +112,54 @@ const MAX_LINES_PER_READ = 400;
  * 仍失败则跳过该组（定向枚举是增强层，分区提取已提供基线覆盖）。每组结果用
  * 「组文件 ∪ 全部 diff 文件」作证据允许集清洗后返回；清洗后为空的组不返回。
  */
+/**
+ * Task 14 · inventory 编排的枚举详情（设计 §6.3）：作为可选 details 挂在
+ * BehavioralEnumerationMetrics 上——旧 W0-8 diff 枚举回执没有该字段，字段与状态口径不变。
+ * running / coarse / implicit / fallback / lease / budget / productDescriptionStatus
+ * 与恢复任务会计（reused/executed/pending）在此记录；单元处理比例只是诊断计数，
+ * 不产生新的综合质量分（整体状态仍由完整性账本的最差维度规则推导）。
+ */
+export interface InventoryEnumerationSummary {
+  unitsTotal: number;
+  unitsPending: number;
+  /** 租约持有中（status=running）的单元数。 */
+  unitsRunning: number;
+  unitsExtracted: number;
+  unitsNoBehavior: number;
+  unitsUnresolved: number;
+  unitsFailed: number;
+  anchorsTotal: number;
+  /** entry 锚点只用于定位，不计入核销分子。 */
+  entryAnchors: number;
+  behaviorAnchors: number;
+  /** 未被 behavior 锚点覆盖、必须交 AI 审查的剩余区域锚点数。 */
+  implicitReviewAnchors: number;
+  /** coarse=true 的粗粒度审查区域（检测能力缺口披露，不等于已发现该区域全部行为）。 */
+  coarseReviewAnchors: number;
+  semanticUnits: number;
+  /** 剩余实现面兜底认领的单元数（detector=residual）：检测器缺口由它兜底并披露。 */
+  residualUnits: number;
+  /** primaryRanges=null 的不可读占位单元数（读取失败披露；占位期间主覆盖门禁不通过）。 */
+  unreadableUnits: number;
+  primaryRangesCoveredLines: number;
+  primaryRangesOmittedLines: number;
+  anchorRangesCoveredLines: number;
+  anchorRangesOmittedLines: number;
+  tasksTotal: number;
+  /** 恢复会计：复用成功终态 result_json、本 run 未重新执行的任务数。 */
+  tasksReusedTerminal: number;
+  /** 本 run 实际发起提取的任务数（passInfos 只覆盖这部分，恢复复用绝不计为新执行趟）。 */
+  tasksExecuted: number;
+  tasksPending: number;
+  /** 快照时仍处于 running（租约持有）的任务数。 */
+  leasesHeld: number;
+  /** 全部任务累计 attempt 数（重复尝试与迟到提交可审计，at-least-once 语义披露）。 */
+  attemptsTotal: number;
+  /** 共享预算触顶或 usage 未知导致的派发停止（激活门禁 fail closed 的输入）。 */
+  budgetBlocked: boolean;
+  productDescriptionStatus: "generated" | "preserved" | "unavailable" | "not_run";
+}
+
 export interface BehavioralEnumerationMetrics {
   /** patch-scan 行为文件总数。 */
   pathsTotal: number;
@@ -128,6 +176,8 @@ export interface BehavioralEnumerationMetrics {
   hunksTruncated: number;
   /** complete / partial / failed / not_applicable——增强层失败不得被误认为完整成功。 */
   status: "complete" | "partial" | "failed" | "not_applicable";
+  /** Task 14 · inventory 编排的可选枚举详情；旧 W0-8 diff 枚举回执无此字段。 */
+  inventory?: InventoryEnumerationSummary;
 }
 
 export interface BehavioralEnumerationOutcome {

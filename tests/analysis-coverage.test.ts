@@ -99,6 +99,14 @@ describe("computeCoverageReceipt", () => {
     expect(receipt.coverageRatio).toBe(0);
   });
 
+  it("marks legacy receipts with null primaryRangesOmitted (inventory-only accounting, historical semantics preserved)", () => {
+    // Task 14：主覆盖区间遗漏只由 inventory 编排路径填写；旧分区回执恒为 null，
+    // sourceCoverage 完整性判定对旧回执保持历史语义（不新增 partial 条件）。
+    const index = fakeIndex([{ path: "lib/a.ts", size: 1000 }]);
+    const receipt = computeCoverageReceipt({ index, partitions: [partition([{ path: "lib/a.ts", content: "x" }])] });
+    expect(receipt.primaryRangesOmitted).toBeNull();
+  });
+
   it("skips pruned out-of-scope top-level directories instead of hitting the index scope guard (run 80)", async () => {
     // run 80（uxplay-android）：source_roots=["app/src/main","uxplay/lib"]，仓库根还有 deps/、gradle/
     // 等 scope 外目录。枚举 BFS 曾无条件 listDir 这些目录，索引 assertAllowed 抛

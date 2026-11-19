@@ -3,9 +3,9 @@ import { type LlmBillingContext } from "./ai";
 import type { OutputLanguage } from "./analysis-language";
 import type { RunContext } from "./analysis";
 import { enumerateImplementationSurface, type AnalysisCoverageReceipt } from "./analysis-coverage";
-import type { BehavioralEnumerationMetrics } from "./behavioral-enumeration";
+import type { BehavioralEnumerationMetrics, InventoryEnumerationSummary } from "./behavioral-enumeration";
 import { evaluateBehaviorActivationGate, resolveProductDescription, type ActivationGateAnchor, type ActivationGateResult, type ProductDescriptionOutcome } from "./behavior-activation";
-import { buildBehaviorInventory } from "./behavior-inventory";
+import { buildBehaviorInventory, RESIDUAL_DETECTOR_ID } from "./behavior-inventory";
 import { evaluateInventoryCoverage } from "./behavior-inventory/coverage";
 import { loadBehaviorTaskSources, planBehaviorExecutionTasks, type TaskSource } from "./behavior-inventory/planner";
 import type { BehaviorExecutionTask, BehaviorManifest, BehaviorUnit, CodeRange } from "./behavior-inventory/types";
@@ -73,6 +73,10 @@ import { loadLatestSpecVersionLanguage } from "./spec-versions";
  * - 门禁：evaluateBehaviorActivationGate fail closed；失败或 budgetBlocked 时 activate
  *   模式 throw（run 失败，saveResult 不可达，旧激活规格不变），shadow 返回 activated:false。
  * - 锚点关联行仅 activate 且过门禁后 INSERT IGNORE 落库（saveResult 回填前置）。
+ * - 观测（Task 14）：coverage 回执带主覆盖区间遗漏（新路径 sourceCoverage complete
+ *   要求为零）；enumerationMetrics 的 inventory 详情记录单元/锚点状态、coarse/
+ *   implicit/fallback 计数、租约与预算、摘要状态与恢复任务会计——恢复复用的成功
+ *   任务计入 tasksReusedTerminal，绝不计为本 run 新执行的提取趟。
  */
 
 export const BEHAVIOR_TASK_RESERVED_LLM_CALLS = 2;
@@ -694,8 +698,46 @@ export async function runInventoryFullAnalysis(
       diffTotalPaths: diffPaths.length,
       diffSelectedPaths,
       diffOmittedPaths: diffPaths.length - diffSelectedPaths,
+      // Task 14：新路径回执必须带主覆盖区间遗漏——完整性账本的 sourceCoverage complete
+      // 要求该值为零，不能仅凭「装配数大于零且未触分区帽」推导（设计 §6.3）。
+      primaryRangesOmitted: inventoryCoverage.primaryCoverage.uniqueLinesOmitted,
     };
 
+    // Task 14：W0-8 diff 枚举字段在本路径保持全零 + not_applicable（分组枚举是旧分区
+    // 路径的增强层）；inventory 编排的完整性披露挂在可选 inventory 详情上——单元/锚点
+    // 状态、coarse/implicit/fallback 计数、租约与预算、摘要状态、恢复任务会计。
+    const taskRows = [...rowsAfter.values()];
+    const unitStatusCount = (status: BehaviorUnitStatus) => unitStatuses.filter((entry) => entry.status === status).length;
+    const allAnchors = manifest.units.flatMap((unit) => unit.anchors);
+    const inventorySummary: InventoryEnumerationSummary = {
+      unitsTotal: manifest.units.length,
+      unitsPending: unitStatusCount("pending"),
+      unitsRunning: unitStatusCount("running"),
+      unitsExtracted: unitStatusCount("extracted"),
+      unitsNoBehavior: unitStatusCount("no_behavior"),
+      unitsUnresolved: unitStatusCount("unresolved"),
+      unitsFailed: unitStatusCount("failed"),
+      anchorsTotal: allAnchors.length,
+      entryAnchors: allAnchors.filter((anchor) => anchor.role === "entry").length,
+      behaviorAnchors: allAnchors.filter((anchor) => anchor.role === "behavior").length,
+      implicitReviewAnchors: allAnchors.filter((anchor) => anchor.role === "implicit_review").length,
+      coarseReviewAnchors: allAnchors.filter((anchor) => anchor.role === "implicit_review" && anchor.coarse).length,
+      semanticUnits: manifest.units.filter((unit) => unit.detector !== RESIDUAL_DETECTOR_ID).length,
+      residualUnits: manifest.units.filter((unit) => unit.detector === RESIDUAL_DETECTOR_ID).length,
+      unreadableUnits: inventoryCoverage.diagnostics.unreadableUnits.length,
+      primaryRangesCoveredLines: inventoryCoverage.primaryCoverage.uniqueLinesCovered,
+      primaryRangesOmittedLines: inventoryCoverage.primaryCoverage.uniqueLinesOmitted,
+      anchorRangesCoveredLines: inventoryCoverage.anchorCoverage.uniqueLinesCovered,
+      anchorRangesOmittedLines: inventoryCoverage.anchorCoverage.uniqueLinesOmitted,
+      tasksTotal: manifest.tasks.length,
+      tasksReusedTerminal: reusedTerminal,
+      tasksExecuted: state.executed,
+      tasksPending: manifest.tasks.length - reusedTerminal - state.executed,
+      leasesHeld: taskRows.filter((row) => row.status === "running").length,
+      attemptsTotal: taskRows.reduce((sum, row) => sum + row.attempts, 0),
+      budgetBlocked: state.budgetBlocked,
+      productDescriptionStatus,
+    };
     const enumerationMetrics: BehavioralEnumerationMetrics = {
       pathsTotal: 0,
       pathsEnumerated: 0,
@@ -706,6 +748,7 @@ export async function runInventoryFullAnalysis(
       groupsCompleted: 0,
       groupsFailed: 0,
       status: "not_applicable",
+      inventory: inventorySummary,
     };
 
     return {

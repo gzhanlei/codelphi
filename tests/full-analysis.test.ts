@@ -717,6 +717,25 @@ describe("runInventoryFullAnalysis orchestration", () => {
     expect(outcome.coverage.coverageRatio).toBe(1);
     expect(outcome.coverage.partitionsCapped).toBe(false);
     expect(outcome.enumerationMetrics.status).toBe("not_applicable");
+    // Task 14：inventory 枚举详情如实记录（running/coarse/implicit/fallback/lease/budget/summary + 恢复会计）
+    const inventory = outcome.enumerationMetrics.inventory!;
+    expect(inventory).toBeDefined();
+    expect(inventory.unitsTotal).toBe(manifest.units.length);
+    expect(inventory.semanticUnits + inventory.residualUnits).toBe(manifest.units.length);
+    expect(inventory.anchorsTotal).toBe(manifest.units.reduce((sum, unit) => sum + unit.anchors.length, 0));
+    expect(inventory.entryAnchors + inventory.behaviorAnchors + inventory.implicitReviewAnchors).toBe(inventory.anchorsTotal);
+    expect(inventory.coarseReviewAnchors).toBeLessThanOrEqual(inventory.implicitReviewAnchors);
+    expect(inventory.tasksTotal).toBe(manifest.tasks.length);
+    expect(inventory.tasksReusedTerminal).toBe(0);
+    expect(inventory.tasksExecuted).toBe(manifest.tasks.length);
+    expect(inventory.tasksPending).toBe(0);
+    expect(inventory.leasesHeld).toBe(0);
+    expect(inventory.attemptsTotal).toBe(manifest.tasks.length);
+    expect(inventory.budgetBlocked).toBe(false);
+    expect(inventory.productDescriptionStatus).toBe("generated");
+    expect(inventory.primaryRangesOmittedLines).toBe(0);
+    // 新路径覆盖回执：主覆盖区间遗漏入账（sourceCoverage complete 必须为零，Task 14）
+    expect(outcome.coverage.primaryRangesOmitted).toBe(0);
     expect(outcome.passInfos.length).toBe(manifest.tasks.length);
     expect(outcome.mergeStats).toEqual({ changesTruncated: 0, scenariosDeduped: 0, featuresFolded: 0 });
     expect(outcome.unitStatuses.every((unit) => unit.status === "extracted")).toBe(true);
@@ -738,6 +757,12 @@ describe("runInventoryFullAnalysis orchestration", () => {
     expect(second.result.features.length).toBe(2);
     expect(second.behaviorLinks.length).toBeGreaterThan(0);
     expect(second.tasks.reusedTerminal).toBe(second.tasks.total);
+    // Task 14 恢复会计：复用的成功终态任务计入 tasksReusedTerminal，绝不被误报为
+    // 本 run 新执行的提取趟（passInfos 只覆盖实际发起提取的任务）。
+    expect(second.enumerationMetrics.inventory?.tasksReusedTerminal).toBe(second.tasks.total);
+    expect(second.enumerationMetrics.inventory?.tasksExecuted).toBe(0);
+    expect(second.passInfos).toEqual([]);
+    expect(second.coverage.primaryRangesOmitted).toBe(0);
   });
 
   it("resume claims only eligible tasks (failed row below maxAttempts is re-executed once)", async () => {

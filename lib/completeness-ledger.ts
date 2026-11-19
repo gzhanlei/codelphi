@@ -9,9 +9,13 @@ import type { BehavioralEnumerationMetrics } from "./behavioral-enumeration";
  * 分析成功 ≠ 分析完整 ≠ 分析正确，三者必须分开。
  *
  * 维度与数据来源：
- *   sourceCoverage         覆盖率回执（W0-7 diff 计数含）
- *   behavioralEnumeration  W0-8 枚举指标
- *   extractionCompletion   分区趟完成/重试/空结果
+ *   sourceCoverage         覆盖率回执（W0-7 diff 计数含；Task 14 起 inventory 编排回执
+ *                          另带主覆盖区间遗漏，complete 必须为零，旧回执保持历史语义）
+ *   behavioralEnumeration  W0-8 枚举指标（Task 14 起可挂 inventory 编排详情：单元/锚点/
+ *                          coarse/fallback/租约/预算/摘要状态与恢复任务会计，仅诊断计数）
+ *   extractionCompletion   分区趟完成/重试/空结果（passInfos 只计本 run 新执行的提取趟；
+ *                          inventory 恢复复用的成功任务计入 enumeration inventory 详情的
+ *                          tasksReusedTerminal，绝不计为趟数）
  *   evidenceIntegrity      sanitize 剔除计数与 all_candidates_rejected
  *   mergeIntegrity         changes 截断 / 去重 / 一致性冲突 / 坍缩
  *   verification           一致性冲突 + M9 影子（人工核实为外部生命周期，另行追踪）
@@ -28,6 +32,8 @@ export interface SourceCoverageDimension {
   diffTotalPaths: number | null;
   diffSelectedPaths: number | null;
   diffOmittedPaths: number | null;
+  /** inventory 编排的主覆盖区间遗漏（唯一行数）；旧回执为 null（历史语义不变）。 */
+  primaryRangesOmitted: number | null;
 }
 
 export interface BehavioralEnumerationDimension extends BehavioralEnumerationMetrics {
@@ -97,9 +103,14 @@ export function deriveOverallState(states: LedgerState[]): LedgerState {
 
 export function deriveSourceCoverage(receipt: AnalysisCoverageReceipt): SourceCoverageDimension {
   const omitted = receipt.diffOmittedPaths ?? 0;
+  // Task 14：新路径（inventory 编排）complete 必须要求主覆盖区间遗漏为零——
+  // 文件数和字节数只作辅助诊断，不能仅凭「装配数大于零且未触分区帽」推导（设计 §6.3）。
+  // 旧回执该字段为 null/缺省，保持历史语义。
+  const primaryRangesOmitted = receipt.primaryRangesOmitted ?? null;
   let state: LedgerState;
   if (receipt.implFilesAssembled === 0) state = "failed";
   else if (receipt.partitionsCapped || omitted > 0) state = "partial";
+  else if (primaryRangesOmitted != null && primaryRangesOmitted > 0) state = "partial";
   else state = "complete";
   return {
     state,
@@ -110,6 +121,7 @@ export function deriveSourceCoverage(receipt: AnalysisCoverageReceipt): SourceCo
     diffTotalPaths: receipt.diffTotalPaths,
     diffSelectedPaths: receipt.diffSelectedPaths,
     diffOmittedPaths: receipt.diffOmittedPaths,
+    primaryRangesOmitted,
   };
 }
 
@@ -125,6 +137,11 @@ export interface ExtractionPassInfo {
   allCandidatesRejected: boolean;
 }
 
+/**
+ * 趟完成度推导。passes 只计本 run 新执行的提取趟：inventory 编排恢复时复用的成功
+ * 终态任务不进入 passInfos，其会计在 enumeration 的 inventory 详情
+ * （tasksReusedTerminal）——恢复复用绝不被误报为新执行的趟。
+ */
 export function deriveExtractionCompletion(partitions: number, passes: Array<{ retries: number; empty: boolean }>): ExtractionCompletionDimension {
   const retries = passes.reduce((total, pass) => total + pass.retries, 0);
   const emptyPasses = passes.filter((pass) => pass.empty).length;
