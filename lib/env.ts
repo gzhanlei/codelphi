@@ -44,6 +44,26 @@ export function analysisAiContextBudgetOverride() {
   return Number.isInteger(raw) && raw > 0 ? raw : null;
 }
 
+/** W2 收敛式全量（2026-11-19 立项）：多趟提取的轮数上限。默认 1=现行为（单趟采样）；
+ * 调高后按边际产出收敛（新增锚定场景 < ε 停止），趟数→成本如实放大。clamp [1,10] 防误配。 */
+export function analysisConvergenceRounds(): number {
+  const raw = Number(process.env.ANALYSIS_CONVERGENCE_ROUNDS ?? "");
+  if (!Number.isInteger(raw) || raw < 1) return 1;
+  return Math.min(raw, 10);
+}
+
+/** W2 收敛阈值 ε：一轮新增锚定场景少于该值视为收敛。默认 5。 */
+export function analysisConvergenceEpsilon(): number {
+  const raw = Number(process.env.ANALYSIS_CONVERGENCE_EPSILON ?? "");
+  return Number.isInteger(raw) && raw > 0 ? raw : 5;
+}
+
+/** W2 收敛判定：轮数未到上限且边际新增锚定场景 ≥ ε（默认 5 条）时再跑一轮。 */
+export function shouldRunAnotherConvergenceRound(input: { roundsRun: number; scenarioCount: number; lastCount: number; maxRounds: number; epsilon: number }): boolean {
+  if (input.roundsRun >= input.maxRounds) return false;
+  return input.scenarioCount - input.lastCount >= input.epsilon;
+}
+
 /** 分区趟数上限（成本闸门）：默认无界（保持按仓库穷尽的覆盖语义）；配置后命中即截断并披露。 */
 export function analysisMaxPartitions(): number | null {
   const raw = Number(process.env.ANALYSIS_MAX_PARTITIONS ?? "");

@@ -17,7 +17,7 @@ import { incrementalShadowEnabled } from "./env";
 import type { BehavioralEnumerationMetrics } from "./behavioral-enumeration";
 import { computeCoverageReceipt, loadInheritedCoverageReceipt, enumerateImplementationSurface, enumerateRequiredImplementationSurface, saveCoverageReceipt, type AnalysisCoverageReceipt } from "./analysis-coverage";
 import { mergeChunkResults, type ExtractionChunk } from "./extraction-merge";
-import { behavioralEnumerationEnabled } from "./env";
+import { behavioralEnumerationEnabled, analysisConvergenceEpsilon, analysisConvergenceRounds } from "./env";
 import { behavioralChangePaths } from "./patch-scan";
 import { parsePatchHunks } from "./spec-diff";
 import { enumerateBehavioralChunks } from "./behavioral-enumeration";
@@ -515,6 +515,41 @@ async function runAnalysisBody(run: RunContext) {
       passInfos.push(extracted.pass);
     }
     result = mergeChunkResults(chunks, (stats) => { mergeStats = stats; });
+    // W2 收敛式全量（2026-11-19 立项「根治首分析不可靠」）：首分析/全量的单趟召回实测
+    // 只有 40-50%（run 397 实证 584/1131）。收敛轮对同一分区计划重复提取：合并按行为
+    // 等价去重，边际新增锚定场景 < ε 即收敛停止——「完整」由收敛准则定义，成本=趟数。
+    // 仅全量模式（affectedKeys===null）参与：增量 carry 已由锚点级保真保证，无需多轮。
+    if (affectedKeys === null && analysisConvergenceRounds() > 1) {
+      const maxRounds = analysisConvergenceRounds();
+      const epsilon = analysisConvergenceEpsilon();
+      let lastCount = countMergedScenarios(result);
+      for (let round = 2; round <= maxRounds; round += 1) {
+        for (const [index, partition] of partitions.entries()) {
+          const extracted = await extractPassWithRetry({
+            sources: partition.sources,
+            change,
+            context: {
+              previousFeatureNames: [...knownFeatureNames],
+              previousSpec: previousSpecText,
+              partition: { index: index + 1, total: partitions.length },
+              outputLanguage: run.outputLanguage,
+              billing: { runId: run.id, accountId: run.accountId ?? null, chargeComponent: "main" },
+            },
+            allowSet: evidenceAllowSet(partition, change),
+            label: `converge${round}-${index + 1}/${run.id}`,
+          });
+          for (const feature of extracted.result.features) knownFeatureNames.add(feature.name);
+          chunks.push({ result: extracted.result });
+          passInfos.push(extracted.pass);
+        }
+        result = mergeChunkResults(chunks, (stats) => { mergeStats = stats; });
+        const count = countMergedScenarios(result);
+        const marginal = count - lastCount;
+        console.log("[analysis] convergence round", { runId: run.id, round, marginal, totalScenarios: count, converged: marginal < epsilon });
+        if (marginal < epsilon) break;
+        lastCount = count;
+      }
+    }
   }
   // W0-8 行为面枚举：行为文件逐组定向提问（每文件显式回答行为/无行为），把召回从
   // 注意力问题变枚举问题。枚举是增强层：组硬失败重试一次后跳过，不阻塞主提取产出。
@@ -711,6 +746,11 @@ async function runAnalysisBody(run: RunContext) {
   } catch (error) {
     console.error("[analysis] completeness ledger write failed", error);
   }
+}
+
+/** 合并结果的总锚定场景数（W2 收敛判定的量测口径）。 */
+function countMergedScenarios(result: AnalysisResult): number {
+  return result.features.reduce((sum, feature) => sum + feature.scenarios.length, 0);
 }
 
 async function runAnalysisSafely(runId: number) {
