@@ -242,22 +242,8 @@ async function workspaceMain(argv: string[], dependencies: CliDependencies) {
       const uploadKey = process.env.CODELPHI_SNAPSHOT_KEY;
       if (uploadUrl && uploadKey) {
         try {
-          const body = await readFile(result.snapshotExportPath, "utf8");
-          const response = await fetch(`${uploadUrl.replace(/\/$/, "")}/api/products/import-snapshot`, {
-            method: "POST",
-            headers: { "content-type": "application/json", authorization: `Bearer ${uploadKey}` },
-            body,
-          });
-          const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-          if (!response.ok) {
-            stderr(language === "en"
-              ? `Upload failed: HTTP ${response.status} ${JSON.stringify(payload)} (artifacts remain local; set CODELPHI_IMPORT_URL/CODELPHI_SNAPSHOT_KEY or unset to disable)`
-              : `上传失败：HTTP ${response.status} ${JSON.stringify(payload)}（产物保留在本地；可修正环境变量重试，或取消这两个变量以关闭自动上传）`);
-          } else {
-            stdout(language === "en"
-              ? `Uploaded to CoDelphi: product #${payload.productId} (${payload.slug ?? "?"}), imported=${payload.imported}, scenarios=${payload.scenariosImported}`
-              : `已上传到 CoDelphi：产品 #${payload.productId}（${payload.slug ?? "?"}），imported=${payload.imported}，场景数=${payload.scenariosImported}`);
-          }
+          const code = await uploadSnapshotFile(result.snapshotExportPath, uploadUrl, uploadKey, stdout, stderr, language);
+          if (code !== 0) stderr(language === "en" ? "artifacts remain local; fix the environment and retry `upload --workdir`" : "产物保留在本地；修正环境变量后可用 `upload --workdir` 重试");
         } catch (error) {
           stderr(language === "en" ? `Upload failed: ${error instanceof Error ? error.message : String(error)}` : `上传失败：${error instanceof Error ? error.message : String(error)}`);
         }
@@ -275,19 +261,7 @@ async function workspaceMain(argv: string[], dependencies: CliDependencies) {
           : "upload 需要环境变量 CODELPHI_IMPORT_URL 与 CODELPHI_SNAPSHOT_KEY");
         return 2;
       }
-      const body = await readFile(uploadPath, "utf8");
-      const response = await fetch(`${uploadUrl.replace(/\/$/, "")}/api/products/import-snapshot`, {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${uploadKey}` },
-        body,
-      });
-      const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-      if (!response.ok) {
-        stderr(`Upload failed: HTTP ${response.status} ${JSON.stringify(payload)}`);
-        return 1;
-      }
-      stdout(`Uploaded: product #${payload.productId} (${payload.slug ?? "?"}), imported=${payload.imported}, scenarios=${payload.scenariosImported}`);
-      return 0;
+      return uploadSnapshotFile(uploadPath, uploadUrl, uploadKey, stdout, stderr, language);
     }
     stderr(language === "en" ? "Usage: prepare <target> --workdir <dir> | show --workdir <dir> --partition <id> | complete --workdir <dir> | finalize --workdir <dir> | upload --workdir <dir>" : "用法：prepare <目标> --workdir <目录> | show --workdir <目录> --partition <id> | complete --workdir <目录> | finalize --workdir <目录> | upload --workdir <目录>");
     return 2;
@@ -295,6 +269,41 @@ async function workspaceMain(argv: string[], dependencies: CliDependencies) {
     stderr(errorText(error, language));
     return 1;
   }
+}
+
+
+/** BYO 分片上传（2026-11-19）：snapshot.json 按 4MB 切块流式 POST，服务端末块组装导入。
+ * 幂等键=revision+treeSha（服务端 seeded 基线），整包失败可安全整体重传。 */
+async function uploadSnapshotFile(snapshotPath: string, uploadUrl: string, uploadKey: string, stdout: (message: string) => void, stderr: (message: string) => void, language: "en" | "zh-CN") {
+  const body = await readFile(snapshotPath, "utf8");
+  const buffer = Buffer.from(body, "utf8");
+  const CHUNK = 4 * 1024 * 1024;
+  const total = Math.max(1, Math.ceil(buffer.length / CHUNK));
+  const importId = randomUUID();
+  for (let index = 0; index < total; index += 1) {
+    const slice = buffer.subarray(index * CHUNK, Math.min(buffer.length, (index + 1) * CHUNK));
+    const response = await fetch(`${uploadUrl.replace(/\/$/, "")}/api/products/import-snapshot`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/octet-stream",
+        authorization: `Bearer ${uploadKey}`,
+        "x-import-id": importId,
+        "x-import-chunk-index": String(index),
+        "x-import-chunk-total": String(total),
+      },
+      body: new Uint8Array(slice),
+    });
+    const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!response.ok) {
+      stderr(language === "en" ? `Upload failed: HTTP ${response.status} ${JSON.stringify(payload)}` : `上传失败：HTTP ${response.status} ${JSON.stringify(payload)}`);
+      return 1;
+    }
+    if (index < total - 1) continue;
+    stdout(language === "en"
+      ? `Uploaded to CoDelphi: product #${payload.productId} (${payload.slug ?? "?"}), imported=${payload.imported}, scenarios=${payload.scenariosImported}`
+      : `已上传到 CoDelphi：产品 #${payload.productId}（${payload.slug ?? "?"}），imported=${payload.imported}，场景数=${payload.scenariosImported}`);
+  }
+  return 0;
 }
 
 export async function main(argv = process.argv.slice(2), dependencies: CliDependencies = {}) {
