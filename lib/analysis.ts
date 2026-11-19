@@ -17,6 +17,7 @@ import { incrementalShadowEnabled } from "./env";
 import type { BehavioralEnumerationMetrics } from "./behavioral-enumeration";
 import { computeCoverageReceipt, loadInheritedCoverageReceipt, enumerateImplementationSurface, enumerateRequiredImplementationSurface, saveCoverageReceipt, type AnalysisCoverageReceipt } from "./analysis-coverage";
 import { mergeChunkResults, type ExtractionChunk } from "./extraction-merge";
+import type { AnchorScenarioLink } from "./behavior-unit-state";
 import { behavioralEnumerationEnabled, analysisConvergenceEpsilon, analysisConvergenceRounds } from "./env";
 import { behavioralChangePaths } from "./patch-scan";
 import { parsePatchHunks } from "./spec-diff";
@@ -189,7 +190,32 @@ export async function upsertRelease(connection: PoolConnection, run: RunContext,
   return { releaseId, projections };
 }
 
-async function saveResult(run: RunContext, result: AnalysisResult, change: ChangeContext, affectedKeys: ReadonlySet<string> | null = null, coverage?: AnalysisCoverageReceipt) {
+/**
+ * Task 12 行为来源最终映射：同事务把 analysis_behavior_anchor_scenarios 的
+ * final_scenario_id 回填到最终 spec_scenarios 行。关联行按 (run_id, anchor_key_hash,
+ * local_scenario_key_hash) 定位（080 唯一键，sha256 hex 口径与 behavior-unit-receipts
+ * 一致）。任一 link 的 localScenarioKey 没有最终行映射 = 合并/折叠丢了行为来源——
+ * 先全量收集再抛错回滚，绝不发出半更新；映射存在但行不存在（affectedRows ≠ 1）同样
+ * 抛错回滚，规格与行为账本保持一致。
+ */
+async function persistBehaviorFinalMappings(connection: PoolConnection, run: RunContext, links: readonly AnchorScenarioLink[], scenarioIdByLocalKey: ReadonlyMap<string, number>) {
+  if (links.length === 0) return;
+  const missing = links.filter((link) => !scenarioIdByLocalKey.has(link.localScenarioKey)).map((link) => link.localScenarioKey).sort();
+  if (missing.length > 0) throw new Error(`behavior_final_mapping_missing:${missing.join(",")}`);
+  const sha256 = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
+  for (const link of links) {
+    const scenarioId = scenarioIdByLocalKey.get(link.localScenarioKey) as number;
+    const [updated] = await connection.execute(
+      "UPDATE analysis_behavior_anchor_scenarios SET final_scenario_id = ? WHERE run_id = ? AND anchor_key_hash = ? AND local_scenario_key_hash = ?",
+      [scenarioId, run.id, sha256(link.anchorKey), sha256(link.localScenarioKey)],
+    ) as [{ affectedRows?: number }, unknown];
+    if ((updated.affectedRows ?? 0) !== 1) {
+      throw new Error(`behavior_final_mapping_row_missing:${link.anchorKey} ${link.localScenarioKey}`);
+    }
+  }
+}
+
+export async function saveResult(run: RunContext, result: AnalysisResult, change: ChangeContext, affectedKeys: ReadonlySet<string> | null = null, coverage?: AnalysisCoverageReceipt, behaviorLinks: readonly AnchorScenarioLink[] = []) {
   const connection = await getDb().getConnection();
   try {
     await connection.beginTransaction();
@@ -206,7 +232,7 @@ async function saveResult(run: RunContext, result: AnalysisResult, change: Chang
         .filter((file) => behavioralPaths.has(file.path))
         .map((file) => [file.path, parsePatchHunks(file.patch)] as const),
     );
-    const { specVersionId, specChanges, baseline, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds } = await insertSpecVersion(connection, run, result, { ...(affectedKeys ? { affectedKeys } : {}), behavioralChangePaths: behavioralPaths, changedHunksByPath });
+    const { specVersionId, specChanges, baseline, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds, scenarioIdByLocalKey } = await insertSpecVersion(connection, run, result, { ...(affectedKeys ? { affectedKeys } : {}), behavioralChangePaths: behavioralPaths, changedHunksByPath });
     // BM-11 别名登记：变体名 → canonical 旧键，走 feature_aliases 显式归并通道
     // （migrations/030；progress-summary 的历史 spec_changes 归并已消费该表）。幂等 INSERT IGNORE。
     for (const fold of featureFolds) {
@@ -215,6 +241,8 @@ async function saveResult(run: RunContext, result: AnalysisResult, change: Chang
         [run.productId, fold.fromKey, fold.intoKey],
       );
     }
+    // Task 12：行为锚点 ↔ 最终场景映射回填（同事务；缺失即抛错回滚）
+    await persistBehaviorFinalMappings(connection, run, behaviorLinks, scenarioIdByLocalKey);
     await rebuildSpecFileIndex(connection, run.repositoryId, specVersionId);
     await markSpecDrift(connection, run.productId, specVersionId);
     // B1：覆盖率回执与规格版本同事务落库（append-only，历史版本可回溯）

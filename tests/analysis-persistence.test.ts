@@ -1,10 +1,23 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import type { PoolConnection } from "mysql2/promise";
 import type { AnalysisResult } from "../lib/ai";
+import type { AnchorScenarioLink } from "../lib/behavior-unit-state";
 import type { Execute } from "../lib/db";
 import { assertLatestRun, upsertGeneratedSpec, upsertRelease, type RunContext } from "../lib/analysis";
+// saveResult 由 Task 12 导出；命名空间引用保证 RED 阶段既有用例仍能加载本文件。
+import * as analysis from "../lib/analysis";
+import type { MergeResult } from "../lib/extraction-merge";
 import { loadPreviousSpecText } from "../lib/spec-versions";
 import type { ReleaseChangeFact } from "../lib/release-change-projection";
+
+// saveResult 经 getDb().getConnection() 自取事务连接：mock db 模块注入 stub 连接。
+// 既有用例全走显式 connection，不经 getDb，不受影响。
+const dbMock = vi.hoisted(() => ({ connection: undefined as unknown }));
+vi.mock("../lib/db", () => ({
+  getDb: () => ({ execute: vi.fn(), getConnection: async () => dbMock.connection }),
+  defaultExecute: async () => [[]],
+}));
 
 const run: RunContext = { id: 2, repositoryId: 3, productId: 4, owner: "gzhanlei", name: "radar", beforeSha: null, afterSha: "sha-2", connectionId: null, provider: "github", organizationId: 1, productSlug: "radar", productName: "Radar" };
 const result: AnalysisResult = {
@@ -238,5 +251,94 @@ describe("loadPreviousSpecText (P0 anchoring loader)", () => {
     // 无命中时顺序不变
     const unchanged = await loadPreviousSpecText(3, execute, ["不存在功能"]);
     expect(unchanged.map((feature) => feature.name)).toEqual(["统一登录", "规格导出", "产品简介编辑"]);
+  });
+});
+
+describe("saveResult 行为来源最终映射 (Task 12)", () => {
+  const sha256 = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
+  const ORIGIN_KEY = 'scenario|["unit:login","anchor:login-hp","001"]';
+  const link: AnchorScenarioLink = { runId: run.id, unitKey: "unit:login", anchorKey: "anchor:login-hp", localScenarioKey: ORIGIN_KEY };
+  const resultWithOrigins: MergeResult = {
+    ...result,
+    features: [{
+      name: "Auth",
+      summary: "Auth",
+      scenarios: [{ reference: "HP-1", context: "访客", action: "登录", outcome: "进入首页", category: "happy", evidence: [{ path: "lib/auth.ts", startLine: 8 }], originKeys: [ORIGIN_KEY] }],
+    }],
+  };
+
+  function connection(options: { latestRunId?: number; anchorUpdateAffectedRows?: number } = {}) {
+    let featureId = 600;
+    let scenarioId = 700;
+    const execute = vi.fn(async (sql: string) => {
+      if (sql.includes("SELECT id FROM analysis_runs")) return [[{ id: options.latestRunId ?? run.id }]];
+      if (sql.includes("INSERT INTO spec_versions")) return [{ insertId: 99 }];
+      if (sql.includes("INSERT INTO spec_features")) return [{ insertId: featureId++ }];
+      if (sql.includes("INSERT INTO spec_scenarios")) return [{ insertId: scenarioId++ }];
+      if (sql.includes("INSERT INTO spec_changes")) return [{ insertId: 500 }];
+      // 无上一版规格 / 无人工条目 / 无墓碑：insertSpecVersion 首版基线
+      if (sql.includes("SELECT id FROM spec_versions")) return [[]];
+      if (sql.includes("FROM features LEFT JOIN features parents")) return [[]];
+      if (sql.includes("SELECT name FROM features")) return [[]];
+      if (sql.includes("SELECT f.name AS featureName")) return [[]];
+      if (sql.includes("FROM spec_features sf")) return [[]]; // rebuildSpecFileIndex：空索引
+      if (sql.includes("FROM spec_changes WHERE spec_version_id")) return [[]]; // markSpecDrift：无变化不打点
+      // upsertRelease：既有发布归当前 run（幂等短路），已有 changes → ensureRegressionTasks 早退
+      if (sql.includes("analysis_run_id AS analysisRunId")) return [[{ id: 10, analysisRunId: run.id }]];
+      if (sql.includes("SELECT id FROM releases")) return [[{ id: 10 }]];
+      if (sql.includes("SELECT COUNT(*)")) return [[{ count: 1 }]];
+      if (sql.includes("spec_version_id AS specVersionId")) return [[{ specVersionId: null }]];
+      if (sql.includes("FROM spec_changes c")) return [[]];
+      if (sql.includes("UPDATE analysis_behavior_anchor_scenarios")) return [{ affectedRows: options.anchorUpdateAffectedRows ?? 1 }];
+      if (sql.includes("UPDATE analysis_runs")) return [{ affectedRows: 1 }];
+      return [{}];
+    });
+    return {
+      execute,
+      beginTransaction: vi.fn(async () => {}),
+      commit: vi.fn(async () => {}),
+      rollback: vi.fn(async () => {}),
+      release: vi.fn(),
+    } as unknown as PoolConnection;
+  }
+
+  it("backfills final_scenario_id for anchor scenario links inside the same transaction", async () => {
+    const stub = connection();
+    dbMock.connection = stub;
+    await analysis.saveResult(run, resultWithOrigins, change, null, undefined, [link]);
+    expect(stub.execute).toHaveBeenCalledWith(
+      expect.stringContaining("UPDATE analysis_behavior_anchor_scenarios SET final_scenario_id = ?"),
+      [700, run.id, sha256(link.anchorKey), sha256(link.localScenarioKey)],
+    );
+    expect(stub.commit).toHaveBeenCalledTimes(1);
+    expect(stub.rollback).not.toHaveBeenCalled();
+  });
+
+  it("rolls back when a link's local scenario key has no final scenario mapping", async () => {
+    const stub = connection();
+    dbMock.connection = stub;
+    const missing: AnchorScenarioLink = { ...link, localScenarioKey: 'scenario|["unit:login","anchor:login-hp","099"]' };
+    await expect(analysis.saveResult(run, resultWithOrigins, change, null, undefined, [missing])).rejects.toThrow(/behavior_final_mapping_missing/);
+    expect(stub.rollback).toHaveBeenCalledTimes(1);
+    expect(stub.commit).not.toHaveBeenCalled();
+    // 缺失映射先全量收集再抛：不得发出任何半更新
+    expect(stub.execute).not.toHaveBeenCalledWith(expect.stringContaining("UPDATE analysis_behavior_anchor_scenarios"), expect.anything());
+  });
+
+  it("rolls back when the anchor link row no longer exists (affectedRows = 0)", async () => {
+    const stub = connection({ anchorUpdateAffectedRows: 0 });
+    dbMock.connection = stub;
+    await expect(analysis.saveResult(run, resultWithOrigins, change, null, undefined, [link])).rejects.toThrow(/behavior_final_mapping_row_missing/);
+    expect(stub.rollback).toHaveBeenCalledTimes(1);
+    expect(stub.commit).not.toHaveBeenCalled();
+  });
+
+  it("keeps the superseded-run guard ahead of any spec writes", async () => {
+    const stub = connection({ latestRunId: 999 });
+    dbMock.connection = stub;
+    await expect(analysis.saveResult(run, resultWithOrigins, change, null, undefined, [link])).rejects.toThrow("Analysis superseded by run 999");
+    expect(stub.rollback).toHaveBeenCalledTimes(1);
+    expect(stub.execute).not.toHaveBeenCalledWith(expect.stringContaining("INSERT INTO spec_versions"), expect.anything());
+    expect(stub.execute).not.toHaveBeenCalledWith(expect.stringContaining("UPDATE analysis_behavior_anchor_scenarios"), expect.anything());
   });
 });

@@ -1,11 +1,12 @@
 import type { PoolConnection } from "mysql2/promise";
 import type { AnalysisResult, SpecAnchorFeature } from "./ai";
 import type { RunContext } from "./analysis";
+import { compareCodePoints } from "./behavior-inventory/identity";
 import { defaultExecute, type Execute } from "./db";
 import { evidenceItems } from "./evidence";
 import { nextReference } from "./extraction-merge";
 import type { ReleaseChangeFact } from "./release-change-projection";
-import { diffSpec, featureScenarioPairMatch, featureVariantSimilar, mergeSpecSources, preserveUnchangedEvidence, scenarioBehaviorEqual, specFeatureKey, specScenarioKey, type PatchHunk, type SpecChange, type SpecFeature, type SpecScenario, type SpecTombstones } from "./spec-diff";
+import { diffSpec, featureScenarioPairMatch, featureVariantSimilar, mergeSpecSources, preserveUnchangedEvidence, scenarioBehaviorEqual, specFeatureKey, specScenarioKey, unionScenarioOriginKeys, type PatchHunk, type SpecChange, type SpecFeature, type SpecScenario, type SpecTombstones } from "./spec-diff";
 import { classifySpecHighlight } from "./spec-highlights";
 
 interface FeatureRow {
@@ -169,7 +170,14 @@ async function loadPreviousSpec(connection: PoolConnection, run: RunContext) {
   return { id: version.id, features };
 }
 
-async function insertFeatures(connection: PoolConnection, versionId: number, features: SpecFeature[]) {
+/**
+ * 写入版本快照并返回 Task 12 行为来源最终映射：Task 10 的 localScenarioKey（originKeys）
+ * → 最终 spec_scenarios 行 id。originKeys 不落任何列，只用于同事务回填
+ * analysis_behavior_anchor_scenarios.final_scenario_id。同一 origin 映射到两行是账本
+ * 不变量违例（去重/折叠丢来源），直接抛错让上层回滚，绝不静默取其一。
+ */
+async function insertFeatures(connection: PoolConnection, versionId: number, features: SpecFeature[]): Promise<Map<string, number>> {
+  const scenarioIdByLocalKey = new Map<string, number>();
   for (const [position, feature] of features.entries()) {
     const [featureResult] = await connection.execute(
       `INSERT INTO spec_features (spec_version_id, stable_key, name, summary, parent_key, source, position)
@@ -178,14 +186,23 @@ async function insertFeatures(connection: PoolConnection, versionId: number, fea
     );
     const featureId = Number((featureResult as { insertId: number }).insertId);
     for (const scenario of feature.scenarios) {
-      await connection.execute(
+      const [scenarioResult] = await connection.execute(
         `INSERT INTO spec_scenarios
           (spec_feature_id, reference, context, action, outcome, category, step_order, source, evidence)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [featureId, scenario.reference, scenario.context, scenario.action, scenario.outcome, scenario.category, scenario.step ?? null, scenario.source === undefined ? "generated" : scenario.source, JSON.stringify(scenario.evidence)],
       );
+      if (!scenario.originKeys || scenario.originKeys.length === 0) continue;
+      const scenarioId = Number((scenarioResult as { insertId: number }).insertId);
+      for (const originKey of [...scenario.originKeys].sort(compareCodePoints)) {
+        if (scenarioIdByLocalKey.has(originKey)) {
+          throw new Error(`behavior_origin_duplicate:${originKey} would map to two final scenario rows`);
+        }
+        scenarioIdByLocalKey.set(originKey, scenarioId);
+      }
     }
   }
+  return scenarioIdByLocalKey;
 }
 
 async function insertChanges(connection: PoolConnection, versionId: number, baseVersionId: number | null, changes: SpecChange[]): Promise<ReleaseChangeFact[]> {
@@ -263,7 +280,12 @@ export function foldVariantFeatures(previousFeatures: SpecFeature[], features: S
         // 并存型：变体场景并入旧键特征（featureScenarioPairMatch 口径 + 引用冲突重编号）。
         const references = existingAtPreviousKey.scenarios.map((scenario) => scenario.reference);
         for (const scenario of feature.scenarios) {
-          if (existingAtPreviousKey.scenarios.some((existing) => featureScenarioPairMatch(existing, scenario))) continue;
+          const duplicate = existingAtPreviousKey.scenarios.find((existing) => featureScenarioPairMatch(existing, scenario));
+          if (duplicate) {
+            // Task 12：被折叠判定丢弃的重复场景，其行为来源必须并入存活行
+            unionScenarioOriginKeys(duplicate, scenario);
+            continue;
+          }
           const reference = references.includes(scenario.reference) ? nextReference(references, scenario.reference) : scenario.reference;
           references.push(reference);
           existingAtPreviousKey.scenarios.push({ ...scenario, reference });
@@ -304,7 +326,7 @@ export function foldVariantFeatures(previousFeatures: SpecFeature[], features: S
   return { features: result, folds };
 }
 
-export async function insertSpecVersion(connection: PoolConnection, run: RunContext, result: AnalysisResult, options: { affectedKeys?: ReadonlySet<string>; behavioralChangePaths?: ReadonlySet<string>; changedHunksByPath?: ReadonlyMap<string, readonly PatchHunk[]> } = {}): Promise<{ specVersionId: number; specChanges: ReleaseChangeFact[]; baseline?: boolean; features: ReturnType<typeof mergeSpecSources>; collapse: SpecVersionCollapse | null; featureCollapses: FeatureCollapse[]; misplacedScenarios: MisplacedScenario[]; identityHijacksDropped: number; featureFolds: FeatureFold[] }> {
+export async function insertSpecVersion(connection: PoolConnection, run: RunContext, result: AnalysisResult, options: { affectedKeys?: ReadonlySet<string>; behavioralChangePaths?: ReadonlySet<string>; changedHunksByPath?: ReadonlyMap<string, readonly PatchHunk[]> } = {}): Promise<{ specVersionId: number; specChanges: ReleaseChangeFact[]; baseline?: boolean; features: ReturnType<typeof mergeSpecSources>; collapse: SpecVersionCollapse | null; featureCollapses: FeatureCollapse[]; misplacedScenarios: MisplacedScenario[]; identityHijacksDropped: number; featureFolds: FeatureFold[]; scenarioIdByLocalKey: Map<string, number> }> {
   const [previous, manual, tombstones] = await Promise.all([loadPreviousSpec(connection, run), loadManualSpec(connection, run.productId), loadManualTombstones(connection, run.productId)]);
   // M9 增量模式：受影响集之外的 generated 条目原样沿用上一版（三分合并：carried 种子 < AI < manual）。
   const affectedKeys = options.affectedKeys;
@@ -367,10 +389,10 @@ export async function insertSpecVersion(connection: PoolConnection, run: RunCont
     [run.productId, run.repositoryId, run.id, run.afterSha, run.outputLanguage === "en" ? "en" : "zh-CN"],
   );
   const versionId = Number((versionResult as { insertId: number }).insertId);
-  await insertFeatures(connection, versionId, foldedFeatures);
+  const scenarioIdByLocalKey = await insertFeatures(connection, versionId, foldedFeatures);
   const specChanges = await insertChanges(connection, versionId, previous === null ? null : previous.id, changes);
   // 合并后的完整 spec 一并返回：M9 影子对比必须以 carry-forward 之后的规格为对象。
-  return { specVersionId: versionId, specChanges, baseline: previous === null, features: foldedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds };
+  return { specVersionId: versionId, specChanges, baseline: previous === null, features: foldedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds, scenarioIdByLocalKey };
 }
 
 /** 规格坍缩（护栏）：新版场景数较上一版骤降超过阈值。生产 v95（2026-11-08）178→83 即此形态。 */

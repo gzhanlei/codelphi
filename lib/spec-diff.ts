@@ -611,6 +611,14 @@ export interface SpecTombstones {
   scenarioKeys: ReadonlySet<string>;
 }
 
+/** Task 12：行为来源并集（kept 原有在前、incoming 去重追加）。合并/折叠层丢弃重复文案时调用，保证每个 origin 都存活到最终行。 */
+export function unionScenarioOriginKeys(kept: SpecScenario, incoming: SpecScenario) {
+  if (!incoming.originKeys || incoming.originKeys.length === 0) return;
+  const union = kept.originKeys ? [...kept.originKeys] : [];
+  for (const key of incoming.originKeys) if (!union.includes(key)) union.push(key);
+  kept.originKeys = union;
+}
+
 export function specScenarioKey(featureName: string, reference: string) {
   return `${specFeatureKey(featureName)}:${reference}`;
 }
@@ -637,7 +645,12 @@ export function mergeSpecSources(generated: SpecFeature[], manual: SpecFeature[]
       continue;
     }
     const scenarios = scenarioMap(existing);
-    for (const scenario of feature.scenarios) scenarios.set(scenario.reference, scenario);
+    for (const scenario of feature.scenarios) {
+      const replaced = scenarios.get(scenario.reference);
+      scenarios.set(scenario.reference, scenario);
+      // Task 12：manual 文本胜出（红线不动），但被替换的 generated 场景的行为来源必须存活到最终行
+      if (replaced) unionScenarioOriginKeys(scenario, replaced);
+    }
     const mergedFeature = feature.source === "generated" ? { ...feature, summary: existing.summary } : feature;
     merged.set(key, { ...mergedFeature, scenarios: [...scenarios.values()] });
   }

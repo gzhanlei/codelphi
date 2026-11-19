@@ -69,7 +69,7 @@ vi.mock("../lib/incremental-shadow", async (importOriginal) => ({
 }));
 const { partitionedSourcesMock } = vi.hoisted(() => ({ partitionedSourcesMock: vi.fn() }));
 vi.mock("../lib/remote-analysis", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/remote-analysis")>(), getRemoteAnalysisSources: vi.fn(), getPartitionedAnalysisSources: partitionedSourcesMock }));
-vi.mock("../lib/spec-versions", () => ({ loadLatestSpecVersionLanguage: vi.fn(async () => null), insertSpecVersion: vi.fn(async () => ({ specVersionId: 44, specChanges: [], features: [{ name: "统一登录", summary: "s", scenarios: [] }], collapse: null, featureCollapses: [], misplacedScenarios: [], identityHijacksDropped: 0, featureFolds: [] })), loadLatestSpecFeatures: vi.fn(async () => ({ specVersionId: 44, features: [{ name: "统一登录", summary: "s", scenarios: [] }] })), loadPreviousFeatureNames: vi.fn(async () => ["统一登录", "支付", "规格导出"]), loadPreviousSpecText: vi.fn(async () => [{ name: "统一登录", summary: "s", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy" }] }]) }));
+vi.mock("../lib/spec-versions", () => ({ loadLatestSpecVersionLanguage: vi.fn(async () => null), insertSpecVersion: vi.fn(async () => ({ specVersionId: 44, specChanges: [], features: [{ name: "统一登录", summary: "s", scenarios: [] }], collapse: null, featureCollapses: [], misplacedScenarios: [], identityHijacksDropped: 0, featureFolds: [], scenarioIdByLocalKey: new Map() })), loadLatestSpecFeatures: vi.fn(async () => ({ specVersionId: 44, features: [{ name: "统一登录", summary: "s", scenarios: [] }] })), loadPreviousFeatureNames: vi.fn(async () => ["统一登录", "支付", "规格导出"]), loadPreviousSpecText: vi.fn(async () => [{ name: "统一登录", summary: "s", scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy" }] }]) }));
 vi.mock("../lib/architecture-version", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/architecture-version")>(), generateRepositoryArchitectureVersion: vi.fn(async () => ({ status: "accepted", errorMessage: null })) }));
 const { syncFeatureFlowsForVersion } = vi.hoisted(() => ({ syncFeatureFlowsForVersion: vi.fn(async () => ({ generated: 0, copied: 0, failed: 0 })) }));
 vi.mock("../lib/feature-flow-service", () => ({ syncFeatureFlowsForVersion, regenerateFeatureFlowForWorkbenchFeature: vi.fn() }));
@@ -208,6 +208,7 @@ describe("analysis orchestration", () => {
       misplacedScenarios: [],
       identityHijacksDropped: 0,
       featureFolds: [],
+      scenarioIdByLocalKey: new Map(),
     });
     connection.execute.mockImplementation(async (sql: string) => {
       if (sql.includes("SET status = 'running'")) return [{ affectedRows: 1 }];
@@ -506,7 +507,7 @@ describe("analysis orchestration", () => {
         merged.push({ ...feature });
       }
       mergedCalls.push(merged);
-      return { specVersionId: 44, specChanges: [], features: merged, collapse: null, featureCollapses: [], misplacedScenarios: [], identityHijacksDropped: 0, featureFolds: [] };
+      return { specVersionId: 44, specChanges: [], features: merged, collapse: null, featureCollapses: [], misplacedScenarios: [], identityHijacksDropped: 0, featureFolds: [], scenarioIdByLocalKey: new Map() };
     });
     return mergedCalls;
   };
@@ -679,6 +680,7 @@ describe("analysis orchestration", () => {
       misplacedScenarios: [],
       identityHijacksDropped: 0,
       featureFolds: [],
+      scenarioIdByLocalKey: new Map(),
     });
     await runAnalysis(8);
     expect(connection.rollback).toHaveBeenCalled();

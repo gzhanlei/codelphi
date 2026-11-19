@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { PoolConnection } from "mysql2/promise";
 import type { AnalysisResult } from "../lib/ai";
 import type { RunContext } from "../lib/analysis";
+import type { MergeResult } from "../lib/extraction-merge";
 import { detectFeatureCollapses, detectMisplacedScenarios, detectSpecCollapse, featureParentKey, foldVariantFeatures, insertSpecVersion, loadLatestSpecVersionLanguage, loadPreviousFeatureNames } from "../lib/spec-versions";
 const run: RunContext = { id: 8, repositoryId: 3, productId: 4, owner: "gzhanlei", name: "radar", beforeSha: "a", afterSha: "b", connectionId: null, provider: "github", organizationId: 1, productSlug: "radar", productName: "Radar" };
 const scenario = { reference: "HP-1", context: "Visitor", action: "Signs in", outcome: "Dashboard", category: "happy" as const, evidence: [] };
@@ -20,6 +21,7 @@ function connection(previousVersions: Array<{ id: number }>, manual = false, tom
   const changes: unknown[][] = [];
   let featureId = 100;
   let changeId = 500;
+  let scenarioId = 700;
   const connection = {
     execute: vi.fn(async (sql: string, parameters: unknown[] = []) => {
       if (sql.includes("SELECT id FROM spec_versions")) return [previousVersions];
@@ -36,6 +38,7 @@ function connection(previousVersions: Array<{ id: number }>, manual = false, tom
       if (sql.includes("FROM scenarios WHERE source = 'manual'")) return [[{ featureId: 5, reference: "HP-9", context: "User", action: "Reads", outcome: "Learns", category: "happy", source: "manual", evidence: "[]" }]];
       if (sql.includes("INSERT INTO spec_versions")) return [{ insertId: 99 }];
       if (sql.includes("INSERT INTO spec_features")) return [{ insertId: featureId++ }];
+      if (sql.includes("INSERT INTO spec_scenarios")) return [{ insertId: scenarioId++ }];
       if (sql.includes("INSERT INTO spec_changes")) {
         changes.push(parameters);
         return [{ insertId: changeId++ }];
@@ -436,5 +439,84 @@ describe("insertSpecVersion BM-11 装配折叠集成", () => {
     // 并入的新场景（HP-2）落快照（快照每版全量重写功能场景，carried 的 HP-1 本就随之落库）
     const inserted = (db.execute as unknown as ReturnType<typeof vi.fn>).mock.calls.filter((call: unknown[]) => String(call[0]).includes("INSERT INTO spec_scenarios"));
     expect(inserted.some((call: unknown[]) => (call[1] as unknown[])?.includes("HP-2"))).toBe(true);
+  });
+});
+
+describe("insertSpecVersion 行为来源最终映射 (Task 12)", () => {
+  const scenarioInserts = (db: { execute: unknown }) =>
+    (db.execute as unknown as ReturnType<typeof vi.fn>).mock.calls.filter((call: unknown[]) => String(call[0]).includes("INSERT INTO spec_scenarios"));
+
+  it("maps every origin to the id of its final spec_scenarios row", async () => {
+    const db = connection([]);
+    const input: MergeResult = {
+      ...result,
+      features: [{ name: "Auth", summary: "OAuth", scenarios: [{ ...scenario, originKeys: ["scenario|k2", "scenario|k1"] }] }],
+    };
+    const { scenarioIdByLocalKey } = await insertSpecVersion(db, run, input);
+    // 同一条最终场景的两个 origin（跨锚点共撑）都映射到同一行；originKeys 不落任何列
+    expect(scenarioIdByLocalKey.get("scenario|k1")).toBe(700);
+    expect(scenarioIdByLocalKey.get("scenario|k2")).toBe(700);
+    expect(scenarioIdByLocalKey.size).toBe(2);
+    const inserts = scenarioInserts(db);
+    expect(inserts).toHaveLength(1);
+    expect(JSON.stringify(inserts[0][1])).not.toContain("originKeys");
+    expect(JSON.stringify(inserts[0][1])).not.toContain("scenario|k1");
+  });
+
+  it("returns an empty mapping for legacy results without origins", async () => {
+    const db = connection([]);
+    const { scenarioIdByLocalKey } = await insertSpecVersion(db, run, { ...result, features: [result.features[0]] });
+    expect(scenarioIdByLocalKey.size).toBe(0);
+  });
+
+  it("keeps origins when a manual scenario replaces the generated one at the same reference", async () => {
+    const db = connection([], true);
+    const input: MergeResult = {
+      ...result,
+      features: [{ name: "Manual feature", summary: "AI wording", scenarios: [{ ...scenario, reference: "HP-9", originKeys: ["scenario|k9"] }] }],
+    };
+    const { scenarioIdByLocalKey, features } = await insertSpecVersion(db, run, input);
+    // manual 文本胜出（红线不动），但 origin 必须存活并指向最终那一行
+    const manual = features.find((feature) => feature.name === "Manual feature");
+    expect(manual?.scenarios.filter((item) => item.reference === "HP-9")).toHaveLength(1);
+    expect(scenarioIdByLocalKey.get("scenario|k9")).toBe(700);
+  });
+
+  it("unions origins onto the surviving scenario when the BM-11 fold drops a variant duplicate", async () => {
+    const db = connection([{ id: 11 }]);
+    // carried 的 Authentication（上一版 HP-1：Visitor/Signs in/Dashboard）在增量下原样沿用；
+    // AI 变体 Authentication flow 折叠并入，首条与 carried HP-1 行为等价（duplicate），第二条新增
+    const input: MergeResult = {
+      ...result,
+      features: [
+        {
+          name: "Authentication flow",
+          summary: "Old",
+          scenarios: [
+            { ...scenario, originKeys: ["scenario|variant-dup"] },
+            { ...scenario, reference: "HP-2", outcome: "Onboarding", originKeys: ["scenario|variant-new"] },
+          ],
+        },
+      ],
+    };
+    const { scenarioIdByLocalKey, features, featureFolds } = await insertSpecVersion(db, run, input, { affectedKeys: new Set(["unrelated"]) });
+    expect(featureFolds).toHaveLength(1);
+    const merged = features.find((feature) => feature.name === "Authentication");
+    expect(merged?.scenarios.map((item) => item.reference)).toEqual(["HP-1", "HP-2"]);
+    // 被折叠判定丢弃的重复场景，其 origin 并入存活行：variant-dup → carried HP-1 的行 id
+    expect(scenarioIdByLocalKey.get("scenario|variant-dup")).toBe(700);
+    expect(scenarioIdByLocalKey.get("scenario|variant-new")).toBe(701);
+  });
+
+  it("rejects when one origin would map to two final scenario rows", async () => {
+    const db = connection([]);
+    const input: MergeResult = {
+      ...result,
+      features: [
+        { name: "Feature A", summary: "a", scenarios: [{ ...scenario, originKeys: ["scenario|dup"] }] },
+        { name: "Feature B", summary: "b", scenarios: [{ ...scenario, reference: "HP-9", outcome: "Different", originKeys: ["scenario|dup"] }] },
+      ],
+    };
+    await expect(insertSpecVersion(db, run, input)).rejects.toThrow(/scenario\|dup/);
   });
 });
