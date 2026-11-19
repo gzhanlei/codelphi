@@ -3,7 +3,7 @@ import { appendFile, link, lstat, mkdir, readFile, rename, rm, writeFile } from 
 import { basename, dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { runSnapshot, type SnapshotRunOptions, type SnapshotRunResult } from "../lib/snapshot/run";
-import { completeSnapshotWorkspace, finalizeSnapshotWorkspace, prepareSnapshotWorkspace, readSnapshotWorkOrder } from "../lib/snapshot/workspace";
+import { completeSnapshotWorkspace, finalizeSnapshotWorkspace, prepareSnapshotWorkspace, readSnapshotWorkOrder, readZeroYieldWorkOrderIds } from "../lib/snapshot/workspace";
 import { resolveCompletionBackend } from "../lib/snapshot/host-ai";
 import { standaloneGatewayHost, type CompletionUsageHandler } from "../lib/llm-client";
 import type { SnapshotProgressEvent } from "../lib/snapshot/types";
@@ -166,20 +166,21 @@ async function workspaceMain(argv: string[], dependencies: CliDependencies) {
   const stdout = dependencies.stdout ?? ((message: string) => console.log(message));
   const stderr = dependencies.stderr ?? ((message: string) => console.error(message));
   try {
-    const { values, positionals } = parseArgs({
-      args,
-      allowPositionals: true,
-      options: {
-        ref: { type: "string" },
-        scope: { type: "string", multiple: true },
-        language: { type: "string" },
-        workdir: { type: "string" },
-        partition: { type: "string" },
-        concurrency: { type: "string" },
-        "env-file": { type: "string" },
-        standalone: { type: "boolean", default: false },
-      },
-    }) as { values: CliValues & { workdir?: string; partition?: string; concurrency?: string }; positionals: string[] };
+      const { values, positionals } = parseArgs({
+        args,
+        allowPositionals: true,
+        options: {
+          ref: { type: "string" },
+          scope: { type: "string", multiple: true },
+          language: { type: "string" },
+          workdir: { type: "string" },
+          partition: { type: "string" },
+          concurrency: { type: "string" },
+          "env-file": { type: "string" },
+          standalone: { type: "boolean", default: false },
+          "until-covered": { type: "boolean", default: false },
+        },
+      }) as { values: CliValues & { workdir?: string; partition?: string; concurrency?: string; "until-covered"?: boolean }; positionals: string[] };
     if (!values.workdir) {
       stderr(language === "en" ? "Missing --workdir" : "缺少 --workdir");
       return 2;
@@ -230,6 +231,28 @@ async function workspaceMain(argv: string[], dependencies: CliDependencies) {
       stdout(language === "en"
         ? `Complete finished: ${outcome.completed.length} completed, ${outcome.failed.length} failed, ${outcome.skippedExisting} reused; presentation: ${outcome.presentation}`
         : `完成结束：${outcome.completed.length} 个成功，${outcome.failed.length} 个失败，复用已有 ${outcome.skippedExisting} 个；展示结果：${outcome.presentation}`);
+      if (outcome.failed.length > 0) return 1;
+      // W2 收敛趟数（--until-covered）：零产出分区=该切片没有带锚定的场景，删除其结果
+      // 定向重提取，最多 3 轮；某轮后零产出分区清空即收敛。
+      if (values["until-covered"]) {
+        const MAX_CONVERGENCE_ROUNDS = 3;
+        for (let round = 1; round <= MAX_CONVERGENCE_ROUNDS; round += 1) {
+          const zeroYield = await readZeroYieldWorkOrderIds(directory);
+          if (zeroYield.length === 0) break;
+          stdout(language === "en"
+            ? `Convergence round ${round}: re-extracting ${zeroYield.length} zero-yield partition(s)`
+            : `收敛第 ${round} 轮：${zeroYield.length} 个零产出分区重新提取`);
+          for (const id of zeroYield) await rm(join(directory, "results", `${id}.json`), { force: true });
+          const roundOutcome = await completeSnapshotWorkspace({
+            directory,
+            client: backend.client,
+            concurrency: Number(values.concurrency) || 4,
+            onProgress: (message) => stderr(message),
+          });
+          await pendingUsageWrites;
+          if (roundOutcome.failed.length > 0) break;
+        }
+      }
       return outcome.failed.length > 0 ? 1 : 0;
     }
     if (command === "finalize" && positionals.length === 0) {

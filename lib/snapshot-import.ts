@@ -151,6 +151,8 @@ export interface ImportDeps {
   execute: (sql: string, params?: unknown[]) => Promise<unknown>;
   currentContractVersion: string;
   organizationId: number;
+  /** 测试注入：跳过真实 GitHub 可达性探测。 */
+  probeRemote?: (identity: ImportArtifact["identity"], origin: { owner: string; name: string } | null) => Promise<RemoteProbeResult>;
 }
 
 function rowsOf(result: unknown): Array<any> {
@@ -264,7 +266,84 @@ async function insertDraftFeatures(deps: ImportDeps, productId: number, features
   return scenariosImported;
 }
 
-export async function importSnapshotArtifact(deps: ImportDeps, raw: unknown, identityInput?: { slug?: string }): Promise<{ productId: number; slug: string; featuresImported: number; scenariosImported: number; mode: ImportDecision["mode"]; binding: "created" | "existing" | "unbound" }> {
+
+/** 首次导入赠 SAU（§11，用户拍板 2026-11-18）：mode=create_product 时赠 1 SAU 到该组织
+ * 账户的 Trial 钱包，幂等键 grt:import-gift:{productId}（同产品只赠一次）。best-effort：
+ * 组织无 billing 账户行等异常只降级 gift.granted=false，绝不拖垮导入本身。 */
+export async function grantImportGift(connection: { execute: (sql: string, params?: unknown[]) => Promise<unknown> }, organizationId: number, productId: number): Promise<{ granted: boolean }> {
+  try {
+    const accountId = organizationId; // 账户按组织 id 一一对应（billing 约定）
+    await connection.execute(`SELECT account_id FROM billing_accounts WHERE account_id = ? FOR UPDATE`, [accountId]);
+    const walletRows = rowsOf(await connection.execute(
+      `SELECT wallet_id, remaining_sau AS remaining FROM billing_quota_wallets
+       WHERE account_id = ? AND quota_type = 'trial' AND status = 'active'
+       ORDER BY wallet_id DESC LIMIT 1 FOR UPDATE`,
+      [accountId],
+    ));
+    let walletId: number;
+    let remaining: number;
+    const wallet = walletRows[0] as { wallet_id: number; remaining: number } | undefined;
+    if (wallet) {
+      walletId = Number(wallet.wallet_id);
+      remaining = Number(wallet.remaining);
+    } else {
+      const insert = rowsOf(await connection.execute(
+        `INSERT INTO billing_quota_wallets (account_id, quota_type, remaining_sau, reserved_sau, source_key, status, balance_after_remaining, balance_after_reserved)
+         VALUES (?, 'trial', 0, 0, ?, 'active', 0, 0)`,
+        [accountId, `trial:org:${accountId}`],
+      ));
+      walletId = Number((insert[0] as { insertId: number }).insertId);
+      remaining = 0;
+    }
+    const newRemaining = remaining + 1;
+    const idempotencyKey = `grt:import-gift:${productId}`;
+    const dup = rowsOf(await connection.execute("SELECT entry_id FROM billing_ledger WHERE idempotency_key = ? FOR UPDATE", [idempotencyKey]));
+    if (dup.length > 0) return { granted: false };
+    await connection.execute(
+      `INSERT INTO billing_ledger (account_id, wallet_id, idempotency_key, action, quota_type, units, reason, balance_after_remaining, balance_after_reserved)
+       VALUES (?, ?, ?, 'granted', 'trial', 1, ?, ?, ?)`,
+      [accountId, walletId, idempotencyKey, `import gift: product ${productId}`, newRemaining, 0],
+    );
+    await connection.execute(
+      "UPDATE billing_quota_wallets SET remaining_sau = ?, balance_after_remaining = ?, balance_after_reserved = reserved_sau WHERE wallet_id = ?",
+      [newRemaining, newRemaining, walletId],
+    );
+    return { granted: true };
+  } catch {
+    return { granted: false };
+  }
+}
+
+
+/** 远端可达性探针（§5 三级匹配的 level-1 证据，2026-11-19 B 波）：revision 在远端默认分支
+ * 可达 → linked_sha；不可达 → unlinked（改写历史/treeSha 校验属 Stage B+）。失败诚实降级。 */
+export interface RemoteProbeResult {
+  state: "reachable" | "unreachable" | "unverified";
+  changedFiles?: number;
+  reason?: string;
+}
+
+export async function probeRemoteReachability(deps: ImportDeps, identity: ImportArtifact["identity"], origin: { owner: string; name: string } | null, inject?: { getRepository?: (input: { owner: string; name: string; defaultBranch: string }, access: { connectionId: number | null; organizationId: number }) => Promise<{ defaultBranch?: string }>; getChangeContext?: (repo: { defaultBranch?: string }, before: string, after: string, access: { connectionId: number | null; organizationId: number }) => Promise<{ files: ReadonlyArray<{ path: string; patch?: string; status?: string }> }> }): Promise<RemoteProbeResult> {
+  if (!origin) return { state: "unverified", reason: "no_github_origin" };
+  try {
+    const { getCodeHostingAdapter } = await import("./code-hosting/registry");
+    const access = { connectionId: null as number | null, organizationId: 0 };
+    const adapter = getCodeHostingAdapter("github");
+    const baseRepo = { owner: origin.owner, name: origin.name, defaultBranch: "main" };
+    const repository = inject?.getRepository
+      ? { ...baseRepo, ...(await inject.getRepository(baseRepo, access)) }
+      : await adapter.getRepository(baseRepo, access);
+    const branch = repository?.defaultBranch ?? "main";
+    const change = inject?.getChangeContext
+      ? await inject.getChangeContext(repository, identity.revision, branch, access)
+      : await adapter.getChangeContext(repository, identity.revision, branch, access);
+    return { state: "reachable", changedFiles: Array.isArray(change.files) ? change.files.length : 0 };
+  } catch (error) {
+    return { state: "unreachable", reason: error instanceof Error ? error.message.slice(0, 160) : "unknown" };
+  }
+}
+
+export async function importSnapshotArtifact(deps: ImportDeps, raw: unknown, identityInput?: { slug?: string }): Promise<{ productId: number; slug: string; featuresImported: number; scenariosImported: number; mode: ImportDecision["mode"]; binding: "created" | "existing" | "unbound"; gift: { granted: boolean }; remote: RemoteProbeResult; evidenceMode: "anchors" }> {
   const features = validateImportArtifact(raw, deps.currentContractVersion);
   const artifact = raw as ImportArtifact;
   const identity = artifact.identity;
@@ -278,5 +357,9 @@ export async function importSnapshotArtifact(deps: ImportDeps, raw: unknown, ide
     `UPDATE products SET seeded_snapshot_sha = ?, seeded_tree_sha = ?, seeded_dirty = ?, seeded_contract_version = ?, seeded_at = CURRENT_TIMESTAMP(3) WHERE id = ?`,
     [identity.revision, identity.treeSha ?? null, identity.workingTreeDirty ? 1 : 0, artifact.contractVersion, target.productId],
   );
-  return { productId: target.productId, slug: target.slug, featuresImported: features.length, scenariosImported, mode: target.mode, binding: target.binding };
+  const gift = target.mode === "create_product" ? await grantImportGift(deps, deps.organizationId, target.productId) : { granted: false };
+  const remote = target.binding === "created" ? await (deps.probeRemote ? deps.probeRemote(identity, origin) : probeRemoteReachability(deps, identity, origin)) : { state: "unverified" as const, reason: "reused_or_unbound" };
+  // evidence mode B 是 BYO 默认（§8.1）：导入只持久化 path+行号锚点，代码摘录（artifact 的
+  // evidenceSnippets）从不同步入库——服务器零摘录字节。
+  return { productId: target.productId, slug: target.slug, featuresImported: features.length, scenariosImported, mode: target.mode, binding: target.binding, gift, remote, evidenceMode: "anchors" as const };
 }

@@ -143,6 +143,7 @@ describe("importSnapshotArtifact 分支覆盖（resolveTargetProduct 三路径�
 
   it("registers the repository row when the origin is new (created binding)", async () => {
     const { importSnapshotArtifact } = await import("../lib/snapshot-import");
+    vi.fn(); // 保持 vi 引用（顶部已导入）
     const calls: string[] = [];
     const deps = fakeDeps((sql) => {
       calls.push(String(sql));
@@ -151,8 +152,11 @@ describe("importSnapshotArtifact 分支覆盖（resolveTargetProduct 三路径�
       if (sql.startsWith("INSERT INTO features")) return [{ insertId: 501 }];
       return [[]];
     });
-    const receipt = await importSnapshotArtifact(deps, artifact());
+    const probeRemote = vi.fn().mockResolvedValue({ state: "reachable", changedFiles: 2 });
+    const receipt = await importSnapshotArtifact({ ...deps, probeRemote }, artifact());
     expect(receipt.binding).toBe("created");
+    expect(probeRemote).toHaveBeenCalled();
+    expect(receipt.remote).toEqual({ state: "reachable", changedFiles: 2 });
     const repoCall = calls.findIndex((sql) => sql.startsWith("INSERT INTO repositories"));
     expect(repoCall).toBeGreaterThan(-1);
     expect(receipt.productId).toBe(77);

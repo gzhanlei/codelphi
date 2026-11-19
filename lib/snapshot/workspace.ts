@@ -196,6 +196,22 @@ export async function finalizeSnapshotWorkspace(directory: string) {
   return { analysis, report, html, outputPath, snapshotExportPath };
 }
 
+/** 收敛趟数（W2 客户端语义，2026-11-19）：识别零产出工作单——该分区提取没有带锚定的场景。
+ *  调用方删除这些结果后重跑 complete，即为一轮定向重提取；边际产出 < ε 时停止。 */
+export async function readZeroYieldWorkOrderIds(directory: string): Promise<string[]> {
+  const manifest = await readManifest(directory);
+  const zero: string[] = [];
+  for (const id of manifest.workOrderIds) {
+    try {
+      const result = parseAnalysisContent(await readFile(join(directory, "results", `${id}.json`), "utf8"));
+      if ((result.features?.length ?? 0) === 0) zero.push(id);
+    } catch {
+      // 缺失/不可解析结果由 complete 自身的重试与失败计数负责，这里跳过
+    }
+  }
+  return zero;
+}
+
 export async function readSnapshotWorkOrder(directory: string, workOrderId: string) {
   const manifest = await readManifest(directory);
   if (!manifest.workOrderIds.includes(workOrderId)) throw new Error(`Unknown work order: ${workOrderId}`);

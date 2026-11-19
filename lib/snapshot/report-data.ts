@@ -161,6 +161,10 @@ export function buildSnapshotReportData(analysis: SnapshotAnalysis, budgets: Par
 
   const productHasEvidence = analysis.result.product.evidence.length > 0;
   if (!productHasEvidence) warnings.push({ code: "product_description_unavailable" });
+  // BYO 私有仓库披露（设计 §10 红线）：本地/非公网来源的报告含真实源码摘录，必须显式警告勿公开分发。
+  if (analysis.identity.source !== "github") {
+    warnings.push({ code: "local_source_excerpts_privacy" });
+  }
   return {
     schemaVersion: 1,
     language: analysis.language,

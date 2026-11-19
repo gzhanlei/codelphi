@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>代码不说谎：把 GitHub 仓库变成一份人人可读的产品规格</title>
+<style>
+  :root{
+    --ink:#0E2A21;      /* 品牌深绿 */
+    --acc:#2E7D5B;      /* 强调绿 */
+    --mut:#51635B;      /* 次级文字 */
+    --line:#D8E4DD;     /* 细线 */
+    --tint:#F2F7F3;     /* 浅底 */
+  }
+  @page { size: A4; margin: 20mm 18mm; }
+  html, body { margin:0; padding:0; background:#ffffff; }
+  body{
+    font-family:"Hiragino Sans GB","PingFang SC","Microsoft YaHei",sans-serif;
+    color:#23342C;
+    font-size:11.5pt;
+    line-height:1.9;
+    orphans:2; widows:2;
+  }
+  /* ---------- 头部 ---------- */
+  .kicker{
+    font-size:9pt; letter-spacing:.42em; color:var(--acc);
+    text-transform:uppercase; margin:0 0 14pt;
+  }
+  h1{
+    font-family:"Songti SC","STSong",Georgia,serif;
+    font-size:24pt; line-height:1.45; font-weight:700;
+    color:var(--ink); margin:0 0 10pt;
+  }
+  .head-rule{ height:2.5pt; background:var(--ink); width:64pt; margin:0 0 26pt; }
+  /* ---------- 标题 ---------- */
+  h2{
+    font-family:"Songti SC","STSong",Georgia,serif;
+    font-size:15pt; font-weight:700; color:var(--ink);
+    margin:26pt 0 10pt; padding-bottom:6pt;
+    border-bottom:1px solid var(--line);
+    break-after:avoid;
+  }
+  h2.newpage{ break-before:page; margin-top:0; }
+  /* ---------- 正文 ---------- */
+  p{ margin:0 0 9pt; text-align:justify; }
+  strong{ color:var(--ink); font-weight:700; }
+  a{ color:var(--acc); text-decoration:none; border-bottom:0.5pt solid rgba(46,125,91,.4);
+     overflow-wrap:break-word; word-break:break-all; }
+  /* 角色段（"产品经理：……"）前导粗体作为小标题 */
+  .role strong:first-child{ display:inline; }
+  /* 结语链接列表 */
+  ul.links{ list-style:none; padding:0; margin:12pt 0 0; }
+  ul.links li{ padding:7pt 0 7pt 2pt; border-bottom:1px solid var(--line); font-size:10.5pt; }
+  ul.links li .lab{ display:inline-block; width:8em; color:var(--mut); }
+  .fin{
+    margin-top:20pt; padding:12pt 16pt; background:var(--tint);
+    border-left:3px solid var(--acc); color:var(--ink);
+    font-family:"Songti SC","STSong",Georgia,serif; font-size:11.5pt;
+    break-inside:avoid;
+  }
+</style>
+</head>
+<body>
+
+<div class="kicker">CoDelphi · 产品介绍</div>
+<h1>代码不说谎：把 GitHub 仓库变成一份人人可读的产品规格</h1>
+<div class="head-rule"></div>
+
+<h2>同一个产品，四种说法</h2>
+<p>想象一个再普通不过的工作日。</p>
+<p>产品经理想知道上个版本到底改了什么，翻了一圈提交记录没看懂，最后还是去问研发——被第三次打断的同事叹了口气。QA 面对明天的发版，凭经验和直觉圈回归范围，圈多了浪费人力，圈少了心里发虚。技术负责人要向管理层汇报进展，能拿出来的只有一份半年没更新的文档和几张截图。刚接手项目的新同事对着代码仓库发呆：这个产品到底有哪些功能？每个功能背后藏着哪些用户场景？文档没写，问不出，唯一说得清的人下个月离职。</p>
+<p>四个场景，同一个病根：<strong>产品行为的真相只存在于代码里，而读代码是一种昂贵的翻译。</strong> 每个角色都在用各自的方式翻译同一份代码——文档、会议、口头交接——然后得出互相割裂的认知。文档与代码之间的鸿沟，就是这样一道一道裂开的。</p>
+<p>CoDelphi 的解法朴素到近乎固执：<strong>代码不说谎，那就让代码来讲述它自己。</strong></p>
+
+<h2>一个续费了二十多年的域名</h2>
+<p>二十多年前，我和两位朋友一起做过一个叫 CoDelphi 的网站，为中国 Delphi 程序员提供技术知识和讨论社区。后来我加入 CSDN，那个网站完成了它的历史使命，悄然落幕，但域名我一直续费到现在。</p>
+<p>这些年，我的工作岗位覆盖了产品研发管理和经营管理。做管理最大的收获之一，是终于看全了一个产品在不同角色眼中的样子——研发眼里的实现、产品眼里的需求、测试眼里的用例、老板眼里的数字，中间隔着一条条认知的裂缝；也终于看清文档与代码之间那道鸿沟有多深。作为写了三十年代码的老程序员，我越来越确信一件事：<strong>代码不说谎</strong>。它可能写得烂、可能有 bug，但它永远是产品行为最忠实、最完整的记录。</p>
+<p>那就让代码来讲述它自己吧。于是，这个续费了二十多年的域名等来了它的第二次使命——CoDelphi 项目与 CoDelphi.com 网站由此而来。</p>
+
+<h2>CoDelphi 是什么</h2>
+<p>一句话：<strong>CoDelphi 把 GitHub 仓库变成一份可追溯的产品规格。</strong></p>
+<p>连接仓库之后，它会还给你三样东西。</p>
+<p><strong>一份活的功能与场景清单。</strong> AI 通读代码，提取出产品有哪些功能、每个功能支撑哪些用户场景，按「正常流程、边界情况、异常处理」分类，整理成两级功能树。最重要的规则只有一条：<strong>每一条结论都必须附带源码证据</strong>——AI 只被允许引用它本次真正读过的代码文件和行号，你可以点开每一条，直达对应的源码。</p>
+<p><strong>一条随代码演进的行为时间线。</strong> 每次代码推送，CoDelphi 自动分析本次行为变化，以「改变前 → 改变后」的对比呈现：哪些功能新增了场景、哪些行为被修改、哪些被移除，一目了然。仓库安静的日子，它不制造噪音。</p>
+<p><strong>一个人机协作的工作台。</strong> AI 提取的内容全部可以人工修订和补充。凡是标记为「人工来源」的内容，后续的自动分析永远不会覆盖——AI 负责规模，人负责签发。</p>
+<p>这里要诚实地说清楚一件事：<strong>CoDelphi 不判断你的代码写得对不对。</strong> 它是一本行为账本，记录「产品现在是什么行为、刚刚变成了什么」，而不是正确性判据。证据可溯也不等于结论无误——所以才把人工核实做进了产品的核心机制里。AI 翻译，人签发，这是 CoDelphi 的工作方式。</p>
+
+<h2>它为谁而生</h2>
+<p><strong>产品经理：不再问「研发到底做了什么」。</strong><br>
+打开产品页，功能树和场景清单让你不读一行代码就能建立产品全貌；发版之后看行为变化对比，认知同步的速度等于研发合并的速度；写新需求之前，先查这个功能现有哪些场景，把「现状边界」写进需求文档。发现 AI 哪句说得不准？直接在页面上改。</p>
+<p><strong>QA：让「测什么」由事实决定。</strong><br>
+发版页的行为变化清单，就是这一次的回归范围——变了哪些功能、哪些场景，每条附证据；「未发现行为变化」的版本，可以放心瘦身回归。场景的「正常/边界/异常」分类，本身就是一套现成的用例划分方案。核实过的场景可以固化为「QA 验证过的基线」，AI 更新不覆盖。</p>
+<p><strong>技术负责人：把产品认知变成公司资产。</strong><br>
+团队所有产品接入后，一个页面看全每个产品的功能规模与发布节奏；向管理层汇报，用按版本确定的行为变化说话，每项有源码证据背书；复盘事故时，查「这个行为最后一次变化是哪个版本」；最现实的一条——成员离职后，团队至少留下一份 AI 提取加人工修订的产品认知基线，而不是随人蒸发。</p>
+<p><strong>开发者：接手陌生仓库，不再从通读代码开始。</strong><br>
+第一次接手项目，先读行为全貌，每条结论点开证据直达源码；提交 Pull Request 时，预演机器人会告诉你这个 PR 会改变哪些产品行为；写代码时，你的 AI 助手（Claude、ChatGPT 等）可以通过 MCP 直接查询产品的规格事实——让助手引用带证据的产品事实，而不是靠猜。</p>
+<p><strong>六边形战士：一个人，就是一支队伍。</strong><br>
+AI 编程时代，越来越多独立开发者和一人公司的日常是：上午定需求、下午写代码、晚上验收发版、周末对外汇报——四五个角色一个人全包。但角色可以合并，认知不能省略：AI 让你写代码的速度快了十倍，认知带宽却没有。最先体会到「自己写的产品自己说不清」的，恰恰是速度最快的那批人——三周前让 AI 实现的那个功能，今天连作者本人都讲不清它现在到底是什么行为。</p>
+<p>对这样的人，CoDelphi 一份顶四份：功能树与场景清单，是你永远和代码同步的产品文档，写新需求前先查现状边界（产品经理那份）；每次推送的行为变化清单，就是验收清单——AI 写的代码，你逐条核对它宣称的行为变化再签发，这正是 AI 时代最需要的那道人工闸门（QA 那份）；发布稿一键生成对外公告，哪天产品做起来了要招人，这份可追溯的规格就是现成的交接文档，新搭档从一份带证据的规格接手，而不是从你脑子里的记忆接手（技术负责人那份）；MCP 让你的 AI 助手随时引用产品事实——一个 AI 帮你写代码，一个 AI 帮你记住产品，你只负责决策（开发者那份）。</p>
+
+<h2>几个值得一提的特色</h2>
+<p><strong>证据可溯，机制级防幻觉。</strong> 不是靠提示词叮嘱 AI「别编」，而是硬性校验：AI 只能引用本次实际读取的代码路径，引用一个不存在的文件，整次分析直接失败。</p>
+<p><strong>发布稿：对客户讲人话。</strong> 在总览页勾选本次发布要宣布的功能，CoDelphi 生成一份合并全部变化的发布稿草稿，按功能分组校对后一键发布，得到一个公开只读页面，可分享链接、可导出 Markdown；多次发布的公告自动汇成一条公开变更日志。生成什么、发布与否，永远是你的主动行为。</p>
+<p><strong>周报自动写好。</strong> 滚动 7 天的行为摘要自动生成，按客服、销售、市场三种视角分好桶，经 Slack、邮件或 Webhook 送达。没有变化的周，不发。</p>
+<p><strong>PR 预演。</strong> Pull Request 一开，CoDelphi 就在 PR 里评论这个改动会触碰哪些功能与场景、预期发生什么行为变化。它只陈述、不裁决——是否合并，仍由人判断。</p>
+<p><strong>知识健康视图。</strong> 哪些规格内容可能已经漂移、哪些经过人工核实、由谁在维护——只摆事实，不编造「健康分」。</p>
+
+<h2>让 AI 助手带着产品记忆写代码</h2>
+<p>AI 编程助手写代码很快，但它有三个固有缺陷：<strong>会失忆</strong>——每个会话从零开始，靠重读仓库猜行为；<strong>会盲目修改</strong>——不知道一个文件牵连着哪些产品行为；<strong>自己检查自己</strong>——自我确认并不可信。</p>
+<p>CoDelphi 的 MCP 工具面（13 个只读工具 + 1 个反馈通道，支持 Claude、Codex、ChatGPT 等 AI 编程助手）就是为此准备的。仓库接入后，agent 会在编码周期的四个时机自觉行动：</p>
+<p><strong>动手之前</strong>，先反查要改的文件牵连着哪些功能与场景，爆炸半径先知道；<strong>理解既有行为时</strong>，检索带源码证据锚的行为约定，而不是只靠猜；<strong>push 之后</strong>，一个独立的观察者会从代码里归纳出这次实际改变了什么，agent 拿它与自己的意图对账，发现计划外的变化就回去查代码；<strong>发现账本与代码不符</strong>，上报由人裁决——agent 是巡检员，不是编辑者。</p>
+<p>同样要诚实：账本是快照，不是全量地图，没搜到不等于不存在。它给 AI 助手的，是一份随代码更新的行为记忆，和一个不自欺的对账判据。</p>
+<p>接入只要两步：设置页创建组织级 MCP key（页面附连接示例），再把四行策略贴进仓库的 AGENTS.md，你的 AI 助手就会自动开始这个循环。</p>
+
+<h2>怎么使用</h2>
+<p><strong>第一步，看 Demo。</strong> 打开 <a href="https://codelphi.com/products/u-a8811be775/codelphi">https://codelphi.com/products/u-a8811be775/codelphi</a>，无需注册登录，只读浏览。这个 Demo 分析的就是 CoDelphi 自己——它是本项目分析的第一个对象，规格随每次代码推送保持最新。</p>
+<p><strong>第二步，接入你的仓库。</strong> 在 <a href="https://codelphi.com">https://codelphi.com</a> 注册登录（当前使用 Chandler 账号体系，注册后自动获得个人工作区），点「添加产品」，填入 GitHub 仓库的 owner/repo 和默认分支，完成只读授权（GitHub App 仅申请仓库读取权限，不碰你的代码写入）。保持「添加后立即分析」勾选，稍等片刻，第一版产品规格就生成了。</p>
+<p><strong>第三步，日常就是这么简单。</strong> 之后每次 push，行为变化自动更新（高频仓库可在设置里改为每天低峰一次，或每 N 次推送合并分析，额度更省）；有空时上来核实、修订；要对外发布公告时，用发布稿。</p>
+<p>一个边界说明：目前每个产品接入一个主仓库。拆分了多个代码库的产品，可以按服务各建产品空间，工作区总览会聚合它们的发布动态。</p>
+<p>进阶玩法：把你的 AI 编程助手接入 CoDelphi，让它带着产品记忆写代码（见「让 AI 助手带着产品记忆写代码」一节）；或者，直接去 GitHub 拿源码，自己搭一套。</p>
+
+<h2>为什么开源，还做网站，还收费</h2>
+<p>CoDelphi 是一个开源项目（MIT 协议），源代码在 <a href="https://github.com/gzhanlei/codelphi">https://github.com/gzhanlei/codelphi</a>，你可以自由获取、自由修改、自由搭建自己的平台——一份产品规格的所有权，本来就应该完全属于你。</p>
+<p>那为什么还要做网站、还收费？因为自己搭一套，意味着自己维护数据库、自己配置 AI 服务、自己跟进每一次升级。网站做的就是把这件事替你做好：注册即用。</p>
+<p>收费只为一件事：<strong>覆盖成本</strong>——AI 调用和服务器，仅此而已。具体方式：注册即送 5 个分析单元，一次完整分析消耗 1 个单元，失败的分析不扣额度；正式价格正在按实测成本校准中（现在是公测期）。这是老程序员式的诚实：代码就在 GitHub 上，产品没有秘密，也不打算靠信息差赚钱。</p>
+
+<h2 class="newpage">结语</h2>
+<p>二十多年前，CoDelphi 帮中国的 Delphi 程序员读懂技术；二十多年后，它想帮每一个团队读懂自己的产品。</p>
+<div class="fin">代码不说谎。你只需要给它一个开口的机会。</div>
+<ul class="links">
+  <li><span class="lab">免登录 Demo</span><a href="https://codelphi.com/products/u-a8811be775/codelphi">https://codelphi.com/products/u-a8811be775/codelphi</a></li>
+  <li><span class="lab">注册使用</span><a href="https://codelphi.com">https://codelphi.com</a></li>
+  <li><span class="lab">开源仓库</span><a href="https://github.com/gzhanlei/codelphi">https://github.com/gzhanlei/codelphi</a>（MIT）</li>
+</ul>
+
+</body>
+</html>

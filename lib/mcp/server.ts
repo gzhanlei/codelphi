@@ -240,11 +240,39 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
       lastAppliedMigration: migrations[0] ?? null,
       lastAnalysisStatus: analysisRuns[0] ? { runId: analysisRuns[0].id, status: analysisRuns[0].status, afterSha: analysisRuns[0].afterSha, errorMessage: analysisRuns[0].errorMessage } : null,
     });
+    // BYO 导入草稿披露（2026-11-19，§7）+ 账本新鲜度（stale 门 V1）：都按诚实披露口径返回。
+    const seededRows = await queryRows<{ seededSnapshotSha: string; seededTreeSha: string | null; seededDirty: number; seededContractVersion: string | null; seededAt: Date; importedScenarios: number }>(
+      execute(
+        `SELECT p.seeded_snapshot_sha AS seededSnapshotSha, p.seeded_tree_sha AS seededTreeSha, p.seeded_dirty AS seededDirty,
+                p.seeded_contract_version AS seededContractVersion, p.seeded_at AS seededAt,
+                (SELECT COUNT(*) FROM scenarios s JOIN features f ON f.id = s.feature_id WHERE f.product_id = product.id AND s.source = 'ai_snapshot_import') AS importedScenarios
+         FROM products product WHERE product.id = ? LIMIT 1`,
+        [product.id],
+      ),
+    );
+    const seeded = seededRows[0];
+    const importedDraft = seeded?.seededSnapshotSha ? {
+      seededSnapshotSha: seeded.seededSnapshotSha,
+      seededTreeSha: seeded.seededTreeSha,
+      seededDirty: Number(seeded.seededDirty) === 1,
+      seededContractVersion: seeded.seededContractVersion,
+      seededAt: seeded.seededAt,
+      importedScenarios: Number(seeded.importedScenarios),
+      note: "本产品知识由本地 radar 快照导入（AI 候选，未经服务端独立分析）",
+    } : null;
+    let freshness: Record<string, unknown> | undefined;
+    try {
+      freshness = (await loadLedgerFreshnessForServer(product.id)).block as unknown as Record<string, unknown>;
+    } catch (error) {
+      freshness = { available: false, reason: error instanceof Error ? error.message.slice(0, 160) : "unknown_error" };
+    }
     return {
       slug: product.slug,
       name: product.name,
       description: product.description,
       featureCount: Number(featureCounts[0]?.count ?? 0),
+      importedDraft,
+      freshness,
       latestRelease: latestRelease ? { id: latestRelease.id, title: latestRelease.title, sha: latestRelease.sha, committedAt: latestRelease.committedAt } : null,
       // 账本是快照：告诉调用方这份规格对应哪个 commit，才能区分「账本状态」与「工作区状态」
       specSnapshot: latestRelease ? { specVersionId: latestRelease.specVersionId, sha: latestRelease.sha, committedAt: latestRelease.committedAt } : null,

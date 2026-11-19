@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { completeSnapshotWorkspace, finalizeSnapshotWorkspace, prepareSnapshotWorkspace, readSnapshotWorkOrder, writeSnapshotResult } from "../lib/snapshot/workspace";
+import { completeSnapshotWorkspace, finalizeSnapshotWorkspace, prepareSnapshotWorkspace, readSnapshotWorkOrder, readZeroYieldWorkOrderIds, writeSnapshotResult } from "../lib/snapshot/workspace";
 import { resolveCompletionBackend } from "../lib/snapshot/host-ai";
 import { main } from "../scripts/snapshot";
 
@@ -244,5 +244,22 @@ describe("host-native snapshot workspace", () => {
   it("reports no backend when neither standalone config nor host bridge exists", async () => {
     const backend = resolveCompletionBackend({ environment: {}, host: undefined });
     expect(backend.kind).toBe("unavailable");
+  });
+});
+
+describe("readZeroYieldWorkOrderIds (W2 收敛趟数)", () => {
+  it("flags work orders whose extraction yielded no features, skipping missing results", async () => {
+    const directory = await workspace();
+    await prepareSnapshotWorkspace({ directory, target: await repository(), outputLanguage: "en" });
+    const manifest = JSON.parse(await readFile(join(directory, "manifest.json"), "utf8"));
+    const id = manifest.workOrderIds[0];
+    // 有产出：不在零产出清单
+    await writeSnapshotResult(directory, id, validResult);
+    expect(await readZeroYieldWorkOrderIds(directory)).toEqual([]);
+    // 零产出（features 空）：判为零收益分区，交由收敛轮定向重提取
+    // （收敛轮先删结果再跑 complete，与这里的删-写序列一致）
+    await rm(join(directory, "results", `${id}.json`), { force: true });
+    await writeSnapshotResult(directory, id, JSON.stringify({ product: { description: "e", evidence: [{ path: "index.ts", startLine: 1 }] }, release: { title: "e", summary: "e" }, changes: [], features: [] }));
+    expect(await readZeroYieldWorkOrderIds(directory)).toEqual([id]);
   });
 });
