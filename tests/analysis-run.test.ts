@@ -51,7 +51,10 @@ vi.mock("../lib/code-hosting", async (importOriginal) => ({
     product: { id: run.productId, slug: run.productSlug, name: run.productName },
   })),
 }));
-vi.mock("../lib/ai", () => ({
+vi.mock("../lib/ai", async (importOriginal) => ({
+  // spread 真实模块：lib/analysis → full-analysis → behavior-unit-extraction 的模块级
+  // zod 派生依赖真实 analysisSchema/normalizeScenarioAliases；只替换出网通道。
+  ...await importOriginal<typeof import("../lib/ai")>(),
   analyzeWithAI: vi.fn(),
   analyzeBehavioralGroup: vi.fn(),
   requestStructuredCompletion: vi.fn(),

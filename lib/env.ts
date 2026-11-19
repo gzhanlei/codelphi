@@ -83,3 +83,37 @@ export function behavioralEnumerationMaxGroups() {
   const raw = Number(process.env.BEHAVIORAL_ENUM_MAX_GROUPS ?? "");
   return Number.isInteger(raw) && raw > 0 ? raw : 8;
 }
+
+/** 全量分析模式：legacy（现状分区/收敛）| inventory_shadow（跑库存编排但不激活）| inventory（库存编排激活）。
+ * 默认与垃圾值一律回退 legacy——新模式必须显式开启。 */
+export function fullAnalysisMode(): "legacy" | "inventory_shadow" | "inventory" {
+  const raw = (process.env.FULL_ANALYSIS_MODE ?? "").trim();
+  if (raw === "inventory" || raw === "inventory_shadow") return raw;
+  return "legacy";
+}
+
+/** 库存编排的单元并发度。默认 4，clamp [1,16]，垃圾值回退默认。 */
+export function behaviorAnalysisConcurrency(): number {
+  const raw = Number(process.env.ANALYSIS_BEHAVIOR_CONCURRENCY ?? "");
+  if (!Number.isInteger(raw) || raw < 1) return 4;
+  return Math.min(raw, 16);
+}
+
+/** 库存编排的本次运行预算上限。缺省/非正值 = 无上限（undefined，绝不用 0 表无上限）。 */
+export function behaviorAnalysisBudget(): {
+  maxLlmCalls?: number;
+  maxTotalTokens?: number;
+  maxCostAmount?: number;
+  currency: string;
+} {
+  const positiveNumber = (name: string) => {
+    const raw = Number(process.env[name] ?? "");
+    return Number.isFinite(raw) && raw > 0 ? raw : undefined;
+  };
+  return {
+    maxLlmCalls: positiveNumber("ANALYSIS_BEHAVIOR_MAX_LLM_CALLS"),
+    maxTotalTokens: positiveNumber("ANALYSIS_BEHAVIOR_MAX_TOTAL_TOKENS"),
+    maxCostAmount: positiveNumber("ANALYSIS_BEHAVIOR_MAX_COST_AMOUNT"),
+    currency: (process.env.ANALYSIS_BEHAVIOR_COST_CURRENCY ?? "").trim() || "CNY",
+  };
+}

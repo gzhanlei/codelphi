@@ -18,7 +18,8 @@ import type { BehavioralEnumerationMetrics } from "./behavioral-enumeration";
 import { computeCoverageReceipt, loadInheritedCoverageReceipt, enumerateImplementationSurface, enumerateRequiredImplementationSurface, saveCoverageReceipt, type AnalysisCoverageReceipt } from "./analysis-coverage";
 import { mergeChunkResults, type ExtractionChunk } from "./extraction-merge";
 import type { AnchorScenarioLink } from "./behavior-unit-state";
-import { behavioralEnumerationEnabled, analysisConvergenceEpsilon, analysisConvergenceRounds } from "./env";
+import { behavioralEnumerationEnabled, analysisConvergenceEpsilon, analysisConvergenceRounds, fullAnalysisMode } from "./env";
+import { runInventoryFullAnalysis } from "./full-analysis";
 import { behavioralChangePaths } from "./patch-scan";
 import { parsePatchHunks } from "./spec-diff";
 import { enumerateBehavioralChunks } from "./behavioral-enumeration";
@@ -443,6 +444,12 @@ async function runAnalysisBody(run: RunContext) {
   const knownFeatureNames = new Set(previousFeatureNames);
   let coverage: AnalysisCoverageReceipt | null = null;
   let partitions: AnalysisPartition[] = [];
+  // Task 13：库存编排产出的锚点↔局部场景关联（legacy 分区路径恒为空）
+  let behaviorLinks: readonly AnchorScenarioLink[] = [];
+  // Task 13 全量分析模式：legacy（默认，现状分区/收敛）| inventory_shadow | inventory。
+  // 库存编排只替代 affectedKeys===null 的全量提取（增量/RC2-carry 不进入新编排）。
+  const analysisMode = fullAnalysisMode();
+  const inventoryEligible = !noBehavioralWindow && affectedKeys === null;
   let enumerationMetrics: BehavioralEnumerationMetrics = {
     pathsTotal: behavioralPaths.length,
     pathsEnumerated: 0,
@@ -480,6 +487,26 @@ async function runAnalysisBody(run: RunContext) {
       coverage = { implFilesAssembled: 0, implFilesTotal: 0, implBytesAssembled: 0, implBytesTotal: 0, coverageRatio: 0, partitionsUsed: 0, partitionsCapped: false, diffTotalPaths: change.files.length, diffSelectedPaths: 0, diffOmittedPaths: change.files.length };
     }
     console.log("[analysis] no-behavioral-change window; previous spec carried verbatim", { runId: run.id, diffFiles: change.files.length, carriedFeatures: result.features.length, specVersionId: previousSpec?.specVersionId ?? null });
+  } else if (inventoryEligible && analysisMode === "inventory") {
+    // Task 13：库存编排激活模式——单元清单 + 任务租约 + 预算预留 + 激活门禁的全量重建。
+    // 门禁失败即 throw（run 失败，saveResult 不可达，旧激活规格不变）；partitions 保持 []
+    // （完整性账本 partitions:0 如实披露：本路径无旧分区概念）。
+    const outcome = await runInventoryFullAnalysis({
+      run,
+      change,
+      repository: remoteAnalysisRequest.repository,
+      access: target.access,
+      provider: target.adapter.provider,
+      scopeRoots,
+      knownFeatureNames: previousFeatureNames,
+    }, { activate: true });
+    result = outcome.result;
+    coverage = outcome.coverage;
+    enumerationMetrics = outcome.enumerationMetrics;
+    passInfos.push(...outcome.passInfos);
+    mergeStats = outcome.mergeStats;
+    behaviorLinks = outcome.behaviorLinks;
+    console.log("[analysis] inventory full analysis activated", { runId: run.id, tasks: outcome.tasks, units: outcome.unitStatuses.length, productDescriptionStatus: outcome.productDescriptionStatus });
   } else {
   const requiredPaths = affectedKeys === null ? null : [...new Set([
     ...change.files.map((file) => file.path),
@@ -602,7 +629,7 @@ async function runAnalysisBody(run: RunContext) {
     console.log("[analysis] behavioral enumeration", { runId: run.id, ...enumerationMetrics });
   }
   } // else：提取分支结束（BM-10 零行为变更窗口不进入）
-  const { specVersionId, releaseId, releaseChangeProjections, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds } = await saveResult(run, result, change, affectedKeys, coverage);
+  const { specVersionId, releaseId, releaseChangeProjections, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds } = await saveResult(run, result, change, affectedKeys, coverage, behaviorLinks);
   let projectionRewrite = { rewritten: 0, failed: 0, skipped: 0 };
   try {
     projectionRewrite = await rewriteReleaseChangeProjections(
@@ -773,6 +800,24 @@ async function runAnalysisBody(run: RunContext) {
     await saveCompletenessLedger(getDb(), fullLedger);
   } catch (error) {
     console.error("[analysis] completeness ledger write failed", error);
+  }
+  // Task 13 inventory_shadow：旧结果已激活（主事务已提交），新库存编排 best-effort 跑一遍
+  // 只产出门禁/覆盖遥测（activate:false，LLM 计费 platform_shadow）；失败绝不翻 run 状态。
+  if (inventoryEligible && analysisMode === "inventory_shadow") {
+    try {
+      const shadowOutcome = await runInventoryFullAnalysis({
+        run,
+        change,
+        repository: remoteAnalysisRequest.repository,
+        access: target.access,
+        provider: target.adapter.provider,
+        scopeRoots,
+        knownFeatureNames: previousFeatureNames,
+      }, { activate: false });
+      console.log("[inventory-shadow] inventory orchestration shadow completed", { runId: run.id, activationWorthy: shadowOutcome.activated, gate: shadowOutcome.gate.checks, tasks: shadowOutcome.tasks, units: shadowOutcome.unitStatuses.length });
+    } catch (error) {
+      console.error("[inventory-shadow] inventory orchestration shadow failed; activated legacy result unchanged", { runId: run.id, message: error instanceof Error ? error.message : String(error) });
+    }
   }
 }
 

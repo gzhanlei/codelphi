@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { analysisConvergenceRounds, shouldRunAnotherConvergenceRound } from "../lib/env";
+import { analysisConvergenceRounds, fullAnalysisMode, shouldRunAnotherConvergenceRound } from "../lib/env";
 
 /** W2 收敛式全量提取（2026-11-19 立项）：多趟提取按边际产出收敛，取代隐形趟数封顶。
  *  契约：默认 1 轮（现行为）；maxRounds 内、边际新增锚定场景 ≥ ε 才再跑一轮。 */
 
 afterEach(() => {
   delete process.env.ANALYSIS_CONVERGENCE_ROUNDS;
+  delete process.env.FULL_ANALYSIS_MODE;
 });
 
 describe("analysisConvergenceRounds", () => {
@@ -43,5 +44,17 @@ describe("shouldRunAnotherConvergenceRound", () => {
 
   it("stops when max rounds reached even with high yield", () => {
     expect(shouldRunAnotherConvergenceRound({ roundsRun: 3, scenarioCount: 600, lastCount: 100, maxRounds: 3, epsilon: 5 })).toBe(false);
+  });
+});
+
+describe("fullAnalysisMode routing", () => {
+  it("defaults to legacy so the existing partition/convergence flow is unchanged", () => {
+    delete process.env.FULL_ANALYSIS_MODE;
+    expect(fullAnalysisMode()).toBe("legacy");
+  });
+
+  it("falls back to legacy on garbage input", () => {
+    process.env.FULL_ANALYSIS_MODE = "enable-the-new-thing";
+    expect(fullAnalysisMode()).toBe("legacy");
   });
 });
