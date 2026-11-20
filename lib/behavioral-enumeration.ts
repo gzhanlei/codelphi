@@ -148,8 +148,10 @@ export interface InventoryEnumerationSummary {
   tasksTotal: number;
   /** 恢复会计：复用成功终态 result_json、本 run 未重新执行的任务数。 */
   tasksReusedTerminal: number;
-  /** 本 run 实际发起提取的任务数（passInfos 只覆盖这部分，恢复复用绝不计为新执行趟）。 */
+  /** 本 run 实际发起过提取尝试的任务数（含发起后硬失败的；重试不重复计）。
+      passInfos 只覆盖这部分，恢复复用绝不计为新执行趟。 */
   tasksExecuted: number;
+  /** 持久化行 status='pending' 的字面计数（failed/unresolved/running 都不是 pending）。 */
   tasksPending: number;
   /** 快照时仍处于 running（租约持有）的任务数。 */
   leasesHeld: number;

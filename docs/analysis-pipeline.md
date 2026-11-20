@@ -5,6 +5,7 @@
 > 修订：2026-11-10 v2（外部评审采纳，含 P0 修正与可观测补齐）：「diff 必选」明确为**优先选择而非无条件全覆盖**，覆盖率回执新增 diff 面入选/遗漏计数（migration 058）；行为枚举容量上限与完整性状态显式披露；空结果三态区分（无变化/候选全被清洗/提取为空）；full 定义澄清；盲评结论加样本口径限定；行为等价去重规则成文；M9 一致率分母警示。
 > 修订：2026-11-17 v3：增量改为 diff 与受影响证据的定向装配；取消 run 级分区数量与总读取量止损线；覆盖回执按实际范围计算；用户视图移除内部装配指标。
 > 修订：2026-11-20 v4：全量分析三模式（`legacy` / `inventory_shadow` / `inventory`）与行为清单编排成文（§13）；不可变 manifest 恢复语义、双重覆盖门禁、at-least-once 执行、共享预算、摘要降级与激活门禁；完整性账本新增 inventory 枚举详情与新路径 sourceCoverage 口径（§9）。§0 概览修正「×6 分区」过时表述（v3 已取消分区数上限）。
+> 修订：2026-11-20 v5（Task 15）：配对行为 benchmark 统计层与冻结协议成文（`lib/behavior-benchmark.ts`、`docs/benchmark/frozen/behavior-inventory-v1.md`、离线测量脚本 `scripts/measure-inventory-analysis.ts`）；inventory 遥测口径修正（tasksExecuted 含发起后失败任务、tasksPending 按字面 pending 行计数）；明确 `primaryRangesOmitted` 只在账本 details JSON 中可见，不是 `analysis_coverage_receipts` 的表列。**人工 shadow 验收未执行，`inventory` 模式保持禁用。**
 
 ## 0. 一页总览
 
@@ -139,7 +140,7 @@ run 级六维度完整性状态，落 `analysis_completeness_ledger`（run 唯�
 
 | 维度 | 状态来源 | 典型 partial 原因 |
 |---|---|---|
-| sourceCoverage | 覆盖率回执（impl 装配 + diff 入选/遗漏；inventory 编排回执另带主覆盖区间遗漏，complete 必须为零） | diff 路径遗漏或相关源码不可读 / 新路径主覆盖区间遗漏 |
+| sourceCoverage | 覆盖率回执（impl 装配 + diff 入选/遗漏；inventory 编排回执另带主覆盖区间遗漏，complete 必须为零）。⚠️ `primaryRangesOmitted` 只在完整性账本的 details JSON（`details.sourceCoverage.primaryRangesOmitted`）中可见——`analysis_coverage_receipts` 表没有该列，`saveCoverageReceipt` 不落它 | diff 路径遗漏或相关源码不可读 / 新路径主覆盖区间遗漏 |
 | behavioralEnumeration | 枚举指标（paths_total/enumerated/omitted、groups 完成失败；inventory 编排可挂可选详情：单元/锚点状态、coarse/implicit/fallback 计数、租约与预算、摘要状态、恢复任务会计） | 组帽截断 / 组失败 |
 | extractionCompletion | 分区趟数 / 重试 / 空结果趟（只计本 run 新执行的提取趟；inventory 恢复复用的成功任务计入 enumeration 详情的 tasksReusedTerminal，不计为趟数） | 重试发生 / 无行为变化趟 |
 | evidenceIntegrity | sanitize 剔除计数 + all_candidates_rejected | 有剔除 / 候选全被拒 |
@@ -219,7 +220,7 @@ superset 实测（run 63）：sourceCoverage partial（35/2149，diff 57/120 入
 - primaryCoverage：实现面区间（eligible）vs 单元主覆盖区间并集，按 path 分组闭区间并集计算唯一行数，禁止重叠求和；
 - anchorCoverage：单元主区间 vs behavior/implicit_review 锚点区间并集；entry 锚点只用于定位、不计入核销分子；
 - `primaryRanges=null` 的不可读占位单元使主覆盖门禁保持不通过；无法安全拆到预算内的单元标 unresolved，绝不截断后伪装成功；
-- 新路径覆盖回执带 `primaryRangesOmitted`：完整性账本 sourceCoverage 的 complete 必须要求主覆盖区间遗漏为零，文件数/字节数只作辅助诊断（旧回执该字段为 null，历史语义不变）。
+- 新路径覆盖回执对象带 `primaryRangesOmitted`：完整性账本 sourceCoverage 的 complete 必须要求主覆盖区间遗漏为零，文件数/字节数只作辅助诊断（旧回执该字段为 null，历史语义不变）。该值经账本 details JSON（`details.sourceCoverage.primaryRangesOmitted`）持久化，**不是 `analysis_coverage_receipts` 的表列**（`saveCoverageReceipt` 的列清单不含它）。
 
 **执行语义：at-least-once + 条件提交（不是 exactly-once）**：
 
@@ -238,7 +239,9 @@ superset 实测（run 63）：sourceCoverage partial（35/2149，diff 57/120 入
 
 **激活门禁（D8，fail closed）**：`evaluateBehaviorActivationGate` 七项检查——inventoryManifestValid、primaryCoverageComplete、anchorCoverageComplete、anchorAccountingComplete（unresolved 锚点不计入）、allUnitsInAllowedTerminalStates（仅 extracted / no_behavior）、existingEvidenceChecksPassed（含 all_candidates_rejected 复查）、existingMergeChecksPassed。任一不过或 budgetBlocked：activate 模式 throw（run 失败，saveResult 不可达，**既有激活规格不变**，已持久化单元回执保留供断点续跑）；shadow 不 throw，返回 activated:false。
 
-**观测口径**：编排 outcome 的 enumerationMetrics 挂 inventory 详情（units 各状态计数、entry/behavior/implicit_review/coarse 锚点计数、semantic/residual 单元、主覆盖与锚点覆盖唯一行数、unreadable 占位、leasesHeld / attemptsTotal、budgetBlocked、productDescriptionStatus、tasks total / reusedTerminal / executed / pending）。恢复复用的成功任务计入 tasksReusedTerminal；passInfos 只计本 run 新执行的任务，绝不把恢复工作误报为新执行趟。单元处理比例只是诊断计数，不产生新的综合质量分（整体状态仍由完整性账本最差维度规则推导）。
+**观测口径**：编排 outcome 的 enumerationMetrics 挂 inventory 详情（units 各状态计数、entry/behavior/implicit_review/coarse 锚点计数、semantic/residual 单元、主覆盖与锚点覆盖唯一行数、unreadable 占位、leasesHeld / attemptsTotal、budgetBlocked、productDescriptionStatus、tasks total / reusedTerminal / executed / pending）。恢复复用的成功任务计入 tasksReusedTerminal；tasksExecuted 是本 run 实际发起过提取尝试的任务数，**含发起后硬失败的任务**（attempt 级会计在 attemptsTotal 与 LLM 回执）；tasksPending 按持久化行 `status='pending'` 字面计数，failed/unresolved/running 都不是 pending（Task 15 修正：旧口径 total − reused − executed 会把发起后失败的任务误报为 pending）。passInfos 只计本 run 新执行的任务，绝不把恢复工作误报为新执行趟。单元处理比例只是诊断计数，不产生新的综合质量分（整体状态仍由完整性账本最差维度规则推导）。
+
+**配对 benchmark 与切换门禁（Task 15，D8 收口）**：统计层 `lib/behavior-benchmark.ts`（配对召回差值 Newcombe 95% 区间 + 各路径自身 Wilson 区间 + 非劣效判定）与冻结协议/测量脚本见 `docs/benchmark/frozen/behavior-inventory-v1.md`；脚本 `scripts/measure-inventory-analysis.ts` 是显式 shadow/离线工具（只读冻结对照 JSON，不连库、不调 AI、不激活规格、不读改 FULL_ANALYSIS_MODE）。判定：逐仓 `LowerCI(Delta) > -0.03`（严格）、宏平均点估计 ≥ -0.03、30 条仅初始下限（区间跨过 -0.03 即 inconclusive）、过程门禁先决、误报/证据辅助门禁（宏平均 +3pp / −2pp）。**截至本次修订，人工 shadow 验收未执行，`inventory` 模式保持禁用**；验收结果须交用户审阅，启用与否是独立决定。
 
 ## 14. 实测锚点（superset 盲评，同窗口同基线四跑）
 

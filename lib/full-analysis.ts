@@ -73,10 +73,12 @@ import { loadLatestSpecVersionLanguage } from "./spec-versions";
  * - 门禁：evaluateBehaviorActivationGate fail closed；失败或 budgetBlocked 时 activate
  *   模式 throw（run 失败，saveResult 不可达，旧激活规格不变），shadow 返回 activated:false。
  * - 锚点关联行仅 activate 且过门禁后 INSERT IGNORE 落库（saveResult 回填前置）。
- * - 观测（Task 14）：coverage 回执带主覆盖区间遗漏（新路径 sourceCoverage complete
+ * - 观测（Task 14/15）：coverage 回执带主覆盖区间遗漏（新路径 sourceCoverage complete
  *   要求为零）；enumerationMetrics 的 inventory 详情记录单元/锚点状态、coarse/
  *   implicit/fallback 计数、租约与预算、摘要状态与恢复任务会计——恢复复用的成功
- *   任务计入 tasksReusedTerminal，绝不计为本 run 新执行的提取趟。
+ *   任务计入 tasksReusedTerminal，绝不计为本 run 新执行的提取趟；tasksExecuted 含
+ *   发起后硬失败的任务（attempt 级会计在 attemptsTotal），tasksPending 按持久化行
+ *   status='pending' 字面计数（Task 15 修正，失败任务不再被误报为 pending）。
  */
 
 export const BEHAVIOR_TASK_RESERVED_LLM_CALLS = 2;
@@ -453,6 +455,9 @@ export async function runInventoryFullAnalysis(
           return;
         }
         attemptsThisRun += 1;
+        // Task 15 遥测口径：本 run 实际发起提取尝试的任务（含发起后硬失败的）即计 executed；
+        // 首个 attempt 发起时计数，重试不重复计（attempt 级会计在 attemptsTotal / LLM 回执）。
+        if (attemptsThisRun === 1) state.executed += 1;
         let result: BehaviorTaskExtractionResult;
         try {
           const sources = await loadBehaviorTaskSources(index, task, unit);
@@ -474,7 +479,6 @@ export async function runInventoryFullAnalysis(
             outputLanguage,
             label: `inventory/${runId}/${task.taskKey.slice(0, 48)}`,
           });
-          state.executed += 1;
         } catch (error) {
           // 硬失败（网关/超时/源不可读）：记 failed（消耗 attempt），settle 后按预算重试
           await markBehaviorTaskFailure({ execute, runId, taskKey: task.taskKey, attemptId: claimed.attemptId, leaseOwner, error: errorMessage(error) });
@@ -732,7 +736,9 @@ export async function runInventoryFullAnalysis(
       tasksTotal: manifest.tasks.length,
       tasksReusedTerminal: reusedTerminal,
       tasksExecuted: state.executed,
-      tasksPending: manifest.tasks.length - reusedTerminal - state.executed,
+      // Task 15：pending 按持久化行 status='pending' 的字面计数——failed/unresolved/running
+      // 都不是 pending（旧口径 total − reused − executed 会把发起后失败的任务误报为 pending）。
+      tasksPending: taskRows.filter((row) => row.status === "pending").length,
       leasesHeld: taskRows.filter((row) => row.status === "running").length,
       attemptsTotal: taskRows.reduce((sum, row) => sum + row.attempts, 0),
       budgetBlocked: state.budgetBlocked,
@@ -766,7 +772,8 @@ export async function runInventoryFullAnalysis(
         total: manifest.tasks.length,
         reusedTerminal,
         executed: state.executed,
-        pending: manifest.tasks.length - reusedTerminal - state.executed,
+        // 与 inventory 详情同口径（Task 15）：字面 status='pending' 行计数
+        pending: taskRows.filter((row) => row.status === "pending").length,
       },
     };
   } catch (error) {

@@ -864,6 +864,30 @@ describe("runInventoryFullAnalysis orchestration", () => {
     expect(budget.released).toEqual([]);
   });
 
+  it("counts initiated-but-failed attempts as executed and derives pending from literal pending rows", async () => {
+    // Task 15 修正 Task 14 遥测口径：tasksExecuted 必须包含「已发起但硬失败」的提取尝试
+    // （旧口径只计成功任务，失败任务会被误报为 pending）；tasksPending 必须按持久化行
+    // status='pending' 的字面计数（failed 不是 pending），不能用 total − reused − executed 推导。
+    vi.mocked(extractBehaviorTask).mockImplementation(async () => {
+      throw new Error("gateway timeout");
+    });
+
+    const outcome = await actualFullAnalysis.runInventoryFullAnalysis(baseInput(), { activate: false });
+
+    // 全部任务发起尝试后重试耗尽、停在 failed；门禁 fail closed（shadow 不 throw）
+    expect(outcome.activated).toBe(false);
+    for (const row of store.tasks.values()) expect(row.status).toBe("failed");
+    const manifest = store.manifest as BehaviorManifest;
+    const inventory = outcome.enumerationMetrics.inventory!;
+    expect(inventory.tasksExecuted).toBe(manifest.tasks.length);
+    expect(inventory.tasksPending).toBe(0);
+    expect(inventory.tasksReusedTerminal).toBe(0);
+    expect(inventory.attemptsTotal).toBe(manifest.tasks.length * 3);
+    // 顶层 tasks 汇总与 inventory 详情同口径
+    expect(outcome.tasks.executed).toBe(manifest.tasks.length);
+    expect(outcome.tasks.pending).toBe(0);
+  });
+
   it("fails the run without calling saveResult when a unit stays unresolved", async () => {
     vi.mocked(extractBehaviorTask).mockImplementation(async (input: { task: BehaviorExecutionTask }) => unresolvedResult(input.task));
     await expect(actualFullAnalysis.runInventoryFullAnalysis(baseInput(), { activate: true })).rejects.toThrow(/gate|unresolved|incomplete/i);
