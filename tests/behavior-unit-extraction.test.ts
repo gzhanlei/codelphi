@@ -518,3 +518,31 @@ describe("judge prompt unit directory (related-reference)", () => {
     expect(prompt).not.toMatch(/[一-鿿]/);
   });
 });
+
+describe("judge schema tolerance (2026-11-20 bench real-DB round)", () => {
+  it("parses scenarios citing more than the legacy density cap of evidence items", async () => {
+    // inventory 判定的证据上限放宽到 20：密集区域 >5 条证据不再整体 parse 崩溃
+    const denseEvidence = Array.from({ length: 8 }, (_, index) => ({ path: "src/foo.ts", startLine: index + 1 }));
+    const denseScenario = { ...feature.scenarios[0], evidence: denseEvidence };
+    const denseFeature = { ...feature, scenarios: [denseScenario] };
+    const denseRegion = { id: "R1", disposition: "extracted", reason: "外部可见", evidence: [{ path: "src/foo.ts", startLine: 1 }], scenarioRefs: ["HP-1"] };
+    const requestCompletion = completionMock(describeResponse(), judgeResponse([denseRegion, internalRegion("R2", "data_transform")], [denseFeature]));
+    const result = await extractBehaviorTask(input({ requestCompletion }));
+    expect(result.outcome).toBe("extracted");
+    expect(result.scenarioCount).toBe(1);
+    expect(result.features[0].scenarios[0].evidence).toHaveLength(8);
+    expect(result.anchorReceipts[0].disposition).toBe("extracted");
+  });
+
+  it("strips an out-of-enum internalKind instead of crashing the whole task (controlled unresolved)", async () => {
+    // 模型偶发产出枚举外 internalKind：剥字段 → reviewed_internal_without_kind → 受控
+    // unresolved（可复核），绝不烧硬失败重试预算
+    const badKindRegion = { id: "R1", disposition: "reviewed_internal", internalKind: "internal_implementation", reason: "内部实现", evidence: [{ path: "src/foo.ts", startLine: 3 }], scenarioRefs: [] };
+    const requestCompletion = completionMock(describeResponse(), judgeResponse([badKindRegion, internalRegion("R2", "data_transform")]));
+    const result = await extractBehaviorTask(input({ requestCompletion }));
+    expect(result.outcome).toBe("unresolved");
+    expect(result.unresolvedAnchorCount).toBe(1);
+    expect(result.anchorReceipts[0]).toMatchObject({ disposition: "unresolved", reason: "reviewed_internal_without_kind" });
+    expect(result.anchorReceipts[1].disposition).toBe("reviewed_internal");
+  });
+});

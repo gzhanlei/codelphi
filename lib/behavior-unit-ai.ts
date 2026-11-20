@@ -15,6 +15,15 @@ import type { BehaviorExecutionTask } from "./behavior-inventory/types";
 
 export type BehaviorAnchorDisposition = "extracted" | "reviewed_internal" | "unresolved";
 
+/** internalKind 合法值集合（解析层剥除非法值的依据；no_code_content 是编排合成专用值，
+ *  模型永远不会产出，也不在 AI 判定契约内）。 */
+const INTERNAL_KIND_VALUES: ReadonlySet<string> = new Set([
+  "pure_technical",
+  "covered_elsewhere",
+  "data_transform",
+  "other_evidence_backed",
+]);
+
 /** no_code_content 仅由提取编排对纯空行区域确定性合成（无模型判定、零 AI 调用）；
  *  AI 判定契约（judgeSchema 的四值枚举）不变，模型永远不会产出该值。 */
 export type BehaviorInternalKind = "pure_technical" | "covered_elsewhere" | "data_transform" | "other_evidence_backed" | "no_code_content";
@@ -231,6 +240,17 @@ const describeSchema = z.object({
   ).max(200),
 });
 
+/** inventory 判定专用宽松场景 schema（2026-11-20 bench 真库发现）：scenario evidence 的
+ *  legacy 演示密度上限（max 5）会让密集区域整体 parse 失败 → 任务硬失败，与判定 prompt
+ *  「不设条数上限」的契约矛盾。这里把 evidence 上限放宽到 20（仍防爆炸），其余字段口径
+ *  与 analysisSchema 同源。 */
+const BEHAVIOR_SCENARIO_SCHEMA = analysisSchema.shape.features.element.shape.scenarios.element.extend({
+  evidence: z.array(analysisSchema.shape.features.element.shape.scenarios.element.shape.evidence.element).max(20),
+});
+const BEHAVIOR_FEATURE_SCHEMA = analysisSchema.shape.features.element.extend({
+  scenarios: z.array(BEHAVIOR_SCENARIO_SCHEMA).max(40),
+});
+
 const judgeSchema = z.object({
   regions: z.array(
     z.object({
@@ -244,7 +264,7 @@ const judgeSchema = z.object({
       relatedScenarioRefs: z.array(z.string().min(1).max(200)).max(40).optional(),
     }),
   ).max(200),
-  features: z.array(analysisSchema.shape.features.element).max(50),
+  features: z.array(BEHAVIOR_FEATURE_SCHEMA).max(50),
 });
 
 /** 与 lib/ai 归一层同口径的不可见字符清理（模型偶发在证据路径前后带零宽字符）。 */
@@ -302,6 +322,16 @@ export function parseJudgeContent(content: string, task: BehaviorExecutionTask):
             const path = ((item as { path: string }).path).replace(INVISIBLE_CHARS, "").trim();
             return path ? { ...(item as Record<string, unknown>), path } : item;
           });
+        }
+        // internalKind 枚举外值（2026-11-20 bench 真库高频失败源）：剥掉该字段而非让整个
+        // 任务 parse 崩溃——reviewed_internal 缺 kind 由状态推导落 unresolved（reason=
+        // reviewed_internal_without_kind），走受控语义复核（I），绝不烧硬失败重试预算。
+        if (record.internalKind != null && !INTERNAL_KIND_VALUES.has(String(record.internalKind))) {
+          console.warn("[analysis] behavior judge internalKind outside enum; stripped to controlled unresolved", {
+            stage: "judge",
+            received: String(record.internalKind).slice(0, 40),
+          });
+          delete record.internalKind;
         }
         return record;
       })
