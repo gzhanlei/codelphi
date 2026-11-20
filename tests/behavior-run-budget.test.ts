@@ -10,6 +10,7 @@ import {
   PRODUCT_SUMMARY_RESERVED_INPUT_TOKENS,
   PRODUCT_SUMMARY_RESERVED_LLM_CALLS,
   PRODUCT_SUMMARY_RESERVED_OUTPUT_TOKENS,
+  reconcileOrphanedTaskReservations,
   releaseUnusedBehaviorBudget,
   reserveBehaviorBudget,
   reserveProductSummaryBudget,
@@ -58,6 +59,8 @@ interface FakeReservationRow {
   reserved_output_tokens: number;
   reserved_cost_micros: number;
   status: string;
+  /** 简化模型：epoch 毫秒（真实表为 DATETIME(3)，对账按创建时间划定孤儿截止线）。 */
+  created_at_ms: number;
 }
 
 interface FakeReceiptRow {
@@ -200,6 +203,7 @@ function budgetDb(initial: FakeBudgetRow, receipts: FakeReceiptRow[] = []) {
         reserved_output_tokens: Number(rOut),
         reserved_cost_micros: toMicros(rCost),
         status: "reserved",
+        created_at_ms: Date.now(),
       });
       return [{ affectedRows: 1 }];
     }
@@ -225,16 +229,52 @@ function budgetDb(initial: FakeBudgetRow, receipts: FakeReceiptRow[] = []) {
       return [{ affectedRows: 1 }];
     }
     if (sql.includes("FROM analysis_behavior_budget_reservations WHERE run_id = ? AND kind = 'product_summary'")) {
+      const matched = reservations
+        .filter((reservation) => reservation.run_id === Number(parameters[0]) && reservation.kind === "product_summary")
+        .map(serializeReservation);
+      // ORDER BY id DESC LIMIT 1：idempotent 读取只认最新一行（旧的 released 行不得被错拿）。
+      if (sql.includes("ORDER BY id DESC")) {
+        matched.sort((left, right) => Number(right.id) - Number(left.id));
+        return [matched.slice(0, 1)];
+      }
+      return [matched];
+    }
+    if (
+      sql.includes("FROM analysis_behavior_budget_reservations WHERE run_id = ? AND kind = 'task' AND status = 'reserved'")
+    ) {
+      const cutoffMs = Number(parameters[1]);
       return [
         reservations
-          .filter((reservation) => reservation.run_id === Number(parameters[0]) && reservation.kind === "product_summary")
+          .filter(
+            (reservation) =>
+              reservation.run_id === Number(parameters[0]) &&
+              reservation.kind === "task" &&
+              reservation.status === "reserved" &&
+              reservation.created_at_ms <= cutoffMs,
+          )
           .map(serializeReservation),
       ];
     }
+    if (sql.startsWith("SELECT (max_llm_calls = ?)")) {
+      // 数据库侧精确比较无上限 sentinel（修复 Critical N：sentinel 判等绝不经 JS 读回值）。
+      const [callsSentinel, tokensSentinel, costSentinel, runId] = parameters;
+      if (row.run_id !== Number(runId)) return [[]];
+      return [
+        [
+          {
+            calls_uncapped: Number(row.max_llm_calls) === Number(callsSentinel) ? 1 : 0,
+            tokens_uncapped: String(row.max_total_tokens) === String(tokensSentinel) ? 1 : 0,
+            cost_uncapped: String(row.max_cost_amount) === String(costSentinel) ? 1 : 0,
+          },
+        ],
+      ];
+    }
     if (sql.startsWith("SELECT max_llm_calls, max_total_tokens, max_cost_amount FROM analysis_run_budgets")) {
+      // 模拟 mysql2 默认读回行为：BIGINT UNSIGNED 最大值超出安全整数后被舍入
+      // （Number("18446744073709551615") === 18446744073709552000）。修复后代码不得再发这条 SELECT。
       return [
         row.run_id === Number(parameters[0])
-          ? [{ max_llm_calls: row.max_llm_calls, max_total_tokens: row.max_total_tokens, max_cost_amount: row.max_cost_amount }]
+          ? [{ max_llm_calls: row.max_llm_calls, max_total_tokens: Number(row.max_total_tokens), max_cost_amount: row.max_cost_amount }]
           : [],
       ];
     }
@@ -767,6 +807,126 @@ describe("reserveProductSummaryBudget", () => {
     expect(db.row.settled_llm_calls).toBe(1);
     expect(db.row.settled_input_tokens).toBe(5000);
     expect(fromMicros(db.row.settled_cost_micros)).toBeCloseTo(0.2, 6);
+  });
+
+  it("exposes the settled status on an idempotent re-reserve so recovery never regenerates a settled summary (B)", async () => {
+    const db = budgetDb(budgetRow({ max_llm_calls: 4 }), [receipt({ attempt_id: PRODUCT_SUMMARY_ATTEMPT_ID })]);
+    stubDb(db);
+    const first = await reserveProductSummaryBudget(42);
+    expect(first.status).toBe("reserved");
+    await settleBehaviorBudget({ reservationId: first.reservationId });
+    const again = await reserveProductSummaryBudget(42);
+    expect(again.reservationId).toBe(first.reservationId);
+    expect(again.status).toBe("settled");
+    expect(db.reservations()).toHaveLength(1);
+  });
+
+  it("returns the latest live reservation, not an older released row, on an idempotent re-reserve (B)", async () => {
+    const db = budgetDb(budgetRow({ max_llm_calls: 8 }));
+    stubDb(db);
+    const first = await reserveProductSummaryBudget(42);
+    await releaseUnusedBehaviorBudget(first.reservationId);
+    const second = await reserveProductSummaryBudget(42);
+    expect(second.reservationId).not.toBe(first.reservationId);
+    const again = await reserveProductSummaryBudget(42);
+    expect(again.reservationId).toBe(second.reservationId);
+    expect(again.status).toBe("reserved");
+  });
+});
+
+describe("unlimited sentinel precision (Critical N)", () => {
+  it("pins the driver rounding fact: mysql2 cannot read the BIGINT UNSIGNED sentinel back exactly", () => {
+    expect(String(Number(UNLIMITED_MAX_TOTAL_TOKENS))).not.toBe(UNLIMITED_MAX_TOTAL_TOKENS);
+  });
+
+  it("compares the unlimited sentinels on the database side instead of in JavaScript", async () => {
+    const db = budgetDb(budgetRow({ max_total_tokens: "10000" }));
+    stubDb(db);
+    const reservation = await reserveBehaviorBudget(reservationInput());
+    await settleBehaviorBudget({ reservationId: reservation.reservationId }).catch(() => undefined);
+    const legacyProbe = db
+      .statements()
+      .find((statement) => statement.startsWith("SELECT max_llm_calls, max_total_tokens, max_cost_amount"));
+    expect(legacyProbe).toBeUndefined();
+    const probe = db.statements().find((statement) => statement.startsWith("SELECT (max_llm_calls = ?)"));
+    expect(probe).toBeDefined();
+    expect(probe).toContain("max_total_tokens = CONVERT(?, UNSIGNED)");
+    expect(probe).toContain("max_cost_amount = CONVERT(?, DECIMAL(12,6))");
+  });
+
+  it("settles unknown usage without throwing when every cap is the unlimited sentinel as the driver reads it", async () => {
+    // 修复前：驱动舍入使"无上限"被误判为"已配置上限" → 任何 usage unknown 的结算都抛
+    // behavior_budget_usage_unknown → 激活门禁永久 fail closed。假驱动的旧 SELECT 路由返回舍入值。
+    const db = budgetDb(budgetRow(), [
+      receipt({
+        attempt_id: "attempt-1",
+        usage_status: "unknown",
+        input_tokens: null,
+        output_tokens: null,
+        llm_cost_amount: null,
+        pricing_status: "unpriced",
+      }),
+    ]);
+    stubDb(db);
+    const reservation = await reserveBehaviorBudget(reservationInput());
+    await expect(settleBehaviorBudget({ reservationId: reservation.reservationId })).resolves.toBeUndefined();
+    expect(db.row.settled_llm_calls).toBe(1);
+    expect(db.row.settled_input_tokens).toBe(400);
+    expect(db.reservations()[0].status).toBe("settled_unknown");
+  });
+});
+
+describe("reconcileOrphanedTaskReservations (E)", () => {
+  it("settles orphaned task reservations that have receipts and releases those that never called", async () => {
+    const db = budgetDb(budgetRow({ max_llm_calls: 10 }), [receipt({ attempt_id: "attempt-1" })]);
+    stubDb(db);
+    await reserveBehaviorBudget(reservationInput({ attemptId: "attempt-1" }));
+    await reserveBehaviorBudget(reservationInput({ attemptId: "attempt-2" }));
+    const result = await reconcileOrphanedTaskReservations({ runId: 42, orphanBeforeMs: Date.now() + 60_000 });
+    expect(result).toEqual({ examined: 2, settled: 1, released: 1, usageUnknownBlocked: false });
+    expect(db.reservations().find((entry) => entry.attempt_id === "attempt-1")?.status).toBe("settled");
+    expect(db.reservations().find((entry) => entry.attempt_id === "attempt-2")?.status).toBe("released");
+    expect(db.row.reserved_llm_calls).toBe(0);
+    expect(db.row.settled_llm_calls).toBe(1);
+  });
+
+  it("leaves in-flight reservations newer than the cutoff and the summary share untouched", async () => {
+    const db = budgetDb(budgetRow({ max_llm_calls: 10 }));
+    stubDb(db);
+    const summary = await reserveProductSummaryBudget(42);
+    const orphan = await reserveBehaviorBudget(reservationInput({ attemptId: "attempt-orphan" }));
+    const inFlight = await reserveBehaviorBudget(reservationInput({ attemptId: "attempt-live" }));
+    const cutoff = Date.now();
+    db.reservations().find((entry) => entry.attempt_id === "attempt-orphan")!.created_at_ms = cutoff - 1_000;
+    db.reservations().find((entry) => entry.attempt_id === "attempt-live")!.created_at_ms = cutoff + 60_000;
+    const result = await reconcileOrphanedTaskReservations({ runId: 42, orphanBeforeMs: cutoff });
+    expect(result).toEqual({ examined: 1, settled: 0, released: 1, usageUnknownBlocked: false });
+    expect(db.reservations().find((entry) => entry.attempt_id === "attempt-live")?.status).toBe("reserved");
+    expect(db.reservations().find((entry) => entry.reservation_uuid === summary.reservationId)?.status).toBe("reserved");
+    expect(db.row.summary_reserved).toBe(1);
+    expect(inFlight.reservationId).toBeTruthy();
+  });
+
+  it("flags usageUnknownBlocked without aborting the sweep when orphan usage is unknown under a configured cap", async () => {
+    const db = budgetDb(budgetRow({ max_llm_calls: 10, max_total_tokens: "10000" }), [
+      receipt({
+        attempt_id: "attempt-unknown",
+        usage_status: "unknown",
+        input_tokens: null,
+        output_tokens: null,
+        llm_cost_amount: null,
+        pricing_status: "unpriced",
+      }),
+    ]);
+    stubDb(db);
+    await reserveBehaviorBudget(reservationInput({ attemptId: "attempt-unknown" }));
+    await reserveBehaviorBudget(reservationInput({ attemptId: "attempt-clean" }));
+    const result = await reconcileOrphanedTaskReservations({ runId: 42, orphanBeforeMs: Date.now() + 60_000 });
+    expect(result.usageUnknownBlocked).toBe(true);
+    expect(result.settled).toBe(1);
+    expect(result.released).toBe(1);
+    expect(db.reservations().find((entry) => entry.attempt_id === "attempt-unknown")?.status).toBe("settled_unknown");
+    expect(db.reservations().find((entry) => entry.attempt_id === "attempt-clean")?.status).toBe("released");
   });
 });
 

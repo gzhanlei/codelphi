@@ -261,6 +261,8 @@ export async function loadBehaviorTaskSources(
       fragment.ranges.map((range) => ({ path: unit.primaryPath, ...range })),
     ),
   );
+  // M（影子阶段限制）：清单层没有调用图分析，unit.contextRanges 恒为空——这里只读取
+  // 单元显式声明的最小依赖区间，绝不回退为整份共享依赖文件顶替上下文。
   const contextRanges = unionRanges(unit.contextRanges);
   const sources: TaskSource[] = [];
   for (const range of primaryRanges) sources.push(await readRange(index, range, "primary"));

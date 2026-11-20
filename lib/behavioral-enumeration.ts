@@ -141,6 +141,14 @@ export interface InventoryEnumerationSummary {
   residualUnits: number;
   /** primaryRanges=null 的不可读占位单元数（读取失败披露；占位期间主覆盖门禁不通过）。 */
   unreadableUnits: number;
+  /** 清单生成诊断（D，随 manifest 持久化）：无检测器支持的实现面路径。 */
+  detectorUnsupportedPaths: string[];
+  /** 检测器解析失败（整文件回退残余清单）的路径。 */
+  detectorParseFailurePaths: string[];
+  /** 命中间隔动态注册、走 fallback 区间的路径。 */
+  dynamicRegistrationFallbackPaths: string[];
+  /** 读取失败的实现面路径（生成零区间占位单元，激活被阻断直到可读）。 */
+  unreadablePaths: string[];
   primaryRangesCoveredLines: number;
   primaryRangesOmittedLines: number;
   anchorRangesCoveredLines: number;

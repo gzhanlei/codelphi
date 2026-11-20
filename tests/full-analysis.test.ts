@@ -7,12 +7,12 @@ import { manifestHash } from "../lib/behavior-inventory/manifest";
 import { BehaviorBudgetError, UNLIMITED_MAX_COST_AMOUNT, UNLIMITED_MAX_LLM_CALLS, UNLIMITED_MAX_TOTAL_TOKENS } from "../lib/behavior-run-budget";
 import { InventoryPersistenceError } from "../lib/behavior-unit-receipts";
 import { extractBehaviorTask } from "../lib/behavior-unit-extraction";
-import { claimBehaviorTask, commitBehaviorTaskResult, insertManifestIfAbsent, loadVerifiedManifest, markBehaviorTaskFailure } from "../lib/behavior-unit-receipts";
-import { releaseUnusedBehaviorBudget, reserveBehaviorBudget, reserveProductSummaryBudget, settleBehaviorBudget } from "../lib/behavior-run-budget";
+import { claimBehaviorTask, commitBehaviorTaskResult, insertManifestIfAbsent, loadVerifiedManifest, markBehaviorTaskFailure, renewBehaviorTaskLease } from "../lib/behavior-unit-receipts";
+import { reconcileOrphanedTaskReservations, releaseUnusedBehaviorBudget, reserveBehaviorBudget, reserveProductSummaryBudget, settleBehaviorBudget } from "../lib/behavior-run-budget";
 import { runAnalysis } from "../lib/analysis";
 import { analyzeBehavioralGroup, analyzeWithAI } from "../lib/ai";
 import { getPartitionedAnalysisSources } from "../lib/remote-analysis";
-import { insertSpecVersion } from "../lib/spec-versions";
+import { insertSpecVersion, loadLatestSpecVersionLanguage } from "../lib/spec-versions";
 import { behaviorAnalysisBudget, behaviorAnalysisConcurrency, fullAnalysisMode } from "../lib/env";
 import { runInventoryFullAnalysis } from "../lib/full-analysis";
 import type { InventoryFullAnalysisOutcome } from "../lib/full-analysis";
@@ -43,7 +43,9 @@ const FILES: Record<string, string[]> = {
   ],
   "src/util.ts": ["export function formatMoney(cents: number) {", "  return `¥${(cents / 100).toFixed(2)}`;", "}"],
 };
-const FILE_CONTENT = Object.fromEntries(Object.entries(FILES).map(([path, lines]) => [path, lines.join("\n")]));
+// 可变仓文件表：测试可增删文件（C 范围指纹漂移 / H 纯空行文件）；beforeEach 复位为 FILES
+const repoFiles: Record<string, string[]> = { ...FILES };
+const repoFileContent = (path: string): string | undefined => (repoFiles[path] ? repoFiles[path].join("\n") : undefined);
 
 const RUN_ID = 8;
 
@@ -65,6 +67,7 @@ const store = {
   tasks: new Map<string, FakeTaskRow>(),
   linkInserts: [] as unknown[][],
   budgetRow: null as unknown[] | null,
+  productRow: null as { description: string; description_evidence: string } | null,
 };
 
 const budget = {
@@ -75,6 +78,11 @@ const budget = {
   reservations: new Map<string, { reservationId: string; attemptId: string }>(),
   settled: [] as string[],
   released: [] as string[],
+  // B：摘要预留的服务端状态（reserved/settled/settled_unknown）——恢复路径的行为由它驱动
+  summaryStatus: "reserved" as "reserved" | "settled" | "settled_unknown",
+  // E：孤儿任务预留对账结果（usageUnknownBlocked=true 时派发必须停止、门禁 fail closed）
+  orphanResult: { examined: 0, settled: 0, released: 0, usageUnknownBlocked: false },
+  reconcileCalls: 0,
 };
 
 const zeroSanitize = (empty: boolean) => ({ droppedClaims: 0, droppedScenarios: 0, droppedFeatures: 0, allCandidatesRejected: false, empty, keptClaims: 0 });
@@ -143,13 +151,13 @@ const index = {
   listDir: vi.fn(async (path: string) => ({
     status: "indexed",
     truncated: false,
-    entries: Object.keys(FILES)
+    entries: Object.keys(repoFiles)
       .filter((file) => file.startsWith(`${path}/`))
-      .map((file) => ({ path: file, type: "blob", size: FILE_CONTENT[file].length })),
+      .map((file) => ({ path: file, type: "blob", size: repoFileContent(file)!.length })),
   })),
-  statPath: vi.fn(async (path: string) => (FILE_CONTENT[path] ? { path, byteSize: FILE_CONTENT[path].length } : null)),
+  statPath: vi.fn(async (path: string) => (repoFiles[path] ? { path, byteSize: repoFileContent(path)!.length } : null)),
   readLines: vi.fn(async (request: { path: string; startLine: number; endLine: number }) => {
-    const lines = FILES[request.path];
+    const lines = repoFiles[request.path];
     if (!lines) throw new Error(`missing ${request.path}`);
     const slice = lines.slice(request.startLine - 1, request.endLine);
     return { path: request.path, startLine: request.startLine, endLine: request.startLine + slice.length - 1, lines: slice, byteSize: 0, lineCount: lines.length };
@@ -177,7 +185,7 @@ const execute = vi.fn(async (sql: string, params?: unknown[]) => {
   if (sql.includes("FROM analysis_behavior_tasks")) {
     return [[...store.tasks.values()].map((row) => ({ task_key: row.taskKey, status: row.status, attempts: row.attempts, result_json: row.resultJson }))];
   }
-  if (sql.includes("FROM products")) return [[]];
+  if (sql.includes("FROM products")) return [store.productRow ? [store.productRow] : []];
   return [{}];
 });
 
@@ -284,7 +292,13 @@ function mockReserveProductSummaryBudgetImpl(runId: number) {
     reservedInputTokens: 128_000,
     reservedOutputTokens: 8_192,
     reservedCostAmount: 5,
+    status: budget.summaryStatus,
   });
+}
+
+function mockReconcileOrphanedTaskReservationsImpl() {
+  budget.reconcileCalls += 1;
+  return Promise.resolve(budget.orphanResult);
 }
 
 function mockSettleBehaviorBudgetImpl(input: { reservationId: string }) {
@@ -309,6 +323,7 @@ vi.mock("../lib/behavior-unit-receipts", async (importOriginal) => {
     claimBehaviorTask: vi.fn(mockClaimBehaviorTaskImpl),
     commitBehaviorTaskResult: vi.fn(mockCommitBehaviorTaskResultImpl),
     markBehaviorTaskFailure: vi.fn(mockMarkBehaviorTaskFailureImpl),
+    renewBehaviorTaskLease: vi.fn(async () => undefined),
   };
 });
 
@@ -320,6 +335,7 @@ vi.mock("../lib/behavior-run-budget", async (importOriginal) => {
     reserveProductSummaryBudget: vi.fn(mockReserveProductSummaryBudgetImpl),
     settleBehaviorBudget: vi.fn(mockSettleBehaviorBudgetImpl),
     releaseUnusedBehaviorBudget: vi.fn(mockReleaseUnusedBehaviorBudgetImpl),
+    reconcileOrphanedTaskReservations: vi.fn(mockReconcileOrphanedTaskReservationsImpl),
   };
 });
 
@@ -625,16 +641,21 @@ describe("runInventoryFullAnalysis orchestration", () => {
     vi.mocked(claimBehaviorTask).mockImplementation(mockClaimBehaviorTaskImpl);
     vi.mocked(commitBehaviorTaskResult).mockImplementation(mockCommitBehaviorTaskResultImpl);
     vi.mocked(markBehaviorTaskFailure).mockImplementation(mockMarkBehaviorTaskFailureImpl);
+    vi.mocked(renewBehaviorTaskLease).mockImplementation(async () => undefined);
     vi.mocked(reserveBehaviorBudget).mockImplementation(mockReserveBehaviorBudgetImpl);
     vi.mocked(reserveProductSummaryBudget).mockImplementation(mockReserveProductSummaryBudgetImpl);
     vi.mocked(settleBehaviorBudget).mockImplementation(mockSettleBehaviorBudgetImpl);
     vi.mocked(releaseUnusedBehaviorBudget).mockImplementation(mockReleaseUnusedBehaviorBudgetImpl);
+    vi.mocked(reconcileOrphanedTaskReservations).mockImplementation(mockReconcileOrphanedTaskReservationsImpl);
+    for (const key of Object.keys(repoFiles)) delete repoFiles[key];
+    Object.assign(repoFiles, FILES);
     store.manifest = null;
     store.manifestTampered = false;
     store.manifestVersionConflict = false;
     store.tasks = new Map();
     store.linkInserts = [];
     store.budgetRow = null;
+    store.productRow = null;
     budget.seq = 0;
     budget.reserveCalls = 0;
     budget.failReservesAfter = Number.POSITIVE_INFINITY;
@@ -642,6 +663,9 @@ describe("runInventoryFullAnalysis orchestration", () => {
     budget.reservations = new Map();
     budget.settled = [];
     budget.released = [];
+    budget.summaryStatus = "reserved";
+    budget.orphanResult = { examined: 0, settled: 0, released: 0, usageUnknownBlocked: false };
+    budget.reconcileCalls = 0;
     vi.mocked(extractBehaviorTask).mockImplementation(async (input: { task: BehaviorExecutionTask; sources: Array<{ path: string; role: string }> }) => {
       const primary = input.sources.find((source) => source.role === "primary") ?? input.sources[0];
       return extractedResult(input.task, primary.path);
@@ -734,6 +758,11 @@ describe("runInventoryFullAnalysis orchestration", () => {
     expect(inventory.budgetBlocked).toBe(false);
     expect(inventory.productDescriptionStatus).toBe("generated");
     expect(inventory.primaryRangesOmittedLines).toBe(0);
+    // D：清单生成诊断随 manifest 持久化并暴露到枚举摘要（恢复路径同口径）
+    expect(inventory.detectorUnsupportedPaths).toEqual([]);
+    expect(inventory.detectorParseFailurePaths).toEqual([]);
+    expect(inventory.dynamicRegistrationFallbackPaths).toEqual([]);
+    expect(inventory.unreadablePaths).toEqual([]);
     // 新路径覆盖回执：主覆盖区间遗漏入账（sourceCoverage complete 必须为零，Task 14）
     expect(outcome.coverage.primaryRangesOmitted).toBe(0);
     expect(outcome.passInfos.length).toBe(manifest.tasks.length);
@@ -748,8 +777,9 @@ describe("runInventoryFullAnalysis orchestration", () => {
     const second = await actualFullAnalysis.runInventoryFullAnalysis(baseInput(), { activate: true });
     expect(second.activated).toBe(true);
     expect(vi.mocked(loadVerifiedManifest)).toHaveBeenCalledTimes(1);
-    expect(index.listRoot).not.toHaveBeenCalled();
-    expect(index.listDir).not.toHaveBeenCalled();
+    // C：恢复按目录枚举重算范围指纹（元数据级 listDir）——但绝不重读文件内容重扫
+    expect(index.listRoot).toHaveBeenCalled();
+    expect(index.readLines).not.toHaveBeenCalled();
     expect(vi.mocked(extractBehaviorTask)).not.toHaveBeenCalled();
     expect(vi.mocked(claimBehaviorTask)).not.toHaveBeenCalled();
     expect(vi.mocked(reserveBehaviorBudget)).not.toHaveBeenCalled();
@@ -958,6 +988,252 @@ describe("runInventoryFullAnalysis orchestration", () => {
     expect(budget.released).toContain("summary-res");
     expect(budget.settled).not.toContain("summary-res");
     expect(requestCompletion).not.toHaveBeenCalled();
+  });
+
+  it("reconciles orphaned task reservations on resume before any new reservation (E)", async () => {
+    await actualFullAnalysis.runInventoryFullAnalysis(baseInput(), { activate: true });
+    vi.clearAllMocks();
+    budget.orphanResult = { examined: 2, settled: 1, released: 1, usageUnknownBlocked: false };
+    const failedTaskKey = [...store.tasks.keys()][0];
+    const row = store.tasks.get(failedTaskKey) as FakeTaskRow;
+    row.status = "failed";
+    row.attempts = 1;
+    row.resultJson = null;
+
+    const second = await actualFullAnalysis.runInventoryFullAnalysis(baseInput(), { activate: true });
+    expect(second.activated).toBe(true);
+    expect(vi.mocked(reconcileOrphanedTaskReservations)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(reconcileOrphanedTaskReservations)).toHaveBeenCalledWith({ runId: RUN_ID, orphanBeforeMs: expect.any(Number) });
+    // 对账先于任何新预留：孤儿占用的份额先了断，再派发
+    expect(vi.mocked(reconcileOrphanedTaskReservations).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(reserveProductSummaryBudget).mock.invocationCallOrder[0]);
+    expect(vi.mocked(reconcileOrphanedTaskReservations).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(reserveBehaviorBudget).mock.invocationCallOrder[0]);
+  });
+
+  it("stops dispatch and fails closed when orphan reconciliation reports unknown usage (E)", async () => {
+    await actualFullAnalysis.runInventoryFullAnalysis(baseInput(), { activate: true });
+    vi.clearAllMocks();
+    budget.orphanResult = { examined: 1, settled: 1, released: 0, usageUnknownBlocked: true };
+    const failedTaskKey = [...store.tasks.keys()][0];
+    const row = store.tasks.get(failedTaskKey) as FakeTaskRow;
+    row.status = "failed";
+    row.attempts = 1;
+    row.resultJson = null;
+
+    await expect(actualFullAnalysis.runInventoryFullAnalysis(baseInput(), { activate: true })).rejects.toThrow(/inventory_activation_gate_failed/);
+    // usage 未知 = 派发停止：可领取任务走 abort 排水路径恢复 pending，绝不发起 LLM 调用
+    expect(vi.mocked(extractBehaviorTask)).not.toHaveBeenCalled();
+    expect((store.tasks.get(failedTaskKey) as FakeTaskRow).status).toBe("pending");
+  });
+
+  it("refuses to resume when the implementation surface no longer matches the manifest scope fingerprint (C)", async () => {
+    await actualFullAnalysis.runInventoryFullAnalysis(baseInput(), { activate: true });
+    vi.clearAllMocks();
+    repoFiles["src/extra.ts"] = ["export function extraFlag() {", "  return true;", "}"];
+
+    await expect(actualFullAnalysis.runInventoryFullAnalysis(baseInput(), { activate: true })).rejects.toThrow(/inventory_version_conflict/);
+    // 范围漂移的 manifest 不可恢复：不重扫、不派发、不对账（指纹校验先于任何写路径）
+    expect(vi.mocked(extractBehaviorTask)).not.toHaveBeenCalled();
+    expect(vi.mocked(claimBehaviorTask)).not.toHaveBeenCalled();
+    expect(budget.reconcileCalls).toBe(0);
+  });
+
+  it("degrades per D10 without regenerating when the summary reservation was already settled (B)", async () => {
+    store.productRow = { description: "旧的简介文案。", description_evidence: JSON.stringify([{ path: "src/orders.ts", startLine: 1 }]) };
+    vi.mocked(loadLatestSpecVersionLanguage).mockResolvedValue("zh-CN");
+    await actualFullAnalysis.runInventoryFullAnalysis(baseInput(), { activate: true });
+    vi.clearAllMocks();
+    // clearAllMocks 只清 mock 调用记录：预算台账（普通数组）一并复位，断言只看第二次 run
+    budget.settled = [];
+    budget.released = [];
+    budget.summaryStatus = "settled";
+
+    const second = await actualFullAnalysis.runInventoryFullAnalysis(baseInput(), { activate: true });
+    expect(second.activated).toBe(true);
+    // 摘要已结算：绝不再调用摘要 LLM（usage 无法二次入账），语言一致沿用旧简介
+    expect(requestCompletion).not.toHaveBeenCalled();
+    expect(second.productDescriptionStatus).toBe("preserved");
+    expect(second.result.product.description).toBe("旧的简介文案。");
+    // 已结算的预留绝不重复 settle，也绝不走 release（release 已结算预留会抛错）
+    expect(budget.settled).not.toContain("summary-res");
+    expect(budget.released).not.toContain("summary-res");
+  });
+
+  it("reports the summary unavailable when it was already settled and no previous description matches the language (B)", async () => {
+    await actualFullAnalysis.runInventoryFullAnalysis(baseInput(), { activate: true });
+    vi.clearAllMocks();
+    budget.settled = [];
+    budget.released = [];
+    budget.summaryStatus = "settled";
+
+    const second = await actualFullAnalysis.runInventoryFullAnalysis(baseInput(), { activate: true });
+    expect(second.activated).toBe(true);
+    expect(requestCompletion).not.toHaveBeenCalled();
+    expect(second.productDescriptionStatus).toBe("unavailable");
+    expect(second.result.product.description).toBe("");
+    expect(budget.settled).not.toContain("summary-res");
+    expect(budget.released).not.toContain("summary-res");
+  });
+
+  it("treats a settled_unknown summary reservation as budget usage unknown and fails closed (B)", async () => {
+    await actualFullAnalysis.runInventoryFullAnalysis(baseInput(), { activate: true });
+    vi.clearAllMocks();
+    budget.summaryStatus = "settled_unknown";
+
+    await expect(actualFullAnalysis.runInventoryFullAnalysis(baseInput(), { activate: true })).rejects.toThrow(/inventory_activation_gate_failed/);
+    expect(requestCompletion).not.toHaveBeenCalled();
+    expect(vi.mocked(extractBehaviorTask)).not.toHaveBeenCalled();
+  });
+
+  it("renews the task lease during long-running extraction (F)", async () => {
+    vi.mocked(extractBehaviorTask).mockImplementation(async (input: { task: BehaviorExecutionTask; sources: Array<{ path: string; role: string }> }) => {
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      const primary = input.sources.find((source) => source.role === "primary") ?? input.sources[0];
+      return extractedResult(input.task, primary.path);
+    });
+
+    const outcome = await actualFullAnalysis.runInventoryFullAnalysis({ ...baseInput(), leaseDurationMs: 30 }, { activate: true });
+    expect(outcome.activated).toBe(true);
+    // 租约 30ms / 心跳 10ms / 提取 80ms：每个任务执行窗口内必有多次续约
+    expect(vi.mocked(renewBehaviorTaskLease).mock.calls.length).toBeGreaterThan(0);
+    for (const [renewal] of vi.mocked(renewBehaviorTaskLease).mock.calls) {
+      expect(renewal).toMatchObject({ runId: RUN_ID, leaseDurationMs: 30 });
+      expect(typeof (renewal as { attemptId?: unknown }).attemptId).toBe("string");
+    }
+  });
+
+  it("treats a lost lease mid-extraction as a hard failure and never commits that attempt (F)", async () => {
+    let rejectOnce = true;
+    vi.mocked(renewBehaviorTaskLease).mockImplementation(async () => {
+      if (rejectOnce) {
+        rejectOnce = false;
+        throw new Error("lease stolen");
+      }
+    });
+    vi.mocked(extractBehaviorTask).mockImplementation(async (input: { task: BehaviorExecutionTask; sources: Array<{ path: string; role: string }> }) => {
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      const primary = input.sources.find((source) => source.role === "primary") ?? input.sources[0];
+      return extractedResult(input.task, primary.path);
+    });
+
+    const outcome = await actualFullAnalysis.runInventoryFullAnalysis({ ...baseInput(), leaseDurationMs: 30 }, { activate: true });
+    expect(outcome.activated).toBe(true);
+    // 租约丢失的 attempt 按硬失败处理（记 failed 后重试成功），其结果绝不提交
+    const marks = vi.mocked(markBehaviorTaskFailure).mock.calls.map((call) => call[0] as { error?: unknown });
+    expect(marks.some((mark) => String(mark.error).includes("lease stolen"))).toBe(true);
+    const manifest = store.manifest as BehaviorManifest;
+    expect(vi.mocked(commitBehaviorTaskResult).mock.calls.length).toBe(manifest.tasks.length);
+    expect(Math.max(...[...store.tasks.values()].map((row) => row.attempts))).toBeGreaterThanOrEqual(2);
+  });
+
+  it("runs a single semantic repair pass within the same attempt when receipts stay unresolved (I)", async () => {
+    vi.mocked(extractBehaviorTask).mockImplementation(async (input: { task: BehaviorExecutionTask; repair?: { previous: BehaviorTaskExtractionResult } }) => {
+      if (input.repair) {
+        // 复核趟：未决 fragment 全部改判 reviewed_internal（已决结论由合并保留）
+        return {
+          outcome: "no_behavior" as const,
+          features: [],
+          anchorReceipts: input.repair.previous.anchorReceipts.map((receipt) => ({
+            ...receipt,
+            disposition: "reviewed_internal" as const,
+            internalKind: "pure_technical" as const,
+            reason: "复核确认内部实现",
+            evidence: [{ path: "src/orders.ts", startLine: 1 }],
+            scenarioRefs: [],
+          })),
+          scenarioCount: 0,
+          reviewedCount: input.repair.previous.anchorReceipts.length,
+          unresolvedAnchorCount: 0,
+          sanitize: zeroSanitize(true),
+        };
+      }
+      return unresolvedResult(input.task);
+    });
+
+    const outcome = await actualFullAnalysis.runInventoryFullAnalysis(baseInput(), { activate: true });
+    expect(outcome.activated).toBe(true);
+    const manifest = store.manifest as BehaviorManifest;
+    const calls = vi.mocked(extractBehaviorTask).mock.calls;
+    // 每任务恰好两趟：首趟 + repair；repair 不新增 attempt（同一租约内复核）
+    expect(calls.length).toBe(manifest.tasks.length * 2);
+    expect(calls.filter(([extractInput]) => (extractInput as { repair?: unknown }).repair != null).length).toBe(manifest.tasks.length);
+    expect(vi.mocked(claimBehaviorTask).mock.calls.length).toBe(manifest.tasks.length);
+    for (const row of store.tasks.values()) {
+      expect(row.status).toBe("no_behavior");
+      expect(row.attempts).toBe(1);
+    }
+    // 同预留结算：每任务预留仍恰好 settle 一次（repair 趟的实际回执在同一预留上入账）
+    expect(budget.settled.filter((id) => id !== "summary-res")).toHaveLength(manifest.tasks.length);
+  });
+
+  it("does not repair when the outcome is unresolved without unresolved receipts (attribution hole, I)", async () => {
+    vi.mocked(extractBehaviorTask).mockImplementation(async (input: { task: BehaviorExecutionTask }) => ({
+      outcome: "unresolved" as const,
+      features: [
+        {
+          name: "无主功能",
+          summary: "存活场景缺少 extracted 归属",
+          scenarios: [{ reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy" as const, evidence: [{ path: "src/orders.ts", startLine: 1 }] }],
+        },
+      ],
+      anchorReceipts: input.task.anchorFragments.map((fragment) => ({
+        anchorKey: fragment.anchorKey,
+        anchorFragmentKey: fragment.anchorFragmentKey,
+        disposition: "reviewed_internal" as const,
+        internalKind: "pure_technical" as const,
+        evidence: [{ path: "src/orders.ts", startLine: 1 }],
+        scenarioRefs: [],
+      })),
+      scenarioCount: 1,
+      reviewedCount: input.task.anchorFragments.length,
+      unresolvedAnchorCount: 0,
+      sanitize: { ...zeroSanitize(false), keptClaims: 1 },
+    }));
+
+    await expect(actualFullAnalysis.runInventoryFullAnalysis(baseInput(), { activate: true })).rejects.toThrow(/inventory_activation_gate_failed/);
+    const manifest = store.manifest as BehaviorManifest;
+    // 归因洞（无未决回执的 unresolved）不触发 repair：每任务恰好一次提取调用
+    expect(vi.mocked(extractBehaviorTask).mock.calls.length).toBe(manifest.tasks.length);
+    for (const row of store.tasks.values()) expect(row.status).toBe("unresolved");
+  });
+
+  it("evaluates primary coverage against the manifest-persisted eligibleRanges, not unit-declared ranges (K)", async () => {
+    await actualFullAnalysis.runInventoryFullAnalysis(baseInput(), { activate: true });
+    const manifest = store.manifest as BehaviorManifest;
+    // K：eligibleRanges 是随 manifest 持久化的独立真源；把它改大到超出任何单元主区间，
+    // 覆盖门禁必须按它判出遗漏（若仍从单元主区间反推则永远完整，此断言不成立）
+    expect(manifest.diagnostics).toBeDefined();
+    manifest.diagnostics!.eligibleRanges = [{ path: "src/orders.ts", startLine: 1, endLine: 100 }];
+
+    await expect(actualFullAnalysis.runInventoryFullAnalysis(baseInput(), { activate: true })).rejects.toThrow(/primaryCoverageComplete/);
+  });
+
+  it("rejects task sources whose content is only blank lines as unreadable (H)", async () => {
+    repoFiles["src/blank.ts"] = ["", "  ", ""];
+
+    await expect(actualFullAnalysis.runInventoryFullAnalysis(baseInput(), { activate: true })).rejects.toThrow(/inventory_activation_gate_failed/);
+    const marks = vi.mocked(markBehaviorTaskFailure).mock.calls.map((call) => call[0] as { error?: unknown });
+    expect(marks.some((mark) => String(mark.error).includes("unreadable"))).toBe(true);
+  });
+
+  it("passes the manifest unit-key directory to every extraction call (related-reference constraint)", async () => {
+    await actualFullAnalysis.runInventoryFullAnalysis(baseInput(), { activate: true });
+    const manifest = store.manifest as BehaviorManifest;
+    const expected = manifest.units.map((unit) => unit.unitKey);
+    expect(expected.length).toBeGreaterThan(0);
+    for (const [extractInput] of vi.mocked(extractBehaviorTask).mock.calls) {
+      expect((extractInput as { knownUnitKeys?: string[] }).knownUnitKeys).toEqual(expected);
+    }
+  });
+
+  it("derives the merge-check gate from merge stats instead of a hardcoded pass (G)", () => {
+    const source = readFileSync(path.join(__dirname, "..", "lib", "full-analysis.ts"), "utf8");
+    expect(source).not.toMatch(/existingMergeChecksPassed:\s*true/);
+    expect(source).toMatch(/existingMergeChecksPassed:\s*merged\.stats\.changesTruncated === 0/);
+  });
+
+  it("drops ghost relatedUnitKeys from gate anchors so covered_elsewhere cannot lean on non-manifest units", () => {
+    const source = readFileSync(path.join(__dirname, "..", "lib", "full-analysis.ts"), "utf8");
+    expect(source).toMatch(/validUnitKeys\.has\(key\)/);
   });
 
   it("delegates the product summary to the shared Task 12 resolver (no duplicate implementation)", () => {

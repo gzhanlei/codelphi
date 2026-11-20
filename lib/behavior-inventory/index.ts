@@ -4,19 +4,24 @@ import { genericDetector, findDynamicRegistrationLines, matchesGenericPath } fro
 import { matchesNextPath, nextDetector } from "./detectors/next";
 import type { BehaviorDetector, BehaviorUnitDraft, InventorySource } from "./detectors/types";
 import { assertRangesWithin, subtractRanges } from "./ranges";
-import { compareCodePoints, makeAnchorKey, makeUnitKey, normalizeLineRanges } from "./identity";
+import { compareCodePoints, makeAnchorKey, makeUnitKey, normalizeCodeRanges, normalizeLineRanges } from "./identity";
 import type {
   BehaviorAnchor,
   BehaviorAnchorLocator,
+  BehaviorInventoryDiagnostics,
   BehaviorUnit,
   BehaviorUnitLocator,
   CodeRange,
   LineRange,
 } from "./types";
 
+export type { BehaviorInventoryDiagnostics } from "./types";
+
 export type { BehaviorDetector, BehaviorUnitDraft, InventorySource } from "./detectors/types";
 
-export const INVENTORY_SCHEMA_VERSION = "1";
+/** schema v2：manifest 持久化 diagnostics（detector 失败面 / unreadablePaths / eligibleRanges）。
+ *  v1 manifest 不含该字段，hash 校验会拒绝旧 manifest（显式失败，不静默重用）。 */
+export const INVENTORY_SCHEMA_VERSION = "2";
 
 const RESIDUAL_DETECTOR: Pick<BehaviorDetector, "id" | "version"> = { id: "residual", version: "1" };
 
@@ -50,16 +55,6 @@ export interface BuildInventoryInput {
   sources: readonly InventorySource[];
 }
 
-export interface BehaviorInventoryDiagnostics {
-  detectorUnsupported: string[];
-  detectorParseFailure: string[];
-  dynamicRegistrationFallback: string[];
-  excludedNonImplementation: string[];
-  fallbackInventorySuccess: boolean;
-  semanticUnits: number;
-  residualUnits: number;
-}
-
 export interface BehaviorInventoryResult {
   inventorySchemaVersion: string;
   detectorRegistryVersion: string;
@@ -67,6 +62,23 @@ export interface BehaviorInventoryResult {
   scopeFingerprint: string;
   units: BehaviorUnit[];
   diagnostics: BehaviorInventoryDiagnostics;
+}
+
+/**
+ * 范围指纹（C）：eligible 实现面路径集合 + scopeRoots 的确定性哈希。扫描期与恢复期共用
+ * 同一实现——恢复时只按目录枚举重算（不读文件内容），与持久化 manifest 的指纹比对，
+ * 不一致即 inventory_version_conflict，绝不静默重扫自愈。
+ */
+export function computeScopeFingerprint(paths: readonly string[], scopeRoots: readonly string[]): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        paths: [...paths].sort(compareCodePoints),
+        scopeRoots: [...scopeRoots].sort(compareCodePoints),
+      }),
+      "utf8",
+    )
+    .digest("hex");
 }
 
 /** 定位符空串统一归一为 null：空串与缺省在身份里同义，不允许两种形态并存。 */
@@ -288,6 +300,60 @@ function buildResidualUnits(
   });
 }
 
+/**
+ * 不可读文件的占位单元（L）：primaryRanges=null、零区间 coarse implicit_review 锚点。
+ * 占位单元不生成执行任务（planner 对 null primaryRanges 返回空），由覆盖/激活门禁
+ * fail closed——文件恢复可读后新 run 重扫自动消除，绝不伪造区间或静默跳过。
+ */
+function buildUnreadablePlaceholder(source: InventorySource): FinalizedUnit {
+  return finalizeUnit(
+    {
+      locator: { kind: "file", path: source.path },
+      primaryPath: source.path,
+      primaryRanges: null,
+      anchors: [
+        {
+          role: "implicit_review",
+          ranges: [],
+          evidence: [{ path: source.path }],
+          coarse: true,
+        },
+      ],
+    },
+    RESIDUAL_DETECTOR,
+  );
+}
+
+/**
+ * 结构不变量（A）：同文件内各单元的主区间两两不相交。单元是执行与归因的身份单元，
+ * 同一行被两个单元认领会让结算与覆盖核销双计；任何重叠都是检测器缺陷，直接显式失败。
+ */
+function assertPrimaryRangesDisjoint(units: readonly BehaviorUnit[]): void {
+  const byPath = new Map<string, Array<{ startLine: number; endLine: number; unitKey: string }>>();
+  for (const unit of units) {
+    for (const range of unit.primaryRanges ?? []) {
+      const list = byPath.get(unit.primaryPath) ?? [];
+      list.push({ startLine: range.startLine, endLine: range.endLine, unitKey: unit.unitKey });
+      byPath.set(unit.primaryPath, list);
+    }
+  }
+  for (const [path, ranges] of byPath) {
+    ranges.sort(
+      (a, b) => a.startLine - b.startLine || a.endLine - b.endLine || compareCodePoints(a.unitKey, b.unitKey),
+    );
+    for (let index = 1; index < ranges.length; index += 1) {
+      const previous = ranges[index - 1];
+      const current = ranges[index];
+      if (current.startLine <= previous.endLine) {
+        throw new Error(
+          `behavior inventory primary range overlap in ${path}: ${previous.unitKey} ` +
+            `[${previous.startLine},${previous.endLine}] vs ${current.unitKey} [${current.startLine},${current.endLine}]`,
+        );
+      }
+    }
+  }
+}
+
 export function buildBehaviorInventory(input: BuildInventoryInput): BehaviorInventoryResult {
   return buildBehaviorInventoryWithRegistry(input, DETECTOR_REGISTRY);
 }
@@ -304,12 +370,17 @@ export function buildBehaviorInventoryWithRegistry(
     else excludedNonImplementation.push(source.path);
   }
 
+  // L：读取失败的文件不进入检测器与残余兜底——为其生成零区间占位单元并记入 unreadablePaths；
+  // 残余清单与 eligibleRanges 只覆盖可读实现面，占位单元以零任务阻断激活直到文件可读。
+  const readable = eligible.filter((source) => source.unreadable !== true);
+  const unreadable = eligible.filter((source) => source.unreadable === true);
+
   const detectorUnsupported = new Set<string>();
   const detectorParseFailure = new Set<string>();
   const dynamicRegistrationFallback = new Set<string>();
   const semanticUnits: FinalizedUnit[] = [];
 
-  for (const source of eligible) {
+  for (const source of readable) {
     const entry = registry.find(({ matches }) => matches(source.path));
     try {
       // 动态扫描与 detect/finalize 同属每文件失败边界：区间解析抛错按 parse failure 整文件回退，不得逃逸。
@@ -329,32 +400,32 @@ export function buildBehaviorInventoryWithRegistry(
   // detect/finalize 要么整文件成功要么抛错，解析失败的文件不会留下半成品单元，整文件交给剩余清单。
   const finalized = [
     ...semanticUnits,
-    ...buildResidualUnits(eligible, semanticUnits.map(({ unit }) => unit)),
+    ...buildResidualUnits(readable, semanticUnits.map(({ unit }) => unit)),
+    ...unreadable.map(buildUnreadablePlaceholder),
   ];
 
   resolveUnitKeyCollisions(finalized);
   resolveAnchorKeyCollisions(finalized);
   assertUniqueKeys(finalized);
   const units = finalized.map(({ unit }) => unit).sort((a, b) => compareCodePoints(a.unitKey, b.unitKey));
+  assertPrimaryRangesDisjoint(units);
 
-  const eligibleRanges = eligible.map((source) => ({
-    path: source.path,
-    startLine: 1,
-    endLine: lineCountOf(source.content),
-  }));
+  // eligibleRanges 由实现面枚举独立计算（K）：覆盖判定的真源不来自单元自身声明。
+  const eligibleRanges = normalizeCodeRanges(
+    readable.map((source) => ({
+      path: source.path,
+      startLine: 1,
+      endLine: lineCountOf(source.content),
+    })),
+  );
   const allPrimary = units.flatMap((unit) => codeRangesOf(unit.primaryPath, unit.primaryRanges ?? []));
   const omitted = subtractRanges(eligibleRanges, allPrimary);
 
   const scopeRoots = [...(input.scopeRoots ?? ["."])].sort(compareCodePoints);
-  const scopeFingerprint = createHash("sha256")
-    .update(
-      JSON.stringify({
-        paths: eligible.map((source) => source.path).sort(compareCodePoints),
-        scopeRoots,
-      }),
-      "utf8",
-    )
-    .digest("hex");
+  const scopeFingerprint = computeScopeFingerprint(
+    eligible.map((source) => source.path),
+    scopeRoots,
+  );
 
   const sortStrings = (values: Iterable<string>): string[] => [...values].sort(compareCodePoints);
   const residualCount = units.filter((unit) => unit.detector === RESIDUAL_DETECTOR.id).length;
@@ -363,6 +434,8 @@ export function buildBehaviorInventoryWithRegistry(
     detectorParseFailure: sortStrings(detectorParseFailure),
     dynamicRegistrationFallback: sortStrings(dynamicRegistrationFallback),
     excludedNonImplementation: sortStrings(excludedNonImplementation),
+    unreadablePaths: sortStrings(unreadable.map((source) => source.path)),
+    eligibleRanges,
     fallbackInventorySuccess: omitted.length === 0,
     semanticUnits: units.length - residualCount,
     residualUnits: residualCount,

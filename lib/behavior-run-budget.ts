@@ -216,7 +216,11 @@ function validateReservationInput(input: BudgetReservationInput): void {
   }
 }
 
-/** 聚合账本的原子预留扣减：余额谓词条件 UPDATE，sentinel 表示对应维度无上限。 */
+/** 聚合账本的原子预留扣减：余额谓词条件 UPDATE，sentinel 表示对应维度无上限。
+ *  sentinel 判等必须在数据库侧做精确类型比较（CONVERT）：mysql2 默认把 BIGINT UNSIGNED
+ *  最大值读回为舍入值，值经 JS 往返后再参与比较会失真（Critical N）。
+ *  用 CONVERT(?, type) 而非 CAST(? AS type)：AS + UNSIGNED/DECIMAL 会撞仓库的
+ *  SQL 保留字护栏（tests/sql-alias-reserved-words.test.ts）。 */
 async function applyLedgerReservation(
   execute: Execute,
   input: { runId: number; llmCalls: number; inputTokens: number; outputTokens: number; costAmount: number; summary: boolean },
@@ -235,8 +239,8 @@ async function applyLedgerReservation(
       WHERE run_id = ?
         ${summaryPredicate}
         AND (max_llm_calls = ? OR settled_llm_calls + reserved_llm_calls + ? <= max_llm_calls)
-        AND (max_total_tokens = ? OR settled_input_tokens + reserved_input_tokens + settled_output_tokens + reserved_output_tokens + ? <= max_total_tokens)
-        AND (max_cost_amount = ? OR settled_cost_amount + reserved_cost_amount + ? <= max_cost_amount)`,
+        AND (max_total_tokens = CONVERT(?, UNSIGNED) OR settled_input_tokens + reserved_input_tokens + settled_output_tokens + reserved_output_tokens + ? <= max_total_tokens)
+        AND (max_cost_amount = CONVERT(?, DECIMAL(12,6)) OR settled_cost_amount + reserved_cost_amount + ? <= max_cost_amount)`,
     [
       input.llmCalls,
       input.inputTokens,
@@ -320,12 +324,17 @@ export async function reserveBehaviorBudget(input: BudgetReservationInput): Prom
   });
 }
 
+/** 产品摘要预留：除预留身份与金额外携带服务端状态——恢复路径必须区分 reserved
+ *  （可继续生成）与 settled/settled_unknown（摘要已结算，绝不再生成，按 D10 降级）。 */
+export type ProductSummaryReservation = BudgetReservation & { status: ReservationStatus };
+
 /**
  * 产品摘要份额独立预留（D9/D10：摘要调用、token、费用不与单元抢占，不能因单元超支静默跳过）。
  * 每 run 一次：summary_reserved 0→1 与余额判定在同一条件 UPDATE；已预留时幂等返回
- * 首次预留的服务端状态（同一 reservationId），绝不双倍预留。
+ * 最新预留行的服务端状态（同一 reservationId），绝不双倍预留。最新行（id DESC）是唯一
+ * 权威——旧的 released 行不得被错拿（fix round 3 / B）。
  */
-export async function reserveProductSummaryBudget(runId: number): Promise<BudgetReservation> {
+export async function reserveProductSummaryBudget(runId: number): Promise<ProductSummaryReservation> {
   assertPositiveInt(runId, "runId");
   if (runId === 0) throw new Error("runId must be positive");
   const reservationId = randomUUID();
@@ -358,19 +367,23 @@ export async function reserveProductSummaryBudget(runId: number): Promise<Budget
       reservedInputTokens: PRODUCT_SUMMARY_RESERVED_INPUT_TOKENS,
       reservedOutputTokens: PRODUCT_SUMMARY_RESERVED_OUTPUT_TOKENS,
       reservedCostAmount: PRODUCT_SUMMARY_RESERVED_COST_AMOUNT,
+      status: "reserved" as const,
     };
   });
   if (created) return created;
-  // 失败只有两种原因：已预留（幂等返回首次预留）或预算不足；summary_reserved 单调 0→1，读后判定无竞态。
+  // 失败只有两种原因：已预留（幂等返回最新预留）或预算不足；summary_reserved 单调 0→1，读后判定无竞态。
   const [flagRows] = (await getDb().execute("SELECT summary_reserved FROM analysis_run_budgets WHERE run_id = ?", [
     runId,
   ])) as [Array<{ summary_reserved: unknown }>, unknown];
   if (flagRows.length > 0 && Number(flagRows[0].summary_reserved) === 1) {
     const [rows] = (await getDb().execute(
-      `SELECT ${RESERVATION_COLUMNS} FROM analysis_behavior_budget_reservations WHERE run_id = ? AND kind = 'product_summary' ORDER BY id ASC LIMIT 1`,
+      `SELECT ${RESERVATION_COLUMNS} FROM analysis_behavior_budget_reservations WHERE run_id = ? AND kind = 'product_summary' ORDER BY id DESC LIMIT 1`,
       [runId],
     )) as [ReservationRow[], unknown];
-    if (rows.length > 0) return toBudgetReservation(parseReservationRow(rows[0]));
+    if (rows.length > 0) {
+      const parsed = parseReservationRow(rows[0]);
+      return { ...toBudgetReservation(parsed), status: parsed.status };
+    }
   }
   throw new BehaviorBudgetError(
     "behavior_budget_exceeded",
@@ -384,17 +397,26 @@ interface BudgetConfig {
   costCapConfigured: boolean;
 }
 
+/**
+ * 读取 run 的硬上限配置。无上限 sentinel 的判等必须在数据库侧完成（Critical N）：
+ * max_total_tokens 是 BIGINT UNSIGNED，其最大值 18446744073709551615 超出 JS 安全整数，
+ * mysql2 默认读回为舍入值（18446744073709552000）——在 JS 侧做字符串/数值比较会把
+ * "无上限"误判为"已配置上限"，导致一切 usage unknown 的结算都抛出并永久阻断派发。
+ */
 async function loadBudgetConfig(execute: Execute, runId: number): Promise<BudgetConfig | null> {
   const [rows] = (await execute(
-    "SELECT max_llm_calls, max_total_tokens, max_cost_amount FROM analysis_run_budgets WHERE run_id = ?",
-    [runId],
-  )) as [Array<{ max_llm_calls: unknown; max_total_tokens: unknown; max_cost_amount: unknown }>, unknown];
+    `SELECT (max_llm_calls = ?) AS calls_uncapped,
+            (max_total_tokens = CONVERT(?, UNSIGNED)) AS tokens_uncapped,
+            (max_cost_amount = CONVERT(?, DECIMAL(12,6))) AS cost_uncapped
+       FROM analysis_run_budgets WHERE run_id = ?`,
+    [UNLIMITED_MAX_LLM_CALLS, UNLIMITED_MAX_TOTAL_TOKENS, UNLIMITED_MAX_COST_AMOUNT, runId],
+  )) as [Array<{ calls_uncapped: unknown; tokens_uncapped: unknown; cost_uncapped: unknown }>, unknown];
   const row = rows[0];
   if (!row) return null;
   return {
-    callsCapConfigured: Number(row.max_llm_calls) !== UNLIMITED_MAX_LLM_CALLS,
-    tokenCapConfigured: String(row.max_total_tokens) !== UNLIMITED_MAX_TOTAL_TOKENS,
-    costCapConfigured: String(row.max_cost_amount) !== UNLIMITED_MAX_COST_AMOUNT,
+    callsCapConfigured: Number(row.calls_uncapped) !== 1,
+    tokenCapConfigured: Number(row.tokens_uncapped) !== 1,
+    costCapConfigured: Number(row.cost_uncapped) !== 1,
   };
 }
 
@@ -556,4 +578,64 @@ export async function releaseUnusedBehaviorBudget(reservationId: string): Promis
       ],
     );
   });
+}
+
+export interface OrphanReservationReconcileResult {
+  /** 命中的孤儿预留数（run 内 kind=task、status=reserved 且创建时间不晚于截止线）。 */
+  examined: number;
+  /** 有 LLM 回执、已按回执结算的孤儿数。 */
+  settled: number;
+  /** 零回执（进程在任何 LLM 调用落账前崩溃）、已释放的孤儿数。 */
+  released: number;
+  /** 有孤儿在配置硬上限下用量未知：已按预留上界结算，调用方必须停止新的派发。 */
+  usageUnknownBlocked: boolean;
+}
+
+/**
+ * 崩溃恢复对账（fix round 3 / E）：进程崩溃会留下 status='reserved' 的任务预留，永远不结算，
+ * 聚合计数随之永久泄漏（恢复重跑后预算被影子占用耗尽）。run 恢复时按创建时间截止线
+ * （orphanBeforeMs，须排除本进程在途 attempt）扫描孤儿任务预留并逐笔了断：
+ *  - 有回执 → 走与正常终态相同的结算路径（usage unknown 在配置硬上限下不抛出中断对账，
+ *    仅置 usageUnknownBlocked，由编排层停止派发）；
+ *  - 零回执 → 从未发生 LLM 调用，整笔释放。
+ * 摘要份额（kind=product_summary）不在此列——它由 summary_reserved 标志位与 D10 降级路径管理。
+ * 每行孤儿的状态转移仍由 settle/release 自身的行锁与状态谓词兜底，扫描与转移之间的竞态
+ * 只会退化为 no-op 或显式错误，绝不双入账。
+ */
+export async function reconcileOrphanedTaskReservations(input: {
+  runId: number;
+  orphanBeforeMs: number;
+}): Promise<OrphanReservationReconcileResult> {
+  assertPositiveInt(input.runId, "runId");
+  if (input.runId === 0) throw new Error("runId must be positive");
+  if (!Number.isFinite(input.orphanBeforeMs)) {
+    throw new Error(`orphanBeforeMs must be a finite epoch-ms number, got ${String(input.orphanBeforeMs)}`);
+  }
+  const [rows] = (await getDb().execute(
+    `SELECT ${RESERVATION_COLUMNS} FROM analysis_behavior_budget_reservations
+      WHERE run_id = ? AND kind = 'task' AND status = 'reserved' AND created_at <= FROM_UNIXTIME(? / 1000)
+      ORDER BY id ASC`,
+    [input.runId, input.orphanBeforeMs],
+  )) as [ReservationRow[], unknown];
+  const result: OrphanReservationReconcileResult = { examined: rows.length, settled: 0, released: 0, usageUnknownBlocked: false };
+  for (const row of rows) {
+    const reservation = parseReservationRow(row);
+    const usage = await loadAttemptLlmUsage(reservation.runId, reservation.attemptId);
+    if (usage.llmCalls > 0) {
+      try {
+        await settleBehaviorBudget({ reservationId: reservation.reservationId });
+      } catch (error) {
+        if (error instanceof BehaviorBudgetError && error.code === "behavior_budget_usage_unknown") {
+          result.usageUnknownBlocked = true;
+        } else {
+          throw error;
+        }
+      }
+      result.settled += 1;
+    } else {
+      await releaseUnusedBehaviorBudget(reservation.reservationId);
+      result.released += 1;
+    }
+  }
+  return result;
 }

@@ -32,7 +32,8 @@ const DYNAMIC_REGISTRATION_PATTERNS: RegExp[] = [
   /\b(?:app|router|server)\s*\[\s*[\w$]+\s*\]\s*\(/,
 ];
 
-const EXPORT_DECLARATION = /^\s*export\s+(?:async\s+)?(?:function|class)\s+([A-Za-z_$][\w$]*)|^\s*export\s+const\s+([A-Za-z_$][\w$]*)\s*=/gm;
+/** 行首断言后的缩进只吃空白不吃换行（J）：`\s` 可吞换行会把声明前的空行并入单元区间。 */
+const EXPORT_DECLARATION = /^[^\S\n]*export\s+(?:async\s+)?(?:function|class)\s+([A-Za-z_$][\w$]*)|^[^\S\n]*export\s+const\s+([A-Za-z_$][\w$]*)\s*=/gm;
 
 export function matchesGenericPath(path: string): boolean {
   return /\.(?:ts|tsx|js|jsx|mjs|cjs)$/i.test(path);
@@ -117,9 +118,10 @@ const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
 
 function resolveNamedHandler(content: string, starts: readonly number[], name: string): LineRange | null {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // (?:^|\n) 之后只吃行内空白（J）：`\s*` 会跨行吞掉声明前的空行，使 handler 区间起点错位。
   const patterns = [
-    new RegExp(`(?:^|\\n)\\s*(?:export\\s+)?(?:async\\s+)?function\\s+${escaped}\\s*\\(`),
-    new RegExp(`(?:^|\\n)\\s*(?:export\\s+)?const\\s+${escaped}\\s*=`),
+    new RegExp(`(?:^|\\n)[^\\S\\n]*(?:export\\s+)?(?:async\\s+)?function\\s+${escaped}\\s*\\(`),
+    new RegExp(`(?:^|\\n)[^\\S\\n]*(?:export\\s+)?const\\s+${escaped}\\s*=`),
   ];
   for (const pattern of patterns) {
     const match = pattern.exec(content);
@@ -200,23 +202,54 @@ interface RegistrationAnalysis {
   dynamicLines: number[];
 }
 
+function rangesOverlap(a: LineRange, b: LineRange): boolean {
+  return a.startLine <= b.endLine && b.startLine <= a.endLine;
+}
+
+/** 同一 handler 被多次注册时，后续注册单元收缩到注册语句行：handler 区间只能由首个
+ *  注册单元认领（同文件主区间两两不相交的结构不变量），后续单元的独立行为是注册本身
+ *  （registrationId/调度参数差异），其 entry 锚点已在注册语句上。 */
+function shrinkDraftToRegistrationLine(draft: BehaviorUnitDraft, fallbackLine: number): BehaviorUnitDraft {
+  const entryLine = draft.anchors.find((anchor) => anchor.role === "entry")?.ranges[0]?.startLine ?? fallbackLine;
+  return {
+    ...draft,
+    primaryRanges: [{ startLine: entryLine, endLine: entryLine }],
+    anchors: draft.anchors.filter((anchor) => anchor.role === "entry"),
+  };
+}
+
 /** handler 不可解析（未定义标识符、无法识别的匿名形态）时同样记动态兜底，不允许静默丢单元。 */
 function analyzeRegistrations(source: InventorySource): RegistrationAnalysis {
   const starts = lineStarts(source.content);
   const { registrations, dynamicLines } = scanRegistrations(source);
   const drafts: BehaviorUnitDraft[] = [];
+  const claimedHandlerRanges: LineRange[] = [];
   for (const registration of registrations) {
-    const draft = registrationDraft(source, starts, registration);
-    if (draft == null) dynamicLines.push(registration.line);
-    else drafts.push(draft);
+    let draft = registrationDraft(source, starts, registration);
+    if (draft == null) {
+      dynamicLines.push(registration.line);
+      continue;
+    }
+    if (draft.primaryRanges?.some((range) => claimedHandlerRanges.some((claimed) => rangesOverlap(range, claimed)))) {
+      draft = shrinkDraftToRegistrationLine(draft, registration.line);
+    }
+    claimedHandlerRanges.push(...(draft.primaryRanges ?? []));
+    drafts.push(draft);
   }
   return { drafts, dynamicLines };
 }
 
 export function detectGeneric(source: InventorySource): BehaviorUnitDraft[] {
   const starts = lineStarts(source.content);
-  const drafts = publicExportDrafts(source, starts);
-  return [...drafts, ...analyzeRegistrations(source).drafts];
+  const registrationDrafts = analyzeRegistrations(source).drafts;
+  // A：注册调用优先认领 handler 声明区间——同一区间若再产出 public_api 单元会造成
+  // 主区间跨单元重叠（同一行被两个身份单元双计）。与任一注册 handler 区间相交的
+  // public_api 草稿直接丢弃；注册单元本身已带 entry + implicit_review 完整覆盖。
+  const registrationRanges: LineRange[] = registrationDrafts.flatMap((draft) => draft.primaryRanges ?? []);
+  const drafts = publicExportDrafts(source, starts).filter(
+    (draft) => !(draft.primaryRanges ?? []).some((range) => registrationRanges.some((other) => rangesOverlap(range, other))),
+  );
+  return [...drafts, ...registrationDrafts];
 }
 
 export const genericDetector: BehaviorDetector = {

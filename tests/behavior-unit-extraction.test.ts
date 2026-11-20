@@ -332,3 +332,96 @@ describe("extractBehaviorTask", () => {
     expect(requestCompletion).not.toHaveBeenCalled();
   });
 });
+
+describe("extractBehaviorTask semantic repair (I)", () => {
+  const billing: LlmBillingContext = {
+    runId: 7,
+    accountId: 3,
+    chargeComponent: "main",
+    taskKey: task.taskKey,
+    unitKey: task.unitKey,
+    attemptId: "attempt-1",
+  };
+
+  async function firstPassUnresolved() {
+    // R1 extracted（HP-1 存活），R2 缺结论 → 首趟 unresolved
+    const requestCompletion = completionMock(describeResponse(), judgeResponse([extractedRegion("R1")], [feature]));
+    const first = await extractBehaviorTask(input({ requestCompletion, billing }));
+    expect(first.outcome).toBe("unresolved");
+    expect(first.unresolvedAnchorCount).toBe(1);
+    return first;
+  }
+
+  it("repairs only unresolved fragments with a single semantic_repair judge call", async () => {
+    const first = await firstPassUnresolved();
+    // 复核趟区域 id 按缩减任务重排：唯一的未决 fragment（原 R2，行 6-10）在新任务中是 R1
+    const repairCompletion = completionMock(judgeResponse([internalRegion("R1", "data_transform")]));
+    const repaired = await extractBehaviorTask(input({ requestCompletion: repairCompletion, billing, repair: { previous: first } }));
+    expect(repairCompletion).toHaveBeenCalledTimes(1);
+    expect(repairCompletion.mock.calls[0][1]).toMatchObject({ callStage: "semantic_repair", taskKey: task.taskKey, attemptId: "attempt-1" });
+    // 复核趟只核对未决 fragment：区域列表只有行 6-10，不再复述、不重新判定已决区域
+    const repairPrompt = repairCompletion.mock.calls[0][0][1].content;
+    expect(repairPrompt).toContain("- R1：行 6-10");
+    expect(repairPrompt).not.toContain("行 1-5");
+    expect(repaired.outcome).toBe("extracted");
+    expect(repaired.unresolvedAnchorCount).toBe(0);
+    expect(repaired.reviewedCount).toBe(1);
+    expect(repaired.scenarioCount).toBe(1);
+    expect(repaired.anchorReceipts[0]).toMatchObject({ anchorFragmentKey: "fragment|a:1", disposition: "extracted", scenarioRefs: ["HP-1"] });
+    expect(repaired.anchorReceipts[1]).toMatchObject({ anchorFragmentKey: "fragment|b:1", disposition: "reviewed_internal", internalKind: "data_transform" });
+  });
+
+  it("renumbers repair scenario refs so they never collide with the previous pass (HP-1 stays unique)", async () => {
+    const first = await firstPassUnresolved();
+    // 复核趟模型再次从 HP-1 起编号——合并前必须按前缀取最小未占用号重排
+    const repairCompletion = completionMock(judgeResponse([extractedRegion("R1", ["HP-1"])], [feature]));
+    const repaired = await extractBehaviorTask(input({ requestCompletion: repairCompletion, billing, repair: { previous: first } }));
+    expect(repaired.outcome).toBe("extracted");
+    expect(repaired.scenarioCount).toBe(2);
+    const references = repaired.features.flatMap((item) => item.scenarios.map((scenario) => scenario.reference));
+    expect(references).toEqual(["HP-1", "HP-2"]);
+    expect(repaired.anchorReceipts[0].scenarioRefs).toEqual(["HP-1"]);
+    expect(repaired.anchorReceipts[1].scenarioRefs).toEqual(["HP-2"]);
+  });
+
+  it("returns the previous result unchanged when nothing is unresolved (attribution holes are not repaired here)", async () => {
+    const requestCompletion = completionMock(describeResponse(), judgeResponse([extractedRegion("R1"), internalRegion("R2", "data_transform")], [feature]));
+    const clean = await extractBehaviorTask(input({ requestCompletion }));
+    expect(clean.outcome).toBe("extracted");
+    const repairCompletion = completionMock();
+    const repaired = await extractBehaviorTask(input({ requestCompletion: repairCompletion, repair: { previous: clean } }));
+    expect(repairCompletion).not.toHaveBeenCalled();
+    expect(repaired).toBe(clean);
+  });
+
+  it("stays unresolved when the repair pass cannot settle the fragment either", async () => {
+    const first = await firstPassUnresolved();
+    const repairCompletion = completionMock(judgeResponse([], []));
+    const repaired = await extractBehaviorTask(input({ requestCompletion: repairCompletion, billing, repair: { previous: first } }));
+    expect(repaired.outcome).toBe("unresolved");
+    expect(repaired.unresolvedAnchorCount).toBe(1);
+    expect(repaired.anchorReceipts[1]).toMatchObject({ anchorFragmentKey: "fragment|b:1", disposition: "unresolved" });
+    // 首趟已决的 R1 结论原样保留
+    expect(repaired.anchorReceipts[0].disposition).toBe("extracted");
+  });
+});
+
+describe("judge prompt unit directory (related-reference)", () => {
+  it("restricts relatedUnitKeys to the provided valid unit directory", () => {
+    const prompt = judgeBehaviorTaskPrompt({ task, sources, descriptions, knownUnitKeys: ["unit|job:a", "unit|http:b"] });
+    expect(prompt).toContain("unit|job:a");
+    expect(prompt).toContain("unit|http:b");
+    expect(prompt).toContain("有效单元清单");
+    expect(prompt).toContain("按 unresolved");
+  });
+
+  it("renders the English directory without Chinese leakage", () => {
+    const englishDescriptions: BehaviorRegionDescription[] = [
+      { id: "R1", facts: "validates and stores the order", inputs: "request body", controlFlow: "sequential", externalEffects: "writes to the database" },
+    ];
+    const prompt = judgeBehaviorTaskPrompt({ task, sources, descriptions: englishDescriptions, knownUnitKeys: ["unit|job:a"], language: "en" });
+    expect(prompt).toContain("unit|job:a");
+    expect(prompt).toContain("valid unit directory");
+    expect(prompt).not.toMatch(/[一-鿿]/);
+  });
+});

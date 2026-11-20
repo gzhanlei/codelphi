@@ -5,16 +5,17 @@ import type { RunContext } from "./analysis";
 import { enumerateImplementationSurface, type AnalysisCoverageReceipt } from "./analysis-coverage";
 import type { BehavioralEnumerationMetrics, InventoryEnumerationSummary } from "./behavioral-enumeration";
 import { evaluateBehaviorActivationGate, resolveProductDescription, type ActivationGateAnchor, type ActivationGateResult, type ProductDescriptionOutcome } from "./behavior-activation";
-import { buildBehaviorInventory, RESIDUAL_DETECTOR_ID } from "./behavior-inventory";
+import { buildBehaviorInventory, computeScopeFingerprint, RESIDUAL_DETECTOR_ID } from "./behavior-inventory";
 import { evaluateInventoryCoverage } from "./behavior-inventory/coverage";
 import { loadBehaviorTaskSources, planBehaviorExecutionTasks, type TaskSource } from "./behavior-inventory/planner";
-import type { BehaviorExecutionTask, BehaviorManifest, BehaviorUnit, CodeRange } from "./behavior-inventory/types";
+import type { BehaviorExecutionTask, BehaviorManifest, BehaviorUnit } from "./behavior-inventory/types";
 import { mergeBehaviorTaskResults } from "./behavior-result-merge";
 import {
   BehaviorBudgetError,
   UNLIMITED_MAX_COST_AMOUNT,
   UNLIMITED_MAX_LLM_CALLS,
   UNLIMITED_MAX_TOTAL_TOKENS,
+  reconcileOrphanedTaskReservations,
   releaseUnusedBehaviorBudget,
   reserveBehaviorBudget,
   reserveProductSummaryBudget,
@@ -28,6 +29,7 @@ import {
   insertManifestIfAbsent,
   loadVerifiedManifest,
   markBehaviorTaskFailure,
+  renewBehaviorTaskLease,
 } from "./behavior-unit-receipts";
 import {
   aggregateBehaviorUnitStatus,
@@ -75,10 +77,27 @@ import { loadLatestSpecVersionLanguage } from "./spec-versions";
  * - 锚点关联行仅 activate 且过门禁后 INSERT IGNORE 落库（saveResult 回填前置）。
  * - 观测（Task 14/15）：coverage 回执带主覆盖区间遗漏（新路径 sourceCoverage complete
  *   要求为零）；enumerationMetrics 的 inventory 详情记录单元/锚点状态、coarse/
- *   implicit/fallback 计数、租约与预算、摘要状态与恢复任务会计——恢复复用的成功
+ *   implicit/fallback 计数、清单生成诊断（D：detector 失败面与不可读路径，随 manifest
+ *   持久化，恢复同口径）、租约与预算、摘要状态与恢复任务会计——恢复复用的成功
  *   任务计入 tasksReusedTerminal，绝不计为本 run 新执行的提取趟；tasksExecuted 含
  *   发起后硬失败的任务（attempt 级会计在 attemptsTotal），tasksPending 按持久化行
  *   status='pending' 字面计数（Task 15 修正，失败任务不再被误报为 pending）。
+ * - 审查修复轮（2026-11-19 review wave）：
+ *   B 摘要预留携带服务端状态——恢复拿到已结算预留时绝不重新生成（usage 无法二次入账），
+ *     按 D10 降级（语言一致 preserved / 否则 unavailable）；settled_unknown 等价
+ *     usage 未知硬阻断（停止派发 + 门禁 fail closed）。
+ *   C 恢复重算范围指纹（目录枚举元数据级，不读文件内容），与持久化指纹不一致即
+ *     inventory_version_conflict，绝不静默重扫自愈。
+ *   E 恢复在派发前对账孤儿任务预留（usageUnknownBlocked → 停止派发 + 门禁 fail closed）。
+ *   F 执行窗口（源加载 + 提取 + 复核）内的租约心跳续约；续约失败视为硬失败，绝不提交。
+ *   G existingMergeChecksPassed 由合并统计派生（截断计数 >0 即不通过），不再硬编码 true。
+ *   H 任务源码纯空行视同不可读（硬失败路径）。
+ *   I unresolved 且仍有未决回执时同 attempt 内做一次语义复核（repair），复核趟与首趟
+ *     共用同一预留（settle 按实际回执入账，超预留不截断、仅受 run 上限约束）。
+ *   K 覆盖判定的 eligibleRanges 取 manifest 持久化诊断（独立真源），不从单元主区间反推。
+ *   related-ref：covered_elsewhere 的 relatedUnitKeys 只保留 manifest 单元集合内的 key
+ *     （幽灵 key 丢弃，丢完无关联即回 unresolved 由门禁 fail closed）；派发时向判定
+ *     prompt 传有效单元 key 目录（knownUnitKeys，截断 150）。
  */
 
 export const BEHAVIOR_TASK_RESERVED_LLM_CALLS = 2;
@@ -243,10 +262,14 @@ function isReusableTerminal(row: PersistedTaskRow | undefined): boolean {
   return row != null && (row.status === "extracted" || row.status === "no_behavior") && row.result != null;
 }
 
-/** 任务源码可读性硬校验：任何 source 内容为空或区间倒挂都视为不可读，走硬失败路径。 */
+/** 任务源码可读性硬校验：任何 source 内容为空、纯空行（H）或区间倒挂都视为不可读，走硬失败路径。 */
 function assertSourcesReadable(sources: TaskSource[]): void {
   for (const source of sources) {
-    if (source.content === "" || source.endLine < source.startLine) {
+    if (
+      source.content === "" ||
+      source.endLine < source.startLine ||
+      source.content.split("\n").every((line) => line.trim() === "")
+    ) {
       throw new Error(`behavior task source unreadable: ${source.path}#${source.startLine}-${source.endLine}`);
     }
   }
@@ -266,6 +289,10 @@ function buildGateAnchors(
   localKeyByTaskRef: ReadonlyMap<string, string>,
 ): ActivationGateAnchor[] {
   const anchors: ActivationGateAnchor[] = [];
+  // related-reference 防线：relatedUnitKeys 只保留 manifest 单元集合内的 key——幽灵 key
+  // （模型幻觉/跨 run 漂移）直接丢弃；丢完无关联的 covered_elsewhere 锚点在门禁回
+  // unresolved（fail closed），绝不凭不可解析的关联放行。
+  const validUnitKeys = new Set(manifest.units.map((unit) => unit.unitKey));
   for (const unit of manifest.units) {
     const states = unitStates.get(unit.unitKey) ?? [];
     for (const anchor of unit.anchors) {
@@ -298,7 +325,9 @@ function buildGateAnchors(
           seenEvidence.add(id);
           evidence.push(item);
         }
-        for (const key of receipt.relatedUnitKeys ?? []) relatedUnitKeys.add(key);
+        for (const key of receipt.relatedUnitKeys ?? []) {
+          if (validUnitKeys.has(key)) relatedUnitKeys.add(key);
+        }
         for (const ref of receipt.relatedScenarioRefs ?? []) {
           relatedScenarioRefs.add(localKeyByTaskRef.get(`${taskKey}\n${ref}`) ?? ref);
         }
@@ -339,6 +368,8 @@ export async function runInventoryFullAnalysis(
   const maxAttempts = input.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
   const leaseDurationMs = input.leaseDurationMs ?? DEFAULT_LEASE_DURATION_MS;
   const concurrency = Math.max(1, input.concurrency ?? behaviorAnalysisConcurrency());
+  // 恢复启动时刻（E：孤儿预留对账的创建时间截止线，排除本进程在途 attempt）
+  const runStartedAtMs = Date.now();
   const index = input.index ?? (await createRemoteSourceIndex(
     { owner: input.repository.owner, repo: input.repository.repo, revision: input.repository.revision },
     { scopeRoots: [...input.scopeRoots], access: input.access, provider: input.provider, budgets: analysisSourceIndexBudgets },
@@ -346,8 +377,10 @@ export async function runInventoryFullAnalysis(
 
   // ---- manifest：存在则校验加载（tampered/conflict 直接传播），不存在则首跑扫描插入 ----
   const [manifestProbe] = await execute("SELECT run_id FROM analysis_behavior_manifests WHERE run_id = ?", [runId]);
+  const resumed = (manifestProbe as unknown[]).length > 0;
+  let orphanUsageUnknownBlocked = false;
   let manifest: BehaviorManifest;
-  if ((manifestProbe as unknown[]).length > 0) {
+  if (resumed) {
     try {
       manifest = await loadVerifiedManifest(execute, runId);
     } catch (error) {
@@ -357,6 +390,20 @@ export async function runInventoryFullAnalysis(
         throw new InventoryPersistenceError(error.code, `${error.code}: ${error.message}`);
       }
       throw error;
+    }
+    // C：恢复按目录枚举（元数据级，不读文件内容）重算范围指纹并与持久化值比对——实现面
+    // 已漂移的 manifest 不可恢复，抛 inventory_version_conflict（绝不静默重扫自愈）。
+    // 路径口径与首跑扫描一致：0 字节文件无可审行，不参与指纹。
+    const surface = await enumerateImplementationSurface(index);
+    const currentFingerprint = computeScopeFingerprint(
+      surface.filter((entry) => entry.size > 0).map((entry) => entry.path),
+      input.scopeRoots.map((scope) => scope.path),
+    );
+    if (currentFingerprint !== manifest.scopeFingerprint) {
+      throw new InventoryPersistenceError(
+        "inventory_version_conflict",
+        `inventory_version_conflict: run ${runId} implementation surface changed since the manifest was persisted (scope fingerprint mismatch); create a new run instead of resuming`,
+      );
     }
   } else {
     const sources = await scanInventorySources(index);
@@ -373,28 +420,50 @@ export async function runInventoryFullAnalysis(
       scopeFingerprint: inventory.scopeFingerprint,
       units: inventory.units,
       tasks,
+      // D/K：清单生成诊断随 manifest 持久化（hash 保护）——恢复路径的诊断暴露与
+      // eligibleRanges 覆盖判定都以此为独立真源。
+      diagnostics: inventory.diagnostics,
     };
     await insertManifestIfAbsent(execute, runId, manifest);
   }
   const unitsByKey = new Map(manifest.units.map((unit) => [unit.unitKey, unit]));
 
-  // ---- 任务行（幂等补崩溃窗口）+ 预算行 + 摘要预留（activate，先于任何任务预留）----
+  // ---- 任务行（幂等补崩溃窗口）+ 预算行 + 孤儿对账（E，仅恢复）+ 摘要预留（先于任务预留）----
   await ensureTaskRows(execute, runId, manifest);
   await ensureBudgetRow(execute, runId);
+  if (resumed) {
+    // E：进程崩溃会留下 status='reserved' 的任务预留，永不结算、聚合计数永久泄漏。
+    // 恢复在派发前了断孤儿（有回执结算 / 零回执释放）；usage 未知等价 budgetBlocked。
+    const orphans = await reconcileOrphanedTaskReservations({ runId, orphanBeforeMs: runStartedAtMs });
+    orphanUsageUnknownBlocked = orphans.usageUnknownBlocked;
+  }
   // 摘要预留先于任何任务预留（D9：摘要份额不被单元抢占）；shadow 不预留不生成。
   // 摘要首次 LLM 调用前的任何退出（门禁失败/派发致命错误/数据异常）都必须经 Task 7
   // fix round 2 的安全路径释放该预挂号预留（同事务复位 summary_reserved，见末尾 catch）；
   // 进入共享解析器后由它恰好 settle 一次（summaryHandedOff 置位，绝不重复释放）。
   const summaryReservation = options.activate ? await reserveProductSummaryBudget(runId) : null;
-  let summaryHandedOff = false;
+  // B：恢复路径拿到的预留可能已结算（上一进程在摘要结算后崩溃）——已结算的摘要绝不重新
+  // 生成（usage 无法二次入账），摘要阶段按 D10 降级；settled_unknown 等价 usage 未知
+  // 硬阻断（停止派发 + 门禁 fail closed）。已结算预留不可释放，移交标志置位。
+  const summaryAlreadySettled = summaryReservation != null && summaryReservation.status !== "reserved";
+  let summaryHandedOff = summaryAlreadySettled;
+  const preDispatchBudgetBlocked = orphanUsageUnknownBlocked || summaryReservation?.status === "settled_unknown";
   try {
     // ---- 调度：worker pool，每任务固定 reserve → claim ----
     const rowsBefore = await loadPersistedTaskRows(execute, runId);
     const eligible = manifest.tasks.filter((task) => !isReusableTerminal(rowsBefore.get(task.taskKey)));
     const reusedTerminal = manifest.tasks.length - eligible.length;
-    const state: DispatchState = { stopDispatch: false, budgetBlocked: false, fatal: null, executed: 0, passInfos: [] };
+    const state: DispatchState = {
+      stopDispatch: preDispatchBudgetBlocked,
+      budgetBlocked: preDispatchBudgetBlocked,
+      fatal: null,
+      executed: 0,
+      passInfos: [],
+    };
     const leaseOwner = `inventory-${runId}-${randomUUID()}`;
     const queue = [...eligible];
+    // related-reference：判定 prompt 的有效单元 key 目录（截断 150 防爆 prompt）
+    const knownUnitKeys = manifest.units.map((unit) => unit.unitKey).slice(0, 150);
 
     const safeSettle = async (reservationId: string): Promise<void> => {
       try {
@@ -459,6 +528,21 @@ export async function runInventoryFullAnalysis(
         // 首个 attempt 发起时计数，重试不重复计（attempt 级会计在 attemptsTotal / LLM 回执）。
         if (attemptsThisRun === 1) state.executed += 1;
         let result: BehaviorTaskExtractionResult;
+        // F：执行窗口（源加载 + 复述/判定 + 复核）可能远超租约时长——周期续约（lease/3），
+        // 续约失败（租约丢失/被抢占）视为硬失败：中止本 attempt，绝不提交。
+        let leaseError: unknown = null;
+        const heartbeat = setInterval(() => {
+          void renewBehaviorTaskLease({
+            execute,
+            runId,
+            taskKey: task.taskKey,
+            attemptId: claimed.attemptId,
+            leaseOwner,
+            leaseDurationMs,
+          }).catch((error: unknown) => {
+            leaseError ??= error;
+          });
+        }, Math.max(1, Math.floor(leaseDurationMs / 3)));
         try {
           const sources = await loadBehaviorTaskSources(index, task, unit);
           assertSourcesReadable(sources);
@@ -471,21 +555,38 @@ export async function runInventoryFullAnalysis(
             // LLM 计费身份 = 预留 attemptId（settle 按预留聚合实际回执）；claim.attemptId 是租约身份
             attemptId: reservation.attemptId,
           };
-          result = await extractBehaviorTask({
+          const extractInput = {
             task,
             sources,
             billing,
             knownFeatureNames: input.knownFeatureNames,
+            knownUnitKeys,
             outputLanguage,
             label: `inventory/${runId}/${task.taskKey.slice(0, 48)}`,
-          });
+          };
+          result = await extractBehaviorTask(extractInput);
+          // I：unresolved 且仍有未决回执（归因洞除外）且本 attempt 之后还有重试预算时，
+          // 同 attempt 内做一次语义复核（单判定调用）。复核趟与首趟共用同一预留：
+          // settle 按实际回执入账，超出预留量不截断（仅受 run 上限约束）。
+          if (
+            result.outcome === "unresolved" &&
+            result.anchorReceipts.some((receipt) => receipt.disposition === "unresolved") &&
+            claimed.attempts < maxAttempts &&
+            !state.stopDispatch
+          ) {
+            result = await extractBehaviorTask({ ...extractInput, repair: { previous: result } });
+          }
+          // 执行期间租约曾丢失：结果不可信（提交谓词大概率也不再匹配），按硬失败处理
+          if (leaseError != null) throw leaseError;
         } catch (error) {
-          // 硬失败（网关/超时/源不可读）：记 failed（消耗 attempt），settle 后按预算重试
+          // 硬失败（网关/超时/源不可读/租约丢失）：记 failed（消耗 attempt），settle 后按预算重试
           await markBehaviorTaskFailure({ execute, runId, taskKey: task.taskKey, attemptId: claimed.attemptId, leaseOwner, error: errorMessage(error) });
           await safeSettle(reservation.reservationId);
           if (claimed.attempts < maxAttempts && !state.stopDispatch) continue;
           state.passInfos.push({ retries: attemptsThisRun - 1, sanitize: zeroSanitize(true) });
           return;
+        } finally {
+          clearInterval(heartbeat);
         }
         const committed = await commitBehaviorTaskResult({
           execute,
@@ -592,10 +693,10 @@ export async function runInventoryFullAnalysis(
     });
     const merged = mergeBehaviorTaskResults(chunks);
 
-    // ---- 覆盖（门禁口径）：eligibleRanges 取全部单元主区间并集（恢复路径无需重读文件） ----
-    const eligibleRanges: CodeRange[] = manifest.units.flatMap((unit) =>
-      (unit.primaryRanges ?? []).map((range) => ({ path: unit.primaryPath, startLine: range.startLine, endLine: range.endLine })),
-    );
+    // ---- 覆盖（门禁口径）：eligibleRanges 取 manifest 持久化诊断（K：实现面区间由清单
+    // 生成期的独立枚举计算并随 manifest 受 hash 保护，恢复与首跑同口径；绝不从单元
+    // 主区间反推——那会让「单元认领即覆盖」成为恒真式） ----
+    const eligibleRanges = manifest.diagnostics?.eligibleRanges ?? [];
     const inventoryCoverage = evaluateInventoryCoverage({ eligibleRanges, units: manifest.units, tasks: manifest.tasks });
 
     // ---- 激活门禁（D8：fail closed） ----
@@ -614,7 +715,9 @@ export async function runInventoryFullAnalysis(
       survivingUnitKeys,
       survivingScenarioRefs,
       existingEvidenceChecksPassed,
-      existingMergeChecksPassed: true,
+      // G：合并检查不再硬编码通过——reviewed 审计候选截断（changesTruncated>0）意味着
+      // 合并面静默丢条目，激活门禁必须 fail closed（去重/折叠是正常确定性合并，不计异常）。
+      existingMergeChecksPassed: merged.stats.changesTruncated === 0,
     });
 
     const activated = gate.activate && !state.budgetBlocked;
@@ -659,22 +762,33 @@ export async function runInventoryFullAnalysis(
             evidence: (Array.isArray(parseJsonColumn(productRow?.description_evidence ?? "[]")) ? parseJsonColumn(productRow?.description_evidence ?? "[]") : []) as Evidence[],
             language: previousLanguage,
           };
-      try {
-        const resolution = await resolveProductDescription({
-          runId,
-          accountId: input.run.accountId ?? null,
-          mergedFeatures: merged.result.features,
-          outputLanguage,
-          previous,
-          // 预挂号预留传入：解析器跳过 reserve、恰好 settle 一次（usage 未知硬阻断透传）
-          reservation: summaryReservation,
-          requestCompletion: input.requestCompletion,
-        });
-        product = resolution.product;
-        productDescriptionStatus = resolution.status;
-      } finally {
-        // 进入解析器即视为已移交结算职责（含 settle 抛错前已保守入账）——绝不重复释放
-        summaryHandedOff = true;
+      if (summaryAlreadySettled) {
+        // B：恢复路径摘要预留已结算——绝不重新生成（usage 无法二次入账）也绝不重复
+        // settle/release；按 D10 降级：语言一致沿用旧简介，否则 unavailable。
+        if (previous != null && previous.language === outputLanguage) {
+          product = { description: previous.description, evidence: previous.evidence };
+          productDescriptionStatus = "preserved";
+        } else {
+          productDescriptionStatus = "unavailable";
+        }
+      } else {
+        try {
+          const resolution = await resolveProductDescription({
+            runId,
+            accountId: input.run.accountId ?? null,
+            mergedFeatures: merged.result.features,
+            outputLanguage,
+            previous,
+            // 预挂号预留传入：解析器跳过 reserve、恰好 settle 一次（usage 未知硬阻断透传）
+            reservation: summaryReservation,
+            requestCompletion: input.requestCompletion,
+          });
+          product = resolution.product;
+          productDescriptionStatus = resolution.status;
+        } finally {
+          // 进入解析器即视为已移交结算职责（含 settle 抛错前已保守入账）——绝不重复释放
+          summaryHandedOff = true;
+        }
       }
     }
 
@@ -729,6 +843,11 @@ export async function runInventoryFullAnalysis(
       semanticUnits: manifest.units.filter((unit) => unit.detector !== RESIDUAL_DETECTOR_ID).length,
       residualUnits: manifest.units.filter((unit) => unit.detector === RESIDUAL_DETECTOR_ID).length,
       unreadableUnits: inventoryCoverage.diagnostics.unreadableUnits.length,
+      // D：清单生成诊断暴露（随 manifest 持久化，恢复路径同口径，无需重扫）
+      detectorUnsupportedPaths: manifest.diagnostics?.detectorUnsupported ?? [],
+      detectorParseFailurePaths: manifest.diagnostics?.detectorParseFailure ?? [],
+      dynamicRegistrationFallbackPaths: manifest.diagnostics?.dynamicRegistrationFallback ?? [],
+      unreadablePaths: manifest.diagnostics?.unreadablePaths ?? [],
       primaryRangesCoveredLines: inventoryCoverage.primaryCoverage.uniqueLinesCovered,
       primaryRangesOmittedLines: inventoryCoverage.primaryCoverage.uniqueLinesOmitted,
       anchorRangesCoveredLines: inventoryCoverage.anchorCoverage.uniqueLinesCovered,

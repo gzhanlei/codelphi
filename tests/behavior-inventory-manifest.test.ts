@@ -181,6 +181,58 @@ describe("canonicalManifest / manifestHash", () => {
     invalid.units[0].anchors[1].ranges = [{ startLine: 30, endLine: 20 }];
     expect(() => canonicalManifest(invalid)).toThrow(/range/i);
   });
+
+  it("materializes a missing diagnostics block as canonical empty values (D)", () => {
+    const missing = originalManifest();
+    const explicitEmpty = originalManifest();
+    explicitEmpty.diagnostics = {
+      detectorUnsupported: [],
+      detectorParseFailure: [],
+      dynamicRegistrationFallback: [],
+      excludedNonImplementation: [],
+      unreadablePaths: [],
+      eligibleRanges: [],
+      fallbackInventorySuccess: false,
+      semanticUnits: 0,
+      residualUnits: 0,
+    };
+    expect(manifestHash(explicitEmpty)).toBe(manifestHash(missing));
+  });
+
+  it("normalizes diagnostics array order and range order into the canonical hash (D)", () => {
+    const diagnostics = {
+      detectorUnsupported: ["b.ts", "a.ts"],
+      detectorParseFailure: [],
+      dynamicRegistrationFallback: [],
+      excludedNonImplementation: [],
+      unreadablePaths: ["z.ts", "y.ts"],
+      eligibleRanges: [
+        { path: "b.ts", startLine: 1, endLine: 5 },
+        { path: "a.ts", startLine: 3, endLine: 9 },
+      ],
+      fallbackInventorySuccess: true,
+      semanticUnits: 2,
+      residualUnits: 1,
+    };
+    const first = originalManifest();
+    first.diagnostics = { ...diagnostics };
+    const reordered = originalManifest();
+    reordered.diagnostics = {
+      ...diagnostics,
+      detectorUnsupported: ["a.ts", "b.ts"],
+      unreadablePaths: ["y.ts", "z.ts"],
+      eligibleRanges: [
+        { path: "a.ts", startLine: 3, endLine: 9 },
+        { path: "b.ts", startLine: 1, endLine: 5 },
+      ],
+    };
+    // 数组/区间顺序差异被规范化吸收，hash 不变。
+    expect(manifestHash(reordered)).toBe(manifestHash(first));
+    // 诊断内容本身进入 hash：改任一字段即变。
+    const changed = originalManifest();
+    changed.diagnostics = { ...diagnostics, detectorParseFailure: ["c.ts"] };
+    expect(manifestHash(changed)).not.toBe(manifestHash(first));
+  });
 });
 
 describe("makeUnitKey", () => {

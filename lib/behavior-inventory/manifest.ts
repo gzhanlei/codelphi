@@ -5,6 +5,7 @@ import type {
   BehaviorAnchorFragment,
   BehaviorEvidence,
   BehaviorExecutionTask,
+  BehaviorInventoryDiagnostics,
   BehaviorManifest,
   BehaviorUnit,
 } from "./types";
@@ -61,6 +62,35 @@ function normalizeTask(task: BehaviorExecutionTask): BehaviorExecutionTask {
   return { taskKey: task.taskKey, unitKey: task.unitKey, anchorFragments };
 }
 
+const EMPTY_MANIFEST_DIAGNOSTICS: BehaviorInventoryDiagnostics = {
+  detectorUnsupported: [],
+  detectorParseFailure: [],
+  dynamicRegistrationFallback: [],
+  excludedNonImplementation: [],
+  unreadablePaths: [],
+  eligibleRanges: [],
+  fallbackInventorySuccess: false,
+  semanticUnits: 0,
+  residualUnits: 0,
+};
+
+/** 诊断块缺省（v1 manifest）时物化为空值；数组按码点序、区间规范化，保证 canonical 确定。 */
+function normalizeDiagnostics(diagnostics: BehaviorInventoryDiagnostics | undefined): BehaviorInventoryDiagnostics {
+  const source = diagnostics ?? EMPTY_MANIFEST_DIAGNOSTICS;
+  const sortStrings = (values: readonly string[]): string[] => [...values].sort(compareCodePoints);
+  return {
+    detectorUnsupported: sortStrings(source.detectorUnsupported),
+    detectorParseFailure: sortStrings(source.detectorParseFailure),
+    dynamicRegistrationFallback: sortStrings(source.dynamicRegistrationFallback),
+    excludedNonImplementation: sortStrings(source.excludedNonImplementation),
+    unreadablePaths: sortStrings(source.unreadablePaths),
+    eligibleRanges: normalizeCodeRanges(source.eligibleRanges),
+    fallbackInventorySuccess: source.fallbackInventorySuccess,
+    semanticUnits: source.semanticUnits,
+    residualUnits: source.residualUnits,
+  };
+}
+
 /** 规范化 manifest：对象 key 与数组顺序固定、区间先规范化、可选字段统一物化为 null。 */
 export function normalizeManifest(manifest: BehaviorManifest): BehaviorManifest {
   const units = manifest.units.map(normalizeUnit);
@@ -74,6 +104,7 @@ export function normalizeManifest(manifest: BehaviorManifest): BehaviorManifest 
     scopeFingerprint: manifest.scopeFingerprint,
     units,
     tasks,
+    diagnostics: normalizeDiagnostics(manifest.diagnostics),
   };
 }
 

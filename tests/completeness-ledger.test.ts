@@ -191,6 +191,11 @@ describe("deriveBehavioralEnumeration with inventory details (Task 14)", () => {
     semanticUnits: 9,
     residualUnits: 3,
     unreadableUnits: 0,
+    // D：清单生成诊断暴露（随 manifest 持久化的检测器失败面）
+    detectorUnsupportedPaths: [],
+    detectorParseFailurePaths: [],
+    dynamicRegistrationFallbackPaths: [],
+    unreadablePaths: [],
     primaryRangesCoveredLines: 4800,
     primaryRangesOmittedLines: 0,
     anchorRangesCoveredLines: 4800,

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildBehaviorInventory,
   buildBehaviorInventoryWithRegistry,
+  computeScopeFingerprint,
   DETECTOR_REGISTRY_VERSION,
   INVENTORY_SCHEMA_VERSION,
   type BehaviorDetector,
@@ -387,21 +388,27 @@ describe("residual fallback inventory", () => {
   });
 });
 
+const allSources: InventorySource[] = [
+  nextRouteSource,
+  dashboardPageSource,
+  moneyLibSource,
+  automationSource,
+  flaskDynamicSource,
+  source("docs/guide.md", "# Guide\n\nSee the runbook.\n"),
+  source("tests/money.test.ts", "import { formatMoney } from \"../lib/money\";\n"),
+];
+
+function build(): BehaviorInventoryResult {
+  return buildBehaviorInventory({ afterSha: "sha-all", scopeRoots: ["."], sources: allSources });
+}
+
+function allEligiblePaths(): string[] {
+  return allSources
+    .filter((item) => !item.path.startsWith("docs/") && !item.path.startsWith("tests/"))
+    .map((item) => item.path);
+}
+
 describe("buildBehaviorInventory invariants", () => {
-  const allSources: InventorySource[] = [
-    nextRouteSource,
-    dashboardPageSource,
-    moneyLibSource,
-    automationSource,
-    flaskDynamicSource,
-    source("docs/guide.md", "# Guide\n\nSee the runbook.\n"),
-    source("tests/money.test.ts", "import { formatMoney } from \"../lib/money\";\n"),
-  ];
-
-  function build(): BehaviorInventoryResult {
-    return buildBehaviorInventory({ afterSha: "sha-all", scopeRoots: ["."], sources: allSources });
-  }
-
   it("covers the eligible implementation surface exactly once with no overlap and no omission", () => {
     const result = build();
     const eligible = allSources.filter((item) => !item.path.startsWith("docs/") && !item.path.startsWith("tests/"));
@@ -447,6 +454,187 @@ describe("buildBehaviorInventory invariants", () => {
       sources: [...allSources, source("lib/extra.ts", "export function extra(): number {\n  return 1;\n}\n")],
     });
     expect(expanded.scopeFingerprint).not.toBe(baseline.scopeFingerprint);
+  });
+
+  it("pins the shadow-phase limitation: every unit has empty contextRanges (M)", () => {
+    // 影子阶段没有调用图分析，contextRanges 恒为空——绝不把整份共享依赖文件塞进上下文顶替。
+    const result = build();
+    expect(result.units.length).toBeGreaterThan(0);
+    for (const unit of result.units) expect(unit.contextRanges).toEqual([]);
+  });
+
+  it("persists eligible ranges and unreadable paths in the diagnostics surface (D)", () => {
+    const result = build();
+    expect(result.diagnostics.eligibleRanges.length).toBeGreaterThan(0);
+    for (const path of allEligiblePaths()) {
+      expect(result.diagnostics.eligibleRanges.some((range) => range.path === path)).toBe(true);
+    }
+    expect(result.diagnostics.unreadablePaths).toEqual([]);
+  });
+});
+
+describe("registration/export range ownership (A)", () => {
+  it("assigns an exported registered handler to the registration unit only, never double-claimed by public_api", () => {
+    const cronExportedSource = source(
+      "scripts/cron-exported.ts",
+      [
+        "import cron from \"node-cron\";",
+        "",
+        "export function nightlyJob(): void {",
+        "  console.log(\"tick\");",
+        "}",
+        "",
+        "cron.schedule(\"0 3 * * *\", nightlyJob);",
+        "",
+      ].join("\n"),
+    );
+    const result = buildBehaviorInventory({ afterSha: "sha-cron-export", sources: [cronExportedSource] });
+    const semantic = result.units.filter((unit) => unit.detector !== "residual");
+    expect(semantic).toHaveLength(1);
+    expect(semantic[0].kind).toBe("job");
+    expect(semantic[0].unitKey).toContain("0 3 * * *");
+    expect(result.units.filter((unit) => unit.kind === "public_api")).toHaveLength(0);
+    expect(semantic[0].primaryRanges).toEqual([{ startLine: 3, endLine: 5 }]);
+    expect(result.diagnostics.fallbackInventorySuccess).toBe(true);
+  });
+
+  it("rejects an inventory whose finalized primary ranges overlap within a file", () => {
+    const overlappingDetector: BehaviorDetector = {
+      id: "overlap",
+      version: "1",
+      detect: () => [
+        {
+          locator: { kind: "public_api", exportPath: "src/overlap.ts", symbol: "first", signature: null },
+          primaryPath: "src/overlap.ts",
+          primaryRanges: [{ startLine: 1, endLine: 3 }],
+          anchors: [{ role: "behavior", symbol: "first", ranges: [{ startLine: 1, endLine: 3 }], coarse: false }],
+        },
+        {
+          locator: { kind: "public_api", exportPath: "src/overlap.ts", symbol: "second", signature: null },
+          primaryPath: "src/overlap.ts",
+          primaryRanges: [{ startLine: 3, endLine: 5 }],
+          anchors: [{ role: "behavior", symbol: "second", ranges: [{ startLine: 3, endLine: 5 }], coarse: false }],
+        },
+      ],
+    };
+    expect(() =>
+      buildBehaviorInventoryWithRegistry(
+        { afterSha: "sha-overlap", sources: [source("src/overlap.ts", "one\ntwo\nthree\nfour\nfive\n")] },
+        [{ detector: overlappingDetector, matches: (path) => path === "src/overlap.ts" }],
+      ),
+    ).toThrow(/primary range overlap/);
+  });
+});
+
+describe("declaration range precision (J)", () => {
+  it("starts generic export ranges at the export line, not at preceding blank lines", () => {
+    const blankSource = source(
+      "lib/blank.ts",
+      ["const helper = 1;", "", "", "export function target(): number {", "  return helper;", "}", ""].join("\n"),
+    );
+    const result = buildBehaviorInventory({ afterSha: "sha-blank", sources: [blankSource] });
+    const api = result.units.find((unit) => unit.kind === "public_api");
+    expect(api).toBeDefined();
+    expect(api!.primaryRanges).toEqual([{ startLine: 4, endLine: 6 }]);
+  });
+
+  it("resolves named registration handlers without absorbing preceding blank lines", () => {
+    const cronBlankSource = source(
+      "scripts/cron-blank.ts",
+      [
+        "import cron from \"node-cron\";",
+        "",
+        "",
+        "function nightlyJob(): void {",
+        "  console.log(\"tick\");",
+        "}",
+        "",
+        "cron.schedule(\"0 3 * * *\", nightlyJob);",
+        "",
+      ].join("\n"),
+    );
+    const result = buildBehaviorInventory({ afterSha: "sha-cron-blank", sources: [cronBlankSource] });
+    const job = result.units.find((unit) => unit.kind === "job");
+    expect(job).toBeDefined();
+    expect(job!.primaryRanges).toEqual([{ startLine: 4, endLine: 6 }]);
+  });
+
+  it("starts next.js route export ranges at the export line", () => {
+    const blankRouteSource = source(
+      "app/api/blank/route.ts",
+      [
+        "import { NextResponse } from \"next/server\";",
+        "",
+        "",
+        "export async function GET() {",
+        "  return NextResponse.json({ ok: true });",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const result = buildBehaviorInventory({ afterSha: "sha-blank-route", sources: [blankRouteSource] });
+    const http = result.units.find((unit) => unit.kind === "http");
+    expect(http).toBeDefined();
+    expect(http!.primaryRanges).toEqual([{ startLine: 4, endLine: 6 }]);
+  });
+});
+
+describe("unreadable sources (L)", () => {
+  it("builds a zero-range placeholder unit for an unreadable file and records it in diagnostics", () => {
+    const result = buildBehaviorInventory({
+      afterSha: "sha-unreadable",
+      sources: [
+        source("src/readable.ts", "export function keep(): number {\n  return 1;\n}\n"),
+        { path: "src/broken-read.ts", content: "", unreadable: true },
+      ],
+    });
+    const placeholder = result.units.find((unit) => unit.primaryPath === "src/broken-read.ts");
+    expect(placeholder).toBeDefined();
+    expect(placeholder!.kind).toBe("file");
+    expect(placeholder!.primaryRanges).toBeNull();
+    expect(placeholder!.anchors).toHaveLength(1);
+    expect(placeholder!.anchors[0]).toMatchObject({ role: "implicit_review", ranges: [], coarse: true });
+    expect(result.diagnostics.unreadablePaths).toEqual(["src/broken-read.ts"]);
+    // 不可读文件不参与残余兜底与 eligibleRanges：覆盖门禁由零任务的占位单元阻断，不伪造区间
+    expect(result.diagnostics.eligibleRanges.some((range) => range.path === "src/broken-read.ts")).toBe(false);
+    expect(result.diagnostics.eligibleRanges).toContainEqual({ path: "src/readable.ts", startLine: 1, endLine: 4 });
+    // 占位单元没有残余替身——残余清单只覆盖可读实现面
+    expect(
+      result.units.filter((unit) => unit.primaryPath === "src/broken-read.ts" && unit.primaryRanges != null),
+    ).toHaveLength(0);
+  });
+
+  it("keeps unreadable paths in the scope fingerprint so recovery sees the same file set", () => {
+    const readable = buildBehaviorInventory({
+      afterSha: "sha-fp",
+      sources: [source("src/readable.ts", "export function keep(): number {\n  return 1;\n}\n")],
+    });
+    const withUnreadable = buildBehaviorInventory({
+      afterSha: "sha-fp",
+      sources: [
+        source("src/readable.ts", "export function keep(): number {\n  return 1;\n}\n"),
+        { path: "src/broken-read.ts", content: "", unreadable: true },
+      ],
+    });
+    expect(withUnreadable.scopeFingerprint).not.toBe(readable.scopeFingerprint);
+    expect(computeScopeFingerprint(["src/broken-read.ts", "src/readable.ts"], ["."])).toBe(
+      withUnreadable.scopeFingerprint,
+    );
+  });
+});
+
+describe("computeScopeFingerprint (C)", () => {
+  it("is order-insensitive and matches the inventory fingerprint for the same eligible paths", () => {
+    const eligible = allEligiblePaths();
+    const direct = computeScopeFingerprint(eligible, ["."]);
+    const shuffled = computeScopeFingerprint([...eligible].reverse(), ["."]);
+    expect(shuffled).toBe(direct);
+    expect(direct).toBe(build().scopeFingerprint);
+  });
+
+  it("changes when the scope roots change", () => {
+    const eligible = allEligiblePaths();
+    expect(computeScopeFingerprint(eligible, ["src"])).not.toBe(computeScopeFingerprint(eligible, ["."]));
   });
 });
 

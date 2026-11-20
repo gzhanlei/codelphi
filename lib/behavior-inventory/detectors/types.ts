@@ -7,8 +7,10 @@ import type {
   LineRange,
 } from "../types";
 
-/** 检测器输入沿用 ArchitectureSource 形状；eligible 过滤在 inventory 入口按 evidenceKind 完成。 */
-export type InventorySource = ArchitectureSource;
+/** 检测器输入沿用 ArchitectureSource 形状；eligible 过滤在 inventory 入口按 evidenceKind 完成。
+ *  unreadable=true 表示扫描期读取失败（内容不可信，恒为空串）：清单层为其生成零区间
+ *  占位单元并记入 unreadablePaths，绝不把读失败静默当成空文件。 */
+export type InventorySource = ArchitectureSource & { unreadable?: boolean };
 
 export interface BehaviorAnchorDraft {
   role: BehaviorAnchorRole;

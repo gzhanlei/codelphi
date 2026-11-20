@@ -46,6 +46,9 @@ export interface JudgePromptInput {
   sources: TaskSource[];
   descriptions: BehaviorRegionDescription[];
   knownFeatureNames?: string[];
+  /** 有效单元 key 目录（related-reference）：relatedUnitKeys 只允许取自该清单，
+   *  防止模型臆造不存在/已重命名的单元 key 造成激活期关联静默丢失。 */
+  knownUnitKeys?: string[];
   /** 输出语言（Task 13 传 run.outputLanguage）；缺省 zh-CN，既有调用形态不变。 */
   language?: OutputLanguage;
 }
@@ -135,6 +138,7 @@ export function judgeBehaviorTaskPrompt(input: JudgePromptInput): string {
       : `- ${id}：facts：${description.facts}；inputs：${description.inputs}；controlFlow：${description.controlFlow}；externalEffects：${description.externalEffects}`;
   });
   const names = (input.knownFeatureNames ?? []).map((name) => name.trim()).filter(Boolean).slice(0, 60);
+  const unitKeys = (input.knownUnitKeys ?? []).map((key) => key.trim()).filter(Boolean);
   const template = '{"regions":[{"id":"R1","disposition":"extracted|reviewed_internal|unresolved","internalKind":"pure_technical|covered_elsewhere|data_transform|other_evidence_backed","reason":"","evidence":[{"path":"","startLine":1}],"scenarioRefs":["HP-1"],"relatedUnitKeys":[],"relatedScenarioRefs":[]}],"features":[{"name":"","summary":"","scenarios":[{"reference":"HP-1","context":"","action":"","outcome":"","category":"happy","evidence":[{"path":"","startLine":1}]}]}]}';
   if (language === "en") {
     return [
@@ -147,6 +151,10 @@ export function judgeBehaviorTaskPrompt(input: JudgePromptInput): string {
       "  - data_transform: internal data transformation with no independent external effect;",
       "  - other_evidence_backed: other internal implementation with explicit evidence; reason must explain why no independent external effect exists.",
       "- unresolved: insufficient evidence, uncertain judgment, or unreadable code.",
+      "relatedUnitKeys must be copied verbatim from the following valid unit directory — never invent keys outside it; any key outside the directory counts as a missing relation and is treated as unresolved:",
+      unitKeys.length > 0
+        ? unitKeys.map((key) => `- ${key}`).join("\n")
+        : "(no valid unit directory for this run: leave relatedUnitKeys empty; covered_elsewhere relations must be expressed with relatedScenarioRefs)",
       "When in doubt, judge extracted and output the scenario (one extra entry is better than one missed); judge reviewed_internal only when you can clearly assert there is no independent external effect and provide evidence.",
       'Red line: shared database writes, external API calls, permission and state transitions, and event publication functions must not be judged internal merely because they are "called by another unit" — being called does not mean having no behavior.',
       "Every conclusion and every scenario must carry evidence: path must come from the files actually read below, and startLine must use the input line numbers.",
@@ -178,6 +186,10 @@ export function judgeBehaviorTaskPrompt(input: JudgePromptInput): string {
     "  - data_transform：内部数据转换，不产生独立外部效果；",
     "  - other_evidence_backed：其他有明确证据的内部实现，reason 必须解释为何不存在独立外部效果。",
     "- unresolved：证据不足、判断不确定或代码不可读。",
+    "relatedUnitKeys 只能逐字取自以下有效单元清单，不得臆造清单外的 key；凡不在清单内的一律视为缺失关联，按 unresolved 处理：",
+    unitKeys.length > 0
+      ? unitKeys.map((key) => `- ${key}`).join("\n")
+      : "（本次判定无有效单元清单：relatedUnitKeys 一律留空，covered_elsewhere 的关联只能用 relatedScenarioRefs 表达）",
     "拿不准一律判 extracted 并输出场景（宁可多写一条，不可漏写一条）；只有能明确断言无独立外部效果且给出证据时才判 reviewed_internal。",
     "红线：共享的数据库写入、外部 API 调用、权限与状态转换、事件发布函数，不能仅因为「被其他单元调用」就判为内部实现——被调用不等于没有行为。",
     "每个结论和每个场景都必须带 evidence：path 必须来自下方实际读取的文件，startLine 使用输入的行号。",

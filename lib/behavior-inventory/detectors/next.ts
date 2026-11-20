@@ -10,8 +10,9 @@ import {
 const NEXT_ROUTE_PATH = /(?:^|\/)app\/.*\/route\.(?:ts|tsx|js|jsx|mjs)$|(?:^|\/)pages\/api\/.*\.(?:ts|tsx|js|jsx|mjs)$/;
 const NEXT_PAGE_PATH = /(?:^|\/)app\/.*\/page\.(?:ts|tsx|js|jsx)$|(?:^|\/)pages\/(?!api\/)(?:(?!_)[^/]+\/)*(?!_)[^/]+\.(?:tsx|jsx)$/;
 
-const HTTP_METHOD = /^\s*export\s+(?:async\s+)?function\s+(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\b|^\s*export\s+const\s+(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s*=\s*(?:async\s*)?/gm;
-const DEFAULT_EXPORT = /^\s*export\s+default\s+(?:async\s+)?function\s*([A-Za-z_$][\w$]*)?/gm;
+// 行首缩进只吃行内空白（J）：`\s` 吞换行会把声明前的空行并入路由/page 单元区间。
+const HTTP_METHOD = /^[^\S\n]*export\s+(?:async\s+)?function\s+(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\b|^[^\S\n]*export\s+const\s+(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s*=\s*(?:async\s*)?/gm;
+const DEFAULT_EXPORT = /^[^\S\n]*export\s+default\s+(?:async\s+)?function\s*([A-Za-z_$][\w$]*)?/gm;
 
 export function isNextRoutePath(path: string): boolean {
   return NEXT_ROUTE_PATH.test(path);
