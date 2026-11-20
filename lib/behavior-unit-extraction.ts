@@ -150,7 +150,43 @@ function deriveFragmentReceipt(
   };
 }
 
-/** 纯函数：清洗后的候选 + 逐 fragment 结论 → 任务终态与计数（D5 状态推导的唯一场所）。 */
+/**
+ * D5 终态规则的唯一推导场所：任何合并形态（首趟 / 复核趟 / 空白区域合成）都以同一
+ * 规则重新推导任务终态，绝不削弱。候选全部被清洗（含「有内部结论但场景证据全越界」）
+ * 与存活场景缺 extracted 归属都不得成为 no_behavior。
+ */
+function deriveTaskOutcome(
+  anchorReceipts: BehaviorFragmentReceipt[],
+  features: AnalysisResult["features"],
+  sanitize: EvidenceSanitizeSummary,
+  label: string,
+  stage: string,
+): BehaviorTaskOutcome {
+  const unresolvedAnchorCount = anchorReceipts.filter((receipt) => receipt.disposition === "unresolved").length;
+  const hasExtracted = anchorReceipts.some((receipt) => receipt.disposition === "extracted");
+  const attributedRefs = new Set(anchorReceipts.flatMap((receipt) => receipt.scenarioRefs));
+  const scenarioCount = features.reduce((total, feature) => total + feature.scenarios.length, 0);
+  const unattributedCount = features.reduce(
+    (total, feature) => total + feature.scenarios.filter((scenario) => !attributedRefs.has(scenario.reference)).length,
+    0,
+  );
+  if (unresolvedAnchorCount > 0 || sanitize.allCandidatesRejected) return "unresolved";
+  if (unattributedCount > 0) {
+    // 存活场景缺少有效 extracted 归属（含全部区域 reviewed_internal 却有场景存活）是核算漏洞：
+    // 无锚点来源的事实不得静默进入规格，按 unresolved 定向复核，绝不落入 no_behavior（D5）。
+    console.warn("[analysis] surviving scenarios lack extracted attribution; task stays unresolved", { label, stage, unattributedCount, scenarioCount });
+    return "unresolved";
+  }
+  if (hasExtracted) return "extracted";
+  // 到达此处：scenarioCount===0 且全部区域为有效 reviewed_internal——合法 no_behavior
+  return "no_behavior";
+}
+
+function countByDisposition(anchorReceipts: BehaviorFragmentReceipt[], disposition: BehaviorFragmentReceipt["disposition"]): number {
+  return anchorReceipts.filter((receipt) => receipt.disposition === disposition).length;
+}
+
+/** 纯函数：清洗后的候选 + 逐 fragment 结论 → 任务终态与计数（复用 D5 唯一推导场所）。 */
 function deriveTaskResult(
   task: BehaviorExecutionTask,
   sources: TaskSource[],
@@ -177,31 +213,17 @@ function deriveTaskResult(
   const anchorReceipts = task.anchorFragments.map((fragment, index) =>
     deriveFragmentReceipt(fragment, conclusionsById.get(ids[index]), survivingRefs, refEvidence, allowSet),
   );
-  const unresolvedAnchorCount = anchorReceipts.filter((receipt) => receipt.disposition === "unresolved").length;
-  const reviewedCount = anchorReceipts.filter((receipt) => receipt.disposition === "reviewed_internal").length;
   const scenarioCount = candidate.features.reduce((total, feature) => total + feature.scenarios.length, 0);
-  const hasExtracted = anchorReceipts.some((receipt) => receipt.disposition === "extracted");
-  const attributedRefs = new Set(anchorReceipts.flatMap((receipt) => receipt.scenarioRefs));
-  const unattributedCount = candidate.features.reduce(
-    (total, feature) => total + feature.scenarios.filter((scenario) => !attributedRefs.has(scenario.reference)).length,
-    0,
-  );
-  let outcome: BehaviorTaskOutcome;
-  // 候选全部被清洗（含「有内部结论但场景证据全越界」）不得成为 no_behavior（D5）
-  if (unresolvedAnchorCount > 0 || sanitize.allCandidatesRejected) {
-    outcome = "unresolved";
-  } else if (unattributedCount > 0) {
-    // 存活场景缺少有效 extracted 归属（含全部区域 reviewed_internal 却有场景存活）是核算漏洞：
-    // 无锚点来源的事实不得静默进入规格，按 unresolved 定向复核，绝不落入 no_behavior（D5）。
-    console.warn("[analysis] surviving scenarios lack extracted attribution; task stays unresolved", { label, unattributedCount, scenarioCount });
-    outcome = "unresolved";
-  } else if (hasExtracted) {
-    outcome = "extracted";
-  } else {
-    // 到达此处：scenarioCount===0 且全部区域为有效 reviewed_internal——合法 no_behavior
-    outcome = "no_behavior";
-  }
-  return { outcome, features: candidate.features, anchorReceipts, scenarioCount, reviewedCount, unresolvedAnchorCount, sanitize };
+  const outcome = deriveTaskOutcome(anchorReceipts, candidate.features, sanitize, label, "first pass");
+  return {
+    outcome,
+    features: candidate.features,
+    anchorReceipts,
+    scenarioCount,
+    reviewedCount: countByDisposition(anchorReceipts, "reviewed_internal"),
+    unresolvedAnchorCount: countByDisposition(anchorReceipts, "unresolved"),
+    sanitize,
+  };
 }
 
 function truncatedResult(task: BehaviorExecutionTask): BehaviorTaskExtractionResult {
@@ -214,6 +236,84 @@ function truncatedResult(task: BehaviorExecutionTask): BehaviorTaskExtractionRes
     reviewedCount: 0,
     unresolvedAnchorCount: anchorReceipts.length,
     sanitize: { droppedClaims: 0, droppedScenarios: 0, droppedFeatures: 0, allCandidatesRejected: false, empty: true, keptClaims: 0 },
+  };
+}
+
+/**
+ * 空白区域确定性分类（H 修正）：fragment 区间内实际读取的每一行都是纯空白时，该区域
+ * 无代码可审，直接合成 no_code_content 内部结论——零 AI 调用、证据引用区域自身行号、
+ * 与同 revision 源码内容确定性一致。绝不把「AI 空结果」伪装成该结论（D5 边界不变）：
+ * 只有源码内容事实（而非模型回答缺失）才触发本路径。
+ */
+function primaryLineIndexOf(sources: TaskSource[]): Map<string, Map<number, string>> {
+  const index = new Map<string, Map<number, string>>();
+  for (const source of sources) {
+    if (source.role !== "primary") continue;
+    const lines = index.get(source.path) ?? new Map<number, string>();
+    source.content.split("\n").forEach((line, offset) => lines.set(source.startLine + offset, line));
+    index.set(source.path, lines);
+  }
+  return index;
+}
+
+function fragmentIsBlank(fragment: BehaviorAnchorFragment, index: ReadonlyMap<string, ReadonlyMap<number, string>>): boolean {
+  let inspected = 0;
+  for (const range of fragment.ranges) {
+    for (const lines of index.values()) {
+      for (let line = range.startLine; line <= range.endLine; line += 1) {
+        const text = lines.get(line);
+        if (text == null) continue;
+        inspected += 1;
+        if (text.trim() !== "") return false;
+      }
+    }
+  }
+  // 没有任何实际读取到的行支撑空白判定时不得放行（fail closed，交回模型/硬失败路径）
+  return inspected > 0;
+}
+
+function blankRegionReceipt(fragment: BehaviorAnchorFragment, primaryPath: string): BehaviorFragmentReceipt {
+  return {
+    anchorKey: fragment.anchorKey,
+    anchorFragmentKey: fragment.anchorFragmentKey,
+    disposition: "reviewed_internal",
+    internalKind: "no_code_content",
+    reason: "blank_lines_only",
+    evidence: [{ path: primaryPath, startLine: fragment.ranges[0]?.startLine ?? null }],
+    scenarioRefs: [],
+  };
+}
+
+function blankRegionsResult(task: BehaviorExecutionTask, sources: TaskSource[]): BehaviorTaskExtractionResult {
+  const primary = sources.find((source) => source.role === "primary") ?? sources[0];
+  const anchorReceipts = task.anchorFragments.map((fragment) => blankRegionReceipt(fragment, primary.path));
+  return {
+    outcome: "no_behavior",
+    features: [],
+    anchorReceipts,
+    scenarioCount: 0,
+    reviewedCount: anchorReceipts.length,
+    unresolvedAnchorCount: 0,
+    sanitize: { droppedClaims: 0, droppedScenarios: 0, droppedFeatures: 0, allCandidatesRejected: false, empty: true, keptClaims: 0 },
+  };
+}
+
+/** 空白合成回执并入内容趟结果后，按 D5 唯一规则重新推导任务终态（绝不削弱）。 */
+function mergeBlankReceipts(
+  content: BehaviorTaskExtractionResult,
+  blanks: BehaviorFragmentReceipt[],
+  label: string,
+): BehaviorTaskExtractionResult {
+  const anchorReceipts = [...content.anchorReceipts, ...blanks];
+  const outcome = deriveTaskOutcome(anchorReceipts, content.features, content.sanitize, label, "blank-region merge");
+  return {
+    outcome,
+    features: content.features,
+    anchorReceipts,
+    scenarioCount: content.scenarioCount,
+    reviewedCount: countByDisposition(anchorReceipts, "reviewed_internal"),
+    unresolvedAnchorCount: countByDisposition(anchorReceipts, "unresolved"),
+    sanitize: content.sanitize,
   };
 }
 
@@ -268,14 +368,8 @@ function mergeRepairResult(
   const anchorReceipts = previous.anchorReceipts.map((receipt) => repairByFragment.get(receipt.anchorFragmentKey) ?? receipt);
   const features = [...previous.features, ...repair.features];
   const scenarioCount = features.reduce((total, feature) => total + feature.scenarios.length, 0);
-  const unresolvedAnchorCount = anchorReceipts.filter((receipt) => receipt.disposition === "unresolved").length;
-  const reviewedCount = anchorReceipts.filter((receipt) => receipt.disposition === "reviewed_internal").length;
-  const hasExtracted = anchorReceipts.some((receipt) => receipt.disposition === "extracted");
-  const attributedRefs = new Set(anchorReceipts.flatMap((receipt) => receipt.scenarioRefs));
-  const unattributedCount = features.reduce(
-    (total, feature) => total + feature.scenarios.filter((scenario) => !attributedRefs.has(scenario.reference)).length,
-    0,
-  );
+  const unresolvedAnchorCount = countByDisposition(anchorReceipts, "unresolved");
+  const reviewedCount = countByDisposition(anchorReceipts, "reviewed_internal");
   const sanitize: EvidenceSanitizeSummary = {
     droppedClaims: previous.sanitize.droppedClaims + repair.sanitize.droppedClaims,
     droppedScenarios: previous.sanitize.droppedScenarios + repair.sanitize.droppedScenarios,
@@ -285,21 +379,7 @@ function mergeRepairResult(
       scenarioCount === 0 && (previous.sanitize.allCandidatesRejected || repair.sanitize.allCandidatesRejected),
     empty: previous.sanitize.empty && repair.sanitize.empty,
   };
-  let outcome: BehaviorTaskOutcome;
-  if (unresolvedAnchorCount > 0 || sanitize.allCandidatesRejected) {
-    outcome = "unresolved";
-  } else if (unattributedCount > 0) {
-    console.warn("[analysis] surviving scenarios lack extracted attribution after repair; task stays unresolved", {
-      label,
-      unattributedCount,
-      scenarioCount,
-    });
-    outcome = "unresolved";
-  } else if (hasExtracted) {
-    outcome = "extracted";
-  } else {
-    outcome = "no_behavior";
-  }
+  const outcome = deriveTaskOutcome(anchorReceipts, features, sanitize, label, "semantic repair");
   return { outcome, features, anchorReceipts, scenarioCount, reviewedCount, unresolvedAnchorCount, sanitize };
 }
 
@@ -349,9 +429,49 @@ async function repairBehaviorTask(input: ExtractBehaviorTaskInput): Promise<Beha
   }
 }
 
+/** 双步模型提取（复述 + 判定）；task/sources 由调用方给定（全量或缩减任务），截断映射 unresolved。 */
+async function modelTaskExtraction(
+  task: BehaviorExecutionTask,
+  sources: TaskSource[],
+  request: StructuredRequest,
+  billing: LlmBillingContext | undefined,
+  knownFeatureNames: string[] | undefined,
+  knownUnitKeys: string[] | undefined,
+  language: OutputLanguage,
+  label: string,
+): Promise<BehaviorTaskExtractionResult> {
+  try {
+    const describeContent = await request(
+      [
+        { role: "system", content: systemPrompt(language) },
+        { role: "user", content: describeBehaviorTaskPrompt(task, sources, language) },
+      ],
+      withCallStage(billing, "describe"),
+    );
+    const descriptions = parseDescribeContent(describeContent, task);
+    const judgeContent = await request(
+      [
+        { role: "system", content: systemPrompt(language) },
+        { role: "user", content: judgeBehaviorTaskPrompt({ task, sources, descriptions, knownFeatureNames, knownUnitKeys, language }) },
+      ],
+      withCallStage(billing, "judge"),
+    );
+    const judged = parseJudgeContent(judgeContent, task);
+    return deriveTaskResult(task, sources, judged, label);
+  } catch (error) {
+    // 输出截断是同输入确定性复现的内容级失败：标记 unresolved（定向复核），不走硬失败重试
+    if (AiOutputTruncatedError.isInstance(error)) return truncatedResult(task);
+    throw error;
+  }
+}
+
 /**
  * 执行单个执行任务的双步提取。只读 AI 与传入源码，不写数据库；
  * 结果交给调用方经 Task 8 条件提交。同输入（manifest 固定的任务与源码）产出确定。
+ *
+ * 空白区域确定性分类（H 修正）：纯空行 fragment 不进模型（零 AI 调用）——全空任务直接
+ * 合成 no_behavior；混合任务先裁出纯空 fragment 走缩减任务提取，再并回合成回执按 D5
+ * 规则重推终态。含任一非空白行的区域不受影响，仍走完整模型判定。
  */
 export async function extractBehaviorTask(input: ExtractBehaviorTaskInput): Promise<BehaviorTaskExtractionResult> {
   if (!Array.isArray(input.task?.anchorFragments) || input.task.anchorFragments.length === 0) {
@@ -364,27 +484,30 @@ export async function extractBehaviorTask(input: ExtractBehaviorTaskInput): Prom
   const request = input.requestCompletion ?? requestStructuredCompletion;
   const label = input.label ?? input.task.taskKey;
   const language: OutputLanguage = input.outputLanguage ?? "zh-CN";
-  try {
-    const describeContent = await request(
-      [
-        { role: "system", content: systemPrompt(language) },
-        { role: "user", content: describeBehaviorTaskPrompt(input.task, input.sources, language) },
-      ],
-      withCallStage(input.billing, "describe"),
-    );
-    const descriptions = parseDescribeContent(describeContent, input.task);
-    const judgeContent = await request(
-      [
-        { role: "system", content: systemPrompt(language) },
-        { role: "user", content: judgeBehaviorTaskPrompt({ task: input.task, sources: input.sources, descriptions, knownFeatureNames: input.knownFeatureNames, knownUnitKeys: input.knownUnitKeys, language }) },
-      ],
-      withCallStage(input.billing, "judge"),
-    );
-    const judged = parseJudgeContent(judgeContent, input.task);
-    return deriveTaskResult(input.task, input.sources, judged, label);
-  } catch (error) {
-    // 输出截断是同输入确定性复现的内容级失败：标记 unresolved（定向复核），不走硬失败重试
-    if (AiOutputTruncatedError.isInstance(error)) return truncatedResult(input.task);
-    throw error;
+  const lineIndex = primaryLineIndexOf(input.sources);
+  const blankFragments = input.task.anchorFragments.filter((fragment) => fragmentIsBlank(fragment, lineIndex));
+  if (blankFragments.length === input.task.anchorFragments.length) {
+    return blankRegionsResult(input.task, input.sources);
   }
+  if (blankFragments.length > 0) {
+    const blankKeys = new Set(blankFragments.map((fragment) => fragment.anchorFragmentKey));
+    const reducedTask: BehaviorExecutionTask = {
+      ...input.task,
+      anchorFragments: input.task.anchorFragments.filter((fragment) => !blankKeys.has(fragment.anchorFragmentKey)),
+    };
+    const reducedSources = input.sources.filter((source) => !source.content.split("\n").every((line) => line.trim() === ""));
+    const primary = reducedSources.find((source) => source.role === "primary") ?? reducedSources[0];
+    const contentResult = await modelTaskExtraction(
+      reducedTask,
+      reducedSources,
+      request,
+      input.billing,
+      input.knownFeatureNames,
+      input.knownUnitKeys,
+      language,
+      label,
+    );
+    return mergeBlankReceipts(contentResult, blankFragments.map((fragment) => blankRegionReceipt(fragment, primary.path)), label);
+  }
+  return modelTaskExtraction(input.task, input.sources, request, input.billing, input.knownFeatureNames, input.knownUnitKeys, language, label);
 }

@@ -4,6 +4,7 @@ import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BehaviorManifest, BehaviorUnit } from "../lib/behavior-inventory/types";
 import { manifestHash } from "../lib/behavior-inventory/manifest";
+import { computeScopeFingerprint } from "../lib/behavior-inventory";
 import { BehaviorBudgetError, UNLIMITED_MAX_COST_AMOUNT, UNLIMITED_MAX_LLM_CALLS, UNLIMITED_MAX_TOTAL_TOKENS } from "../lib/behavior-run-budget";
 import { InventoryPersistenceError } from "../lib/behavior-unit-receipts";
 import { extractBehaviorTask } from "../lib/behavior-unit-extraction";
@@ -393,17 +394,26 @@ vi.mock("../lib/code-hosting", async (importOriginal) => ({
     product: { id: run.productId, slug: run.productSlug, name: run.productName },
   })),
 }));
-vi.mock("../lib/ai", () => ({
-  analyzeWithAI: vi.fn(),
-  analyzeBehavioralGroup: vi.fn(),
-  requestStructuredCompletion: vi.fn(),
-  systemPrompt: vi.fn(() => "system prompt"),
-  AiOutputTruncatedError: class AiOutputTruncatedError extends Error {
-    static isInstance(_e: unknown) {
-      return false;
-    }
-  },
-}));
+vi.mock("../lib/ai", async () => {
+  const { z } = await import("zod");
+  return {
+    analyzeWithAI: vi.fn(),
+    analyzeBehavioralGroup: vi.fn(),
+    requestStructuredCompletion: vi.fn(),
+    systemPrompt: vi.fn(() => "system prompt"),
+    AiOutputTruncatedError: class AiOutputTruncatedError extends Error {
+      static isInstance(_e: unknown) {
+        return false;
+      }
+    },
+    // 空白区域回归测试经 importActual 引入真实提取层（behavior-unit-ai 在模块加载期
+    // 组装 judgeSchema）——这里补最小 zod 契约；本文件内模型解析路径始终被替身截断。
+    analysisSchema: z.object({
+      features: z.array(z.object({ name: z.string(), summary: z.string(), scenarios: z.array(z.object({}).passthrough()) })),
+    }),
+    normalizeScenarioAliases: (input: { features?: unknown }) => input,
+  };
+});
 vi.mock("../lib/notifications", () => ({ deliverAnalysisNotifications: vi.fn(async () => undefined) }));
 vi.mock("../lib/release-change-projection", async (importOriginal) => ({
   ...await importOriginal<typeof import("../lib/release-change-projection")>(),
@@ -1207,12 +1217,163 @@ describe("runInventoryFullAnalysis orchestration", () => {
     await expect(actualFullAnalysis.runInventoryFullAnalysis(baseInput(), { activate: true })).rejects.toThrow(/primaryCoverageComplete/);
   });
 
-  it("rejects task sources whose content is only blank lines as unreadable (H)", async () => {
-    repoFiles["src/blank.ts"] = ["", "  ", ""];
+  async function routeBlankTasksToRealExtractor(): Promise<void> {
+    // 集成线束默认整体 mock 掉提取层；空白区域回归需要真实提取层的确定性分类参与——
+    // 按任务源码内容分发：纯空行任务走真实实现（零模型调用），其余任务保留默认替身。
+    const actualExtraction = await vi.importActual<typeof import("../lib/behavior-unit-extraction")>("../lib/behavior-unit-extraction");
+    vi.mocked(extractBehaviorTask).mockImplementation(async (input: { task: BehaviorExecutionTask; sources: Array<{ path: string; role: string; content: string }> }) => {
+      if (input.sources.every((source) => source.content.split("\n").every((line) => line.trim() === ""))) {
+        return actualExtraction.extractBehaviorTask(input as never);
+      }
+      const primary = input.sources.find((source) => source.role === "primary") ?? input.sources[0];
+      return extractedResult(input.task, primary.path);
+    });
+  }
 
-    await expect(actualFullAnalysis.runInventoryFullAnalysis(baseInput(), { activate: true })).rejects.toThrow(/inventory_activation_gate_failed/);
+  it("classifies blank-only residual regions as deterministic no_behavior without any model call (blank file, replaces the old H misjudgment)", async () => {
+    repoFiles["src/blank.ts"] = ["", "  ", ""];
+    await routeBlankTasksToRealExtractor();
+
+    const outcome = await actualFullAnalysis.runInventoryFullAnalysis(baseInput(), { activate: true });
+    // 不再像旧 H 规则那样把纯空行误判为不可读硬失败：run 正常激活
+    expect(outcome.activated).toBe(true);
+    const blankRows = [...store.tasks.values()].filter((row) => row.unitKey.includes("src/blank.ts"));
+    expect(blankRows.length).toBeGreaterThan(0);
+    for (const row of blankRows) {
+      expect(row.status).toBe("no_behavior");
+      const result = JSON.parse(row.resultJson as string) as { outcome: string; anchorReceipts: Array<{ disposition: string; internalKind?: string; reason?: string; evidence: Array<{ path: string; startLine?: number | null }> }> };
+      expect(result.outcome).toBe("no_behavior");
+      for (const receipt of result.anchorReceipts) {
+        expect(receipt).toMatchObject({ disposition: "reviewed_internal", internalKind: "no_code_content", reason: "blank_lines_only" });
+        expect(receipt.evidence[0]).toMatchObject({ path: "src/blank.ts" });
+      }
+    }
     const marks = vi.mocked(markBehaviorTaskFailure).mock.calls.map((call) => call[0] as { error?: unknown });
-    expect(marks.some((mark) => String(mark.error).includes("unreadable"))).toBe(true);
+    expect(marks.some((mark) => String(mark.error).includes("unreadable"))).toBe(false);
+  });
+
+  it("activates a repo whose declarations are separated by blank lines (blank residual gaps stay deterministic no_behavior)", async () => {
+    // 声明间空行 → 残余清单产出 symbol_range 纯空单元 → 零模型调用确定性 no_behavior，
+    // 全量分析照常激活（终审阻断场景的回归测试）
+    repoFiles["src/gapped.ts"] = ["export const alpha = () => 1;", "", "", "export const beta = () => 2;"];
+    await routeBlankTasksToRealExtractor();
+
+    const outcome = await actualFullAnalysis.runInventoryFullAnalysis(baseInput(), { activate: true });
+    expect(outcome.activated).toBe(true);
+    const gapRows = [...store.tasks.values()].filter((row) => row.unitKey.includes("unit|symbol_range") && row.unitKey.includes("src/gapped.ts"));
+    expect(gapRows.length).toBeGreaterThan(0);
+    for (const row of gapRows) {
+      expect(row.status).toBe("no_behavior");
+      const result = JSON.parse(row.resultJson as string) as { anchorReceipts: Array<{ internalKind?: string }> };
+      expect(result.anchorReceipts.every((receipt) => receipt.internalKind === "no_code_content")).toBe(true);
+    }
+    expect(outcome.unitStatuses.every((unit) => unit.status === "extracted" || unit.status === "no_behavior")).toBe(true);
+  });
+
+  it("resolves covered_elsewhere relatedScenarioRefs through dedup aliases to the surviving scenario (2026-11-20 fix round)", async () => {
+    // 手工 manifest：锚点 A 两个分片提取到行为等价场景（task1 证据行号在前 → keeper），
+    // task2 的 HP-1 被去重丢弃；同任务锚点 B covered_elsewhere 引用 HP-1 —— 必须经
+    // 去重别名解析到存活场景，否则门禁 fail closed 拒绝激活。
+    for (const key of Object.keys(repoFiles)) delete repoFiles[key];
+    repoFiles["src/orders.ts"] = [
+      "export function listOrders(userId: string) {",
+      "  return db.orders.filter((order) => order.userId === userId);",
+      "}",
+      "export function closeOrder(orderId: string) {",
+      '  return db.orders.update(orderId, { status: "closed" });',
+      "}",
+    ];
+    const unitKey = 'unit|file|[["src/orders.ts"]]';
+    const anchorAKey = "anchor|behavior|[\"src/orders.ts\",null,[[1,3]]]";
+    const anchorBKey = "anchor|implicit_review|[\"src/orders.ts\",null,[[4,6]]]";
+    const manifest: BehaviorManifest = {
+      inventorySchemaVersion: "2",
+      detectorRegistryVersion: "generic@1+residual@1",
+      afterSha: runContext.afterSha,
+      scopeFingerprint: computeScopeFingerprint(["src/orders.ts"], []),
+      units: [
+        {
+          unitKey,
+          kind: "file",
+          primaryPath: "src/orders.ts",
+          primaryRanges: [{ startLine: 1, endLine: 6 }],
+          contextRanges: [],
+          anchors: [
+            { anchorKey: anchorAKey, role: "behavior", ranges: [{ startLine: 1, endLine: 3 }], evidence: [{ path: "src/orders.ts", startLine: 1 }], coarse: false },
+            { anchorKey: anchorBKey, role: "implicit_review", ranges: [{ startLine: 4, endLine: 6 }], evidence: [{ path: "src/orders.ts", startLine: 4 }], coarse: true },
+          ],
+          detector: "residual",
+          detectorVersion: "1",
+        },
+      ],
+      tasks: [
+        { taskKey: 'task|["unit|file:orders",1]', unitKey, anchorFragments: [{ anchorKey: anchorAKey, anchorFragmentKey: "fragment|orders:a1", ranges: [{ startLine: 1, endLine: 2 }] }] },
+        {
+          taskKey: 'task|["unit|file:orders",2]',
+          unitKey,
+          anchorFragments: [
+            { anchorKey: anchorAKey, anchorFragmentKey: "fragment|orders:a2", ranges: [{ startLine: 3, endLine: 3 }] },
+            { anchorKey: anchorBKey, anchorFragmentKey: "fragment|orders:b1", ranges: [{ startLine: 4, endLine: 6 }] },
+          ],
+        },
+      ],
+      diagnostics: {
+        detectorUnsupported: [],
+        detectorParseFailure: [],
+        dynamicRegistrationFallback: [],
+        excludedNonImplementation: [],
+        unreadablePaths: [],
+        eligibleRanges: [{ path: "src/orders.ts", startLine: 1, endLine: 6 }],
+        fallbackInventorySuccess: true,
+        semanticUnits: 0,
+        residualUnits: 1,
+      },
+    };
+    store.manifest = manifest;
+
+    const behaviorFeature = (startLine: number) => [
+      {
+        name: "订单",
+        summary: "下单",
+        scenarios: [
+          { reference: "HP-1", context: "用户在订单页", action: "提交订单", outcome: "订单创建成功", category: "happy", evidence: [{ path: "src/orders.ts", startLine }] },
+        ],
+      },
+    ];
+    vi.mocked(extractBehaviorTask).mockImplementation(async (input: { task: BehaviorExecutionTask }) => {
+      const coveredElsewhere = input.task.anchorFragments.find((fragment) => fragment.anchorFragmentKey === "fragment|orders:b1");
+      if (coveredElsewhere) {
+        // task2：锚点 A 分片 extracted（HP-1，行为等价会被去重丢弃），锚点 B covered_elsewhere 引用 HP-1
+        return {
+          outcome: "extracted",
+          features: behaviorFeature(3),
+          anchorReceipts: [
+            { anchorKey: anchorAKey, anchorFragmentKey: "fragment|orders:a2", disposition: "extracted", evidence: [{ path: "src/orders.ts", startLine: 3 }], scenarioRefs: ["HP-1"] },
+            { anchorKey: anchorBKey, anchorFragmentKey: "fragment|orders:b1", disposition: "reviewed_internal", internalKind: "covered_elsewhere", reason: "同行为已由 HP-1 表达", evidence: [{ path: "src/orders.ts", startLine: 4 }], scenarioRefs: [], relatedScenarioRefs: ["HP-1"] },
+          ],
+          scenarioCount: 1,
+          reviewedCount: 1,
+          unresolvedAnchorCount: 0,
+          sanitize: { ...zeroSanitize(false), keptClaims: 1 },
+        } as never;
+      }
+      return {
+        outcome: "extracted",
+        features: behaviorFeature(1),
+        anchorReceipts: [{ anchorKey: anchorAKey, anchorFragmentKey: "fragment|orders:a1", disposition: "extracted", evidence: [{ path: "src/orders.ts", startLine: 1 }], scenarioRefs: ["HP-1"] }],
+        scenarioCount: 1,
+        reviewedCount: 0,
+        unresolvedAnchorCount: 0,
+        sanitize: { ...zeroSanitize(false), keptClaims: 1 },
+      } as never;
+    });
+
+    const outcome = await actualFullAnalysis.runInventoryFullAnalysis(baseInput(), { activate: true });
+    expect(outcome.activated).toBe(true);
+    expect(outcome.gate.checks.anchorAccountingComplete).toBe(true);
+    expect(outcome.gate.unaccountedAnchorKeys).toEqual([]);
+    // 去重确实发生（局部身份只有一个），covered_elsewhere 的引用经别名解析到它
+    expect(outcome.result.features).toHaveLength(1);
   });
 
   it("passes the manifest unit-key directory to every extraction call (related-reference constraint)", async () => {

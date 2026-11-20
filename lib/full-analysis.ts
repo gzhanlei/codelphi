@@ -33,7 +33,7 @@ import {
 } from "./behavior-unit-receipts";
 import {
   aggregateBehaviorUnitStatus,
-  assignLocalScenarioKeys,
+  assignLocalScenarioKeysWithAliases,
   buildAnchorScenarioLinks,
   type AnchorScenarioLink,
   type BehaviorUnitStatus,
@@ -91,13 +91,16 @@ import { loadLatestSpecVersionLanguage } from "./spec-versions";
  *   E 恢复在派发前对账孤儿任务预留（usageUnknownBlocked → 停止派发 + 门禁 fail closed）。
  *   F 执行窗口（源加载 + 提取 + 复核）内的租约心跳续约；续约失败视为硬失败，绝不提交。
  *   G existingMergeChecksPassed 由合并统计派生（截断计数 >0 即不通过），不再硬编码 true。
- *   H 任务源码纯空行视同不可读（硬失败路径）。
+ *   H 任务源码区间倒挂（读取缺行）视为不可读（硬失败路径）；纯空行区域改由提取层
+ *     确定性判 no_code_content（零 AI 调用），不再误判为不可读（2026-11-20 修正轮）。
  *   I unresolved 且仍有未决回执时同 attempt 内做一次语义复核（repair），复核趟与首趟
  *     共用同一预留（settle 按实际回执入账，超预留不截断、仅受 run 上限约束）。
  *   K 覆盖判定的 eligibleRanges 取 manifest 持久化诊断（独立真源），不从单元主区间反推。
  *   related-ref：covered_elsewhere 的 relatedUnitKeys 只保留 manifest 单元集合内的 key
  *     （幽灵 key 丢弃，丢完无关联即回 unresolved 由门禁 fail closed）；派发时向判定
- *     prompt 传有效单元 key 目录（knownUnitKeys，截断 150）。
+ *     prompt 传有效单元 key 目录（knownUnitKeys，截断 150）。relatedScenarioRefs 经
+ *     局部身份映射 + 去重候选别名解析到存活场景（2026-11-20 修正轮），解析不到仍
+ *     fail closed。
  */
 
 export const BEHAVIOR_TASK_RESERVED_LLM_CALLS = 2;
@@ -262,14 +265,14 @@ function isReusableTerminal(row: PersistedTaskRow | undefined): boolean {
   return row != null && (row.status === "extracted" || row.status === "no_behavior") && row.result != null;
 }
 
-/** 任务源码可读性硬校验：任何 source 内容为空、纯空行（H）或区间倒挂都视为不可读，走硬失败路径。 */
+/**
+ * 任务源码结构性硬校验：区间倒挂（读取缺行，多为 surface 漂移竞态）视为不可读，走硬失败路径。
+ * 纯空行内容不再是硬失败（H 修正）：声明间空行产生的纯空 residual 区域由提取层确定性
+ * 判为 no_code_content（零 AI 调用），不再误判为不可读导致全量分析无法激活。
+ */
 function assertSourcesReadable(sources: TaskSource[]): void {
   for (const source of sources) {
-    if (
-      source.content === "" ||
-      source.endLine < source.startLine ||
-      source.content.split("\n").every((line) => line.trim() === "")
-    ) {
+    if (source.endLine < source.startLine) {
       throw new Error(`behavior task source unreadable: ${source.path}#${source.startLine}-${source.endLine}`);
     }
   }
@@ -328,6 +331,8 @@ function buildGateAnchors(
         for (const key of receipt.relatedUnitKeys ?? []) {
           if (validUnitKeys.has(key)) relatedUnitKeys.add(key);
         }
+        // relatedScenarioRefs 解析：先直查（存活候选的身份映射），再去重别名（行为等价
+        // 去重丢弃候选 → keeper 局部身份）；两层都落空的引用保持原样，门禁 fail closed。
         for (const ref of receipt.relatedScenarioRefs ?? []) {
           relatedScenarioRefs.add(localKeyByTaskRef.get(`${taskKey}\n${ref}`) ?? ref);
         }
@@ -650,10 +655,14 @@ export async function runInventoryFullAnalysis(
       const states = unitStates.get(unit.unitKey) ?? [];
       const status = aggregateBehaviorUnitStatus({ unit, tasks: states });
       unitStatuses.push({ unitKey: unit.unitKey, status });
-      const assignments = assignLocalScenarioKeys({ unit, tasks: states });
+      const { assignments, refAliases } = assignLocalScenarioKeysWithAliases({ unit, tasks: states });
       assignmentsByUnit.set(unit.unitKey, assignments);
       for (const assignment of assignments) {
         localKeyByTaskRef.set(`${assignment.taskKey}\n${assignment.reference}`, assignment.localScenarioKey);
+      }
+      // 去重候选别名：直查映射已覆盖的键不覆盖（直查优先），只补行为等价丢弃候选的解析
+      for (const [aliasKey, localScenarioKey] of refAliases) {
+        if (!localKeyByTaskRef.has(aliasKey)) localKeyByTaskRef.set(aliasKey, localScenarioKey);
       }
     }
 

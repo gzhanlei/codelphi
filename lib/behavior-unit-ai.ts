@@ -15,7 +15,9 @@ import type { BehaviorExecutionTask } from "./behavior-inventory/types";
 
 export type BehaviorAnchorDisposition = "extracted" | "reviewed_internal" | "unresolved";
 
-export type BehaviorInternalKind = "pure_technical" | "covered_elsewhere" | "data_transform" | "other_evidence_backed";
+/** no_code_content 仅由提取编排对纯空行区域确定性合成（无模型判定、零 AI 调用）；
+ *  AI 判定契约（judgeSchema 的四值枚举）不变，模型永远不会产出该值。 */
+export type BehaviorInternalKind = "pure_technical" | "covered_elsewhere" | "data_transform" | "other_evidence_backed" | "no_code_content";
 
 export interface BehaviorRegionDescription {
   id: string;

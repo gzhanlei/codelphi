@@ -5,6 +5,7 @@ import type { BehaviorFragmentReceipt } from "../lib/behavior-unit-extraction";
 import {
   aggregateBehaviorUnitStatus,
   assignLocalScenarioKeys,
+  assignLocalScenarioKeysWithAliases,
   buildAnchorScenarioLinks,
   type UnitTaskState,
 } from "../lib/behavior-unit-state";
@@ -306,6 +307,74 @@ describe("assignLocalScenarioKeys", () => {
     // reviewed_internal 没有 scenarioRefs、unresolved 永不计入完成：两者都不产生身份与关联
     expect(assignments).toEqual([]);
     expect(buildAnchorScenarioLinks({ runId: 7, unitKey, assignments })).toEqual([]);
+  });
+});
+
+describe("assignLocalScenarioKeysWithAliases (dedup candidate refs)", () => {
+  it("aliases deduped candidates' (taskKey, reference) to the surviving keeper assignment", () => {
+    const unit = makeUnit([anchor(anchorA, "behavior")]);
+    const frag1 = fragment(anchorA, 1);
+    const frag2 = fragment(anchorA, 2);
+    const task1 = makeTask(unit, 1, [frag1]);
+    const task2 = makeTask(unit, 2, [frag2]);
+    // 同一锚点的两个分片提取到行为等价场景（仅空白差异）：一个存活为 assignment，另一个被去重丢弃。
+    // keeper 由确定性排序决定，不由输入顺序预设——断言按 assignment 的实际身份反推被丢弃方。
+    const { assignments, refAliases } = assignLocalScenarioKeysWithAliases({
+      unit,
+      tasks: [
+        taskState(task1, "extracted", [extractedReceipt(frag1, ["HP-1"])], [
+          feature("订单管理", [scenario("HP-1", { context: "用户在订单页", action: "提交订单", outcome: "订单创建成功" })]),
+        ]),
+        taskState(task2, "extracted", [extractedReceipt(frag2, ["HP-2"])], [
+          feature("订单管理", [scenario("HP-2", { reference: "HP-2", context: "用户 在订单页", action: "提交订单", outcome: "订单创建成功" })]),
+        ]),
+      ],
+    });
+    expect(assignments).toHaveLength(1);
+    const keeperKey = `${assignments[0].taskKey}\n${assignments[0].reference}`;
+    const droppedKey = assignments[0].taskKey === task1.taskKey ? `${task2.taskKey}\nHP-2` : `${task1.taskKey}\nHP-1`;
+    // covered_elsewhere 回执引用被去重丢弃的候选时，经别名解析到 keeper 的局部场景身份
+    expect(refAliases.get(droppedKey)).toBe(assignments[0].localScenarioKey);
+    // keeper 自己有直查映射（full-analysis 的 localKeyByTaskRef），不需要别名
+    expect(refAliases.has(keeperKey)).toBe(false);
+    expect(refAliases.size).toBe(1);
+  });
+
+  it("resolves transitively when the keeper itself was linked to an earlier anchor's shared assignment", () => {
+    const unit = makeUnit([anchor(anchorA, "behavior"), anchor(anchorB, "implicit_review")]);
+    const fragA = fragment(anchorA, 1);
+    const fragB = fragment(anchorB, 1);
+    const task1 = makeTask(unit, 1, [fragA]);
+    const task2 = makeTask(unit, 2, [fragB]);
+    // 锚点 B 的候选与锚点 A 的 assignment 行为等价（跨锚点共享，不产生新身份）
+    const { assignments, refAliases } = assignLocalScenarioKeysWithAliases({
+      unit,
+      tasks: [
+        taskState(task1, "extracted", [extractedReceipt(fragA, ["HP-1"])], [
+          feature("订单管理", [scenario("HP-1", { context: "用户在订单页", action: "提交订单", outcome: "订单创建成功" })]),
+        ]),
+        taskState(task2, "extracted", [extractedReceipt(fragB, ["HP-1"])], [
+          feature("订单管理", [scenario("HP-1", { context: "用户在订单页", action: "提交订单", outcome: "订单创建成功" })]),
+        ]),
+      ],
+    });
+    expect(assignments).toHaveLength(1);
+    expect(assignments[0].linkedAnchorKeys).toEqual([anchorA, anchorB]);
+    // 引用者按 (task2, HP-1) 查找时仍能解析到共享 assignment 的身份
+    expect(refAliases.get(`${task2.taskKey}\nHP-1`)).toBe(assignments[0].localScenarioKey);
+  });
+
+  it("keeps genuinely dead references out of the alias map (fail closed unchanged)", () => {
+    const unit = makeUnit([anchor(anchorA, "behavior")]);
+    const frag = fragment(anchorA, 1);
+    const task = makeTask(unit, 1, [frag]);
+    // 模型引用了持久化结果里不存在的场景（HP-9）：不产生任何别名，解析失败仍 fail closed
+    const { assignments, refAliases } = assignLocalScenarioKeysWithAliases({
+      unit,
+      tasks: [taskState(task, "extracted", [extractedReceipt(frag, ["HP-1"])], [feature("订单管理", [scenario("HP-1")])])],
+    });
+    expect(assignments).toHaveLength(1);
+    expect(refAliases.size).toBe(0);
   });
 });
 

@@ -199,19 +199,42 @@ function compareCandidates(a: ScenarioCandidate, b: ScenarioCandidate): number {
   );
 }
 
+/** 引用查找键与 full-analysis 的 localKeyByTaskRef 同一格式：`${taskKey}\n${reference}`。 */
+function referenceLookupKey(taskKey: string, reference: string): string {
+  return `${taskKey}\n${reference}`;
+}
+
+export interface LocalScenarioKeyAssignments {
+  assignments: LocalScenarioKeyAssignment[];
+  /**
+   * 行为等价去重丢弃候选的引用别名：`${taskKey}\n${reference}` → keeper 的局部场景身份。
+   * covered_elsewhere 的 relatedScenarioRefs 经它解析到去重后的存活场景；解析不到的
+   * 引用（模型幻觉/已清洗候选）不产生别名，fail closed 语义不变。
+   */
+  refAliases: ReadonlyMap<string, string>;
+}
+
 /**
  * 分配单元的局部场景身份。只对「全部分片已终态」的锚点分配：分片未完成时没有任何
  * worker 能凭局部结果核销锚点。锚点内先排序后按行为等价（BM-5 严通道，不做跨调用
  * 语义哈希）去重再编号；跨锚点的同行为共享先分配锚点的局部场景（多锚点支撑同一场景）。
+ * 去重丢弃的候选经 refAliases 别名到 keeper 的身份（含 keeper 关联到更早锚点共享
+ * assignment 的传递解析），使 covered_elsewhere 引用仍可解析到存活场景。
  */
-export function assignLocalScenarioKeys(input: LocalScenarioInput): LocalScenarioKeyAssignment[] {
+export function assignLocalScenarioKeysWithAliases(input: LocalScenarioInput): LocalScenarioKeyAssignments {
   const assignments: LocalScenarioKeyAssignment[] = [];
+  // 等价链：被丢弃/共享吞并的候选 aliasKey → keeper 候选的 aliasKey（落定后解析为局部身份）
+  const aliasTarget = new Map<string, string>();
   for (const anchorKey of accountableAnchorKeys(input.unit)) {
     const resolutions = resolveAnchorFragments(anchorKey, input.tasks);
     if (!anchorComplete(resolutions)) continue;
     const kept: ScenarioCandidate[] = [];
     for (const candidate of collectAnchorCandidates(resolutions).sort(compareCandidates)) {
-      if (kept.some((existing) => scenarioBehaviorEqual(existing.scenario, candidate.scenario))) continue;
+      const keeper = kept.find((existing) => scenarioBehaviorEqual(existing.scenario, candidate.scenario));
+      if (keeper) {
+        aliasTarget.set(referenceLookupKey(candidate.taskKey, candidate.reference), referenceLookupKey(keeper.taskKey, keeper.reference));
+        continue;
+      }
       kept.push(candidate);
     }
     let ordinal = 0;
@@ -222,6 +245,7 @@ export function assignLocalScenarioKeys(input: LocalScenarioInput): LocalScenari
           shared.linkedAnchorKeys.push(anchorKey);
           shared.linkedAnchorKeys.sort(compareCodePoints);
         }
+        aliasTarget.set(referenceLookupKey(candidate.taskKey, candidate.reference), referenceLookupKey(shared.taskKey, shared.reference));
         continue;
       }
       ordinal += 1;
@@ -238,7 +262,31 @@ export function assignLocalScenarioKeys(input: LocalScenarioInput): LocalScenari
       });
     }
   }
-  return assignments;
+  const localKeyByReference = new Map(
+    assignments.map((assignment) => [referenceLookupKey(assignment.taskKey, assignment.reference), assignment.localScenarioKey] as const),
+  );
+  const refAliases = new Map<string, string>();
+  for (const [dropped, keeper] of aliasTarget) {
+    // 已持有身份的引用走直查映射，不产生别名；沿等价链解析到最近的持有身份祖先
+    if (localKeyByReference.has(dropped)) continue;
+    const visited = new Set<string>([dropped]);
+    let current: string | undefined = keeper;
+    while (current != null && !visited.has(current)) {
+      const localKey = localKeyByReference.get(current);
+      if (localKey != null) {
+        refAliases.set(dropped, localKey);
+        break;
+      }
+      visited.add(current);
+      current = aliasTarget.get(current);
+    }
+  }
+  return { assignments, refAliases };
+}
+
+/** 兼容包装：只要身份分配（既有调用方与测试的签名不变）。 */
+export function assignLocalScenarioKeys(input: LocalScenarioInput): LocalScenarioKeyAssignment[] {
+  return assignLocalScenarioKeysWithAliases(input).assignments;
 }
 
 /**

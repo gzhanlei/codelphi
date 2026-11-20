@@ -406,6 +406,99 @@ describe("extractBehaviorTask semantic repair (I)", () => {
   });
 });
 
+describe("extractBehaviorTask blank-region deterministic classification", () => {
+  const blankTask: BehaviorExecutionTask = {
+    taskKey: 'task|["unit|symbol_range:src/gap.ts",1]',
+    unitKey: "unit|symbol_range:src/gap.ts",
+    anchorFragments: [
+      { anchorKey: "anchor|implicit:gap:2-3", anchorFragmentKey: "fragment|gap:1", ranges: [{ startLine: 2, endLine: 3 }] },
+    ],
+  };
+
+  it("classifies an all-blank task as no_behavior without any model call (blank lines between declarations)", async () => {
+    // 声明间空行产生的纯空 residual：无代码可审 → 确定性 no_code_content，绝不烧 AI 调用，
+    // 也绝不像旧 H 规则那样被误判为不可读硬失败
+    const blankSources: TaskSource[] = [{ path: "src/gap.ts", content: "\n  ", startLine: 2, endLine: 3, role: "primary" }];
+    const requestCompletion = completionMock(describeResponse());
+    const result = await extractBehaviorTask(input({ task: blankTask, sources: blankSources, requestCompletion }));
+    expect(requestCompletion).not.toHaveBeenCalled();
+    expect(result.outcome).toBe("no_behavior");
+    expect(result.scenarioCount).toBe(0);
+    expect(result.unresolvedAnchorCount).toBe(0);
+    expect(result.sanitize.allCandidatesRejected).toBe(false);
+    expect(result.anchorReceipts).toHaveLength(1);
+    expect(result.anchorReceipts[0]).toMatchObject({
+      anchorKey: blankTask.anchorFragments[0].anchorKey,
+      anchorFragmentKey: "fragment|gap:1",
+      disposition: "reviewed_internal",
+      internalKind: "no_code_content",
+      reason: "blank_lines_only",
+      scenarioRefs: [],
+    });
+    // 证据必须可追溯：引用区域自身的行号（实际读取过的内容）
+    expect(result.anchorReceipts[0].evidence).toEqual([{ path: "src/gap.ts", startLine: 2 }]);
+  });
+
+  it("splits a mixed task: blank fragments are synthesized and only content regions reach the model", async () => {
+    const mixedTask: BehaviorExecutionTask = {
+      taskKey: 'task|["unit|file:src/mixed.ts",1]',
+      unitKey: "unit|file:src/mixed.ts",
+      anchorFragments: [
+        { anchorKey: "anchor|behavior:mixed:1-2", anchorFragmentKey: "fragment|mixed:1", ranges: [{ startLine: 1, endLine: 2 }] },
+        { anchorKey: "anchor|implicit:mixed:3-4", anchorFragmentKey: "fragment|mixed:2", ranges: [{ startLine: 3, endLine: 4 }] },
+      ],
+    };
+    const mixedSources: TaskSource[] = [
+      { path: "src/mixed.ts", content: ["export const a = () => 1;", "export const b = () => 2;", "", "  "].join("\n"), startLine: 1, endLine: 4, role: "primary" },
+    ];
+    const mixedFeature = {
+      name: "订单",
+      summary: "下单",
+      scenarios: [
+        { reference: "HP-1", context: "用户已登录", action: "提交订单", outcome: "订单写入数据库", category: "happy", evidence: [{ path: "src/mixed.ts", startLine: 1 }] },
+      ],
+    };
+    const mixedRegion = { id: "R1", disposition: "extracted", reason: "外部可见", evidence: [{ path: "src/mixed.ts", startLine: 1 }], scenarioRefs: ["HP-1"] };
+    const requestCompletion = completionMock(describeResponse(), judgeResponse([mixedRegion], [mixedFeature]));
+    const result = await extractBehaviorTask(input({ task: mixedTask, sources: mixedSources, requestCompletion }));
+    // 只有一次 describe + 一次 judge（缩减任务），纯空区域不进入模型
+    expect(requestCompletion).toHaveBeenCalledTimes(2);
+    const describePrompt = requestCompletion.mock.calls[0][0][1].content;
+    expect(describePrompt).toContain("行 1-2");
+    expect(describePrompt).not.toContain("行 3-4");
+    // 合并回执：内容区域 extracted（引用重编号后为 HP-1），空白区域确定性 reviewed_internal
+    expect(result.outcome).toBe("extracted");
+    expect(result.anchorReceipts).toHaveLength(2);
+    expect(result.anchorReceipts[0]).toMatchObject({ anchorFragmentKey: "fragment|mixed:1", disposition: "extracted", scenarioRefs: ["HP-1"] });
+    expect(result.anchorReceipts[1]).toMatchObject({
+      anchorFragmentKey: "fragment|mixed:2",
+      disposition: "reviewed_internal",
+      internalKind: "no_code_content",
+      reason: "blank_lines_only",
+    });
+    expect(result.scenarioCount).toBe(1);
+    expect(result.unresolvedAnchorCount).toBe(0);
+  });
+
+  it("keeps fragments with any non-blank line on the model path (deterministic blank rule only)", async () => {
+    // 有一行含空白字符之外的代码内容即不属于空白区域，仍走模型判定
+    const mostlyBlank: TaskSource[] = [
+      { path: "src/hint.ts", content: ["", "", "  return db.orders.update(orderId, { status: \"closed\" });", ""].join("\n"), startLine: 5, endLine: 8, role: "primary" },
+    ];
+    const hintTask: BehaviorExecutionTask = {
+      taskKey: 'task|["unit|symbol_range:src/hint.ts",1]',
+      unitKey: "unit|symbol_range:src/hint.ts",
+      anchorFragments: [{ anchorKey: "anchor|implicit:hint:5-8", anchorFragmentKey: "fragment|hint:1", ranges: [{ startLine: 5, endLine: 8 }] }],
+    };
+    const hintRegion = { id: "R1", disposition: "reviewed_internal", internalKind: "data_transform", reason: "无独立外部效果", evidence: [{ path: "src/hint.ts", startLine: 7 }], scenarioRefs: [] };
+    const requestCompletion = completionMock(describeResponse(), judgeResponse([hintRegion]));
+    const result = await extractBehaviorTask(input({ task: hintTask, sources: mostlyBlank, requestCompletion }));
+    expect(requestCompletion).toHaveBeenCalledTimes(2);
+    expect(result.outcome).toBe("no_behavior");
+    expect(result.anchorReceipts[0]).toMatchObject({ disposition: "reviewed_internal", internalKind: "data_transform" });
+  });
+});
+
 describe("judge prompt unit directory (related-reference)", () => {
   it("restricts relatedUnitKeys to the provided valid unit directory", () => {
     const prompt = judgeBehaviorTaskPrompt({ task, sources, descriptions, knownUnitKeys: ["unit|job:a", "unit|http:b"] });
