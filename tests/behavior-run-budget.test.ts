@@ -116,10 +116,10 @@ function budgetDb(initial: FakeBudgetRow, receipts: FakeReceiptRow[] = []) {
       sql.startsWith("UPDATE analysis_run_budgets SET reserved_llm_calls = reserved_llm_calls + ?") &&
       sql.includes("summary_reserved = 1")
     ) {
-      const [rCalls, rIn, rOut, rCost, runId, callsSentinel, rCallsFit, tokensSentinel, rInOutFit, costSentinel, rCostFit] =
-        parameters;
+      // 2026-11-20 修正轮：sentinel 判等改为 SQL 内联字面量，参数数组只剩真实用量值
+      const [rCalls, rIn, rOut, rCost, runId, rCallsFit, rInOutFit, rCostFit] = parameters;
       if (row.run_id !== Number(runId) || row.summary_reserved !== 0) return [{ affectedRows: 0 }];
-      if (!fits(row, callsSentinel, rCallsFit, tokensSentinel, rInOutFit, costSentinel, rCostFit)) {
+      if (!fits(row, UNLIMITED_MAX_LLM_CALLS, rCallsFit, UNLIMITED_MAX_TOTAL_TOKENS, rInOutFit, UNLIMITED_MAX_COST_AMOUNT, rCostFit)) {
         return [{ affectedRows: 0 }];
       }
       row.reserved_llm_calls += Number(rCalls);
@@ -131,10 +131,9 @@ function budgetDb(initial: FakeBudgetRow, receipts: FakeReceiptRow[] = []) {
       return [{ affectedRows: 1 }];
     }
     if (sql.startsWith("UPDATE analysis_run_budgets SET reserved_llm_calls = reserved_llm_calls + ?")) {
-      const [rCalls, rIn, rOut, rCost, runId, callsSentinel, rCallsFit, tokensSentinel, rInOutFit, costSentinel, rCostFit] =
-        parameters;
+      const [rCalls, rIn, rOut, rCost, runId, rCallsFit, rInOutFit, rCostFit] = parameters;
       if (row.run_id !== Number(runId)) return [{ affectedRows: 0 }];
-      if (!fits(row, callsSentinel, rCallsFit, tokensSentinel, rInOutFit, costSentinel, rCostFit)) {
+      if (!fits(row, UNLIMITED_MAX_LLM_CALLS, rCallsFit, UNLIMITED_MAX_TOTAL_TOKENS, rInOutFit, UNLIMITED_MAX_COST_AMOUNT, rCostFit)) {
         return [{ affectedRows: 0 }];
       }
       row.reserved_llm_calls += Number(rCalls);
@@ -255,16 +254,17 @@ function budgetDb(initial: FakeBudgetRow, receipts: FakeReceiptRow[] = []) {
           .map(serializeReservation),
       ];
     }
-    if (sql.startsWith("SELECT (max_llm_calls = ?)")) {
-      // 数据库侧精确比较无上限 sentinel（修复 Critical N：sentinel 判等绝不经 JS 读回值）。
-      const [callsSentinel, tokensSentinel, costSentinel, runId] = parameters;
+    if (sql.startsWith("SELECT (max_llm_calls = 2147483647)")) {
+      // 数据库侧精确比较无上限 sentinel（修复 Critical N）：2026-11-20 起 sentinel 以
+      // SQL 内联字面量出现（预编译协议下绑定参数判等失效），fake 直接用导入常量判等。
+      const [runId] = parameters;
       if (row.run_id !== Number(runId)) return [[]];
       return [
         [
           {
-            calls_uncapped: Number(row.max_llm_calls) === Number(callsSentinel) ? 1 : 0,
-            tokens_uncapped: String(row.max_total_tokens) === String(tokensSentinel) ? 1 : 0,
-            cost_uncapped: String(row.max_cost_amount) === String(costSentinel) ? 1 : 0,
+            calls_uncapped: Number(row.max_llm_calls) === Number(UNLIMITED_MAX_LLM_CALLS) ? 1 : 0,
+            tokens_uncapped: String(row.max_total_tokens) === String(UNLIMITED_MAX_TOTAL_TOKENS) ? 1 : 0,
+            cost_uncapped: String(row.max_cost_amount) === String(UNLIMITED_MAX_COST_AMOUNT) ? 1 : 0,
           },
         ],
       ];
@@ -848,10 +848,13 @@ describe("unlimited sentinel precision (Critical N)", () => {
       .statements()
       .find((statement) => statement.startsWith("SELECT max_llm_calls, max_total_tokens, max_cost_amount"));
     expect(legacyProbe).toBeUndefined();
-    const probe = db.statements().find((statement) => statement.startsWith("SELECT (max_llm_calls = ?)"));
+    // 2026-11-20 bench 真库发现：绑定参数形式的 sentinel 在预编译（execute）协议下
+    // 判等失效/DECIMAL 溢出——库侧比较保留，但 sentinel 必须是 SQL 内联字面量。
+    const probe = db.statements().find((statement) => statement.startsWith("SELECT (max_llm_calls = 2147483647)"));
     expect(probe).toBeDefined();
-    expect(probe).toContain("max_total_tokens = CONVERT(?, UNSIGNED)");
-    expect(probe).toContain("max_cost_amount = CONVERT(?, DECIMAL(12,6))");
+    expect(probe).toContain(`max_total_tokens = ${UNLIMITED_MAX_TOTAL_TOKENS}`);
+    expect(probe).toContain(`max_cost_amount = ${UNLIMITED_MAX_COST_AMOUNT}`);
+    expect(probe).not.toContain("CONVERT(?,");
   });
 
   it("settles unknown usage without throwing when every cap is the unlimited sentinel as the driver reads it", async () => {
@@ -940,5 +943,19 @@ describe("migration 080 budget reservation state", () => {
     expect(sql).toMatch(/attempt_id VARCHAR\(64\) NOT NULL/);
     expect(sql).toMatch(/kind VARCHAR\(24\) NOT NULL/);
     expect(sql).toMatch(/status VARCHAR\(24\) NOT NULL DEFAULT 'reserved'/);
+  });
+});
+
+describe("budget ledger SQL sentinel handling (2026-11-20 bench round)", () => {
+  const source = readFileSync(path.join(__dirname, "..", "lib", "behavior-run-budget.ts"), "utf8");
+
+  it("inlines unlimited sentinels as SQL literals instead of bound params (execute-protocol safety)", () => {
+    // mysql2 预编译（execute）下，uint64 哨兵字符串作为绑定参数会在服务器侧被类型推断
+    // 走 DECIMAL 溢出（Truncated incorrect DECIMAL value）或舍入为 2^63，判等失效——
+    // 假 execute 的单测抓不到，只有真库触发。哨兵判等必须内联字面量，绝不 CONVERT(?, ...)。
+    expect(source).not.toMatch(/CONVERT\(\?,\s*(?:UNSIGNED|DECIMAL)/);
+    expect(source).toMatch(/max_total_tokens = \$\{UNLIMITED_MAX_TOTAL_TOKENS\}/);
+    expect(source).toMatch(/max_cost_amount = \$\{UNLIMITED_MAX_COST_AMOUNT\}/);
+    expect(source).toMatch(/max_llm_calls = \$\{UNLIMITED_MAX_LLM_CALLS\}/);
   });
 });

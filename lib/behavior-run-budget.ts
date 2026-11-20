@@ -217,10 +217,11 @@ function validateReservationInput(input: BudgetReservationInput): void {
 }
 
 /** 聚合账本的原子预留扣减：余额谓词条件 UPDATE，sentinel 表示对应维度无上限。
- *  sentinel 判等必须在数据库侧做精确类型比较（CONVERT）：mysql2 默认把 BIGINT UNSIGNED
- *  最大值读回为舍入值，值经 JS 往返后再参与比较会失真（Critical N）。
- *  用 CONVERT(?, type) 而非 CAST(? AS type)：AS + UNSIGNED/DECIMAL 会撞仓库的
- *  SQL 保留字护栏（tests/sql-alias-reserved-words.test.ts）。 */
+ *  sentinel 判等用 SQL 内联字面量（常量模块内写死，无注入面），绝不作为绑定参数跨
+ *  协议传输（2026-11-20 bench 真库复现）：mysql2 预编译（execute）下 uint64 哨兵字符
+ *  串经服务器参数类型推断会走 DECIMAL 溢出（Truncated incorrect DECIMAL value）或被
+ *  舍入为 2^63（Critical N 的协议面残余），判等失效会把「无上限」误判为「已配置上限」
+ *  并阻断派发。文本协议（query）不触发——假 execute 的单测抓不到，只有真库触发。 */
 async function applyLedgerReservation(
   execute: Execute,
   input: { runId: number; llmCalls: number; inputTokens: number; outputTokens: number; costAmount: number; summary: boolean },
@@ -238,20 +239,17 @@ async function applyLedgerReservation(
             version = version + 1
       WHERE run_id = ?
         ${summaryPredicate}
-        AND (max_llm_calls = ? OR settled_llm_calls + reserved_llm_calls + ? <= max_llm_calls)
-        AND (max_total_tokens = CONVERT(?, UNSIGNED) OR settled_input_tokens + reserved_input_tokens + settled_output_tokens + reserved_output_tokens + ? <= max_total_tokens)
-        AND (max_cost_amount = CONVERT(?, DECIMAL(12,6)) OR settled_cost_amount + reserved_cost_amount + ? <= max_cost_amount)`,
+        AND (max_llm_calls = ${UNLIMITED_MAX_LLM_CALLS} OR settled_llm_calls + reserved_llm_calls + ? <= max_llm_calls)
+        AND (max_total_tokens = ${UNLIMITED_MAX_TOTAL_TOKENS} OR settled_input_tokens + reserved_input_tokens + settled_output_tokens + reserved_output_tokens + ? <= max_total_tokens)
+        AND (max_cost_amount = ${UNLIMITED_MAX_COST_AMOUNT} OR settled_cost_amount + reserved_cost_amount + ? <= max_cost_amount)`,
     [
       input.llmCalls,
       input.inputTokens,
       input.outputTokens,
       toDecimal(input.costAmount),
       input.runId,
-      UNLIMITED_MAX_LLM_CALLS,
       input.llmCalls,
-      UNLIMITED_MAX_TOTAL_TOKENS,
       tokenUpperBound,
-      UNLIMITED_MAX_COST_AMOUNT,
       toDecimal(input.costAmount),
     ],
   );
@@ -404,12 +402,13 @@ interface BudgetConfig {
  * "无上限"误判为"已配置上限"，导致一切 usage unknown 的结算都抛出并永久阻断派发。
  */
 async function loadBudgetConfig(execute: Execute, runId: number): Promise<BudgetConfig | null> {
+  // sentinel 判等用内联字面量（同 applyLedgerReservation：绑定参数跨预编译协议判等失效）
   const [rows] = (await execute(
-    `SELECT (max_llm_calls = ?) AS calls_uncapped,
-            (max_total_tokens = CONVERT(?, UNSIGNED)) AS tokens_uncapped,
-            (max_cost_amount = CONVERT(?, DECIMAL(12,6))) AS cost_uncapped
+    `SELECT (max_llm_calls = ${UNLIMITED_MAX_LLM_CALLS}) AS calls_uncapped,
+            (max_total_tokens = ${UNLIMITED_MAX_TOTAL_TOKENS}) AS tokens_uncapped,
+            (max_cost_amount = ${UNLIMITED_MAX_COST_AMOUNT}) AS cost_uncapped
        FROM analysis_run_budgets WHERE run_id = ?`,
-    [UNLIMITED_MAX_LLM_CALLS, UNLIMITED_MAX_TOTAL_TOKENS, UNLIMITED_MAX_COST_AMOUNT, runId],
+    [runId],
   )) as [Array<{ calls_uncapped: unknown; tokens_uncapped: unknown; cost_uncapped: unknown }>, unknown];
   const row = rows[0];
   if (!row) return null;
