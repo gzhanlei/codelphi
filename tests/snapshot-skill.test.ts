@@ -6,12 +6,13 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 const exec = promisify(execFile);
 const projectRoot = fileURLToPath(new URL("..", import.meta.url));
 const roots: string[] = [];
 const servers: Server[] = [];
+let tsxTmpRoot: string | null = null;
 
 const content = JSON.stringify({
   product: { description: "Packaged product", evidence: [{ path: "index.ts", startLine: 1 }] },
@@ -32,12 +33,25 @@ const content = JSON.stringify({
 });
 
 beforeAll(async () => {
-  await exec(process.execPath, ["node_modules/tsx/dist/cli.mjs", "scripts/build-snapshot-skill.ts"], { cwd: projectRoot, timeout: 120_000 });
+  // tsx 的 IPC socket 建在子进程 os.tmpdir() 下；test-all.mjs 出于 broker socket 稳定性
+  // 把 TMPDIR 钉进项目内，长 worktree 路径会让 socket 路径超出 macOS unix socket 的
+  // sun_path 104 上限（EINVAL listen，见 2026-11-20 行为清单修正轮）。这里给 tsx 子进程
+  // 单独提供一个短 TMPDIR，套件级钉入策略不受影响；snapshot.cjs 是纯 node，不受此约束。
+  tsxTmpRoot = await mkdtemp("/tmp/codelphi-snapshot-skill-");
+  await exec(process.execPath, ["node_modules/tsx/dist/cli.mjs", "scripts/build-snapshot-skill.ts"], {
+    cwd: projectRoot,
+    timeout: 120_000,
+    env: { ...process.env, TMPDIR: tsxTmpRoot },
+  });
 }, 180_000);
 
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolveClose) => server.close(() => resolveClose()))));
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
+
+afterAll(async () => {
+  if (tsxTmpRoot) await rm(tsxTmpRoot, { recursive: true, force: true });
 });
 
 async function workspace() {
