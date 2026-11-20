@@ -4,7 +4,7 @@
   "title": "Behavior Inventory Benchmark Comparison (v1)",
   "description": "单仓 legacy vs inventory 配对行为对照的冻结文件格式。人工评审在查看任何路径输出之前冻结 behaviors；hits 由不知道新旧来源的评审判定后回填。协议见同目录 behavior-inventory-v1.md。",
   "type": "object",
-  "required": ["schema", "repo", "revision", "frozenAt", "frozenBy", "behaviors", "processGates"],
+  "required": ["schema", "repo", "revision", "frozenAt", "frozenBy", "behaviors", "outputEvaluation", "processGates"],
   "additionalProperties": false,
   "properties": {
     "schema": { "const": "behavior-inventory-v1" },
@@ -119,7 +119,7 @@
       "type": "object",
       "required": ["inventoryManifestValid", "coverageGatesPassed", "activationGatePassed"],
       "additionalProperties": false,
-      "description": "过程门禁声明：manifest 校验、双重覆盖门禁（primaryRangesOmitted=0 等）、激活门禁七项。任一 false → 整体 failed，benchmark 不能抵消过程缺陷",
+      "description": "过程门禁声明：manifest 校验、双重覆盖门禁（primaryRangesOmitted=0 等）、激活门禁七项。任一 false 或缺失 → 整体 failed（exit 1），即使统计 inconclusive 也不例外；benchmark 不能抵消过程缺陷",
       "properties": {
         "inventoryManifestValid": { "type": "boolean" },
         "coverageGatesPassed": { "type": "boolean" },

@@ -9,6 +9,7 @@ import {
   pairedRecallDelta,
   wilsonProportionInterval,
   type PairedBehaviorOutcome,
+  type RepoComparison,
 } from "../lib/behavior-benchmark";
 
 /**
@@ -19,7 +20,9 @@ import {
  *  - 每条路径自身的召回/误报比例保留各自的 Wilson 区间（仅描述不确定性，不替代配对检验）；
  *  - 逐仓 LowerCI(Delta) 严格 > -0.03；区间跨过 -0.03（含 30 条初始下限仍功效不足）
  *    一律 inconclusive，区间整体低于 -0.03 为 inferior；
- *  - 误报分母 = 各路径实际评估的输出行为数（两路径分母独立，unmatched 输出不伪造配对）。
+ *  - 误报分母 = 各路径实际评估的输出行为数（两路径分母独立，unmatched 输出不伪造配对）；
+ *  - fail closed（Task 15 fix）：误报/证据会计缺失的仓使整体 inconclusive；
+ *    过程门禁 false/missing 使整体 failed——即使配对统计本身 inconclusive 也不例外。
  *  期望值由独立参考实现（Wilson score + Newcombe 1998 method 10，z=1.959963984540054）离线计算。
  */
 
@@ -29,6 +32,18 @@ function pairs(n: number, inventoryHit: (index: number) => boolean, legacyHit: (
     result.push({ behaviorId: `B${index}`, inventoryHit: inventoryHit(index), legacyHit: legacyHit(index) });
   }
   return result;
+}
+
+/** 完整对照夹具：过程门禁通过 + 零误报/全证据会计（测试统计口径时的默认背景）。 */
+function comparison(repo: string, sample: PairedBehaviorOutcome[], overrides: Partial<RepoComparison> = {}): RepoComparison {
+  return {
+    repo,
+    pairs: sample,
+    processGatesPassed: true,
+    falsePositives: { legacy: { falsePositives: 0, evaluatedOutputs: 100 }, inventory: { falsePositives: 0, evaluatedOutputs: 100 } },
+    evidenceSupport: { legacy: { supported: 100, evaluatedOutputs: 100 }, inventory: { supported: 100, evaluatedOutputs: 100 } },
+    ...overrides,
+  };
 }
 
 describe("pairedRecallDelta", () => {
@@ -103,7 +118,7 @@ describe("newcombePairedInterval", () => {
 describe("evaluateBehaviorNonInferiority", () => {
   it("passes a repo whose paired lower CI clears -0.03 strictly and reports both Wilson recalls", () => {
     const verdict = evaluateBehaviorNonInferiority([
-      { repo: "acme/demo", pairs: pairs(300, (i) => i <= 294, (i) => i <= 294) },
+      comparison("acme/demo", pairs(300, (i) => i <= 294, (i) => i <= 294)),
     ]);
     expect(verdict.status).toBe("passed");
     const repo = verdict.repos[0];
@@ -122,7 +137,7 @@ describe("evaluateBehaviorNonInferiority", () => {
   it("applies the strict > -0.03 rule: a lower CI just below the margin is not non-inferior", () => {
     // n=300，inventory 292 命中 / legacy 294 命中：LowerCI = -0.03396，跨过 -0.03
     const verdict = evaluateBehaviorNonInferiority([
-      { repo: "acme/demo", pairs: pairs(300, (i) => i <= 292, (i) => i <= 294) },
+      comparison("acme/demo", pairs(300, (i) => i <= 292, (i) => i <= 294)),
     ]);
     expect(verdict.repos[0].status).toBe("inconclusive");
     expect(verdict.repos[0].deltaInterval?.lower).toBeCloseTo(-0.03395785309186291, 8);
@@ -133,7 +148,7 @@ describe("evaluateBehaviorNonInferiority", () => {
   it("treats 30 concordant pairs as underpowered, not as proof (inconclusive at the initial floor)", () => {
     // 30 条全部一致命中：LowerCI = -0.1135，区间跨过 -0.03 → 样本下限 ≠ 功效充分
     const verdict = evaluateBehaviorNonInferiority([
-      { repo: "acme/demo", pairs: pairs(30, () => true, () => true) },
+      comparison("acme/demo", pairs(30, () => true, () => true)),
     ]);
     expect(verdict.repos[0].deltaInterval?.lower).toBeCloseTo(-0.1135133931739688, 8);
     expect(verdict.repos[0].status).toBe("inconclusive");
@@ -142,7 +157,7 @@ describe("evaluateBehaviorNonInferiority", () => {
 
   it("marks repos below the 30-sample initial floor inconclusive without computing a verdict interval", () => {
     const verdict = evaluateBehaviorNonInferiority([
-      { repo: "acme/demo", pairs: pairs(29, () => true, () => true) },
+      comparison("acme/demo", pairs(29, () => true, () => true)),
     ]);
     expect(verdict.repos[0].status).toBe("inconclusive");
     expect(verdict.repos[0].reasons.join(" ")).toMatch(/30/);
@@ -152,10 +167,38 @@ describe("evaluateBehaviorNonInferiority", () => {
   it("fails a repo whose entire paired interval lies below the margin (inferior, not inconclusive)", () => {
     // n=300，inventory 270 / legacy 300：区间 [-0.1392, -0.0683] 整体低于 -0.03
     const verdict = evaluateBehaviorNonInferiority([
-      { repo: "acme/demo", pairs: pairs(300, (i) => i <= 270, () => true) },
+      comparison("acme/demo", pairs(300, (i) => i <= 270, () => true)),
     ]);
     expect(verdict.repos[0].status).toBe("inferior");
     expect(verdict.repos[0].deltaInterval?.upper).toBeCloseTo(-0.06831611785523703, 8);
+    expect(verdict.status).toBe("failed");
+  });
+
+  it("fail closed: recall-green data without FP/evidence accounting cannot pass", () => {
+    // 配对召回门禁本身通过（non_inferior），但误报/证据会计缺失 → 整体 inconclusive，
+    // 绝不因「没提供辅助会计」而放行（评审修复：缺失门禁输入不得静默跳过）。
+    const verdict = evaluateBehaviorNonInferiority([
+      { repo: "acme/demo", pairs: pairs(300, (i) => i <= 294, (i) => i <= 294), processGatesPassed: true },
+    ]);
+    expect(verdict.repos[0].status).toBe("non_inferior");
+    expect(verdict.status).toBe("inconclusive");
+    expect(verdict.reasons.join(" ")).toMatch(/误报|证据|false.?positive|evidence/i);
+  });
+
+  it("fails when a process gate is false even though recall statistics pass", () => {
+    const verdict = evaluateBehaviorNonInferiority([
+      comparison("acme/demo", pairs(300, (i) => i <= 294, (i) => i <= 294), { processGatesPassed: false }),
+    ]);
+    expect(verdict.status).toBe("failed");
+    expect(verdict.reasons.join(" ")).toMatch(/过程门禁|process gate/i);
+  });
+
+  it("fails on a process-gate failure even when the statistics are inconclusive", () => {
+    // 统计 inconclusive（12 条 < 30）+ 过程门禁 false → failed，不是 inconclusive：
+    // benchmark 不能抵消过程缺陷，门禁失败比统计不确定更强
+    const verdict = evaluateBehaviorNonInferiority([
+      comparison("acme/demo", pairs(12, () => true, () => true), { processGatesPassed: false }),
+    ]);
     expect(verdict.status).toBe("failed");
   });
 
@@ -163,11 +206,9 @@ describe("evaluateBehaviorNonInferiority", () => {
     // legacy 评估 40 条输出（2 误报），inventory 评估 55 条输出（5 误报，含 15 条 unmatched）：
     // 分母各自独立（40 与 55），rise = 5/55 − 2/40 ≈ 0.0409 > 0.03 → 辅助门禁失败
     const verdict = evaluateBehaviorNonInferiority([
-      {
-        repo: "acme/demo",
-        pairs: pairs(300, (i) => i <= 294, (i) => i <= 294),
+      comparison("acme/demo", pairs(300, (i) => i <= 294, (i) => i <= 294), {
         falsePositives: { legacy: { falsePositives: 2, evaluatedOutputs: 40 }, inventory: { falsePositives: 5, evaluatedOutputs: 55 } },
-      },
+      }),
     ]);
     const repo = verdict.repos[0];
     expect(repo.falsePositives?.legacy.proportion).toBeCloseTo(0.05, 12);
@@ -181,11 +222,9 @@ describe("evaluateBehaviorNonInferiority", () => {
 
   it("gates macro evidence-support drop at 2 percentage points without touching the recall gate", () => {
     const verdict = evaluateBehaviorNonInferiority([
-      {
-        repo: "acme/demo",
-        pairs: pairs(300, (i) => i <= 294, (i) => i <= 294),
+      comparison("acme/demo", pairs(300, (i) => i <= 294, (i) => i <= 294), {
         evidenceSupport: { legacy: { supported: 38, evaluatedOutputs: 40 }, inventory: { supported: 50, evaluatedOutputs: 55 } },
-      },
+      }),
     ]);
     expect(verdict.macroEvidenceSupportDrop).toBeCloseTo(38 / 40 - 50 / 55, 12);
     expect(verdict.macroEvidenceSupportDrop!).toBeGreaterThan(MAX_MACRO_EVIDENCE_SUPPORT_DROP);
@@ -196,20 +235,18 @@ describe("evaluateBehaviorNonInferiority", () => {
   it("keeps the verdict passed when auxiliary gates stay within budget", () => {
     expect(MAX_MACRO_FALSE_POSITIVE_RISE).toBe(0.03);
     const verdict = evaluateBehaviorNonInferiority([
-      {
-        repo: "acme/demo",
-        pairs: pairs(300, (i) => i <= 294, (i) => i <= 294),
+      comparison("acme/demo", pairs(300, (i) => i <= 294, (i) => i <= 294), {
         falsePositives: { legacy: { falsePositives: 2, evaluatedOutputs: 40 }, inventory: { falsePositives: 3, evaluatedOutputs: 55 } },
         evidenceSupport: { legacy: { supported: 38, evaluatedOutputs: 40 }, inventory: { supported: 52, evaluatedOutputs: 55 } },
-      },
+      }),
     ]);
     expect(verdict.status).toBe("passed");
   });
 
   it("averages deltas as a descriptive macro point estimate across repos", () => {
     const verdict = evaluateBehaviorNonInferiority([
-      { repo: "acme/a", pairs: pairs(300, (i) => i <= 294, (i) => i <= 294) },
-      { repo: "acme/b", pairs: pairs(300, (i) => i <= 293, (i) => i <= 294) },
+      comparison("acme/a", pairs(300, (i) => i <= 294, (i) => i <= 294)),
+      comparison("acme/b", pairs(300, (i) => i <= 293, (i) => i <= 294)),
     ]);
     expect(verdict.macroAverageDelta).toBeCloseTo((0 + -1 / 300) / 2, 12);
     expect(verdict.status).toBe("passed");
@@ -217,8 +254,8 @@ describe("evaluateBehaviorNonInferiority", () => {
 
   it("reports the macro average point estimate and fails when any repo is inferior", () => {
     const verdict = evaluateBehaviorNonInferiority([
-      { repo: "acme/a", pairs: pairs(300, (i) => i <= 270, () => true) },
-      { repo: "acme/b", pairs: pairs(300, (i) => i <= 294, (i) => i <= 294) },
+      comparison("acme/a", pairs(300, (i) => i <= 270, () => true)),
+      comparison("acme/b", pairs(300, (i) => i <= 294, (i) => i <= 294)),
     ]);
     expect(verdict.macroAverageDelta).toBeCloseTo((-0.1 + 0) / 2, 12);
     expect(verdict.status).toBe("failed");
@@ -226,8 +263,8 @@ describe("evaluateBehaviorNonInferiority", () => {
 
   it("is inconclusive when any repo is inconclusive and none is inferior", () => {
     const verdict = evaluateBehaviorNonInferiority([
-      { repo: "acme/a", pairs: pairs(300, (i) => i <= 294, (i) => i <= 294) },
-      { repo: "acme/b", pairs: pairs(12, () => true, () => true) },
+      comparison("acme/a", pairs(300, (i) => i <= 294, (i) => i <= 294)),
+      comparison("acme/b", pairs(12, () => true, () => true)),
     ]);
     expect(verdict.status).toBe("inconclusive");
   });

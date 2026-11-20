@@ -9,13 +9,20 @@
  *  - 不读取也不修改 FULL_ANALYSIS_MODE——是否启用 inventory 是人工验收之后的独立决定；
  *  - 输入必须由未查看新旧输出的评审先冻结（见协议文档）；脚本只负责统计，不产生人工判定。
  *
+ * Fail closed（Task 15 fix）：
+ *  - outputEvaluation（误报/证据会计）每仓必填，缺失即输入错误（exit 3），绝不静默跳过辅助门禁；
+ *  - behaviors 至少 30 条（与 schema minItems 一致；统计层对样本不足另保留 inconclusive 语义）；
+ *  - processGates 三布尔必填；任一 false → 整体 failed（exit 1），即使统计 inconclusive 也不例外。
+ *
  * 用法：
  *   tsx scripts/measure-inventory-analysis.ts --input <comparison.json> [--input <comparison.json> ...] [--out <report.json>]
  *
  * 退出码：0 = passed；1 = failed（含过程门禁未通过）；2 = inconclusive；3 = 用法/输入校验错误。
  */
 import { readFileSync, writeFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import {
+  MIN_PAIRED_BEHAVIOR_SAMPLES,
   evaluateBehaviorNonInferiority,
   type BenchmarkVerdict,
   type PairedBehaviorOutcome,
@@ -71,13 +78,18 @@ function asNonNegativeInt(value: unknown, field: string): number {
   return value;
 }
 
-/** 解析并校验单仓对照文件 → RepoComparison + 直通遥测。 */
-function parseComparison(raw: unknown, source: string): { comparison: RepoComparison; telemetry: Record<string, unknown>; processGatesPassed: boolean } {
+/** 解析并校验单仓对照文件 → RepoComparison + 直通遥测（fail closed 输入契约）。 */
+export function parseComparison(raw: unknown, source: string): { comparison: RepoComparison; telemetry: Record<string, unknown> } {
   const root = asRecord(raw, source);
   if (root.schema !== SCHEMA_ID) fail("schema", `expected "${SCHEMA_ID}", got ${JSON.stringify(root.schema)}`);
   const repo = typeof root.repo === "string" && root.repo.length > 0 ? root.repo : fail("repo", "expected a non-empty string");
 
   const behaviors = Array.isArray(root.behaviors) ? root.behaviors : fail("behaviors", "expected an array");
+  // 与 schema minItems 一致：冻结清单不足 30 条是输入错误（exit 3）；统计层对样本不足的
+  // inconclusive 语义保留给直接消费 lib 的调用方，脚本在入口处拒绝未达下限的对照文件。
+  if (behaviors.length < MIN_PAIRED_BEHAVIOR_SAMPLES) {
+    fail("behaviors", `frozen protocol requires at least ${MIN_PAIRED_BEHAVIOR_SAMPLES} behaviors per repo, got ${behaviors.length}`);
+  }
   const pairs: PairedBehaviorOutcome[] = [];
   const seenIds = new Set<string>();
   for (const [index, entry] of behaviors.entries()) {
@@ -97,57 +109,49 @@ function parseComparison(raw: unknown, source: string): { comparison: RepoCompar
     });
   }
 
-  const comparison: RepoComparison = { repo, pairs };
-  const evaluation = root.outputEvaluation != null ? asRecord(root.outputEvaluation, "outputEvaluation") : null;
-  if (evaluation) {
-    const parseSide = (path: "legacy" | "inventory") => {
-      const side = asRecord(evaluation[path], `outputEvaluation.${path}`);
-      const evaluatedOutputs = asNonNegativeInt(side.evaluatedOutputs, `outputEvaluation.${path}.evaluatedOutputs`);
-      const falsePositives = asNonNegativeInt(side.falsePositives, `outputEvaluation.${path}.falsePositives`);
-      const evidenceSupported = asNonNegativeInt(side.evidenceSupported, `outputEvaluation.${path}.evidenceSupported`);
-      if (evaluatedOutputs === 0) fail(`outputEvaluation.${path}.evaluatedOutputs`, "must be > 0 when outputEvaluation is declared (per-path denominator)");
-      if (falsePositives > evaluatedOutputs) fail(`outputEvaluation.${path}.falsePositives`, "cannot exceed evaluatedOutputs");
-      if (evidenceSupported > evaluatedOutputs) fail(`outputEvaluation.${path}.evidenceSupported`, "cannot exceed evaluatedOutputs");
-      return { evaluatedOutputs, falsePositives, evidenceSupported };
-    };
-    const legacy = parseSide("legacy");
-    const inventory = parseSide("inventory");
-    // 两路径分母各自独立（各路径实际评估的输出行为数）；unmatched 输出只列在 telemetry，不进配对
-    comparison.falsePositives = {
-      legacy: { falsePositives: legacy.falsePositives, evaluatedOutputs: legacy.evaluatedOutputs },
-      inventory: { falsePositives: inventory.falsePositives, evaluatedOutputs: inventory.evaluatedOutputs },
-    };
-    comparison.evidenceSupport = {
-      legacy: { supported: legacy.evidenceSupported, evaluatedOutputs: legacy.evaluatedOutputs },
-      inventory: { supported: inventory.evidenceSupported, evaluatedOutputs: inventory.evaluatedOutputs },
-    };
-  }
+  // 误报/证据会计每仓必填（fail closed）：缺失即输入错误，绝不静默跳过辅助门禁
+  const evaluation = root.outputEvaluation != null ? asRecord(root.outputEvaluation, "outputEvaluation") : fail("outputEvaluation", "required for every repo (false-positive / evidence accounting must not be silently skipped)");
+  const parseSide = (path: "legacy" | "inventory") => {
+    const side = asRecord(evaluation[path], `outputEvaluation.${path}`);
+    const evaluatedOutputs = asNonNegativeInt(side.evaluatedOutputs, `outputEvaluation.${path}.evaluatedOutputs`);
+    const falsePositives = asNonNegativeInt(side.falsePositives, `outputEvaluation.${path}.falsePositives`);
+    const evidenceSupported = asNonNegativeInt(side.evidenceSupported, `outputEvaluation.${path}.evidenceSupported`);
+    if (evaluatedOutputs === 0) fail(`outputEvaluation.${path}.evaluatedOutputs`, "must be > 0 when outputEvaluation is declared (per-path denominator)");
+    if (falsePositives > evaluatedOutputs) fail(`outputEvaluation.${path}.falsePositives`, "cannot exceed evaluatedOutputs");
+    if (evidenceSupported > evaluatedOutputs) fail(`outputEvaluation.${path}.evidenceSupported`, "cannot exceed evaluatedOutputs");
+    return { evaluatedOutputs, falsePositives, evidenceSupported };
+  };
+  const legacy = parseSide("legacy");
+  const inventory = parseSide("inventory");
+  // 两路径分母各自独立（各路径实际评估的输出行为数）；unmatched 输出只列在 telemetry，不进配对
+  const falsePositives = {
+    legacy: { falsePositives: legacy.falsePositives, evaluatedOutputs: legacy.evaluatedOutputs },
+    inventory: { falsePositives: inventory.falsePositives, evaluatedOutputs: inventory.evaluatedOutputs },
+  };
+  const evidenceSupport = {
+    legacy: { supported: legacy.evidenceSupported, evaluatedOutputs: legacy.evaluatedOutputs },
+    inventory: { supported: inventory.evidenceSupported, evaluatedOutputs: inventory.evaluatedOutputs },
+  };
 
   // 过程门禁（设计 §9.5：单元清单/区间/锚点/激活门禁必须先全部通过，benchmark 不能抵消过程缺陷）
-  const gates = root.processGates != null ? asRecord(root.processGates, "processGates") : null;
-  const processGatesPassed = gates != null
-    && asBoolean(gates.inventoryManifestValid, "processGates.inventoryManifestValid")
+  const gates = root.processGates != null ? asRecord(root.processGates, "processGates") : fail("processGates", "required: inventoryManifestValid / coverageGatesPassed / activationGatePassed");
+  const processGatesPassed = asBoolean(gates.inventoryManifestValid, "processGates.inventoryManifestValid")
     && asBoolean(gates.coverageGatesPassed, "processGates.coverageGatesPassed")
     && asBoolean(gates.activationGatePassed, "processGates.activationGatePassed");
+
+  const comparison: RepoComparison = { repo, pairs, processGatesPassed, falsePositives, evidenceSupport };
 
   // 误报率差值之外的遥测（拆分/合并、未决、成本、耗时、unmatched 输出）直通报告，分别展示
   const telemetry: Record<string, unknown> = {};
   for (const key of ["revision", "frozenAt", "frozenBy", "unmatchedOutputs", "splitMerge", "unresolved", "cost"] as const) {
     if (root[key] !== undefined) telemetry[key] = root[key];
   }
-  return { comparison, telemetry, processGatesPassed };
-}
-
-interface MeasuredRepo {
-  comparison: RepoComparison;
-  telemetry: Record<string, unknown>;
-  processGatesPassed: boolean;
-  source: string;
+  return { comparison, telemetry };
 }
 
 function main(): void {
   const args = parseArgs(process.argv.slice(2));
-  const measured: MeasuredRepo[] = args.inputs.map((input) => {
+  const measured = args.inputs.map((input) => {
     let raw: unknown;
     try {
       raw = JSON.parse(readFileSync(input, "utf8"));
@@ -157,23 +161,16 @@ function main(): void {
     return { ...parseComparison(raw, input), source: input };
   });
 
+  // 统计与门禁判定全部在 lib/behavior-benchmark.ts（过程门禁 false/missing → failed，
+  // 误报/证据会计缺失 → inconclusive，逐仓 LowerCI 严格 > -0.03，宏平均点估计 ≥ -0.03）
   const verdict: BenchmarkVerdict = evaluateBehaviorNonInferiority(measured.map((entry) => entry.comparison));
-
-  // 过程门禁失败/缺失：配对统计照算（供诊断），但整体结论强制不得为 passed
-  const gateFailures = measured.filter((entry) => !entry.processGatesPassed);
-  if (gateFailures.length > 0 && verdict.status === "passed") {
-    verdict.status = "failed";
-  }
-  for (const entry of gateFailures) {
-    verdict.reasons.push(`仓库 ${entry.comparison.repo} 的过程门禁未声明或未全部通过（processGates）：benchmark 不能抵消过程缺陷`);
-  }
 
   const report = {
     generatedAt: new Date().toISOString(),
     mode: "shadow-offline",
     note: "人工 shadow 验收结果；本报告不构成 FULL_ANALYSIS_MODE=inventory 的启用授权（那是独立的人工决定）。",
     verdict,
-    repos: measured.map((entry, index) => ({ repo: entry.comparison.repo, source: entry.source, processGatesPassed: entry.processGatesPassed, telemetry: entry.telemetry, statistics: verdict.repos[index] })),
+    repos: measured.map((entry, index) => ({ repo: entry.comparison.repo, source: entry.source, processGatesPassed: entry.comparison.processGatesPassed, telemetry: entry.telemetry, statistics: verdict.repos[index] })),
   };
   const json = JSON.stringify(report, null, 2);
   if (args.out) {
@@ -185,9 +182,11 @@ function main(): void {
   process.exitCode = verdict.status === "passed" ? 0 : verdict.status === "failed" ? 1 : 2;
 }
 
-try {
-  main();
-} catch (error) {
-  console.error(`[measure-inventory-analysis] ${error instanceof Error ? error.message : String(error)}`);
-  process.exitCode = 3;
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    main();
+  } catch (error) {
+    console.error(`[measure-inventory-analysis] ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 3;
+  }
 }

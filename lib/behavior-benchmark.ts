@@ -61,10 +61,16 @@ export interface ProportionSummary extends PathProportionInput {
   interval: ConfidenceInterval;
 }
 
-/** 单仓对照输入：配对召回 + 可选的误报/证据辅助会计。 */
+/** 单仓对照输入：配对召回 + 误报/证据辅助会计 + 过程门禁声明。 */
 export interface RepoComparison {
   repo: string;
   pairs: readonly PairedBehaviorOutcome[];
+  /**
+   * 过程门禁（单元清单/区间/锚点/激活门禁，设计 §9.5）是否全部通过。false → 整体 failed，
+   * 即使配对统计 inconclusive 也不例外——benchmark 不能抵消过程缺陷。
+   */
+  processGatesPassed: boolean;
+  /** 误报/证据会计缺失（fail closed）：该仓统计照算，但整体结论 inconclusive，绝不放行。 */
   falsePositives?: { legacy: FalsePositiveAccounting; inventory: FalsePositiveAccounting };
   evidenceSupport?: { legacy: EvidenceSupportAccounting; inventory: EvidenceSupportAccounting };
 }
@@ -226,9 +232,11 @@ function evaluateRepo(comparison: RepoComparison, confidence: number): RepoVerdi
 }
 
 /**
- * 逐仓非劣效评估 + 宏平均汇总。判定顺序：
+ * 逐仓非劣效评估 + 宏平均汇总。判定顺序（fail closed，Task 15 fix）：
+ *   任一仓过程门禁 false/missing → failed（即使统计 inconclusive 也不例外）；
  *   任一仓 inferior → failed；
- *   否则任一仓 inconclusive（含样本不足）→ inconclusive；
+ *   任一仓缺误报/证据会计 → inconclusive（缺失门禁输入绝不静默放行）；
+ *   否则任一仓统计 inconclusive（含样本不足）→ inconclusive；
  *   否则宏平均差值点估计低于 −0.03，或宏平均误报上升 / 证据下降超预算 → failed；
  *   全部通过 → passed。
  * 误报/证据为辅助门禁（分母 = 各路径实际评估的输出行为数），不替代配对召回门禁；
@@ -249,11 +257,19 @@ export function evaluateBehaviorNonInferiority(input: readonly RepoComparison[],
   const macroEvidenceSupportDrop = evidenceDrops.every((drop): drop is number => drop != null) ? (evidenceDrops as number[]).reduce((sum, drop) => sum + drop, 0) / evidenceDrops.length : null;
 
   let status: BenchmarkVerdict["status"];
+  const gateFailed = input.filter((comparison) => comparison.processGatesPassed !== true);
   const inferior = repos.filter((repo) => repo.status === "inferior");
+  const missingAccounting = repos.filter((repo) => repo.falsePositives == null || repo.evidenceSupport == null);
   const inconclusive = repos.filter((repo) => repo.status === "inconclusive");
-  if (inferior.length > 0) {
+  if (gateFailed.length > 0) {
+    status = "failed";
+    reasons.push(`仓库 ${gateFailed.map((comparison) => comparison.repo).join(", ")} 的过程门禁未通过（processGates）：benchmark 不能抵消过程缺陷`);
+  } else if (inferior.length > 0) {
     status = "failed";
     reasons.push(`仓库 ${inferior.map((repo) => repo.repo).join(", ")} 的配对召回差值区间整体低于 ${NON_INFERIORITY_MARGIN}`);
+  } else if (missingAccounting.length > 0) {
+    status = "inconclusive";
+    reasons.push(`仓库 ${missingAccounting.map((repo) => repo.repo).join(", ")} 缺少误报/证据会计（outputEvaluation）：fail closed，判 inconclusive 而非放行`);
   } else if (inconclusive.length > 0) {
     status = "inconclusive";
     reasons.push(`仓库 ${inconclusive.map((repo) => repo.repo).join(", ")} 无法判定非劣效（样本不足或区间跨过 ${NON_INFERIORITY_MARGIN}）`);
