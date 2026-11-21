@@ -245,7 +245,8 @@ function truncatedResult(task: BehaviorExecutionTask): BehaviorTaskExtractionRes
  * 与同 revision 源码内容确定性一致。绝不把「AI 空结果」伪装成该结论（D5 边界不变）：
  * 只有源码内容事实（而非模型回答缺失）才触发本路径。
  */
-function primaryLineIndexOf(sources: TaskSource[]): Map<string, Map<number, string>> {
+/** 导出供 execution batch 编排层复用（Task 3 最小导出，判定逻辑不变）。 */
+export function primaryLineIndexOf(sources: TaskSource[]): Map<string, Map<number, string>> {
   const index = new Map<string, Map<number, string>>();
   for (const source of sources) {
     if (source.role !== "primary") continue;
@@ -256,7 +257,8 @@ function primaryLineIndexOf(sources: TaskSource[]): Map<string, Map<number, stri
   return index;
 }
 
-function fragmentIsBlank(fragment: BehaviorAnchorFragment, index: ReadonlyMap<string, ReadonlyMap<number, string>>): boolean {
+/** 导出供 execution batch 编排层复用（Task 3 最小导出，判定逻辑不变）。 */
+export function fragmentIsBlank(fragment: BehaviorAnchorFragment, index: ReadonlyMap<string, ReadonlyMap<number, string>>): boolean {
   let inspected = 0;
   for (const range of fragment.ranges) {
     for (const lines of index.values()) {
