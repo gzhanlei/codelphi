@@ -394,9 +394,12 @@ vi.mock("../lib/code-hosting", async (importOriginal) => ({
     product: { id: run.productId, slug: run.productSlug, name: run.productName },
   })),
 }));
-vi.mock("../lib/ai", async () => {
-  const { z } = await import("zod");
+vi.mock("../lib/ai", async (importOriginal) => {
+  // 以真实模块为底（behavior-unit-ai 在模块加载期从 analysisSchema 派生 judgeSchema，
+  // 手搓最小 schema 在 7c22739 证据宽化后失效）——仅替身模型调用面，schema/别名归一走真实实现。
+  const actual = await importOriginal<typeof import("../lib/ai")>();
   return {
+    ...actual,
     analyzeWithAI: vi.fn(),
     analyzeBehavioralGroup: vi.fn(),
     requestStructuredCompletion: vi.fn(),
@@ -406,12 +409,6 @@ vi.mock("../lib/ai", async () => {
         return false;
       }
     },
-    // 空白区域回归测试经 importActual 引入真实提取层（behavior-unit-ai 在模块加载期
-    // 组装 judgeSchema）——这里补最小 zod 契约；本文件内模型解析路径始终被替身截断。
-    analysisSchema: z.object({
-      features: z.array(z.object({ name: z.string(), summary: z.string(), scenarios: z.array(z.object({}).passthrough()) })),
-    }),
-    normalizeScenarioAliases: (input: { features?: unknown }) => input,
   };
 });
 vi.mock("../lib/notifications", () => ({ deliverAnalysisNotifications: vi.fn(async () => undefined) }));
