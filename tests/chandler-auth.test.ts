@@ -41,10 +41,10 @@ describe("Chandler 密码注册/登录客户端", () => {
     vi.clearAllMocks();
   });
 
-  it("注册成功：解析 AuthResponse 并把 user 映射为 SessionUser（sub=用户 id），勾选同意时透传 agree_policies", async () => {
+  it("注册成功：解析 AuthResponse 并把 user 映射为 SessionUser（sub=用户 id），勾选同意时透传 agree_policies，且不携带 cf_turnstile_response", async () => {
     const fetcher = vi.fn(async (_url: string, _init?: RequestInit) => jsonResponse(200, authResponse));
     const result = await registerChandlerUser(
-      { email: "person@example.com", password: "Passw0rd!", emailCode: "123456", turnstileToken: "tk", agreePolicies: true },
+      { email: "person@example.com", password: "Passw0rd!", emailCode: "123456", agreePolicies: true },
       fetcher,
     );
     const [, init] = fetcher.mock.calls[0] as [string, RequestInit];
@@ -55,9 +55,9 @@ describe("Chandler 密码注册/登录客户端", () => {
       password: "Passw0rd!",
       display_name: undefined,
       email_code: "123456",
-      cf_turnstile_response: "tk",
       agree_policies: true,
     });
+    expect("cf_turnstile_response" in body).toBe(false);
     expect(result.mfaRequired).toBeFalsy();
     expect(result.user?.id).toBe("user-uuid-1");
     expect(result.tokens).toEqual({ accessToken: "at-1", refreshToken: "rt-1", expiresIn: 3600 });
@@ -71,10 +71,10 @@ describe("Chandler 密码注册/登录客户端", () => {
 
   it("邮箱验证码错误映射为 email_code_invalid，邮箱已占用映射为 email_taken", async () => {
     const badCode = vi.fn(async (_url: string, _init?: RequestInit) => jsonResponse(400, { error: { code: "auth.invalid_code", message: "验证码错误" } }));
-    await expect(registerChandlerUser({ email: "a@b.c", password: "Passw0rd!", emailCode: "000000", turnstileToken: "tk" }, badCode))
+    await expect(registerChandlerUser({ email: "a@b.c", password: "Passw0rd!", emailCode: "000000" }, badCode))
       .rejects.toMatchObject({ code: "email_code_invalid" });
     const taken = vi.fn(async (_url: string, _init?: RequestInit) => jsonResponse(409, { error: { code: "auth.email_taken", message: "邮箱已注册" } }));
-    await expect(registerChandlerUser({ email: "a@b.c", password: "Passw0rd!", emailCode: "123456", turnstileToken: "tk" }, taken))
+    await expect(registerChandlerUser({ email: "a@b.c", password: "Passw0rd!", emailCode: "123456" }, taken))
       .rejects.toMatchObject({ code: "email_taken" });
   });
 
@@ -89,29 +89,29 @@ describe("Chandler 密码注册/登录客户端", () => {
 
   it("登录成功返回用户与令牌；428 返回 MFA 挑战而非抛错", async () => {
     const ok = vi.fn(async (_url: string, _init?: RequestInit) => jsonResponse(200, authResponse));
-    const result = await loginChandlerUser({ account: "person@example.com", password: "Passw0rd!", turnstileToken: "tk" }, ok);
+    const result = await loginChandlerUser({ account: "person@example.com", password: "Passw0rd!" }, ok);
     expect(result.mfaRequired).toBeFalsy();
     expect(result.user?.id).toBe("user-uuid-1");
     const [, init] = ok.mock.calls[0] as [string, RequestInit];
-    expect(JSON.parse(String(init.body))).toEqual({ email: "person@example.com", password: "Passw0rd!", cf_turnstile_response: "tk" });
+    expect(JSON.parse(String(init.body))).toEqual({ email: "person@example.com", password: "Passw0rd!" });
 
     const mfa = vi.fn(async (_url: string, _init?: RequestInit) => jsonResponse(428, { mfa_required: true, mfa_token: "mfa-1" }));
-    const challenge = await loginChandlerUser({ account: "u", password: "p", turnstileToken: "tk" }, mfa);
+    const challenge = await loginChandlerUser({ account: "u", password: "p" }, mfa);
     expect(challenge).toEqual({ mfaRequired: true, mfaToken: "mfa-1" });
   });
 
   it("登录失败按 Chandler 错误码映射：401 凭证错误、403 Turnstile 失败、5xx/网络不可达统一 unavailable", async () => {
     const unauthorized = vi.fn(async (_url: string, _init?: RequestInit) => jsonResponse(401, { error: { code: "auth.invalid_credentials", message: "账号或密码错误" } }));
-    await expect(loginChandlerUser({ account: "u", password: "p", turnstileToken: "tk" }, unauthorized))
+    await expect(loginChandlerUser({ account: "u", password: "p" }, unauthorized))
       .rejects.toMatchObject({ code: "invalid_credentials" });
     const gate = vi.fn(async (_url: string, _init?: RequestInit) => jsonResponse(403, { error: { code: "auth.turnstile_failed", message: "人机验证未通过" } }));
-    await expect(loginChandlerUser({ account: "u", password: "p", turnstileToken: "tk" }, gate))
+    await expect(loginChandlerUser({ account: "u", password: "p" }, gate))
       .rejects.toMatchObject({ code: "turnstile_failed" });
     const down = vi.fn(async (_url: string, _init?: RequestInit) => jsonResponse(500, { error: { code: "internal", message: "boom" } }));
-    await expect(loginChandlerUser({ account: "u", password: "p", turnstileToken: "tk" }, down))
+    await expect(loginChandlerUser({ account: "u", password: "p" }, down))
       .rejects.toMatchObject({ code: "unavailable" });
     const unreachable = vi.fn(async () => { throw new Error("ECONNREFUSED"); });
-    await expect(loginChandlerUser({ account: "u", password: "p", turnstileToken: "tk" }, unreachable))
+    await expect(loginChandlerUser({ account: "u", password: "p" }, unreachable))
       .rejects.toBeInstanceOf(ChandlerAuthError);
   });
 

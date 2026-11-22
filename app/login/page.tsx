@@ -5,7 +5,7 @@ import { LoginError } from "@/components/login-error";
 import { loadPublicDemoProduct } from "@/lib/public-demo";
 import { getSessionUser } from "@/lib/session";
 import { safeNextPath } from "@/lib/oauth";
-import { resolveTurnstileSiteKey } from "@/lib/turnstile-site-key";
+import { turnstileSiteKey } from "@/lib/env";
 import { pick } from "@/lib/ui-locale";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { resolveUiLocale } from "@/lib/ui-locale-server";
@@ -55,8 +55,8 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           <h2>{pick(locale, LOGIN.welcome)}</h2>
           <p>{pick(locale, LOGIN.chandlerIntro)}</p>
           <LoginError error={error} />
-          {/* 自建登录表单（Chandler 密码通道 + Turnstile）；?next= 经 safeNextPath 校验后透传给成功跳转 */}
-          <LoginForm locale={locale} next={safeNextPath(next)} sitekey={await resolveTurnstileSiteKey()} />
+          {/* 自建登录表单（Chandler 密码通道；CoDelphi 自有 Turnstile 经 env 配对启用）；?next= 经 safeNextPath 校验后透传给成功跳转 */}
+          <LoginForm locale={locale} next={safeNextPath(next)} sitekey={turnstileSiteKey()} />
           <small className="auth-alt-links">{pick(locale, AUTH_FORM.needAccount)} <Link href="/register">{pick(locale, AUTH_FORM.goRegister)}</Link></small>
           <small><Link href="/auth/login">{pick(locale, LOGIN.chandlerButton)}</Link> · {pick(locale, LOGIN.allChandlerUsers)}</small>
           <small><Link href="/data-notice">{pick(locale, { "zh-CN": "数据说明", en: "Data notice" })}</Link>{pick(locale, { "zh-CN": "：源码仅发送给部署配置的 AI 网关及其上游，不用于模型训练。", en: ": source code is sent only to the configured AI gateway and its upstream; it is not used for model training." })}</small>

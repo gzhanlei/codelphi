@@ -4,11 +4,8 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 
 const getSessionUser = vi.fn();
 const loadPublicDemoProduct = vi.fn();
-const resolveTurnstileSiteKey = vi.fn(async () => "");
-
 vi.mock("../lib/session", () => ({ getSessionUser: () => getSessionUser() }));
 vi.mock("../lib/public-demo", () => ({ loadPublicDemoProduct: () => loadPublicDemoProduct() }));
-vi.mock("../lib/turnstile-site-key", () => ({ resolveTurnstileSiteKey: () => resolveTurnstileSiteKey() }));
 vi.mock("next/navigation", () => ({ redirect: vi.fn(() => { throw new Error("redirect"); }) }));
 vi.mock("../lib/ui-locale-server", () => ({ resolveUiLocale: async () => "zh-CN" }));
 
@@ -16,7 +13,6 @@ describe("自建登录页（Chandler 密码通道表单）", () => {
   beforeEach(() => {
     getSessionUser.mockResolvedValue(null);
     loadPublicDemoProduct.mockResolvedValue(null);
-    resolveTurnstileSiteKey.mockResolvedValue("");
     vi.unstubAllEnvs();
   });
 
@@ -56,10 +52,11 @@ describe("自建登录页（Chandler 密码通道表单）", () => {
 
   it("配置 TURNSTILE_SITE_KEY 时渲染 Turnstile 槽位；未配置时不渲染", async () => {
     const LoginPage = (await import("../app/login/page")).default;
-    resolveTurnstileSiteKey.mockResolvedValue("");
+    vi.unstubAllEnvs();
     const withoutKey = renderToStaticMarkup(await LoginPage({ searchParams: Promise.resolve({}) }));
     expect(withoutKey).not.toContain("turnstile-slot");
-    resolveTurnstileSiteKey.mockResolvedValue("0x4AAAAAAGMuYzGBbJ6DwQus");
+    vi.stubEnv("TURNSTILE_SITE_KEY", "0x4AAA_site");
+    vi.stubEnv("TURNSTILE_SECRET", "0x4AAA_secret");
     const withKey = renderToStaticMarkup(await LoginPage({ searchParams: Promise.resolve({}) }));
     expect(withKey).toContain("turnstile-slot");
     expect(withKey).toContain("人机验证");
@@ -96,7 +93,8 @@ describe("自建注册页", () => {
   });
 
   it("配置 TURNSTILE_SITE_KEY 时注册页也渲染 Turnstile 槽位", async () => {
-    resolveTurnstileSiteKey.mockResolvedValue("0x4AAAAAAGMuYzGBbJ6DwQus");
+    vi.stubEnv("TURNSTILE_SITE_KEY", "0x4AAA_site");
+    vi.stubEnv("TURNSTILE_SECRET", "0x4AAA_secret");
     const RegisterPage = (await import("../app/register/page")).default;
     const html = renderToStaticMarkup(await RegisterPage());
     expect(html).toContain("turnstile-slot");

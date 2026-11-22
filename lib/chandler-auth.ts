@@ -8,9 +8,9 @@ import type { SessionUser } from "./types";
 /**
  * Chandler 密码注册/登录客户端（自建注册登录界面，Chandler 统一账号体系不变）：
  * - 注册走公开注册通道（verify-before-create）：POST /v1/auth/register/send-code 下发邮箱 OTP，
- *   POST /v1/auth/register 携带 email_code 注册；不携带 client_id（伙伴通道会豁免邮箱与 Turnstile 校验）。
- * - Cloudflare Turnstile token 由 CoDelphi 页面收集、随 cf_turnstile_response 透传，
- *   siteverify 由 Chandler 服务端执行（token 单次使用，CoDelphi 不得重复消费）。
+ *   POST /v1/auth/register 携带 email_code 注册；不携带 client_id（伙伴通道会豁免邮箱验证）。
+ * - 页面人机验证由 CoDelphi 自有 Turnstile 负责（lib/turnstile-verify.ts，信任合作伙伴模式），
+ *   不向 Chandler 透传 cf_turnstile_response。
  * - 登录 428 表示账号开启了 TOTP MFA，前端改走 /v1/auth/mfa/verify 完成挑战。
  * - 成功后的会话落地面与 OAuth 回调完全一致（upsert 用户 → 加密落库 Chandler 令牌 → 下发会话 cookie）。
  */
@@ -154,7 +154,7 @@ export async function sendChandlerRegisterCode(email: string, fetcher: Fetcher =
 }
 
 export async function registerChandlerUser(
-  input: { email: string; password: string; displayName?: string; emailCode: string; turnstileToken: string; agreePolicies?: boolean },
+  input: { email: string; password: string; displayName?: string; emailCode: string; agreePolicies?: boolean },
   fetcher: Fetcher = fetch,
 ): Promise<ChandlerAuthOutcome> {
   const { payload } = await postChandlerJson(
@@ -164,8 +164,8 @@ export async function registerChandlerUser(
       password: input.password,
       display_name: input.displayName?.trim() || undefined,
       email_code: input.emailCode,
-      cf_turnstile_response: input.turnstileToken,
-      // 指南 v3.12 §2.2：仅当用户勾选同意时上报，服务端据此记录版本化同意行
+      // Chandler 信任合作伙伴模式（指南 v3.13 §2.2）：合作方调用不携带
+      // cf_turnstile_response，页面人机验证由 CoDelphi 自行负责。
       agree_policies: input.agreePolicies === true ? true : undefined,
     },
     fetcher,
@@ -174,13 +174,13 @@ export async function registerChandlerUser(
 }
 
 export async function loginChandlerUser(
-  input: { account: string; password: string; turnstileToken: string },
+  input: { account: string; password: string },
   fetcher: Fetcher = fetch,
 ): Promise<ChandlerAuthOutcome> {
   // 428 = MFA 挑战（非错误），透传给调用方判定
   const { payload } = await postChandlerJson(
     "/v1/auth/login",
-    { email: input.account, password: input.password, cf_turnstile_response: input.turnstileToken },
+    { email: input.account, password: input.password },
     fetcher,
     [428],
   );
