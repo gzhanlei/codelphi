@@ -8,6 +8,12 @@ import { evaluateBehaviorActivationGate, resolveProductDescription, type Activat
 import { buildBehaviorInventory, computeScopeFingerprint, RESIDUAL_DETECTOR_ID } from "./behavior-inventory";
 import { evaluateInventoryCoverage } from "./behavior-inventory/coverage";
 import { loadBehaviorTaskSources, planBehaviorExecutionTasks, type TaskSource } from "./behavior-inventory/planner";
+import { behaviorAnalysisExecutionMode } from "./env";
+import { fragmentIsBlank, primaryLineIndexOf } from "./behavior-unit-extraction";
+import { sha256Utf8 } from "./execution-batch/identity";
+import { planBehaviorExecutionBatches } from "./execution-batch/planner";
+import { publishBehaviorBatchPlanSet } from "./execution-batch/plans";
+import { routeBatchWorkItems, runInventoryBatchAttempt, recoverInventoryBatchAttempts, type BatchWorkItem } from "./execution-batch/runner";
 import type { BehaviorExecutionTask, BehaviorManifest, BehaviorUnit } from "./behavior-inventory/types";
 import { mergeBehaviorTaskResults } from "./behavior-result-merge";
 import {
@@ -470,6 +476,51 @@ export async function runInventoryFullAnalysis(
     // related-reference：判定 prompt 的有效单元 key 目录（截断 150 防爆 prompt）
     const knownUnitKeys = manifest.units.map((unit) => unit.unitKey).slice(0, 150);
 
+    // ---- execution batch（Task 8）：batch 模式按 ready plan set 路由，fallback 走单任务路径 ----
+    const batchMode = behaviorAnalysisExecutionMode() === "batch";
+    let batchWork: BatchWorkItem[] = [];
+    let batchManifestHash = "";
+    if (batchMode && eligible.length > 0) {
+      batchManifestHash = sha256Utf8(JSON.stringify({ v: manifest.inventorySchemaVersion, after: manifest.afterSha, scope: manifest.scopeFingerprint }));
+      const planInputs = [];
+      for (const task of eligible) {
+        const unit = unitsByKey.get(task.unitKey);
+        if (!unit) continue;
+        const sources = await loadBehaviorTaskSources(index, task, unit);
+        const lineIndex = primaryLineIndexOf(sources);
+        const primary = sources.find((source) => source.role === "primary") ?? sources[0]!;
+        planInputs.push({
+          task,
+          isResidual: false,
+          primaryPath: primary.path,
+          primaryUtf8Bytes: sources.reduce((total, source) => total + Buffer.byteLength(source.content, "utf8"), 0),
+          hasBlankFragment: task.anchorFragments.some((fragment) => fragmentIsBlank(fragment, lineIndex)),
+          supportedShape: true,
+        });
+      }
+      const allocation = planBehaviorExecutionBatches({ manifestHash: batchManifestHash, tasks: planInputs });
+      await publishBehaviorBatchPlanSet(execute, { runId, manifestHash: batchManifestHash, manifestTaskKeys: eligible.map((task) => task.taskKey), allocation });
+      const routed = routeBatchWorkItems(eligible, allocation);
+      batchWork = routed.batchWork;
+      queue.length = 0;
+      queue.push(...routed.fallbackTasks);
+      // 恢复：先消费此前崩溃遗留的已持久化响应（零新模型调用或只补 judge）
+      await recoverInventoryBatchAttempts({
+        runId,
+        accountId: input.run.accountId ?? null,
+        manifestHash: batchManifestHash,
+        chargeComponent: options.activate ? "main" : "platform_shadow",
+        leaseOwner,
+        leaseDurationMs,
+        maxAttempts,
+        loadSources: (task) => loadBehaviorTaskSources(index, task, unitsByKey.get(task.unitKey)!),
+        tasks: eligible,
+        knownFeatureNames: input.knownFeatureNames,
+        knownUnitKeys,
+        outputLanguage,
+      });
+    }
+
     const safeSettle = async (reservationId: string): Promise<void> => {
       try {
         await settleBehaviorBudget({ reservationId });
@@ -630,6 +681,32 @@ export async function runInventoryFullAnalysis(
     };
     await Promise.all(Array.from({ length: Math.min(concurrency, Math.max(queue.length, 1)) }, () => worker()));
     if (state.fatal != null) throw state.fatal;
+
+    // ---- batch 计划执行（聚合前落库，保证 rowsAfter 读到 batch 提交结果；激活等待全部 repair 完毕）----
+    for (const work of batchWork) {
+      if (state.stopDispatch) break;
+      try {
+        await runInventoryBatchAttempt({
+          runId,
+          accountId: input.run.accountId ?? null,
+          batchKey: work.plan.batchKey,
+          manifestHash: batchManifestHash,
+          plan: work.plan,
+          tasks: work.tasks,
+          loadSources: (task) => loadBehaviorTaskSources(index, task, unitsByKey.get(task.unitKey)!),
+          leaseOwner,
+          leaseDurationMs,
+          maxAttempts,
+          chargeComponent: options.activate ? "main" : "platform_shadow",
+          knownFeatureNames: input.knownFeatureNames,
+          knownUnitKeys,
+          outputLanguage,
+        });
+      } catch (error) {
+        // 派发结果未知/硬失败：任务保持可恢复状态交由恢复路径；不阻断聚合
+        console.warn("[full-analysis] batch attempt ended with error", { runId, batchKey: work.plan.batchKey, error: errorMessage(error) });
+      }
+    }
 
     // ---- 聚合：重读持久化行 → 单元状态 / 局部场景身份 / 锚点关联 ----
     const rowsAfter = await loadPersistedTaskRows(execute, runId);

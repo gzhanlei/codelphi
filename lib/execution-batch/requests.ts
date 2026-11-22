@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { getDb } from "../db";
 import type { Execute } from "../db";
 import { recordRequestScopedReceipt } from "../billing/cost-receipt";
 import { makeBatchRequestKey } from "./identity";
@@ -282,4 +283,25 @@ export async function reconcileBatchRequestReceipt(
   input: ReconcileBatchReceiptInput,
 ): Promise<"inserted" | "reconciled" | "noop"> {
   return recordRequestScopedReceipt(input);
+}
+
+/** 恢复面：读取该 attempt 已通过读回校验的原始响应（describe/judge 各至多一条）。 */
+export async function loadPersistedBatchResponses(
+  batchAttemptUuid: string,
+): Promise<{ describe: { rawResponse: string; providerFinishReason: string | null } | null; judge: { rawResponse: string; providerFinishReason: string | null } | null }> {
+  const [rows] = (await getDb().execute(
+    `SELECT request_stage, raw_response, provider_finish_reason FROM analysis_behavior_batch_requests
+      WHERE batch_attempt_uuid = ? AND request_outcome = 'response_persisted'`,
+    [batchAttemptUuid],
+  )) as [Array<Record<string, unknown>>, unknown];
+  let describe: { rawResponse: string; providerFinishReason: string | null } | null = null;
+  let judge: { rawResponse: string; providerFinishReason: string | null } | null = null;
+  for (const row of rows) {
+    const stage = String(row.request_stage);
+    const raw = String(row.raw_response ?? "");
+    const finish = row.provider_finish_reason === null || row.provider_finish_reason === undefined ? null : String(row.provider_finish_reason);
+    if (stage === "describe" && !describe) describe = { rawResponse: raw, providerFinishReason: finish };
+    if (stage === "judge" && !judge) judge = { rawResponse: raw, providerFinishReason: finish };
+  }
+  return { describe, judge };
 }

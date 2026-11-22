@@ -92,6 +92,14 @@ export function fullAnalysisMode(): "legacy" | "inventory_shadow" | "inventory" 
   return "legacy";
 }
 
+/** 行为清单执行模式（Task 8）：task=既有单任务双步路径；batch=execution batch。
+ *  默认/垃圾值回退 task；batch 只对新 run 生效，不在已有 run 中途切换（§17）。 */
+export function behaviorAnalysisExecutionMode(): "task" | "batch" {
+  const raw = (process.env.ANALYSIS_BEHAVIOR_EXECUTION_MODE ?? "").trim();
+  if (raw === "batch") return "batch";
+  return "task";
+}
+
 /** 库存编排的单元并发度。默认 4，clamp [1,16]，垃圾值回退默认。 */
 export function behaviorAnalysisConcurrency(): number {
   const raw = Number(process.env.ANALYSIS_BEHAVIOR_CONCURRENCY ?? "");

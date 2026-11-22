@@ -28,6 +28,8 @@ export interface CreateBatchAttemptInput {
   batchKey: string;
   reservationUuid: string;
   modelConfigFingerprint: string;
+  /** 编排层先预留（attemptId=本 uuid）再建 attempt 时传入；缺省内部生成。 */
+  batchAttemptUuid?: string;
 }
 
 export interface ClaimBatchMemberInput {
@@ -138,7 +140,7 @@ async function requireAttempt(runId: number, batchAttemptUuid: string): Promise<
 }
 
 export async function createBatchAttempt(input: CreateBatchAttemptInput): Promise<BatchAttempt> {
-  const batchAttemptUuid = randomUUID();
+  const batchAttemptUuid = input.batchAttemptUuid ?? randomUUID();
   await getDb().execute(
     `INSERT INTO analysis_behavior_batch_attempts
        (run_id, batch_attempt_uuid, batch_key, reservation_uuid, model_config_fingerprint, prompt_version, schema_version, parser_version, execution_phase)
