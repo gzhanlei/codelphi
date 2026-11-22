@@ -683,8 +683,10 @@ export async function runInventoryFullAnalysis(
     if (state.fatal != null) throw state.fatal;
 
     // ---- batch 计划执行（聚合前落库，保证 rowsAfter 读到 batch 提交结果；激活等待全部 repair 完毕）----
-    for (const work of batchWork) {
-      if (state.stopDispatch) break;
+    // 与 fallback worker pool 同档并发：attempt 之间彼此独立（各自 reservation/attempt/claim），
+    // 并发安全由 task claim 原子性 + member 唯一约束 + processing fencing 保证。
+    let batchCursor = 0;
+    const runBatchWork = async (work: BatchWorkItem): Promise<void> => {
       try {
         await runInventoryBatchAttempt({
           runId,
@@ -706,7 +708,16 @@ export async function runInventoryFullAnalysis(
         // 派发结果未知/硬失败：任务保持可恢复状态交由恢复路径；不阻断聚合
         console.warn("[full-analysis] batch attempt ended with error", { runId, batchKey: work.plan.batchKey, error: errorMessage(error) });
       }
-    }
+    };
+    const batchWorkers = Array.from({ length: Math.min(concurrency, Math.max(batchWork.length, 1)) }, async () => {
+      while (!state.stopDispatch && state.fatal == null) {
+        const work = batchWork[batchCursor];
+        batchCursor += 1;
+        if (!work) return;
+        await runBatchWork(work);
+      }
+    });
+    await Promise.all(batchWorkers);
 
     // ---- 聚合：重读持久化行 → 单元状态 / 局部场景身份 / 锚点关联 ----
     const rowsAfter = await loadPersistedTaskRows(execute, runId);
