@@ -270,7 +270,8 @@ const judgeSchema = z.object({
 /** 与 lib/ai 归一层同口径的不可见字符清理（模型偶发在证据路径前后带零宽字符）。 */
 const INVISIBLE_CHARS = /[\u200b\u200c\u200d\u2060\ufeff]/g;
 
-function extractJsonObject(content: string): unknown {
+/** 导出供 execution batch 协议复用（Task 5 最小导出，容错提取逻辑不变）。 */
+export function extractJsonObject(content: string): unknown {
   const trimmed = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
   const start = trimmed.indexOf("{");
   const end = trimmed.lastIndexOf("}");
