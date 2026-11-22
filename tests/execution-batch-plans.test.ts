@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Execute } from "../lib/db";
+import { makeBatchKey } from "../lib/execution-batch/identity";
 import { planBehaviorExecutionBatches, type PlanTaskInput } from "../lib/execution-batch/planner";
 import { loadReadyBehaviorBatchAllocation, publishBehaviorBatchPlanSet } from "../lib/execution-batch/plans";
 
@@ -62,6 +63,7 @@ function createPlansDb() {
   const planSets: PlanSetRow[] = [];
   const plans: PlanRow[] = [];
   const statements: string[] = [];
+  const state = { loseReadyRace: false };
   const clone = <T>(row: T): T => JSON.parse(JSON.stringify(row)) as T;
   const execute: Execute = async (statement, parameters) => {
     statements.push(statement);
@@ -94,6 +96,7 @@ function createPlansDb() {
       return [{ insertId: plans.length }];
     }
     if (statement.startsWith("UPDATE analysis_behavior_batch_plan_sets SET publish_status = 'ready'")) {
+      if (state.loseReadyRace) return [{ affectedRows: 0 }];
       const row = planSets.find(
         (candidate) => candidate.run_id === params[0] && candidate.plan_set_id === params[1] && candidate.publish_status === "building",
       );
@@ -120,7 +123,7 @@ function createPlansDb() {
     }
     throw new Error(`unexpected statement: ${statement}`);
   };
-  return { execute, planSets, plans, statements };
+  return { execute, planSets, plans, statements, state };
 }
 
 describe("execution batch plan set publication", () => {
@@ -244,5 +247,81 @@ describe("execution batch plan set publication", () => {
       code: "execution_batch_version_conflict",
     });
     expect(published.plannerVersion).toBe("1");
+  });
+
+  it("rejects drifted persisted plan sets instead of re-planning (recovery guards)", async () => {
+    const db = createPlansDb();
+    const allocation = buildAllocation();
+    await publishBehaviorBatchPlanSet(db.execute, {
+      runId: RUN_ID,
+      manifestHash: MANIFEST_HASH,
+      manifestTaskKeys: manifestKeysOf(allocation),
+      allocation,
+    });
+    // plan 数量漂移（声明与落库不一致）
+    db.planSets[0]!.expected_plan_count = 99;
+    await expect(loadReadyBehaviorBatchAllocation(db.execute, RUN_ID)).rejects.toMatchObject({
+      code: "execution_batch_version_conflict",
+    });
+    db.planSets[0]!.expected_plan_count = allocation.batchPlans.length;
+    // plan 行丢失
+    db.plans.pop();
+    await expect(loadReadyBehaviorBatchAllocation(db.execute, RUN_ID)).rejects.toMatchObject({
+      code: "execution_batch_version_conflict",
+    });
+    db.plans.push({
+      run_id: RUN_ID,
+      plan_set_id: db.planSets[0]!.plan_set_id,
+      batch_key: allocation.batchPlans[0]!.batchKey,
+      manifest_hash: MANIFEST_HASH,
+      planner_version: "1",
+      ordered_task_keys: JSON.stringify(allocation.batchPlans[0]!.orderedTaskKeys),
+      task_alias_map: JSON.stringify(allocation.batchPlans[0]!.taskAliasMap),
+      grouping_rules_fingerprint: allocation.batchPlans[0]!.groupingRulesFingerprint,
+      input_budget_snapshot: JSON.stringify(allocation.batchPlans[0]!.inputBudgetSnapshot),
+    });
+    // 混入不同 manifest 的 plan（batch_key 按篡改后 manifest 重算一致，触发混源守卫）
+    const victim = db.plans[0]!;
+    victim.manifest_hash = "9".repeat(64);
+    victim.batch_key = makeBatchKey({
+      manifestHash: victim.manifest_hash,
+      plannerVersion: victim.planner_version,
+      orderedTaskKeys: JSON.parse(victim.ordered_task_keys),
+      groupingRulesFingerprint: victim.grouping_rules_fingerprint,
+    });
+    await expect(loadReadyBehaviorBatchAllocation(db.execute, RUN_ID)).rejects.toMatchObject({
+      code: "execution_batch_version_conflict",
+    });
+    victim.manifest_hash = MANIFEST_HASH;
+    victim.batch_key = allocation.batchPlans[0]!.batchKey;
+    // T 别名映射与成员脱钩
+    victim.task_alias_map = JSON.stringify({ "task|a": "T9" });
+    await expect(loadReadyBehaviorBatchAllocation(db.execute, RUN_ID)).rejects.toMatchObject({
+      code: "execution_batch_version_conflict",
+    });
+    victim.task_alias_map = JSON.stringify(allocation.batchPlans[0]!.taskAliasMap);
+    // set 指纹被改写（逐 plan 校验全过后仍被指纹守卫拦截）
+    db.planSets[0]!.plan_set_fingerprint = "8".repeat(64);
+    await expect(loadReadyBehaviorBatchAllocation(db.execute, RUN_ID)).rejects.toMatchObject({
+      code: "execution_batch_version_conflict",
+    });
+    db.planSets[0]!.plan_set_fingerprint = allocation.planSetFingerprint;
+    await expect(loadReadyBehaviorBatchAllocation(db.execute, RUN_ID)).resolves.toBeTruthy();
+  });
+
+  it("does not flip ready when the conditional update loses the race", async () => {
+    const db = createPlansDb();
+    db.state.loseReadyRace = true;
+    const allocation = buildAllocation();
+    await expect(
+      publishBehaviorBatchPlanSet(db.execute, {
+        runId: RUN_ID,
+        manifestHash: MANIFEST_HASH,
+        manifestTaskKeys: manifestKeysOf(allocation),
+        allocation,
+      }),
+    ).rejects.toMatchObject({ code: "execution_batch_version_conflict" });
+    expect(db.planSets[0]!.publish_status).toBe("building");
+    expect(db.plans).toHaveLength(allocation.batchPlans.length);
   });
 });

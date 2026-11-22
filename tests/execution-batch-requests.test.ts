@@ -113,11 +113,13 @@ interface BatchRow {
 
 const batchRows = new Map<string, BatchRow>();
 let corruptStoredResponse = false;
+let failBegin: "error" | null = null;
 
 const batchExecute: Execute = async (statement, rawParams) => {
   const params = rawParams as Array<string | number | null>;
   const normalized = String(statement).replace(/\s+/g, " ").trim();
   if (normalized.startsWith("INSERT INTO analysis_behavior_batch_requests")) {
+    if (failBegin === "error") throw new Error("db down");
     const key = String(params[2]);
     if (batchRows.has(key)) throw dupError();
     batchRows.set(key, {
@@ -426,5 +428,38 @@ describe("execution batch error typing (Task 4)", () => {
     const error = new ExecutionBatchError("execution_batch_request_state", "bad transition");
     expect(error.code).toBe("execution_batch_request_state");
     expect(error.name).toBe("ExecutionBatchError");
+  });
+});
+
+describe("batch request guard branches (ub-mode make-it-right)", () => {
+  beforeEach(() => {
+    batchRows.clear();
+    receiptRows.length = 0;
+    failReceiptInsert = null;
+    failBegin = null;
+    corruptStoredResponse = false;
+    receiptState.router = receiptRouter;
+  });
+
+  it("rethrows non-duplicate begin failures untouched", async () => {
+    failBegin = "error";
+    await expect(beginDescribe()).rejects.toThrow("db down");
+    expect(batchRows.size).toBe(0);
+  });
+
+  it("re-marks dispatch started and terminal outcomes idempotently", async () => {
+    const request = await beginDescribe();
+    await markBatchRequestDispatchStarted(batchExecute, request.requestKey);
+    // 同状态重入：affectedRows=0 但当前已是 dispatch_started → 幂等返回当前行
+    const reMarked = await markBatchRequestDispatchStarted(batchExecute, request.requestKey);
+    expect(reMarked.requestOutcome).toBe("dispatch_started");
+    await markBatchRequestOutcome(batchExecute, { requestKey: request.requestKey, outcome: "outcome_unknown" });
+    await markBatchRequestOutcome(batchExecute, { requestKey: request.requestKey, outcome: "outcome_unknown" });
+    expect((await loadBatchRequest(batchExecute, request.requestKey))?.requestOutcome).toBe("outcome_unknown");
+    // prepared → failed 的幂等重入
+    const failed = await beginDescribe(2);
+    await markBatchRequestOutcome(batchExecute, { requestKey: failed.requestKey, outcome: "failed", failureClass: "local_pre_dispatch" });
+    await markBatchRequestOutcome(batchExecute, { requestKey: failed.requestKey, outcome: "failed", failureClass: "local_pre_dispatch" });
+    expect((await loadBatchRequest(batchExecute, failed.requestKey))?.requestOutcome).toBe("failed");
   });
 });
