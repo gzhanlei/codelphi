@@ -194,8 +194,8 @@ function syntheticTaskFromMember(member: BatchProtocolMember): BehaviorExecution
 }
 
 type RegionCheck =
-  | { ok: true; regionsRaw: unknown[]; diagnostics: string[] }
-  | { ok: false; status: "duplicate_region" | "missing_region" | "payload_invalid"; message: string };
+  | { ok: true; regionsRaw: unknown[]; diagnostics: string[]; missing: string[] }
+  | { ok: false; status: "duplicate_region" | "payload_invalid"; message: string };
 
 function checkRegionPayload(entry: BatchTaskEntry, member: BatchProtocolMember): RegionCheck {
   const regionsRaw = Array.isArray(entry.regions) ? entry.regions : [];
@@ -214,12 +214,13 @@ function checkRegionPayload(entry: BatchTaskEntry, member: BatchProtocolMember):
     return { ok: false, status: "duplicate_region", message: `成员 ${member.taskAlias} 区域结论重复: ${duplicated.join(", ")}` };
   }
   const present = new Set(ids);
+  // 缺区域结论不是成员失败：部分结论照常解析，缺失区域由推导层落未决（§12）
   const missing = expected.filter((alias) => !present.has(alias));
-  if (missing.length > 0) {
-    return { ok: false, status: "missing_region", message: `成员 ${member.taskAlias} 缺区域结论: ${missing.join(", ")}` };
-  }
-  const diagnostics = ids.filter((id) => !expected.includes(id)).map((id) => `丢弃未知区域 id: ${id}`);
-  return { ok: true, regionsRaw, diagnostics };
+  const diagnostics = [
+    ...ids.filter((id) => !expected.includes(id)).map((id) => `丢弃未知区域 id: ${id}`),
+    ...missing.map((alias) => `缺区域结论: ${alias}`),
+  ];
+  return { ok: true, regionsRaw, diagnostics, missing };
 }
 
 function parseEntryPayload<TDescribe, TJudge>(
@@ -228,8 +229,8 @@ function parseEntryPayload<TDescribe, TJudge>(
   member: BatchProtocolMember,
   parse: (content: string, task: BehaviorExecutionTask) => TDescribe | TJudge,
 ):
-  | { ok: true; payload: TDescribe | TJudge; diagnostics: string[] }
-  | { ok: false; status: "duplicate_region" | "missing_region" | "payload_invalid"; message: string } {
+  | { ok: true; payload: TDescribe | TJudge; diagnostics: string[]; missing: string[] }
+  | { ok: false; status: "duplicate_region" | "payload_invalid"; message: string } {
   const check = checkRegionPayload(entry, member);
   if (!check.ok) return check;
   const task = syntheticTaskFromMember(member);
@@ -238,7 +239,7 @@ function parseEntryPayload<TDescribe, TJudge>(
       ? JSON.stringify({ regions: check.regionsRaw })
       : JSON.stringify({ regions: check.regionsRaw, features: Array.isArray(entry.features) ? entry.features : [] });
   try {
-    return { ok: true, payload: parse(payloadJson, task), diagnostics: check.diagnostics };
+    return { ok: true, payload: parse(payloadJson, task), diagnostics: check.diagnostics, missing: check.missing };
   } catch (error) {
     return {
       ok: false,
@@ -289,8 +290,9 @@ export function parseBatchDescribeContent(
     results.push({
       taskKey: member.taskKey,
       taskAlias: member.taskAlias,
-      status: "ok",
+      status: parsed.missing.length > 0 ? "missing_region" : "ok",
       payload: parsed.payload as BehaviorRegionDescription[],
+      message: parsed.missing.length > 0 ? `成员 ${member.taskAlias} 缺区域结论: ${parsed.missing.join(", ")}` : undefined,
       diagnostics: parsed.diagnostics.length > 0 ? parsed.diagnostics : undefined,
     });
   }
@@ -343,8 +345,9 @@ export function parseBatchJudgeContent(
     results.push({
       taskKey: member.taskKey,
       taskAlias: member.taskAlias,
-      status: "ok",
+      status: parsed.missing.length > 0 ? "missing_region" : "ok",
       payload: parsed.payload as BehaviorJudgeOutput,
+      message: parsed.missing.length > 0 ? `成员 ${member.taskAlias} 缺区域结论: ${parsed.missing.join(", ")}` : undefined,
       diagnostics: parsed.diagnostics.length > 0 ? parsed.diagnostics : undefined,
     });
   }

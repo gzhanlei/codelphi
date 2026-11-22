@@ -186,8 +186,9 @@ function countByDisposition(anchorReceipts: BehaviorFragmentReceipt[], dispositi
   return anchorReceipts.filter((receipt) => receipt.disposition === disposition).length;
 }
 
-/** 纯函数：清洗后的候选 + 逐 fragment 结论 → 任务终态与计数（复用 D5 唯一推导场所）。 */
-function deriveTaskResult(
+/** 纯函数：清洗后的候选 + 逐 fragment 结论 → 任务终态与计数（复用 D5 唯一推导场所）。
+ *  导出供 execution batch 按成员复用（Task 7 最小导出，判定规则零复制）。 */
+export function deriveBehaviorTaskResult(
   task: BehaviorExecutionTask,
   sources: TaskSource[],
   judged: BehaviorJudgeOutput,
@@ -226,7 +227,9 @@ function deriveTaskResult(
   };
 }
 
-function truncatedResult(task: BehaviorExecutionTask): BehaviorTaskExtractionResult {
+/** 截断确定性结果：全 fragments unresolved(reason=output_truncated)，永不 no_behavior。
+ *  导出供 execution batch 使用（Task 7 最小导出，语义不变）。 */
+export function behaviorTaskTruncatedResult(task: BehaviorExecutionTask): BehaviorTaskExtractionResult {
   const anchorReceipts = task.anchorFragments.map((fragment) => unresolvedReceipt(fragment, "output_truncated"));
   return {
     outcome: "unresolved",
@@ -423,10 +426,10 @@ async function repairBehaviorTask(input: ExtractBehaviorTaskInput): Promise<Beha
       withCallStage(input.billing, "semantic_repair"),
     );
     const judged = parseJudgeContent(judgeContent, reducedTask);
-    const repaired = deriveTaskResult(reducedTask, input.sources, judged, label);
+    const repaired = deriveBehaviorTaskResult(reducedTask, input.sources, judged, label);
     return mergeRepairResult(previous, renumberRepairRefs(previous, repaired), label);
   } catch (error) {
-    if (AiOutputTruncatedError.isInstance(error)) return mergeRepairResult(previous, truncatedResult(reducedTask), label);
+    if (AiOutputTruncatedError.isInstance(error)) return mergeRepairResult(previous, behaviorTaskTruncatedResult(reducedTask), label);
     throw error;
   }
 }
@@ -459,10 +462,10 @@ async function modelTaskExtraction(
       withCallStage(billing, "judge"),
     );
     const judged = parseJudgeContent(judgeContent, task);
-    return deriveTaskResult(task, sources, judged, label);
+    return deriveBehaviorTaskResult(task, sources, judged, label);
   } catch (error) {
     // 输出截断是同输入确定性复现的内容级失败：标记 unresolved（定向复核），不走硬失败重试
-    if (AiOutputTruncatedError.isInstance(error)) return truncatedResult(task);
+    if (AiOutputTruncatedError.isInstance(error)) return behaviorTaskTruncatedResult(task);
     throw error;
   }
 }
