@@ -22,6 +22,7 @@ if (!commit || !/^[0-9a-f]{7,64}$/i.test(commit)) {
   console.error("[bench] 缺少或非法 --commit（Git revision 必须在 origin 可达）");
   process.exit(2);
 }
+const commitSha: string = commit;
 if (!Number.isInteger(concurrency) || concurrency <= 0 || concurrency > 16) {
   console.error("[bench] 非法 --concurrency（1-16）");
   process.exit(2);
@@ -57,10 +58,10 @@ async function main() {
     `INSERT INTO analysis_runs (repository_id, trigger_type, before_sha, after_sha, status, account_id)
      SELECT id, 'manual', NULL, ?, 'queued', 1 FROM repositories
      WHERE owner = 'gzhanlei' AND name = 'codelphi' LIMIT 1`,
-    [commit],
+    [commitSha],
   )) as unknown as [{ insertId: number }, unknown];
   const runId = Number(inserted.insertId);
-  console.log(`[bench] mode=${mode} runId=${runId} commit=${commit.slice(0, 8)} concurrency=${concurrency} starting`);
+  console.log(`[bench] mode=${mode} runId=${runId} commit=${commitSha.slice(0, 8)} concurrency=${concurrency} starting`);
   const startedAt = Date.now();
   await runAnalysis(runId);
   const elapsed = Date.now() - startedAt;
