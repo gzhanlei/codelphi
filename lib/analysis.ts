@@ -359,12 +359,21 @@ async function runAnalysisBody(run: RunContext) {
   ]);
   const planner = createSlicePlanner({ now: Date.now });
   const scopeRoots = sourceRoots.length > 0 ? sourceRoots : [{ path: "", role: "shared" as const }];
+  // 本地 git 源码后端（bench/自托管）：env 显式开启时从本地仓库目录读 tree/blob，
+  // 零远端 API 调用（rate limit 归零，源码读取变为本地磁盘速度）。生产不设置即关闭。
+  let sourceBackend: import("./remote-source-index").RemoteSourceBackend | undefined;
+  if (process.env.ANALYSIS_SOURCE_BACKEND === "local_git" && process.env.LOCAL_SOURCE_GIT_DIR) {
+    const { createLocalGitBackend } = await import("./remote-source-index/local-git-backend");
+    sourceBackend = createLocalGitBackend({ repoDir: process.env.LOCAL_SOURCE_GIT_DIR });
+    console.log("[analysis] using local git source backend:", process.env.LOCAL_SOURCE_GIT_DIR);
+  }
   const remoteAnalysisRequest = {
     product: target.product,
     repository: { owner: repo.owner, repo: repo.name, revision: run.afterSha },
     access: target.access,
     provider: target.adapter.provider,
     scopeRoots,
+    backend: sourceBackend,
     // W0-7：窗口 diff 文件必选装配（行为证据一手面，保证分区覆盖 diff 面）
     diffPaths: change.files.map((file) => file.path),
   };
