@@ -482,22 +482,32 @@ export async function runInventoryFullAnalysis(
     let batchManifestHash = "";
     if (batchMode && eligible.length > 0) {
       batchManifestHash = sha256Utf8(JSON.stringify({ v: manifest.inventorySchemaVersion, after: manifest.afterSha, scope: manifest.scopeFingerprint }));
-      const planInputs = [];
-      for (const task of eligible) {
-        const unit = unitsByKey.get(task.unitKey);
-        if (!unit) continue;
-        const sources = await loadBehaviorTaskSources(index, task, unit);
-        const lineIndex = primaryLineIndexOf(sources);
-        const primary = sources.find((source) => source.role === "primary") ?? sources[0]!;
-        planInputs.push({
-          task,
-          isResidual: false,
-          primaryPath: primary.path,
-          primaryUtf8Bytes: sources.reduce((total, source) => total + Buffer.byteLength(source.content, "utf8"), 0),
-          hasBlankFragment: task.anchorFragments.some((fragment) => fragmentIsBlank(fragment, lineIndex)),
-          supportedShape: true,
-        });
-      }
+      // 预读并行化（回路修复 1）：2613 个任务的源码读取此前串行，占计划阶段数分钟
+      const PLAN_READ_CONCURRENCY = 16;
+      const planInputs: Array<import("./execution-batch/planner").PlanTaskInput> = [];
+      let planCursor = 0;
+      const planWorkers = Array.from({ length: Math.min(PLAN_READ_CONCURRENCY, eligible.length) }, async () => {
+        for (;;) {
+          const cursor = planCursor;
+          planCursor += 1;
+          const task = eligible[cursor];
+          if (!task) return;
+          const unit = unitsByKey.get(task.unitKey);
+          if (!unit) continue;
+          const sources = await loadBehaviorTaskSources(index, task, unit);
+          const lineIndex = primaryLineIndexOf(sources);
+          const primary = sources.find((source) => source.role === "primary") ?? sources[0]!;
+          planInputs.push({
+            task,
+            isResidual: false,
+            primaryPath: primary.path,
+            primaryUtf8Bytes: sources.reduce((total, source) => total + Buffer.byteLength(source.content, "utf8"), 0),
+            hasBlankFragment: task.anchorFragments.some((fragment) => fragmentIsBlank(fragment, lineIndex)),
+            supportedShape: true,
+          });
+        }
+      });
+      await Promise.all(planWorkers);
       const allocation = planBehaviorExecutionBatches({ manifestHash: batchManifestHash, tasks: planInputs });
       await publishBehaviorBatchPlanSet(execute, { runId, manifestHash: batchManifestHash, manifestTaskKeys: eligible.map((task) => task.taskKey), allocation });
       const routed = routeBatchWorkItems(eligible, allocation);

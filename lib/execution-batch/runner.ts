@@ -266,6 +266,17 @@ function protocolAliases(task: BehaviorExecutionTask): Array<{ anchorFragmentKey
   return task.anchorFragments.map((fragment, index) => ({ anchorFragmentKey: fragment.anchorFragmentKey, regionAlias: `R${index + 1}` }));
 }
 
+export type RepairTriggerClass = "format_or_parse" | "evidence_or_contract" | "model_capacity";
+
+function classifyRepairTrigger(unresolvedReasons: readonly string[], parseFailureReason: string | undefined): RepairTriggerClass {
+  if (parseFailureReason !== undefined) return "format_or_parse";
+  const joined = unresolvedReasons.join(" ");
+  if (unresolvedReasons.some((reason) => reason === "output_truncated")) return "format_or_parse";
+  if (/missing|缺少|unknown|未知|drift/i.test(joined)) return "format_or_parse";
+  if (/evidence|allow|sanitize|归属|attribution/i.test(joined)) return "evidence_or_contract";
+  return "model_capacity";
+}
+
 async function runSplitAndCommit(
   config: AttemptRunConfig,
   context: RunnerContext,
@@ -275,6 +286,7 @@ async function runSplitAndCommit(
   describeTruncated: boolean,
   judgeTruncated: boolean,
   descriptions: ReadonlyMap<string, import("../behavior-unit-ai").BehaviorRegionDescription[]>,
+  repairClassCounts: Record<RepairTriggerClass, number>,
 ): Promise<void> {
   const extraction = extractBehaviorBatch({
     members: claimedMembers.map((entry) => entry.member),
@@ -311,6 +323,16 @@ async function runSplitAndCommit(
     }
     const result = memberResult.result!;
     if (result.outcome === "unresolved" && !describeTruncated && !judgeTruncated) {
+      // repair 触发原因三类分别统计（用户裁决：区分格式/解析问题、模型能力不足、契约/校验失败，
+      // 不为速度降低质量也不把 repair 混为纯缺陷）：
+      //   format_or_parse = 批协议层问题（缺区域结论/别名错/JSON 结构）——batch 特有，可修；
+      //   evidence_or_contract = 证据越界/契约校验未过（sanitize 拒绝/场景缺归属）——质量守卫触发；
+      //   model_capacity = 模型判定本身未完成（无结论/内部推理不足）——模型工作量问题。
+      const unresolvedReasons = result.anchorReceipts
+        .filter((receipt) => receipt.disposition === "unresolved")
+        .map((receipt) => String((receipt as { reason?: string }).reason ?? ""));
+      const repairClass = classifyRepairTrigger(unresolvedReasons, memberResult.reason);
+      repairClassCounts[repairClass] = (repairClassCounts[repairClass] ?? 0) + 1;
       // 单 task 语义复核（§15）：task_attempt_id（提交）/ repair_budget_attempt_id（预算聚合）/
       // repair_request_key（实际请求）三身份分离；repair 崩溃可按现有单任务语义重发
       const repairBudgetAttemptId = randomUUID();
@@ -523,7 +545,9 @@ export async function runInventoryBatchAttempt(input: RunBatchAttemptInput): Pro
     // ⑧ 主批调用结束：按 batch attempt 全部真实回执结算（含失败/unknown）
     await safeSettle(describe.reservationUuid);
     // ⑨⑩ 拆分 / 独立提交 / repair
-    await runSplitAndCommit(snapshotInput, context, claimed, describe.content, judgeContent, describeTruncated, judgeTruncated, new Map());
+    const repairClassCounts: Record<RepairTriggerClass, number> = { format_or_parse: 0, evidence_or_contract: 0, model_capacity: 0 };
+    await runSplitAndCommit(snapshotInput, context, claimed, describe.content, judgeContent, describeTruncated, judgeTruncated, new Map(), repairClassCounts);
+    console.log("[execution-batch] repair classes", JSON.stringify(repairClassCounts));
   } finally {
     clearInterval(heartbeat);
   }
@@ -546,6 +570,7 @@ export async function recoverInventoryBatchAttempts(config: RecoverBatchAttempts
     if (!resumable) continue;
     const taskByKey = new Map(work.tasks.map((task) => [task.taskKey, task]));
     const recovery = await loadBatchAttemptForRecovery({ runId: config.runId, batchAttemptUuid: resumable.batchAttemptUuid });
+  const recoveryRepairCounts: Record<RepairTriggerClass, number> = { format_or_parse: 0, evidence_or_contract: 0, model_capacity: 0 };
     const claimedProtocolMembers = recovery.members.map((member) => ({ taskKey: member.taskKey, taskAlias: member.taskAlias, orderedRegionAliases: member.orderedRegionAliases }));
     const persisted = await loadPersistedBatchResponses(resumable.batchAttemptUuid);
     if (!persisted.describe) continue;
@@ -600,7 +625,7 @@ export async function recoverInventoryBatchAttempts(config: RecoverBatchAttempts
       member: { taskKey: member.taskKey, taskAlias: member.taskAlias, orderedRegionAliases: member.orderedRegionAliases },
       task: taskByKey.get(member.taskKey)!,
       requestTaskAttemptId: member.requestTaskAttemptId,
-    })).filter((entry) => entry.task !== undefined), persisted.describe.rawResponse, judgeContent, describeTruncated, judgeTruncated, new Map());
+    })).filter((entry) => entry.task !== undefined), persisted.describe.rawResponse, judgeContent, describeTruncated, judgeTruncated, new Map(), recoveryRepairCounts);
   }
 }
 
