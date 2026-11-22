@@ -1,12 +1,15 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { LoginForm } from "@/components/login-form";
 import { LoginError } from "@/components/login-error";
 import { loadPublicDemoProduct } from "@/lib/public-demo";
 import { getSessionUser } from "@/lib/session";
-import { pick, resolveUiLocaleValue } from "@/lib/ui-locale";
+import { safeNextPath } from "@/lib/oauth";
+import { resolveTurnstileSiteKey } from "@/lib/turnstile-site-key";
+import { pick } from "@/lib/ui-locale";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { resolveUiLocale } from "@/lib/ui-locale-server";
-import { LOGIN } from "@/lib/ui-strings/dashboard";
+import { AUTH_FORM, LOGIN } from "@/lib/ui-strings/dashboard";
 
 /** 公开演示的五个匿名导出入口，与产品页的导出能力一一对应。 */
 function DemoExports({ slug, locale }: { slug: string; locale: "zh-CN" | "en" }) {
@@ -26,9 +29,9 @@ function DemoExports({ slug, locale }: { slug: string; locale: "zh-CN" | "en" })
   );
 }
 
-export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string; next?: string }> }) {
   if (await getSessionUser()) redirect("/");
-  const { error } = await searchParams;
+  const { error, next } = await searchParams;
   const demo = await loadPublicDemoProduct();
   const locale = await resolveUiLocale();
   const [headlineLine1, headlineLine2] = pick(locale, LOGIN.headline).split("\n");
@@ -52,8 +55,10 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           <h2>{pick(locale, LOGIN.welcome)}</h2>
           <p>{pick(locale, LOGIN.chandlerIntro)}</p>
           <LoginError error={error} />
-          <Link className="login-button" href="/auth/login">{pick(locale, LOGIN.chandlerButton)} <span>→</span></Link>
-          <small>{pick(locale, LOGIN.allChandlerUsers)}</small>
+          {/* 自建登录表单（Chandler 密码通道 + Turnstile）；?next= 经 safeNextPath 校验后透传给成功跳转 */}
+          <LoginForm locale={locale} next={safeNextPath(next)} sitekey={await resolveTurnstileSiteKey()} />
+          <small className="auth-alt-links">{pick(locale, AUTH_FORM.needAccount)} <Link href="/register">{pick(locale, AUTH_FORM.goRegister)}</Link></small>
+          <small><Link href="/auth/login">{pick(locale, LOGIN.chandlerButton)}</Link> · {pick(locale, LOGIN.allChandlerUsers)}</small>
           <small><Link href="/data-notice">{pick(locale, { "zh-CN": "数据说明", en: "Data notice" })}</Link>{pick(locale, { "zh-CN": "：源码仅发送给部署配置的 AI 网关及其上游，不用于模型训练。", en: ": source code is sent only to the configured AI gateway and its upstream; it is not used for model training." })}</small>
           {demo ? (
             <div className="demo-entry">

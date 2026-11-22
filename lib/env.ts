@@ -12,6 +12,12 @@ export function chandlerBaseUrl() {
   return (process.env.CHANDLER_BASE_URL ?? "https://api.chandler.work").replace(/\/$/, "");
 }
 
+/** Cloudflare Turnstile site key（公开值，注册/登录页 widget 用）。siteverify 由 Chandler 服务端执行，
+ *  CoDelphi 只做「页面采集 + 透传 cf_turnstile_response」，不持有 secret、不重复消费 token。 */
+export function turnstileSiteKey() {
+  return (process.env.TURNSTILE_SITE_KEY ?? "").trim();
+}
+
 export function allowedEmails() {
   return new Set(
     (process.env.AUTH_ALLOWED_EMAILS ?? "")

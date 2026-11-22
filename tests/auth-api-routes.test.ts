@@ -1,0 +1,176 @@
+import { NextRequest } from "next/server";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ChandlerAuthError } from "../lib/chandler-auth";
+
+type ChandlerAuthModule = typeof import("../lib/chandler-auth");
+const loginChandlerUser = vi.fn<ChandlerAuthModule["loginChandlerUser"]>();
+const registerChandlerUser = vi.fn<ChandlerAuthModule["registerChandlerUser"]>();
+const sendChandlerRegisterCode = vi.fn<ChandlerAuthModule["sendChandlerRegisterCode"]>();
+const verifyChandlerMfa = vi.fn<ChandlerAuthModule["verifyChandlerMfa"]>();
+const establishCodelphiSession = vi.fn<ChandlerAuthModule["establishCodelphiSession"]>();
+
+vi.mock("../lib/chandler-auth", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../lib/chandler-auth")>(),
+  loginChandlerUser: (...args: Parameters<ChandlerAuthModule["loginChandlerUser"]>) => loginChandlerUser(...args),
+  registerChandlerUser: (...args: Parameters<ChandlerAuthModule["registerChandlerUser"]>) => registerChandlerUser(...args),
+  sendChandlerRegisterCode: (...args: Parameters<ChandlerAuthModule["sendChandlerRegisterCode"]>) => sendChandlerRegisterCode(...args),
+  verifyChandlerMfa: (...args: Parameters<ChandlerAuthModule["verifyChandlerMfa"]>) => verifyChandlerMfa(...args),
+  establishCodelphiSession: (...args: Parameters<ChandlerAuthModule["establishCodelphiSession"]>) => establishCodelphiSession(...args),
+}));
+// resolveTurnstileSiteKey 保持真实现：CHANDLER_BASE_URL 指向立即拒绝的端口 → fetch 失败 → env 兜底，行为确定性
+
+const authUser = { id: "user-uuid-1", email: "person@example.com", displayName: "韩雷", avatar: undefined };
+
+function post(path: string, body: unknown) {
+  return new NextRequest(`https://codelphi.com${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+describe("POST /api/auth/login", () => {
+  let POST: (request: NextRequest) => Promise<Response>;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    vi.stubEnv("AUTH_ALLOWED_EMAILS", "");
+    vi.stubEnv("CHANDLER_BASE_URL", "http://127.0.0.1:9");
+    vi.stubEnv("TURNSTILE_SITE_KEY", "");
+    ({ POST } = await import("../app/api/auth/login/route"));
+  });
+
+  it("透传 cf_turnstile_response 并在成功后建立会话", async () => {
+    loginChandlerUser.mockResolvedValue({ user: authUser, tokens: { accessToken: "at" } });
+    const response = await POST(post("/api/auth/login", { account: "person@example.com", password: "Passw0rd!", turnstileToken: "tk" }));
+    expect(response.status).toBe(200);
+    expect(loginChandlerUser).toHaveBeenCalledWith({ account: "person@example.com", password: "Passw0rd!", turnstileToken: "tk" });
+    expect(establishCodelphiSession).toHaveBeenCalledWith(
+      { sub: "user-uuid-1", email: "person@example.com", name: "韩雷", picture: undefined },
+      { accessToken: "at" },
+    );
+    expect(await response.json()).toEqual({ ok: true });
+  });
+
+  it("428 MFA 挑战原样返回 mfaToken，不建立会话", async () => {
+    loginChandlerUser.mockResolvedValue({ mfaRequired: true, mfaToken: "mfa-1" });
+    const response = await POST(post("/api/auth/login", { account: "u", password: "p", turnstileToken: "tk" }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: false, mfaRequired: true, mfaToken: "mfa-1" });
+    expect(establishCodelphiSession).not.toHaveBeenCalled();
+  });
+
+  it("配置了 site key 时缺少人机验证 token 直接拒绝，不触发 Chandler 调用", async () => {
+    vi.stubEnv("TURNSTILE_SITE_KEY", "0x4AAA_site");
+    const response = await POST(post("/api/auth/login", { account: "u", password: "p" }));
+    expect(response.status).toBe(400);
+    expect((await response.json()).code).toBe("missing_turnstile_token");
+    expect(loginChandlerUser).not.toHaveBeenCalled();
+  });
+
+  it("Chandler 凭证错误映射为 401", async () => {
+    loginChandlerUser.mockRejectedValue(new ChandlerAuthError("invalid_credentials", "auth.invalid_credentials"));
+    const response = await POST(post("/api/auth/login", { account: "u", password: "p", turnstileToken: "tk" }));
+    expect(response.status).toBe(401);
+    expect((await response.json()).code).toBe("invalid_credentials");
+    expect(establishCodelphiSession).not.toHaveBeenCalled();
+  });
+
+  it("邮箱不在白名单时返回 403 forbidden", async () => {
+    vi.stubEnv("AUTH_ALLOWED_EMAILS", "other@example.com");
+    loginChandlerUser.mockResolvedValue({ user: authUser, tokens: { accessToken: "at" } });
+    const response = await POST(post("/api/auth/login", { account: "person@example.com", password: "p", turnstileToken: "tk" }));
+    expect(response.status).toBe(403);
+    expect((await response.json()).code).toBe("forbidden");
+    expect(establishCodelphiSession).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/auth/register", () => {
+  let POST: (request: NextRequest) => Promise<Response>;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    vi.stubEnv("AUTH_ALLOWED_EMAILS", "");
+    vi.stubEnv("CHANDLER_BASE_URL", "http://127.0.0.1:9");
+    vi.stubEnv("TURNSTILE_SITE_KEY", "");
+    ({ POST } = await import("../app/api/auth/register/route"));
+  });
+
+  it("注册成功后建立会话（agree_policies 勾选时透传）", async () => {
+    registerChandlerUser.mockResolvedValue({ user: authUser, tokens: { accessToken: "at", refreshToken: "rt", expiresIn: 3600 } });
+    const response = await POST(post("/api/auth/register", { email: "Person@Example.com", code: "123456", password: "Passw0rd!", displayName: "韩雷", agreePolicies: true, turnstileToken: "tk" }));
+    expect(response.status).toBe(200);
+    expect(registerChandlerUser).toHaveBeenCalledWith({
+      email: "person@example.com",
+      password: "Passw0rd!",
+      displayName: "韩雷",
+      emailCode: "123456",
+      turnstileToken: "tk",
+      agreePolicies: true,
+    });
+    expect(establishCodelphiSession).toHaveBeenCalledTimes(1);
+    expect(await response.json()).toEqual({ ok: true });
+  });
+
+  it("邮箱已注册映射 409，弱密码映射 422", async () => {
+    registerChandlerUser.mockRejectedValue(new ChandlerAuthError("email_taken", "auth.email_taken"));
+    let response = await POST(post("/api/auth/register", { email: "a@b.co", code: "123456", password: "Passw0rd!", turnstileToken: "tk" }));
+    expect(response.status).toBe(409);
+    registerChandlerUser.mockRejectedValue(new ChandlerAuthError("weak_password", "auth.weak_password"));
+    response = await POST(post("/api/auth/register", { email: "a@b.co", code: "123456", password: "aaaaaaaa", turnstileToken: "tk" }));
+    expect(response.status).toBe(422);
+    expect(establishCodelphiSession).not.toHaveBeenCalled();
+  });
+
+  it("非法请求体返回 400", async () => {
+    const response = await POST(post("/api/auth/register", { email: "not-an-email", code: "", password: "" }));
+    expect(response.status).toBe(400);
+    expect((await response.json()).code).toBe("invalid_input");
+    expect(registerChandlerUser).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/auth/register/send-code", () => {
+  let POST: (request: NextRequest) => Promise<Response>;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    ({ POST } = await import("../app/api/auth/register/send-code/route"));
+  });
+
+  it("发送成功返回 sent", async () => {
+    sendChandlerRegisterCode.mockResolvedValue(undefined);
+    const response = await POST(post("/api/auth/register/send-code", { email: "A@B.com" }));
+    expect(response.status).toBe(200);
+    expect(sendChandlerRegisterCode).toHaveBeenCalledWith("a@b.com");
+    expect(await response.json()).toEqual({ status: "sent" });
+  });
+
+  it("邮箱已注册映射 409，冷却期映射 429", async () => {
+    sendChandlerRegisterCode.mockRejectedValue(new ChandlerAuthError("email_taken", "auth.email_taken"));
+    expect((await POST(post("/api/auth/register/send-code", { email: "a@b.co" }))).status).toBe(409);
+    sendChandlerRegisterCode.mockRejectedValue(new ChandlerAuthError("otp_cooldown", "auth.otp_cooldown"));
+    expect((await POST(post("/api/auth/register/send-code", { email: "a@b.co" }))).status).toBe(429);
+  });
+});
+
+describe("POST /api/auth/mfa", () => {
+  let POST: (request: NextRequest) => Promise<Response>;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    vi.stubEnv("AUTH_ALLOWED_EMAILS", "");
+    ({ POST } = await import("../app/api/auth/mfa/route"));
+  });
+
+  it("MFA 验证成功后建立会话；验证码错误映射 401", async () => {
+    verifyChandlerMfa.mockResolvedValue({ user: authUser, tokens: { accessToken: "at" } });
+    const response = await POST(post("/api/auth/mfa", { mfaToken: "mfa-1", code: "654321" }));
+    expect(response.status).toBe(200);
+    expect(verifyChandlerMfa).toHaveBeenCalledWith({ mfaToken: "mfa-1", code: "654321" });
+    expect(establishCodelphiSession).toHaveBeenCalledTimes(1);
+    verifyChandlerMfa.mockRejectedValue(new ChandlerAuthError("mfa_invalid_code", "auth.mfa_invalid_code"));
+    expect((await POST(post("/api/auth/mfa", { mfaToken: "mfa-1", code: "000000" }))).status).toBe(401);
+  });
+});

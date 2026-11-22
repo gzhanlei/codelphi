@@ -86,7 +86,7 @@ openssl rand -hex 32  # SESSION_SECRET
 openssl rand -hex 32  # GITHUB_WEBHOOK_SECRET
 ```
 
-Fill at least: `DATABASE_URL` (Tencent Cloud MySQL `mysql://` URL, database `radar`), `CHANDLER_CLIENT_ID` / `CHANDLER_CLIENT_SECRET`, `GITHUB_TOKEN` (read access to internal repos), `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL`. Optional: `AUTH_ALLOWED_EMAILS` (login restriction for closed deployments only), `PUBLIC_DEMO_SLUGS` (transitional demo allowlist; prefer the per-product switch in Settings). `DATABASE_SSL=true` is the default; set it to `false` only inside a VPC where TLS is unnecessary.
+Fill at least: `DATABASE_URL` (Tencent Cloud MySQL `mysql://` URL, database `radar`), `CHANDLER_CLIENT_ID` / `CHANDLER_CLIENT_SECRET`, `GITHUB_TOKEN` (read access to internal repos), `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL`. Optional: `AUTH_ALLOWED_EMAILS` (login restriction for closed deployments only), `PUBLIC_DEMO_SLUGS` (transitional demo allowlist; prefer the per-product switch in Settings), `TURNSTILE_SITE_KEY` (public Cloudflare Turnstile site key rendered by the self-hosted register/login pages; the token is passed through to Chandler, which performs siteverify server-side). `DATABASE_SSL=true` is the default; set it to `false` only inside a VPC where TLS is unnecessary.
 
 ### 2. Create a dedicated database and account
 

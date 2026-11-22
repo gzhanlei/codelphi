@@ -14,7 +14,7 @@ export const LOGIN = {
   },
   panelEyebrow: { "zh-CN": "工作区登录", en: "Workspace sign-in" },
   welcome: { "zh-CN": "欢迎回来", en: "Welcome back" },
-  chandlerIntro: { "zh-CN": "使用 Chandler 统一账号继续。CoDelphi 不保存你的账号密码。", en: "Continue with your Chandler account. CoDelphi never stores your password." },
+  chandlerIntro: { "zh-CN": "使用 Chandler 统一账号继续；账号与密码由 Chandler 统一身份服务保管。", en: "Continue with your Chandler account; credentials stay in the Chandler identity service." },
   chandlerButton: { "zh-CN": "使用 Chandler 登录", en: "Sign in with Chandler" },
   allChandlerUsers: { "zh-CN": "所有 Chandler 用户均可登录，自动创建个人工作区", en: "Any Chandler user can sign in; a personal workspace is created automatically" },
   dataNoticeLine: {
@@ -32,6 +32,69 @@ export const LOGIN = {
     explainer: { "zh-CN": "Explainer 一页说明", en: "One-page explainer" },
   } satisfies Record<string, LocaleEntry>,
 } satisfies Record<string, LocaleEntry | Record<string, LocaleEntry>>;
+
+// ── 自建注册/登录表单（Chandler 密码认证通道 + Cloudflare Turnstile） ──
+export const AUTH_FORM = {
+  accountLabel: { "zh-CN": "邮箱或用户名", en: "Email or username" },
+  accountPlaceholder: { "zh-CN": "you@example.com", en: "you@example.com" },
+  emailLabel: { "zh-CN": "邮箱", en: "Email" },
+  passwordLabel: { "zh-CN": "密码", en: "Password" },
+  passwordHint: { "zh-CN": "8-255 位，含大小写字母、数字、符号中的至少 3 类", en: "8-255 characters with at least 3 of: upper, lower, digit, symbol" },
+  passwordPlaceholder: { "zh-CN": "输入密码", en: "Enter your password" },
+  codeLabel: { "zh-CN": "邮箱验证码", en: "Email verification code" },
+  codePlaceholder: { "zh-CN": "6 位数字", en: "6-digit code" },
+  displayNameLabel: { "zh-CN": "昵称（可选）", en: "Display name (optional)" },
+  displayNamePlaceholder: { "zh-CN": "在界面中显示的名字", en: "Name shown in the interface" },
+  sendCode: { "zh-CN": "发送验证码", en: "Send code" },
+  sending: { "zh-CN": "发送中…", en: "Sending…" },
+  codeSent: { "zh-CN": "验证码已发送，请查收邮箱（可能在垃圾箱）。", en: "Code sent — check your inbox (and spam folder)." },
+  loginSubmit: { "zh-CN": "登录", en: "Sign in" },
+  registerSubmit: { "zh-CN": "创建账号", en: "Create account" },
+  submitting: { "zh-CN": "提交中…", en: "Submitting…" },
+  mfaLabel: { "zh-CN": "两步验证码", en: "Two-factor code" },
+  mfaHint: { "zh-CN": "该账号已开启两步验证，请输入验证器 App 中的 6 位数字。", en: "This account has two-factor auth on; enter the 6-digit code from your authenticator app." },
+  mfaSubmit: { "zh-CN": "验证并登录", en: "Verify and sign in" },
+  mfaBack: { "zh-CN": "← 返回重新登录", en: "← Back to sign-in" },
+  needAccount: { "zh-CN": "还没有账号？", en: "No account yet?" },
+  goRegister: { "zh-CN": "注册", en: "Sign up" },
+  haveAccount: { "zh-CN": "已有账号？", en: "Already have an account?" },
+  goLogin: { "zh-CN": "直接登录", en: "Sign in instead" },
+  turnstileLabel: { "zh-CN": "人机验证", en: "Human verification" },
+  agreePrefix: { "zh-CN": "已阅读并同意 Chandler", en: "I have read and agree to the Chandler" },
+  agreeTerms: { "zh-CN": "《用户协议》", en: "Terms of Service" },
+  agreeAnd: { "zh-CN": "与", en: "and" },
+  agreePrivacy: { "zh-CN": "《隐私政策》", en: "Privacy Policy" },
+} satisfies Record<string, LocaleEntry>;
+
+// ── 注册页文案 ──
+export const REGISTER = {
+  panelEyebrow: { "zh-CN": "创建账号", en: "Create account" },
+  welcome: { "zh-CN": "注册 CoDelphi", en: "Join CoDelphi" },
+  intro: {
+    "zh-CN": "注册即创建 Chandler 统一账号：邮箱验证通过后自动建立个人工作区，可立即接入产品。",
+    en: "Registration creates a Chandler account: once your email is verified, a personal workspace is provisioned right away.",
+  },
+  headline: { "zh-CN": "把代码变化\n读成产品语言。", en: "Turn code changes\ninto product language." },
+} satisfies Record<string, LocaleEntry>;
+
+/** Chandler 认证错误码 → 界面文案（错误码即稳定键：服务端 API 也用本表回中文默认文案）。 */
+export const AUTH_ERRORS: Record<string, LocaleEntry> = {
+  email_taken: { "zh-CN": "该邮箱已注册，可直接登录。", en: "This email is already registered — sign in instead." },
+  email_code_invalid: { "zh-CN": "邮箱验证码不正确或已过期。", en: "The email verification code is invalid or expired." },
+  otp_cooldown: { "zh-CN": "验证码发送过于频繁，请稍后再试。", en: "Code requests are too frequent; try again shortly." },
+  otp_delivery_failed: { "zh-CN": "验证码发送失败，请稍后再试。", en: "Failed to send the code; try again shortly." },
+  invalid_credentials: { "zh-CN": "账号或密码错误。", en: "Incorrect account or password." },
+  weak_password: { "zh-CN": "密码需 8-255 位，且包含大小写字母、数字、符号中的至少 3 类。", en: "Password must be 8-255 characters with at least 3 of: upper, lower, digit, symbol." },
+  user_disabled: { "zh-CN": "该账号已被限制使用。", en: "This account has been disabled." },
+  mfa_invalid_code: { "zh-CN": "动态验证码不正确。", en: "Invalid verification code." },
+  turnstile_failed: { "zh-CN": "人机验证未通过，请重试。", en: "Human verification failed — please retry." },
+  turnstile_unavailable: { "zh-CN": "人机验证服务暂不可用，请稍后再试。", en: "Human verification is temporarily unavailable; try again later." },
+  rate_limited: { "zh-CN": "操作过于频繁，请稍后再试。", en: "Too many attempts; try again shortly." },
+  unavailable: { "zh-CN": "Chandler 服务暂不可用，请稍后再试。", en: "Chandler is temporarily unavailable; try again later." },
+  invalid_input: { "zh-CN": "请求参数不完整，请检查表单。", en: "The request is incomplete — check the form." },
+  missing_turnstile_token: { "zh-CN": "请先完成人机验证。", en: "Please complete the human verification first." },
+  forbidden: { "zh-CN": "该账号未获得本部署的访问授权。", en: "This account is not authorized for this deployment." },
+} satisfies Record<string, LocaleEntry>;
 
 // ── 403 ──
 export const FORBIDDEN = {

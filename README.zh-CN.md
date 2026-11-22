@@ -86,7 +86,7 @@ openssl rand -hex 32  # SESSION_SECRET
 openssl rand -hex 32  # GITHUB_WEBHOOK_SECRET
 ```
 
-至少填写：`DATABASE_URL`（腾讯云 MySQL `mysql://` URL，库名 `radar`）、`CHANDLER_CLIENT_ID` / `CHANDLER_CLIENT_SECRET`、`GITHUB_TOKEN`（对内部仓库只读）、`AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL`。可选：`AUTH_ALLOWED_EMAILS`（仅封闭部署的登录限制）、`PUBLIC_DEMO_SLUGS`（过渡兜底的 Demo 白名单，推荐用产品设置页开关）。`DATABASE_SSL=true` 为默认值；仅在 VPC 内网明确不需要 TLS 时设为 `false`。
+至少填写：`DATABASE_URL`（腾讯云 MySQL `mysql://` URL，库名 `radar`）、`CHANDLER_CLIENT_ID` / `CHANDLER_CLIENT_SECRET`、`GITHUB_TOKEN`（对内部仓库只读）、`AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL`。可选：`AUTH_ALLOWED_EMAILS`（仅封闭部署的登录限制）、`PUBLIC_DEMO_SLUGS`（过渡兜底的 Demo 白名单，推荐用产品设置页开关）、`TURNSTILE_SITE_KEY`（自建注册/登录页渲染 Cloudflare Turnstile 用的公开 site key；token 透传给 Chandler 做服务端 siteverify）。`DATABASE_SSL=true` 为默认值；仅在 VPC 内网明确不需要 TLS 时设为 `false`。
 
 ### 2. 创建独立数据库和账号
 

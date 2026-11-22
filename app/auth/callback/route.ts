@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { assertChandlerAllowed, completeChandlerOAuth } from "@/lib/chandler";
-import { storeChandlerTokens } from "@/lib/chandler-token";
+import { establishCodelphiSession } from "@/lib/chandler-auth";
 import { allowedEmails, appUrl } from "@/lib/env";
 import { oauthFailurePath, requireOAuthCallback } from "@/lib/oauth-request";
-import { createSession } from "@/lib/session";
-import { findUserIdBySub, upsertCodelphiUser } from "@/lib/users";
 
 function redirectWithClearedOAuth(path: string) {
   const response = NextResponse.redirect(new URL(path, appUrl()));
@@ -39,14 +37,7 @@ export async function GET(request: NextRequest) {
     return redirectWithClearedOAuth(oauthFailurePath(error));
   }
 
-  await upsertCodelphiUser(authentication.profile);
-  // Chandler token 加密落库（M3-T1）：支付 prepay/查单需要用户 token；失败不阻断登录（可重新登录补齐）
-  try {
-    const userId = await findUserIdBySub(authentication.profile.sub);
-    if (userId !== null) await storeChandlerTokens(userId, authentication.tokens);
-  } catch (error) {
-    console.warn("[billing] chandler token store failed; payments may require re-login", error);
-  }
-  await createSession(authentication.profile);
+  // 与密码注册/登录共用同一会话落地面（lib/chandler-auth.ts establishCodelphiSession）
+  await establishCodelphiSession(authentication.profile, authentication.tokens);
   return redirectWithClearedOAuth(authentication.input.next);
 }
