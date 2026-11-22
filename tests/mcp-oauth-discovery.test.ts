@@ -32,6 +32,7 @@ describe("oauth discovery metadata (RFC 8414 / RFC 9728)", () => {
     expect(metadata.authorization_endpoint).toBe("https://codelphi.example/api/mcp/oauth/authorize");
     expect(metadata.token_endpoint).toBe("https://codelphi.example/api/mcp/oauth/token");
     expect(metadata.registration_endpoint).toBe("https://codelphi.example/api/mcp/oauth/register");
+    expect(metadata.response_types_supported).toEqual(["code"]);
     expect(metadata.grant_types).toEqual(["authorization_code", "refresh_token"]);
     expect(metadata.code_challenge_methods).toEqual(["S256"]);
     expect(metadata.token_endpoint_auth_method).toBe("none");
