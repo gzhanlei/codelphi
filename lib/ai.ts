@@ -2,7 +2,7 @@ import { z } from "zod";
 import { requiredEnv } from "./env";
 import type { StructuredCompletionClient } from "./llm-client";
 import type { SourceFile } from "./github";
-import { recordLlmCallReceipt, type ChargeComponent, type LlmCallStage } from "./billing/cost-receipt";
+import { recordLlmCallReceipt, recordRequestScopedReceipt, type ChargeComponent, type LlmCallStage } from "./billing/cost-receipt";
 import type { OutputLanguage } from "./analysis-language";
 
 const evidenceSchema = z.object({
@@ -392,6 +392,9 @@ export interface LlmBillingContext {
   unitKey?: string | null;
   attemptId?: string | null;
   callStage?: LlmCallStage | null;
+  /** 实际请求身份（migration 081）：batch/repair 请求必填（回执走 insert-or-reconcile）；legacy 可空。 */
+  requestKey?: string | null;
+  requestFingerprint?: string | null;
 }
 
 /** 主提取 JSON 契约模板（语言无关共享：键名/编号/枚举是英文结构约定）。 */
@@ -487,12 +490,48 @@ export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext
   return parseAnalysisContent(content);
 }
 
+export interface StructuredCompletionDetails {
+  content: string;
+  usageRaw: unknown | null;
+  providerRequestId: string | null;
+  finishReason: string | null;
+}
+
 /**
- * 网关调用 + 回执记账的共享体（契约 M0-T2：超时与失败都落一条 unknown-usage 记录，
- * 网关 2xx 但结构不可解析时 usage 若存在仍落库）。供标准提取与 W0-8 定向枚举共用。
+ * 网关调用 + 回执记账的共享体（契约 M0-T2 → Task 4 扩展）：超时/失败/截断各落一条记录；
+ * 详细版额外返回 usage/providerRequestId/finishReason 并实测 duration_ms（新增观测，不回填历史）。
+ * batch/repair 请求经 billing.requestKey 携带实际请求身份 → 回执走 insert-or-reconcile（冲突上报）；
+ * legacy 调用无请求身份 → 保持 best-effort 盲插。length 不在详细版抛出：原始截断响应必须先持久化
+ * 再解析（§23.3 C3.4）；legacy wrapper 保持抛 AiOutputTruncatedError 的既有契约。
  */
-export async function requestStructuredCompletion(messages: Array<{ role: string; content: string }>, billing?: LlmBillingContext): Promise<string> {
+export async function requestStructuredCompletionDetailed(messages: Array<{ role: string; content: string }>, billing?: LlmBillingContext): Promise<StructuredCompletionDetails> {
   const model = requiredEnv("AI_MODEL");
+  const startedAtMs = Date.now();
+  const recordReceipt = async (outcome: "success" | "failed" | "timeout", usageRaw: unknown | null, providerRequestId: string | null): Promise<void> => {
+    if (!billing) return;
+    const receipt = {
+      runId: billing.runId,
+      accountId: billing.accountId,
+      chargeComponent: billing.chargeComponent,
+      callKind: billing.callKind ?? null,
+      taskKey: billing.taskKey ?? null,
+      unitKey: billing.unitKey ?? null,
+      attemptId: billing.attemptId ?? null,
+      callStage: billing.callStage ?? null,
+      model,
+      outcome,
+      usageRaw,
+      providerRequestId,
+      requestKey: billing.requestKey ?? null,
+      requestFingerprint: billing.requestFingerprint ?? null,
+      durationMs: Date.now() - startedAtMs,
+    };
+    if (billing.requestKey && billing.requestFingerprint) {
+      await recordRequestScopedReceipt({ ...receipt, requestKey: billing.requestKey, requestFingerprint: billing.requestFingerprint });
+    } else {
+      await recordLlmCallReceipt(receipt);
+    }
+  };
   let response: Response;
   try {
     response = await fetch(chatCompletionsUrl(), {
@@ -513,41 +552,11 @@ export async function requestStructuredCompletion(messages: Array<{ role: string
     });
   } catch (error) {
     // 调用级回执即时写入（契约 M0-T2）：超时与失败都要落一条 unknown-usage 记录
-    if (billing) {
-      await recordLlmCallReceipt({
-        runId: billing.runId,
-        accountId: billing.accountId,
-        chargeComponent: billing.chargeComponent,
-        callKind: billing.callKind ?? null,
-        taskKey: billing.taskKey ?? null,
-        unitKey: billing.unitKey ?? null,
-        attemptId: billing.attemptId ?? null,
-        callStage: billing.callStage ?? null,
-        model,
-        outcome: isAbortTimeout(error) ? "timeout" : "failed",
-        usageRaw: null,
-        providerRequestId: null,
-      });
-    }
+    await recordReceipt(isAbortTimeout(error) ? "timeout" : "failed", null, null);
     throw error;
   }
   if (!response.ok) {
-    if (billing) {
-      await recordLlmCallReceipt({
-        runId: billing.runId,
-        accountId: billing.accountId,
-        chargeComponent: billing.chargeComponent,
-        callKind: billing.callKind ?? null,
-        taskKey: billing.taskKey ?? null,
-        unitKey: billing.unitKey ?? null,
-        attemptId: billing.attemptId ?? null,
-        callStage: billing.callStage ?? null,
-        model,
-        outcome: "failed",
-        usageRaw: null,
-        providerRequestId: null,
-      });
-    }
+    await recordReceipt("failed", null, null);
     await requireSuccessfulAIResponse(response);
   }
   const payload: unknown = await response.json();
@@ -559,62 +568,24 @@ export async function requestStructuredCompletion(messages: Array<{ role: string
     ({ content, usage, requestId, finishReason } = gatewayResponse(payload));
   } catch (error) {
     // 网关返回 2xx 但结构不可解析：usage 若存在仍要落库（成本已发生）
-    if (billing) {
-      const payloadRecord = payload as { usage?: unknown } | null;
-      await recordLlmCallReceipt({
-        runId: billing.runId,
-        accountId: billing.accountId,
-        chargeComponent: billing.chargeComponent,
-        callKind: billing.callKind ?? null,
-        taskKey: billing.taskKey ?? null,
-        unitKey: billing.unitKey ?? null,
-        attemptId: billing.attemptId ?? null,
-        callStage: billing.callStage ?? null,
-        model,
-        outcome: "failed",
-        usageRaw: payloadRecord?.usage ?? null,
-        providerRequestId: null,
-      });
-    }
+    const payloadRecord = payload as { usage?: unknown } | null;
+    await recordReceipt("failed", payloadRecord?.usage ?? null, null);
     throw error;
   }
   if (finishReason === "length") {
-    // 截断是确定性失败：照常落 usage 回执（成本已发生），但不再走 JSON 解析与同输入重试
-    if (billing) {
-      await recordLlmCallReceipt({
-        runId: billing.runId,
-        accountId: billing.accountId,
-        chargeComponent: billing.chargeComponent,
-        callKind: billing.callKind ?? null,
-        taskKey: billing.taskKey ?? null,
-        unitKey: billing.unitKey ?? null,
-        attemptId: billing.attemptId ?? null,
-        callStage: billing.callStage ?? null,
-        model,
-        outcome: "failed",
-        usageRaw: usage,
-        providerRequestId: requestId,
-      });
-    }
-    throw new AiOutputTruncatedError();
+    // 截断是确定性失败：照常落 usage 回执（成本已发生）；详细版返回原始截断响应交由上层持久化
+    await recordReceipt("failed", usage, requestId);
+    return { content, usageRaw: usage, providerRequestId: requestId, finishReason };
   }
-  if (billing) {
-    await recordLlmCallReceipt({
-      runId: billing.runId,
-      accountId: billing.accountId,
-      chargeComponent: billing.chargeComponent,
-      callKind: billing.callKind ?? null,
-      taskKey: billing.taskKey ?? null,
-      unitKey: billing.unitKey ?? null,
-      attemptId: billing.attemptId ?? null,
-      callStage: billing.callStage ?? null,
-      model,
-      outcome: "success",
-      usageRaw: usage,
-      providerRequestId: requestId,
-    });
-  }
-  return content;
+  await recordReceipt("success", usage, requestId);
+  return { content, usageRaw: usage, providerRequestId: requestId, finishReason };
+}
+
+/** legacy 契约保持不变：只返回 content，length 抛 AiOutputTruncatedError（回执已由详细版落库）。 */
+export async function requestStructuredCompletion(messages: Array<{ role: string; content: string }>, billing?: LlmBillingContext): Promise<string> {
+  const details = await requestStructuredCompletionDetailed(messages, billing);
+  if (details.finishReason === "length") throw new AiOutputTruncatedError();
+  return details.content;
 }
 
 /** W0-8 行为面枚举：逐文件显式提问的定向提取（小 prompt、强制逐文件回答）。 */

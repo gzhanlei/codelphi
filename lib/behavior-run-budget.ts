@@ -59,13 +59,21 @@ export const PRODUCT_SUMMARY_RESERVED_INPUT_TOKENS = 128_000;
 export const PRODUCT_SUMMARY_RESERVED_OUTPUT_TOKENS = 8_192;
 export const PRODUCT_SUMMARY_RESERVED_COST_AMOUNT = 5;
 
-type ReservationKind = "task" | "product_summary";
+/** 任务口径预留类别（Task 4）：batch=整批双步请求，task_repair=单 task 语义复核（一次 judge）；
+ *  孤儿对账覆盖这三种非摘要类型，product_summary 仍走专属路径。 */
+export type BehaviorTaskReservationKind = "task" | "batch" | "task_repair";
+
+const TASK_RESERVATION_KINDS: readonly BehaviorTaskReservationKind[] = ["task", "batch", "task_repair"];
+
+type ReservationKind = BehaviorTaskReservationKind | "product_summary";
 type ReservationStatus = "reserved" | "settled" | "settled_unknown" | "released";
 
 export interface BudgetReservationInput {
   runId: number;
   /** 本次尝试身份（lease attempt）；过期重试必须用新 attemptId 重新预留。 */
   attemptId: string;
+  /** 预留类别（Task 4）：缺省 task（既有单任务路径）；batch/task_repair 见 BehaviorTaskReservationKind。 */
+  kind?: BehaviorTaskReservationKind;
   /** 该任务可能发生的最大调用数（含最大重试）。 */
   maxLlmCalls: number;
   /** 输入 token 上界（按事前区间上限）。 */
@@ -283,6 +291,10 @@ async function insertReservationRow(
  */
 export async function reserveBehaviorBudget(input: BudgetReservationInput): Promise<BudgetReservation> {
   validateReservationInput(input);
+  const kind = input.kind ?? "task";
+  if (!TASK_RESERVATION_KINDS.includes(kind)) {
+    throw new Error(`invalid behavior reservation kind: ${String(input.kind)}（product_summary 走专属预留路径）`);
+  }
   const reservationId = randomUUID();
   return withBudgetTransaction(async (execute) => {
     const affected = await applyLedgerReservation(execute, {
@@ -303,7 +315,7 @@ export async function reserveBehaviorBudget(input: BudgetReservationInput): Prom
       reservationId,
       runId: input.runId,
       attemptId: input.attemptId,
-      kind: "task",
+      kind,
       llmCalls: input.maxLlmCalls,
       inputTokens: input.maxInputTokens,
       outputTokens: input.maxOutputTokens,
@@ -313,7 +325,7 @@ export async function reserveBehaviorBudget(input: BudgetReservationInput): Prom
       reservationId,
       runId: input.runId,
       attemptId: input.attemptId,
-      kind: "task" as const,
+      kind,
       reservedLlmCalls: input.maxLlmCalls,
       reservedInputTokens: input.maxInputTokens,
       reservedOutputTokens: input.maxOutputTokens,
@@ -612,7 +624,7 @@ export async function reconcileOrphanedTaskReservations(input: {
   }
   const [rows] = (await getDb().execute(
     `SELECT ${RESERVATION_COLUMNS} FROM analysis_behavior_budget_reservations
-      WHERE run_id = ? AND kind = 'task' AND status = 'reserved' AND created_at <= FROM_UNIXTIME(? / 1000)
+      WHERE run_id = ? AND kind IN ('task', 'batch', 'task_repair') AND status = 'reserved' AND created_at <= FROM_UNIXTIME(? / 1000)
       ORDER BY id ASC`,
     [input.runId, input.orphanBeforeMs],
   )) as [ReservationRow[], unknown];

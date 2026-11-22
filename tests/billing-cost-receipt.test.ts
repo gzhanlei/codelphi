@@ -125,7 +125,7 @@ describe("llm call receipt task/attempt identity", () => {
     expect(String(sql)).toContain("unit_key");
     expect(String(sql)).toContain("attempt_id");
     expect(String(sql)).toContain("call_stage");
-    expect(params).toHaveLength(24);
+    expect(params).toHaveLength(27);
     expect(params[19]).toBeNull(); // call_kind 保持原位
     expect(params[20]).toBe("task-1");
     expect(params[21]).toBe("unit-1");

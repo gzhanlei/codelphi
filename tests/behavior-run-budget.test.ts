@@ -239,7 +239,9 @@ function budgetDb(initial: FakeBudgetRow, receipts: FakeReceiptRow[] = []) {
       return [matched];
     }
     if (
-      sql.includes("FROM analysis_behavior_budget_reservations WHERE run_id = ? AND kind = 'task' AND status = 'reserved'")
+      sql.includes(
+        "FROM analysis_behavior_budget_reservations WHERE run_id = ? AND kind IN ('task', 'batch', 'task_repair') AND status = 'reserved'",
+      )
     ) {
       const cutoffMs = Number(parameters[1]);
       return [
@@ -247,7 +249,7 @@ function budgetDb(initial: FakeBudgetRow, receipts: FakeReceiptRow[] = []) {
           .filter(
             (reservation) =>
               reservation.run_id === Number(parameters[0]) &&
-              reservation.kind === "task" &&
+              ["task", "batch", "task_repair"].includes(reservation.kind) &&
               reservation.status === "reserved" &&
               reservation.created_at_ms <= cutoffMs,
           )
@@ -957,5 +959,96 @@ describe("budget ledger SQL sentinel handling (2026-11-20 bench round)", () => {
     expect(source).toMatch(/max_total_tokens = \$\{UNLIMITED_MAX_TOTAL_TOKENS\}/);
     expect(source).toMatch(/max_cost_amount = \$\{UNLIMITED_MAX_COST_AMOUNT\}/);
     expect(source).toMatch(/max_llm_calls = \$\{UNLIMITED_MAX_LLM_CALLS\}/);
+  });
+});
+
+describe("batch and task_repair reservation kinds (Task 4)", () => {
+  const batchInput = (attemptId: string) => ({
+    runId: 42,
+    attemptId,
+    kind: "batch" as const,
+    maxLlmCalls: 2,
+    maxInputTokens: 1000,
+    maxOutputTokens: 500,
+    maxCostAmount: 5,
+  });
+  const repairInput = (attemptId: string) => ({
+    runId: 42,
+    attemptId,
+    kind: "task_repair" as const,
+    maxLlmCalls: 1,
+    maxInputTokens: 100,
+    maxOutputTokens: 50,
+    maxCostAmount: 1,
+  });
+
+  it("reserves batch and task_repair kinds while legacy default stays task", async () => {
+    const db = budgetDb(budgetRow({ max_llm_calls: 10 }), [
+      receipt({ attempt_id: "batch-attempt" }),
+      receipt({
+        attempt_id: "batch-attempt",
+        usage_status: "unknown",
+        input_tokens: null,
+        output_tokens: null,
+        llm_cost_amount: null,
+        pricing_status: "unpriced",
+      }),
+    ]);
+    stubDb(db);
+    const batch = await reserveBehaviorBudget(batchInput("batch-attempt"));
+    expect(batch.kind).toBe("batch");
+    const repair = await reserveBehaviorBudget(repairInput("repair-attempt"));
+    expect(repair.kind).toBe("task_repair");
+    const legacy = await reserveBehaviorBudget(reservationInput({ attemptId: "legacy-attempt" }));
+    expect(legacy.kind).toBe("task");
+  });
+
+  it("settles a batch reservation from all actual receipts including unknown (unknown ≠ 0)", async () => {
+    const db = budgetDb(budgetRow({ max_llm_calls: 10, max_total_tokens: "10000" }), [
+      receipt({ attempt_id: "batch-attempt" }),
+      receipt({
+        attempt_id: "batch-attempt",
+        usage_status: "unknown",
+        input_tokens: null,
+        output_tokens: null,
+        llm_cost_amount: null,
+        pricing_status: "unpriced",
+      }),
+    ]);
+    stubDb(db);
+    const batch = await reserveBehaviorBudget(batchInput("batch-attempt"));
+    // 一条 known + 一条 unknown：usage unknown 在配置了硬上限的维度上 fail closed（§23.3 C3.9）
+    await expect(settleBehaviorBudget({ reservationId: batch.reservationId })).rejects.toMatchObject({
+      code: "behavior_budget_usage_unknown",
+    });
+    expect(db.reservations().find((entry) => entry.attempt_id === "batch-attempt")?.status).toBe("settled_unknown");
+  });
+
+  it("rejects invalid reservation kinds", async () => {
+    stubDb(budgetDb(budgetRow()));
+    await expect(
+      reserveBehaviorBudget({
+        runId: 42,
+        attemptId: "bad-kind",
+        kind: "product_summary" as never,
+        maxLlmCalls: 1,
+        maxInputTokens: 1,
+        maxOutputTokens: 1,
+        maxCostAmount: 1,
+      }),
+    ).rejects.toThrow(/kind/);
+  });
+
+  it("covers batch and task_repair kinds in orphan reconciliation", async () => {
+    const db = budgetDb(budgetRow({ max_llm_calls: 10 }), [receipt({ attempt_id: "batch-orphan" })]);
+    stubDb(db);
+    await reserveBehaviorBudget(batchInput("batch-orphan"));
+    await reserveBehaviorBudget(repairInput("repair-orphan"));
+    const result = await reconcileOrphanedTaskReservations({ runId: 42, orphanBeforeMs: Date.now() + 60_000 });
+    expect(result.examined).toBe(2);
+    expect(result.settled).toBe(1);
+    expect(result.released).toBe(1);
+    expect(db.reservations().find((entry) => entry.attempt_id === "batch-orphan")?.status).toBe("settled");
+    expect(db.reservations().find((entry) => entry.attempt_id === "repair-orphan")?.status).toBe("released");
   });
 });
