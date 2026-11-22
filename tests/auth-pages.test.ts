@@ -13,7 +13,6 @@ describe("自建登录页（Chandler 密码通道表单）", () => {
   beforeEach(() => {
     getSessionUser.mockResolvedValue(null);
     loadPublicDemoProduct.mockResolvedValue(null);
-    vi.unstubAllEnvs();
   });
 
   it("渲染账号/密码表单、注册入口与 Chandler 授权页回退入口", async () => {
@@ -50,18 +49,6 @@ describe("自建登录页（Chandler 密码通道表单）", () => {
     expect(html).toContain("使用 Chandler 登录");
   });
 
-  it("配置 TURNSTILE_SITE_KEY 时渲染 Turnstile 槽位；未配置时不渲染", async () => {
-    const LoginPage = (await import("../app/login/page")).default;
-    vi.unstubAllEnvs();
-    const withoutKey = renderToStaticMarkup(await LoginPage({ searchParams: Promise.resolve({}) }));
-    expect(withoutKey).not.toContain("turnstile-slot");
-    vi.stubEnv("TURNSTILE_SITE_KEY", "0x4AAA_site");
-    vi.stubEnv("TURNSTILE_SECRET", "0x4AAA_secret");
-    const withKey = renderToStaticMarkup(await LoginPage({ searchParams: Promise.resolve({}) }));
-    expect(withKey).toContain("turnstile-slot");
-    expect(withKey).toContain("人机验证");
-  });
-
   it("已登录用户访问登录页跳回首页", async () => {
     getSessionUser.mockResolvedValue({ sub: "u1" });
     const LoginPage = (await import("../app/login/page")).default;
@@ -72,7 +59,6 @@ describe("自建登录页（Chandler 密码通道表单）", () => {
 describe("自建注册页", () => {
   beforeEach(() => {
     getSessionUser.mockResolvedValue(null);
-    vi.unstubAllEnvs();
   });
 
   it("渲染邮箱验证码/密码/昵称表单与返回登录入口", async () => {
@@ -89,26 +75,5 @@ describe("自建注册页", () => {
     expect(html).toContain("已阅读并同意 Chandler");
     expect(html).toContain("https://chandler.work/terms");
     expect(html).toContain("https://chandler.work/privacy");
-    expect(html).not.toContain("turnstile-slot");
-  });
-
-  it("配置 TURNSTILE_SITE_KEY 时注册页也渲染 Turnstile 槽位", async () => {
-    vi.stubEnv("TURNSTILE_SITE_KEY", "0x4AAA_site");
-    vi.stubEnv("TURNSTILE_SECRET", "0x4AAA_secret");
-    const RegisterPage = (await import("../app/register/page")).default;
-    const html = renderToStaticMarkup(await RegisterPage());
-    expect(html).toContain("turnstile-slot");
-  });
-});
-
-describe("TurnstileWidget 客户端组件", () => {
-  it("未配置 sitekey 时渲染为空；配置后渲染验证槽位与 label", async () => {
-    const { TurnstileWidget } = await import("../components/turnstile-widget");
-    expect(renderToStaticMarkup(createElement(TurnstileWidget, { sitekey: "", action: "login", onToken: () => {} }))).toBe("");
-    const html = renderToStaticMarkup(
-      createElement(TurnstileWidget, { sitekey: "0x4AAAAAAGMuYzGBbJ6DwQus", action: "register", onToken: () => {}, label: "人机验证" }),
-    );
-    expect(html).toContain("turnstile-slot");
-    expect(html).toContain("人机验证");
   });
 });

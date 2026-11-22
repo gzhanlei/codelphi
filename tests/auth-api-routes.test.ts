@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ChandlerAuthError } from "../lib/chandler-auth";
 
 type ChandlerAuthModule = typeof import("../lib/chandler-auth");
@@ -17,8 +17,6 @@ vi.mock("../lib/chandler-auth", async (importOriginal) => ({
   verifyChandlerMfa: (...args: Parameters<ChandlerAuthModule["verifyChandlerMfa"]>) => verifyChandlerMfa(...args),
   establishCodelphiSession: (...args: Parameters<ChandlerAuthModule["establishCodelphiSession"]>) => establishCodelphiSession(...args),
 }));
-// turnstile-verify 保持真实现：默认 env 未配置 → 不启用；启用场景用 TURNSTILE_* env +
-// stub 全局 fetch 模拟 siteverify 响应（route 内仅 siteverify 走全局 fetch）。
 
 const authUser = { id: "user-uuid-1", email: "person@example.com", displayName: "韩雷", avatar: undefined };
 
@@ -29,14 +27,6 @@ function post(path: string, body: unknown) {
     body: JSON.stringify(body),
   });
 }
-
-function stubSiteverify(body: unknown, status = 200) {
-  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(body), { status })));
-}
-
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
 
 describe("POST /api/auth/login", () => {
   let POST: (request: NextRequest) => Promise<Response>;
@@ -49,7 +39,7 @@ describe("POST /api/auth/login", () => {
     ({ POST } = await import("../app/api/auth/login/route"));
   });
 
-  it("人机验证未启用时直接透传 Chandler 并在成功后建立会话", async () => {
+  it("直接透传 Chandler 并在成功后建立会话", async () => {
     loginChandlerUser.mockResolvedValue({ user: authUser, tokens: { accessToken: "at" } });
     const response = await POST(post("/api/auth/login", { account: "person@example.com", password: "Passw0rd!" }));
     expect(response.status).toBe(200);
@@ -67,39 +57,6 @@ describe("POST /api/auth/login", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: false, mfaRequired: true, mfaToken: "mfa-1" });
     expect(establishCodelphiSession).not.toHaveBeenCalled();
-  });
-
-  it("自有 Turnstile 启用后：缺 token 直接 403，不出网也不触发 Chandler", async () => {
-    vi.stubEnv("TURNSTILE_SITE_KEY", "0x4AAA_site");
-    vi.stubEnv("TURNSTILE_SECRET", "0x4AAA_secret");
-    const fetchSpy = vi.fn();
-    vi.stubGlobal("fetch", fetchSpy);
-    const response = await POST(post("/api/auth/login", { account: "u", password: "p" }));
-    expect(response.status).toBe(403);
-    expect((await response.json()).code).toBe("turnstile_failed");
-    expect(fetchSpy).not.toHaveBeenCalled();
-    expect(loginChandlerUser).not.toHaveBeenCalled();
-  });
-
-  it("自有 Turnstile 启用后：siteverify 判失败 → 403 turnstile_failed，token 不透传 Chandler", async () => {
-    vi.stubEnv("TURNSTILE_SITE_KEY", "0x4AAA_site");
-    vi.stubEnv("TURNSTILE_SECRET", "0x4AAA_secret");
-    stubSiteverify({ success: false, "error-codes": ["invalid-input-response"] });
-    const response = await POST(post("/api/auth/login", { account: "u", password: "p", turnstileToken: "0.bad" }));
-    expect(response.status).toBe(403);
-    expect((await response.json()).code).toBe("turnstile_failed");
-    expect(loginChandlerUser).not.toHaveBeenCalled();
-  });
-
-  it("自有 Turnstile 启用后：siteverify 通过 → 放行进入 Chandler 登录", async () => {
-    vi.stubEnv("TURNSTILE_SITE_KEY", "0x4AAA_site");
-    vi.stubEnv("TURNSTILE_SECRET", "0x4AAA_secret");
-    stubSiteverify({ success: true, action: "login" });
-    loginChandlerUser.mockResolvedValue({ user: authUser, tokens: { accessToken: "at" } });
-    const response = await POST(post("/api/auth/login", { account: "person@example.com", password: "Passw0rd!", turnstileToken: "0.good" }));
-    expect(response.status).toBe(200);
-    expect(loginChandlerUser).toHaveBeenCalledWith({ account: "person@example.com", password: "Passw0rd!" });
-    expect(await response.json()).toEqual({ ok: true });
   });
 
   it("Chandler 凭证错误映射为 401", async () => {
@@ -144,21 +101,6 @@ describe("POST /api/auth/register", () => {
     });
     expect(establishCodelphiSession).toHaveBeenCalledTimes(1);
     expect(await response.json()).toEqual({ ok: true });
-  });
-
-  it("自有 Turnstile 启用后：siteverify 通过才放行注册", async () => {
-    vi.stubEnv("TURNSTILE_SITE_KEY", "0x4AAA_site");
-    vi.stubEnv("TURNSTILE_SECRET", "0x4AAA_secret");
-    stubSiteverify({ success: true, action: "register" });
-    registerChandlerUser.mockResolvedValue({ user: authUser, tokens: { accessToken: "at" } });
-    const response = await POST(post("/api/auth/register", { email: "a@b.co", code: "123456", password: "Passw0rd!", turnstileToken: "0.good" }));
-    expect(response.status).toBe(200);
-    expect(registerChandlerUser).toHaveBeenCalledTimes(1);
-
-    stubSiteverify({ success: false, "error-codes": ["invalid-input-response"] });
-    const rejected = await POST(post("/api/auth/register", { email: "a@b.co", code: "123456", password: "Passw0rd!", turnstileToken: "0.bad" }));
-    expect(rejected.status).toBe(403);
-    expect((await rejected.json()).code).toBe("turnstile_failed");
   });
 
   it("邮箱已注册映射 409，弱密码映射 422，验证码错误（防枚举哨兵）映射 400 email_code_invalid", async () => {

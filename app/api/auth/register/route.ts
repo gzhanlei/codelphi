@@ -3,7 +3,6 @@ import { z } from "zod";
 import { assertChandlerAllowed } from "@/lib/chandler";
 import { ChandlerAuthError, chandlerAuthStatus, chandlerProfileFromAuthUser, establishCodelphiSession, registerChandlerUser } from "@/lib/chandler-auth";
 import { allowedEmails } from "@/lib/env";
-import { turnstileEnforced, verifyTurnstileToken } from "@/lib/turnstile-verify";
 import { AUTH_ERRORS } from "@/lib/ui-strings/dashboard";
 import { pick } from "@/lib/ui-locale";
 
@@ -14,27 +13,11 @@ const registerSchema = z.object({
   password: z.string().min(8).max(255),
   displayName: z.string().trim().max(33).optional().default(""),
   agreePolicies: z.boolean().optional().default(false),
-  // CoDelphi 自有 Turnstile 启用时必带（客户端 widget 产出）；未启用时无此字段
-  turnstileToken: z.string().max(2048).optional().default(""),
 });
-
-function clientIp(request: NextRequest): string | undefined {
-  const forwarded = request.headers.get("x-forwarded-for");
-  return forwarded?.split(",")[0]?.trim() || undefined;
-}
 
 export async function POST(request: NextRequest) {
   const parsed = registerSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: pick("zh-CN", AUTH_ERRORS.invalid_input), code: "invalid_input" }, { status: 400 });
-
-  // 页面人机验证（信任合作伙伴模式）：CoDelphi 自有 widget 启用时在本路由 siteverify
-  if (turnstileEnforced()) {
-    const verdict = await verifyTurnstileToken(parsed.data.turnstileToken, "register", clientIp(request));
-    if (!verdict.ok) {
-      const status = verdict.code === "turnstile_unavailable" ? 503 : 403;
-      return NextResponse.json({ error: pick("zh-CN", AUTH_ERRORS[verdict.code!]), code: verdict.code }, { status });
-    }
-  }
 
   try {
     const outcome = await registerChandlerUser({

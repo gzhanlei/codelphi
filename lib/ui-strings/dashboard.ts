@@ -33,7 +33,7 @@ export const LOGIN = {
   } satisfies Record<string, LocaleEntry>,
 } satisfies Record<string, LocaleEntry | Record<string, LocaleEntry>>;
 
-// ── 自建注册/登录表单（Chandler 密码认证通道 + Cloudflare Turnstile） ──
+// ── 自建注册/登录表单（Chandler 密码认证通道） ──
 export const AUTH_FORM = {
   accountLabel: { "zh-CN": "邮箱或用户名", en: "Email or username" },
   accountPlaceholder: { "zh-CN": "you@example.com", en: "you@example.com" },
@@ -59,7 +59,6 @@ export const AUTH_FORM = {
   goRegister: { "zh-CN": "注册", en: "Sign up" },
   haveAccount: { "zh-CN": "已有账号？", en: "Already have an account?" },
   goLogin: { "zh-CN": "直接登录", en: "Sign in instead" },
-  turnstileLabel: { "zh-CN": "人机验证", en: "Human verification" },
   agreePrefix: { "zh-CN": "已阅读并同意 Chandler", en: "I have read and agree to the Chandler" },
   agreeTerms: { "zh-CN": "《用户协议》", en: "Terms of Service" },
   agreeAnd: { "zh-CN": "与", en: "and" },
@@ -87,12 +86,12 @@ export const AUTH_ERRORS: Record<string, LocaleEntry> = {
   weak_password: { "zh-CN": "密码需 8-255 位，且包含大小写字母、数字、符号中的至少 3 类。", en: "Password must be 8-255 characters with at least 3 of: upper, lower, digit, symbol." },
   user_disabled: { "zh-CN": "该账号已被限制使用。", en: "This account has been disabled." },
   mfa_invalid_code: { "zh-CN": "动态验证码不正确。", en: "Invalid verification code." },
+  // 本应用已下线页面级 Turnstile；两条保留仅为兜底 Chandler 侧可能返回的验证错误码
   turnstile_failed: { "zh-CN": "人机验证未通过，请重试。", en: "Human verification failed — please retry." },
   turnstile_unavailable: { "zh-CN": "人机验证服务暂不可用，请稍后再试。", en: "Human verification is temporarily unavailable; try again later." },
   rate_limited: { "zh-CN": "操作过于频繁，请稍后再试。", en: "Too many attempts; try again shortly." },
   unavailable: { "zh-CN": "Chandler 服务暂不可用，请稍后再试。", en: "Chandler is temporarily unavailable; try again later." },
   invalid_input: { "zh-CN": "请求参数不完整，请检查表单。", en: "The request is incomplete — check the form." },
-  missing_turnstile_token: { "zh-CN": "请先完成人机验证。", en: "Please complete the human verification first." },
   forbidden: { "zh-CN": "该账号未获得本部署的访问授权。", en: "This account is not authorized for this deployment." },
 } satisfies Record<string, LocaleEntry>;
 

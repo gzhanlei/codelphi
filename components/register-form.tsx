@@ -1,28 +1,25 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { TurnstileWidget, type TurnstileHandle } from "@/components/turnstile-widget";
 import { authErrorText, postAuth } from "@/components/auth-form-shared";
 import { pick, type UiLocale } from "@/lib/ui-locale";
 import { AUTH_ERRORS, AUTH_FORM } from "@/lib/ui-strings/dashboard";
 
 const RESEND_COOLDOWN_SECONDS = 60; // Chandler send-code 60s 冷却，与 429 otp_cooldown 对齐
 
-/** 注册表单（Chandler 公开注册通道）：邮箱验证码（60s 冷却）+ 密码 + Turnstile，成功即建立会话并进入工作区。 */
-export function RegisterForm({ locale, sitekey }: { locale: UiLocale; sitekey: string }) {
+/** 注册表单（Chandler 公开注册通道）：邮箱验证码（60s 冷却）+ 密码，成功即建立会话并进入工作区。 */
+export function RegisterForm({ locale }: { locale: UiLocale }) {
   const L = AUTH_FORM;
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [agree, setAgree] = useState(false);
   const [password, setPassword] = useState("");
-  const [token, setToken] = useState("");
   const [pending, setPending] = useState(false);
   const [sending, setSending] = useState(false);
   const [cooldown, setCooldown] = useState(0);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
-  const widgetRef = useRef<TurnstileHandle>(null);
   const timerRef = useRef<number | null>(null);
 
   useEffect(() => () => {
@@ -64,10 +61,6 @@ export function RegisterForm({ locale, sitekey }: { locale: UiLocale; sitekey: s
 
   const submit = async () => {
     setError("");
-    if (sitekey && !token) {
-      setError(pick(locale, AUTH_ERRORS.missing_turnstile_token));
-      return;
-    }
     setPending(true);
     try {
       const { data } = await postAuth("/api/auth/register", {
@@ -76,12 +69,10 @@ export function RegisterForm({ locale, sitekey }: { locale: UiLocale; sitekey: s
         password,
         displayName: displayName.trim(),
         agreePolicies: agree === true ? true : undefined,
-        turnstileToken: token,
       });
       if (data.ok) window.location.assign("/");
       else {
         setError(authErrorText(data.code, locale));
-        widgetRef.current?.reset();
       }
     } finally {
       setPending(false);
@@ -122,7 +113,6 @@ export function RegisterForm({ locale, sitekey }: { locale: UiLocale; sitekey: s
           <a href="https://chandler.work/privacy" target="_blank" rel="noreferrer">{pick(locale, L.agreePrivacy)}</a>
         </span>
       </label>
-      <TurnstileWidget ref={widgetRef} sitekey={sitekey} action="register" onToken={setToken} label={pick(locale, L.turnstileLabel)} onError={() => setError(pick(locale, AUTH_ERRORS.turnstile_unavailable))} />
       {error ? <div className="error-banner" role="alert">{error}</div> : null}
       {notice && !error ? <div className="auth-notice" role="status">{notice}</div> : null}
       <button className="login-button" type="submit" disabled={pending}>

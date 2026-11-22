@@ -12,20 +12,6 @@ export function chandlerBaseUrl() {
   return (process.env.CHANDLER_BASE_URL ?? "https://api.chandler.work").replace(/\/$/, "");
 }
 
-/** CoDelphi 自有 Cloudflare Turnstile widget 的公开 site key（注册/登录页渲染用）。
- *  Chandler 信任合作伙伴模式（指南 v3.13）：Chandler 的 widget 仅用于自家页面，
- *  CoDelphi 页面的人机验证由本应用自行负责——widget 须在本应用自己的 Cloudflare
- *  账号创建，hostname 含 codelphi.com（生产）与 localhost（本地）。
- *  与 TURNSTILE_SECRET 成对生效；只配其一时视为未启用（见 lib/turnstile-verify.ts）。 */
-export function turnstileSiteKey() {
-  return (process.env.TURNSTILE_SITE_KEY ?? "").trim();
-}
-
-/** CoDelphi 自有 Turnstile widget 的 secret（服务端 siteverify 用，不落日志）。 */
-export function turnstileSecret() {
-  return (process.env.TURNSTILE_SECRET ?? "").trim();
-}
-
 export function allowedEmails() {
   return new Set(
     (process.env.AUTH_ALLOWED_EMAILS ?? "")
