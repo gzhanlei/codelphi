@@ -2,7 +2,8 @@
 /**
  * Task 15 bench seed（scratch 库 codelphi_bench 专用，幂等）。
  * 只在隔离 bench 库中插入最小行集：org 1（migrations 已建）+ 计费账户/试用钱包 +
- * 产品 codelphi（source_roots=app/lib/scripts）+ 仓库 gzhanlei/codelphi（connection_id=NULL
+ * 产品 codelphi（source_roots=app/lib/scripts/components——components 必须在内，否则
+ *  前端组件不入行为清单=检测盲区假象）+ 仓库 gzhanlei/codelphi（connection_id=NULL
  * → 走服务器环境 GITHUB_TOKEN）。绝不触碰生产库 radar。
  */
 const mysql = require("/data/www/codelphi-bench/app/node_modules/mysql2/promise");
@@ -35,7 +36,7 @@ const url = new URL(
   );
   await conn.query(
     `INSERT INTO products (slug, name, description, organization_id, analyze_mode, source_roots)
-     VALUES ('codelphi', 'CoDelphi', 'Task 15 bench seed', 1, 'full', JSON_ARRAY('app','lib','scripts'))
+     VALUES ('codelphi', 'CoDelphi', 'Task 15 bench seed', 1, 'full', JSON_ARRAY('app','lib','scripts','components'))
      ON DUPLICATE KEY UPDATE name = VALUES(name), analyze_mode = 'full', source_roots = VALUES(source_roots)`,
   );
   const [productRows] = await conn.query("SELECT id FROM products WHERE slug = 'codelphi'");
