@@ -196,26 +196,35 @@ function tokenPairEqual(left: unknown, right: unknown): boolean {
  * 抛账务冲突（不得 last-write-wins）；request_fingerprint 永不改变；duration_ms 取第一次记录。
  * 非重复的写失败仅告警——batch_requests 行状态权威 + receipt 缺失按 C3.6 保守结算兜底。
  */
-export async function recordRequestScopedReceipt(input: RequestScopedReceiptInput): Promise<ReceiptReconcileResult> {
-  const usage = parseLlmUsage(input.usageRaw);
-  const { pricing, cost } = pricingSnapshot(input, usage);
-  try {
-    await getDb().execute(RECEIPT_INSERT_SQL, receiptInsertParams(input, usage, pricing, cost));
-    return "inserted";
-  } catch (error) {
-    if (!isDuplicateEntryError(error)) {
-      console.error("[billing] request-scoped llm receipt write failed", error);
-      return "noop";
-    }
-  }
-  const [rows] = (await getDb().execute(
-    `SELECT request_fingerprint, provider_request_id, usage_status, input_tokens, output_tokens,
-            cache_hit_tokens, cache_miss_tokens, usage_json, llm_cost_amount, duration_ms
-       FROM llm_call_receipts WHERE request_key = ?`,
-    [input.requestKey],
-  )) as [ReceiptReconcileRow[], unknown];
-  const existing = rows[0];
-  if (!existing) throw receiptConflictError(input.requestKey, "duplicate insert reported without an existing row");
+const REQUEST_RECEIPT_UPDATE_SQL = `UPDATE llm_call_receipts
+  SET provider_request_id = ?, input_tokens = ?, output_tokens = ?, cache_hit_tokens = ?, cache_miss_tokens = ?,
+      usage_json = ?, usage_status = ?, llm_cost_amount = ?, duration_ms = ?
+WHERE request_key = ? AND request_fingerprint = ?`;
+
+/**
+ * 纯合并规划（§23.3 C3.5 冲突矩阵）：给出现有行与投递内容，返回合并结果与是否变化；
+ * 任何冲突在此抛出——指纹不符、provider id 已知不同、已知 token/费用互相矛盾。
+ * duration 是观测数据：取第一次成功记录，重复回执不覆盖。
+ */
+function planScopedReceiptMerge(
+  existing: ReceiptReconcileRow,
+  input: RequestScopedReceiptInput,
+  usage: ParsedLlmUsage,
+  cost: number | null,
+): {
+  merged: {
+    providerRequestId: string | null;
+    inputTokens: number | null;
+    outputTokens: number | null;
+    cacheHitTokens: number | null;
+    cacheMissTokens: number | null;
+    usageJson: string | null;
+    usageStatus: string;
+    costAmount: number | null;
+    durationMs: number | null;
+  };
+  changed: boolean;
+} {
   if (str(existing.request_fingerprint) !== input.requestFingerprint) {
     throw receiptConflictError(input.requestKey, "request_fingerprint mismatch");
   }
@@ -261,26 +270,44 @@ export async function recordRequestScopedReceipt(input: RequestScopedReceiptInpu
     merged.usageStatus !== str(existing.usage_status) ||
     merged.costAmount !== numericOrNull(existing.llm_cost_amount) ||
     merged.durationMs !== numericOrNull(existing.duration_ms);
+  return { merged, changed };
+}
+
+export async function recordRequestScopedReceipt(input: RequestScopedReceiptInput): Promise<ReceiptReconcileResult> {
+  const usage = parseLlmUsage(input.usageRaw);
+  const { pricing, cost } = pricingSnapshot(input, usage);
+  try {
+    await getDb().execute(RECEIPT_INSERT_SQL, receiptInsertParams(input, usage, pricing, cost));
+    return "inserted";
+  } catch (error) {
+    if (!isDuplicateEntryError(error)) {
+      console.error("[billing] request-scoped llm receipt write failed", error);
+      return "noop";
+    }
+  }
+  const [rows] = (await getDb().execute(
+    `SELECT request_fingerprint, provider_request_id, usage_status, input_tokens, output_tokens,
+            cache_hit_tokens, cache_miss_tokens, usage_json, llm_cost_amount, duration_ms
+       FROM llm_call_receipts WHERE request_key = ?`,
+    [input.requestKey],
+  )) as [ReceiptReconcileRow[], unknown];
+  const existing = rows[0];
+  if (!existing) throw receiptConflictError(input.requestKey, "duplicate insert reported without an existing row");
+  const { merged, changed } = planScopedReceiptMerge(existing, input, usage, cost);
   if (!changed) return "noop";
-  await getDb().execute(
-    `UPDATE llm_call_receipts
-        SET provider_request_id = ?, input_tokens = ?, output_tokens = ?, cache_hit_tokens = ?, cache_miss_tokens = ?,
-            usage_json = ?, usage_status = ?, llm_cost_amount = ?, duration_ms = ?
-      WHERE request_key = ? AND request_fingerprint = ?`,
-    [
-      merged.providerRequestId,
-      merged.inputTokens,
-      merged.outputTokens,
-      merged.cacheHitTokens,
-      merged.cacheMissTokens,
-      merged.usageJson,
-      merged.usageStatus,
-      merged.costAmount,
-      merged.durationMs,
-      input.requestKey,
-      input.requestFingerprint,
-    ],
-  );
+  await getDb().execute(REQUEST_RECEIPT_UPDATE_SQL, [
+    merged.providerRequestId,
+    merged.inputTokens,
+    merged.outputTokens,
+    merged.cacheHitTokens,
+    merged.cacheMissTokens,
+    merged.usageJson,
+    merged.usageStatus,
+    merged.costAmount,
+    merged.durationMs,
+    input.requestKey,
+    input.requestFingerprint,
+  ]);
   return "reconciled";
 }
 
