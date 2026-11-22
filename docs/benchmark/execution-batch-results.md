@@ -236,10 +236,34 @@ sha 精确取值兜底。
    detector 对前端组件的检测盲区，与执行架构无关，属 inventory 检测器待办。
 3. 其余 19/20 行为面齐备；常量文件的 no_behavior 是合理口径。
 
+## 8.2 第三批 10 样本与 30 样本汇总
+
+第三批：COVERED 6/10（60%）——public-demo 缓存复用、通知渠道异常、Turnstile 半配置、
+chandler 502 映射、MCP 批量通知 202、分析触发 sweep 全部双命中；TERM_ONLY 2
+（**turnstile-widget.tsx 前端组件但语义命中 35 处**——行为经关联文件被提取）；
+PATH_ONLY 1（pr-preview 静默返回）；MISS 1（product-navigation.tsx **0 任务——前端
+组件检测盲区第二次确认**）。digest.ts 被 3 个任务覆盖但 buildDigest 场景未产出
+（2 no_behavior + 1 unresolved 待复核）。
+
+### 30 样本总汇总
+
+| 口径 | 覆盖率 |
+| --- | --- |
+| 严格双命中（路径+语义） | **16/30 = 53%** |
+| 行为面覆盖（任一命中） | **27/30 = 90%** |
+| MISS | **3/30 = 10%**：纯常量口径差异 ×1 + **前端组件检测盲区 ×2（双重确认）** |
+
+### 盲区定性（真缺陷，与执行架构无关）
+
+`components/*` 的 UI 状态展示类组件（remove-product-button、product-navigation）
+**未进入行为清单**（零任务），而 Turnstile widget 的行为能经关联文件被覆盖——
+行为清单 detector 对「UI 状态展示类前端组件」存在稳定盲区。这是 inventory
+检测器的待办（前端组件的单元检测/锚点策略），不影响本实验的执行架构结论。
+
 ## 9. 待办
 
 - [ ] 7 个 PATH_ONLY 样本的人工语义复核（判定真实语义覆盖率）
-- [ ] 前端 UI 组件检测盲区：remove-product-button.tsx 类组件未入行为清单（detector 待办）
+- [ ] 前端 UI 组件检测盲区（双重确认）：remove-product-button + product-navigation 均零任务未入行为清单（detector 待办）
 - [ ] evidence cap 终极修复：软上限剥除超额 evidence（非硬失败）
 - [ ] local-git 后端 spawn 优化（批量 tree 导出/worktree 主路径化）
 - [ ] 可复现性验证：GitHub API 源码 + 4 并发 + 修复版 task 臂重跑一轮（排除 local-git 变量）
