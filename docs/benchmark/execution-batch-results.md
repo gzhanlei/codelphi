@@ -260,10 +260,36 @@ PATH_ONLY 1（pr-preview 静默返回）；MISS 1（product-navigation.tsx **0 �
 行为清单 detector 对「UI 状态展示类前端组件」存在稳定盲区。这是 inventory
 检测器的待办（前端组件的单元检测/锚点策略），不影响本实验的执行架构结论。
 
-## 9. 待办
+## 10. 盲区修复验证（run 14，2026-11-22）：根因是配置不是 detector
+
+30 样本对照后用户裁决转向盲区修复。根因核实：**bench 种子的 source_roots 漏了
+components/（app/lib/scripts），前端组件从未进入分析范围**——inventory detector 本身
+支持 .tsx（next 路由/page + generic symbol_range 分片）。修复：种子加 components
+（c34e2b0）。
+
+run 14（task 臂 + components 范围，45 分钟）：
+
+| 项 | 实测值 |
+| --- | --- |
+| 任务总量 | 2,978（比 run 13 多 322 = 组件任务） |
+| **组件任务** | **318 个，全部处理**：extracted 126（40%）/ no_behavior 103（32%）/ unresolved 89（28%） |
+| **两个原 MISS 组件** | **remove-product-button、product-navigation 均已被提取** ✓ |
+| 总终态 | extracted 958 / no_behavior 1,684 / unresolved 334 / failed 2 |
+| 总账务 | 5,829 调用 / 1,927 万 token / ¥1.53 |
+| 激活门禁 | 仍拒：unresolved 334 未收敛（组件判定贡献 89 个） |
+
+**结论**：
+1. 盲区根因 = **配置遗漏**，一行种子修复后前端组件完整入清单（318 任务、40% 提取出
+   场景）——"detector 缺陷"假设不成立，撤回。
+2. unresolved 总量随分析面扩大而增长（237→334）：gate 稳定通过的前提是 unresolved
+   语义复核收敛，这是**质量收敛课题**（repair 轮次/复核策略），与执行架构和 detector
+   均无关，属后续独立课题。
+
+## 11. 待办
 
 - [ ] 7 个 PATH_ONLY 样本的人工语义复核（判定真实语义覆盖率）
-- [ ] 前端 UI 组件检测盲区（双重确认）：remove-product-button + product-navigation 均零任务未入行为清单（detector 待办）
+- [x] 前端组件盲区：根因=bench 种子 source_roots 漏 components（非 detector 缺陷）；修复 c34e2b0；run 14 验证 318 组件任务入库、两个原 MISS 组件被提取
+- [ ] unresolved 语义复核收敛：334 个 unresolved 使 gate 无法通过（run 11/12/13/14 一致）——质量收敛课题（repair 轮次/复核策略），独立于执行架构
 - [ ] evidence cap 终极修复：软上限剥除超额 evidence（非硬失败）
 - [ ] local-git 后端 spawn 优化（批量 tree 导出/worktree 主路径化）
 - [ ] 可复现性验证：GitHub API 源码 + 4 并发 + 修复版 task 臂重跑一轮（排除 local-git 变量）
