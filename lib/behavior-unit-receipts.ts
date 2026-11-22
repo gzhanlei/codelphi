@@ -241,7 +241,8 @@ interface UpdateResult {
   affectedRows: number;
 }
 
-function taskKeyHash(taskKey: string): string {
+/** 导出供 execution batch 成员行复用（Task 6 最小导出，哈希派生单点化）。 */
+export function taskKeyHash(taskKey: string): string {
   return createHash("sha256").update(taskKey, "utf8").digest("hex");
 }
 

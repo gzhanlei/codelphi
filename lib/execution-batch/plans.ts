@@ -14,7 +14,11 @@ export type ExecutionBatchErrorCode =
   | "execution_batch_version_conflict"
   | "execution_batch_plan_set_not_ready"
   | "execution_batch_plan_set_exists"
-  | "execution_batch_allocation_mismatch";
+  | "execution_batch_allocation_mismatch"
+  | "execution_batch_request_state"
+  | "execution_batch_response_persistence_failed"
+  | "execution_batch_receipt_conflict"
+  | "execution_batch_attempt_state";
 
 export class ExecutionBatchError extends Error {
   constructor(
