@@ -88,6 +88,13 @@ function routingMismatchDetail(allocation: BatchExecutionAllocation, manifestTas
   return null;
 }
 
+/** JSON 列读回：mysql2 对 JSON 列自动解析返回对象（真库行为，fake execute 给字符串）——
+ *  两种形状都容忍（task15 教训：lib 单测绿 ≠ 真库绿）。 */
+function parseJsonColumn<T>(value: unknown): T {
+  if (typeof value === "string") return JSON.parse(value) as T;
+  return value as T;
+}
+
 function rowToPlan(row: PlanRow): BatchPlan {
   return {
     runId: num(row.run_id),
@@ -95,10 +102,10 @@ function rowToPlan(row: PlanRow): BatchPlan {
     batchKey: str(row.batch_key),
     manifestHash: str(row.manifest_hash),
     plannerVersion: str(row.planner_version),
-    orderedTaskKeys: JSON.parse(str(row.ordered_task_keys)) as string[],
-    taskAliasMap: JSON.parse(str(row.task_alias_map)) as Record<string, string>,
+    orderedTaskKeys: parseJsonColumn<string[]>(row.ordered_task_keys),
+    taskAliasMap: parseJsonColumn<Record<string, string>>(row.task_alias_map),
     groupingRulesFingerprint: str(row.grouping_rules_fingerprint),
-    inputBudgetSnapshot: JSON.parse(str(row.input_budget_snapshot)) as BatchPlan["inputBudgetSnapshot"],
+    inputBudgetSnapshot: parseJsonColumn<BatchPlan["inputBudgetSnapshot"]>(row.input_budget_snapshot),
   };
 }
 
@@ -189,7 +196,7 @@ export async function publishBehaviorBatchPlanSet(execute: Execute, input: Publi
     expectedPlanCount: num(setRow.expected_plan_count),
     expectedTaskCount: num(setRow.expected_task_count),
     status: "ready",
-    fallbackAssignments: JSON.parse(str(setRow.fallback_assignments)) as BatchFallbackAssignment[],
+    fallbackAssignments: parseJsonColumn<BatchFallbackAssignment[]>(setRow.fallback_assignments),
   };
 }
 
@@ -223,7 +230,7 @@ function validateStoredPlanSet(setRow: PlanSetRow, planRows: PlanRow[], manifest
       throw new ExecutionBatchError("execution_batch_version_conflict", `run ${runId} plan ${plan.batchKey} T 别名映射与成员不符`);
     }
   }
-  const fallbackAssignments = JSON.parse(str(setRow.fallback_assignments)) as BatchFallbackAssignment[];
+  const fallbackAssignments = parseJsonColumn<BatchFallbackAssignment[]>(setRow.fallback_assignments);
   const recomputedFingerprint = computePlanSetFingerprint(
     str(setRow.planner_version),
     planRows.length > 0 ? str(planRows[0]!.manifest_hash) : "",
@@ -270,7 +277,7 @@ export async function loadReadyBehaviorBatchAllocation(execute: Execute, runId: 
     throw new ExecutionBatchError("execution_batch_version_conflict", `run ${runId} plan set ${str(setRow.plan_set_id)} plan 数量不符`);
   }
   const storedPlans = planRows.map(rowToPlan);
-  const fallbackAssignments = JSON.parse(str(setRow.fallback_assignments)) as BatchFallbackAssignment[];
+  const fallbackAssignments = parseJsonColumn<BatchFallbackAssignment[]>(setRow.fallback_assignments);
   validateStoredPlanSet(setRow, planRows, [
     ...storedPlans.flatMap((plan) => plan.orderedTaskKeys),
     ...fallbackAssignments.map((assignment) => assignment.taskKey),

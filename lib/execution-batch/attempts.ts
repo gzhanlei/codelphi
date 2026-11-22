@@ -299,6 +299,12 @@ export async function transitionBatchAttempt(input: {
 }
 
 /** 恢复上下文：原 member/request identity 与当前 task 提交资格并列返回，不改写 request member。 */
+/** JSON 列读回：mysql2 自动解析（真库）与字符串（fake）两种形状都容忍。 */
+function parseJsonColumn<T>(value: unknown): T {
+  if (typeof value === "string") return JSON.parse(value) as T;
+  return value as T;
+}
+
 export async function loadBatchAttemptForRecovery(input: { runId: number; batchAttemptUuid: string }): Promise<BatchRecoveryContext> {
   const attempt = await requireAttempt(input.runId, input.batchAttemptUuid);
   const [memberRows] = (await getDb().execute(
@@ -317,7 +323,7 @@ export async function loadBatchAttemptForRecovery(input: { runId: number; batchA
     members.push({
       taskKey,
       taskAlias: String(row.task_alias),
-      orderedRegionAliases: JSON.parse(String(row.ordered_region_aliases)) as Array<{ anchorFragmentKey: string; regionAlias: string }>,
+      orderedRegionAliases: parseJsonColumn<Array<{ anchorFragmentKey: string; regionAlias: string }>>(row.ordered_region_aliases),
       requestTaskAttemptId: String(row.request_task_attempt_id),
       requestLeaseIdentity: String(row.request_lease_identity),
       currentTask: taskRow
