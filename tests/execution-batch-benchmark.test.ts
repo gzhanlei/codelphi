@@ -75,13 +75,13 @@ describe("execution batch benchmark accounting (Task 11)", () => {
     }));
     // 过程门禁失败直接 failed——统计再好也不得通过（冻结协议 §4）
     expect(outcome.verdict).toBe("failed");
-    expect(outcome.reasons.some((reason) => reason.includes("process gates"))).toBe(true);
+    expect(outcome.reasons.some((reason) => reason.includes("过程门禁"))).toBe(true);
   });
 
   it("marks missing blind accounting inconclusive rather than passed", () => {
     const outcome = evaluateBenchmarkOutcome(pair({ blindAccounting: null }));
     expect(outcome.verdict).toBe("inconclusive");
-    expect(outcome.reasons.some((reason) => reason.includes("blind"))).toBe(true);
+    expect(outcome.reasons.some((reason) => reason.includes("盲评"))).toBe(true);
     // 样本不足同样 inconclusive（30 是下限≠功效证明）
     const thin = evaluateBenchmarkOutcome(pair({
       blindAccounting: {
