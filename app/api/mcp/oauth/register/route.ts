@@ -13,7 +13,9 @@ function validRedirectUri(value: unknown): value is string {
   if (typeof value !== "string" || value.length === 0 || value.length > MAX_URI_LENGTH) return false;
   try {
     const url = new URL(value);
-    return url.protocol === "https:" || url.protocol === "http:";
+    if (url.protocol === "https:") return true;
+    if (url.protocol === "http:") return ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
+    return !["javascript:", "data:", "file:"].includes(url.protocol);
   } catch {
     return false;
   }

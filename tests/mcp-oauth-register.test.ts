@@ -31,6 +31,21 @@ describe("mcp oauth dynamic client registration route (RFC 7591)", () => {
     expect(registerClient).toHaveBeenCalledWith(expect.anything(), { clientName: "ChatGPT Connector", redirectUris: ["https://chatgpt.com/connector_redirect"] });
   });
 
+  it("accepts loopback and native-app redirect uris", async () => {
+    registerClient.mockResolvedValue({ clientId: "mcp_native" });
+    const redirectUris = ["http://127.0.0.1:60108/callback", "http://localhost:59382/callback", "kimi-code://oauth/callback"];
+    const response = await POST(request({ client_name: "Kimi Code", redirect_uris: redirectUris }));
+    expect(response.status).toBe(201);
+    expect(registerClient).toHaveBeenCalledWith(expect.anything(), { clientName: "Kimi Code", redirectUris });
+  });
+
+  it("rejects non-loopback http redirect uris", async () => {
+    const response = await POST(request({ client_name: "x", redirect_uris: ["http://example.com/callback"] }));
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toBe("invalid_redirect_uri");
+    expect(registerClient).not.toHaveBeenCalled();
+  });
+
   it("rejects a blank name (invalid_client_metadata)", async () => {
     const response = await POST(request({ client_name: "  ", redirect_uris: ["https://chatgpt.com/cb"] }));
     expect(response.status).toBe(400);
