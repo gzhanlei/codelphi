@@ -153,9 +153,38 @@ sha 精确取值兜底。
 5. **额外产出**：`local_git` 源码后端（bench/自托管零 rate limit）、task 侧 evidence
    cap 对齐、三处执行回路修复——均独立于实验结论存活。
 
-## 7. 待办
+## 7. run 13：修复版 task 臂复测（2026-11-22 追加）——结论修正
 
-- [x] fused 臂全量重跑 + 对照报告（本文件 §5/§6）
+为回答「task 臂分析质量」做可审计复测（网关恢复后，70e80f2 修复版代码 + 本地源码 + 4 并发）：
+
+| 项 | 实测值 |
+| --- | --- |
+| 墙钟 | **59 分钟**（run 1 的 3 倍——local-git `cat-file` 子进程 spawn 开销在 4 并发下也严重拖累） |
+| 终态 | extracted 839 / no_behavior 1,581 / **unresolved 237** / failed 3 |
+| 调用/Token/费用 | 5,110（全 success）/ 1,684 万 / ¥1.33 |
+| **激活门禁** | **拒绝**：`anchorAccountingComplete`+`allUnitsInAllowedTerminalStates`（237 个 unresolved 锚点） |
+| evidence cap | 修复后 failed 51→3，但 `too_big maximum:20` 仍出现——模型在密集区可输出超过任何固定上限 |
+
+### 7.1 结论修正（重要）
+
+1. **「task 臂 20 分钟 + gate 通过」不可复现**：run 1 是唯一绿观测。同代码重跑（run 13）
+   gate 拒、墙钟 3 倍。全量分析的质量收敛在该仓库上天然处于 gate 边缘，unresolved 数量
+   在 129（fused）～237（task）之间随模型输出波动——**不是执行架构的属性**。
+2. **evidence cap 需要终极修复**：固定 max 值（10/20）都会被密集区打爆（3/51 次）。
+   正确形态是**剥除超额 evidence 保留前 N 条并记诊断**（软上限），而非整任务硬失败。
+3. **local-git 后端的 spawn 开销必须优化**（tree 列表批量导出 / worktree 直读升级为
+   主路径 + revision 一致性校验），否则本地源码路线墙钟不可接受。
+4. **各臂 unresolved 对照**：fused 129（4.9%）反而低于 task 237（9.0%）——合并调用
+   没有降低判定质量；「fused 质量更差」的假设不成立。
+5. 对用户问题「task 臂分析质量如何」的最终回答：**结构质量唯一一次过 gate，但不可
+   复现；内容质量（召回/假阳性/证据支持）从未盲评**——这是本仓库全量分析的现状，
+   与执行架构无关，属于 gate 边缘波动 + unresolved 语义复核收敛问题。
+
+## 8. 待办
+
+- [ ] evidence cap 终极修复：软上限剥除超额 evidence（非硬失败）
+- [ ] local-git 后端 spawn 优化（批量 tree 导出/worktree 主路径化）
+- [ ] 可复现性验证：GitHub API 源码 + 4 并发 + 修复版 task 臂重跑一轮（排除 local-git 变量）
+- [ ] 内容质量盲评（冻结预标 34 条 codelphi-self 对照）——「质量过关」的证据升级
 - [ ] 中间批次 release 对账（等 run 429 全量重析完成）
-- [ ] 未获单独批准不启用生产 batch/fused（`ANALYSIS_BEHAVIOR_EXECUTION_MODE` 保持默认 task）
-- [ ] Task 12 并发档位 / Task 9 UX：**不再投入**——task 臂已是基线形态，无 batch 收益可调
+- [ ] 未获单独批准不启用生产 batch/fused
