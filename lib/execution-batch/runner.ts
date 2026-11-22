@@ -26,6 +26,7 @@ import {
   persistBatchResponse,
 } from "./requests";
 import { buildBatchDescribePrompt, buildBatchJudgePrompt, parseBatchDescribeContent, type BatchProtocolMember } from "./protocol";
+import { buildBatchFusedPrompt, parseBatchFusedContent } from "./fused-protocol";
 import { extractBehaviorBatch } from "./extraction";
 import { BATCH_PARSER_VERSION, type BatchChatMessage, type BatchExecutionAllocation, type BatchPlan } from "./types";
 
@@ -37,6 +38,13 @@ import { BATCH_PARSER_VERSION, type BatchChatMessage, type BatchExecutionAllocat
  */
 
 export const BATCH_RESERVED_MAX_OUTPUT_TOKENS = 32_000; // describe 16k + judge 16k（与 ai.ts max_tokens 对齐）
+
+/** Task 13 提取模式：describe_judge（双步，默认）| fused（单步实验，显式 flag 才进入）。 */
+export function behaviorBatchExtractionMode(): "describe_judge" | "fused" {
+  const raw = (process.env.ANALYSIS_BEHAVIOR_BATCH_EXTRACTION_MODE ?? "").trim();
+  if (raw === "fused") return "fused";
+  return "describe_judge";
+}
 const BATCH_PROTOCOL_OVERHEAD_INPUT_TOKENS = 16_000;
 
 /** §14.2：预留覆盖本 attempt 最大账务暴露（judge 输入含 describe 最大输出回显）。 */
@@ -99,8 +107,8 @@ export interface RunBatchAttemptInput extends AttemptRunConfig {
   batchKey: string;
   plan: BatchPlan;
   tasks: ReadonlyArray<BehaviorExecutionTask>;
-  /** Task 13 保留扩展位；本阶段只实现 describe_judge 双步。 */
-  extractionMode?: "describe_judge";
+  /** Task 13：describe_judge（双步默认）| fused（单步实验）。 */
+  extractionMode?: "describe_judge" | "fused";
 }
 
 interface RunnerContext {
@@ -400,8 +408,8 @@ async function runSplitAndCommit(
 /** 双步主批执行（§13）。零 claim → aborted + 释放预留；派发失败 → 终态 + 按真实回执结算；
  *  成功路径结算后拆分/独立提交/repair。 */
 export async function runInventoryBatchAttempt(input: RunBatchAttemptInput): Promise<void> {
-  if (input.extractionMode !== undefined && input.extractionMode !== "describe_judge") {
-    throw new Error(`unsupported batch extraction mode: ${String(input.extractionMode)}（fused 属 Task 13 独立实验）`);
+  if (input.extractionMode !== undefined && input.extractionMode !== "describe_judge" && input.extractionMode !== "fused") {
+    throw new Error(`unsupported batch extraction mode: ${String(input.extractionMode)}`);
   }
   const taskByKey = new Map(input.tasks.map((task) => [task.taskKey, task]));
   // ① 预算预留先于任何 claim（attemptId = batch attempt uuid，§14.2）
@@ -477,6 +485,41 @@ export async function runInventoryBatchAttempt(input: RunBatchAttemptInput): Pro
     }
   }, Math.max(1, Math.floor(input.leaseDurationMs / 3)));
   try {
+    if (input.extractionMode === "fused") {
+      // Task 13 fused：单次调用同时完成事实陈述与判定（§15 边界：合并模型调用，
+      // 不合并质量职责——解析/校验/推导/repair 语义原样复用）
+      const fusedFingerprint = batchFingerprint({
+        kind: "batch_fused_request",
+        manifest_hash: input.manifestHash,
+        batch_key: input.batchKey,
+        batch_attempt_uuid: batchAttemptUuid,
+        members: claimedProtocolMembers,
+        prompt_version: BATCH_PARSER_VERSION,
+      });
+      const fused = await dispatchStage(
+        context,
+        input,
+        "judge",
+        1,
+        fusedFingerprint,
+        buildBatchFusedPrompt({
+          members: claimedProtocolMembers,
+          taskByTaskKey: taskByKey,
+          sourcesByTaskKey: await loadSourcesFor(snapshotInput, claimed),
+          knownFeatureNames: input.knownFeatureNames,
+          knownUnitKeys: input.knownUnitKeys,
+          language: input.outputLanguage,
+        }),
+        null,
+        input.dispatchDetailed ?? ((messages, billing) => requestStructuredCompletionDetailed(messages, billing)),
+      );
+      // fused 单次调用结束即结算（同双步：按真实回执结算后再拆分）
+      await safeSettle(fused.reservationUuid);
+      const repairClassCounts: Record<RepairTriggerClass, number> = { format_or_parse: 0, evidence_or_contract: 0, model_capacity: 0 };
+      await runSplitAndCommit(snapshotInput, context, claimed, fused.content, fused.content, fused.finishReason === "length", fused.finishReason === "length", new Map(), repairClassCounts);
+      console.log("[execution-batch] fused repair classes", JSON.stringify(repairClassCounts));
+      return;
+    }
     // ⑥ describe
     const describeFingerprint = batchFingerprint({
       kind: "batch_describe_request",
