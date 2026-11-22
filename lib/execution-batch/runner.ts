@@ -429,6 +429,17 @@ export async function runInventoryBatchAttempt(input: RunBatchAttemptInput): Pro
   const grant = await acquireBatchAttemptProcessing({ runId: input.runId, batchAttemptUuid, processingOwner: input.leaseOwner, leaseDurationMs: input.leaseDurationMs });
   context.processingOwner = grant.processingOwner;
   context.version = grant.version;
+  // ④' 不可变源码快照（§23.6 正确性价值）：同一 attempt 的 describe/judge/extraction 共享
+  // 同一份源码，避免三次读取间源码漂移导致各阶段实际基于不同输入；同时消除重复 I/O。
+  const sourceSnapshot = new Map<string, TaskSource[]>();
+  const cachedLoadSources = async (task: BehaviorExecutionTask): Promise<TaskSource[]> => {
+    const cached = sourceSnapshot.get(task.taskKey);
+    if (cached) return cached;
+    const loaded = await input.loadSources(task);
+    sourceSnapshot.set(task.taskKey, loaded);
+    return loaded;
+  };
+  const snapshotInput: RunBatchAttemptInput = { ...input, loadSources: cachedLoadSources };
   // ⑤ 参与任务心跳：batch heartbeat 是协调操作，实际续租的是每个参与 task（§14.1）
   const claimedProtocolMembers = claimed.map((entry) => entry.member);
   const heartbeat = setInterval(() => {
@@ -462,7 +473,7 @@ export async function runInventoryBatchAttempt(input: RunBatchAttemptInput): Pro
       buildBatchDescribePrompt({
         members: claimedProtocolMembers,
         taskByTaskKey: taskByKey,
-        sourcesByTaskKey: await loadSourcesFor(input, claimed),
+        sourcesByTaskKey: await loadSourcesFor(snapshotInput, claimed),
         language: input.outputLanguage,
       }),
       null,
@@ -496,7 +507,7 @@ export async function runInventoryBatchAttempt(input: RunBatchAttemptInput): Pro
         buildBatchJudgePrompt({
           members: claimedProtocolMembers,
           taskByTaskKey: taskByKey,
-          sourcesByTaskKey: await loadSourcesFor(input, claimed),
+          sourcesByTaskKey: await loadSourcesFor(snapshotInput, claimed),
           describeResponseHash,
           descriptionsByTaskKey: descriptions,
           knownFeatureNames: input.knownFeatureNames,
@@ -512,7 +523,7 @@ export async function runInventoryBatchAttempt(input: RunBatchAttemptInput): Pro
     // ⑧ 主批调用结束：按 batch attempt 全部真实回执结算（含失败/unknown）
     await safeSettle(describe.reservationUuid);
     // ⑨⑩ 拆分 / 独立提交 / repair
-    await runSplitAndCommit(input, context, claimed, describe.content, judgeContent, describeTruncated, judgeTruncated, new Map());
+    await runSplitAndCommit(snapshotInput, context, claimed, describe.content, judgeContent, describeTruncated, judgeTruncated, new Map());
   } finally {
     clearInterval(heartbeat);
   }
