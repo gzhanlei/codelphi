@@ -61,7 +61,18 @@ export function createLocalGitBackend(options: LocalGitBackendOptions): RemoteSo
       }
       return { entries, truncated: false };
     },
-    async fetchBlob(_ref: SourceRevisionRef, _path: string, blobSha: string): Promise<Uint8Array> {
+    async fetchBlob(_ref: SourceRevisionRef, path: string, blobSha: string): Promise<Uint8Array> {
+      // 工作树直读优先（checkout 与分析 revision 一致时零子进程开销）；
+      // 未命中/不一致时回退 git cat-file（仍能保证按 sha 精确取内容）。
+      if (options.worktreeFallback && path) {
+        try {
+          const { readFile } = await import("node:fs/promises");
+          const content = await readFile(`${repoDir}/${path}`, "utf8");
+          return new TextEncoder().encode(content);
+        } catch {
+          // fall through to git cat-file
+        }
+      }
       const output = await git(repoDir, ["cat-file", "blob", blobSha]);
       return new TextEncoder().encode(output);
     },

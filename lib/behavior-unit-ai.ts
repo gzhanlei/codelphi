@@ -258,7 +258,10 @@ const judgeSchema = z.object({
       disposition: z.enum(["extracted", "reviewed_internal", "unresolved"]),
       internalKind: z.enum(["pure_technical", "covered_elsewhere", "data_transform", "other_evidence_backed"]).optional(),
       reason: z.string().max(2_000).optional(),
-      evidence: z.array(evidenceSchema).max(10).default([]),
+      // 2026-11-22 bench 真库发现（同 7c22739 族）：task 臂 judge 对密集代码区域的
+      // evidence max(10) 触发 51 次硬失败（zod too_big）——与 BEHAVIOR_SCENARIO_SCHEMA
+      // 同口径放宽到 20，仍防爆炸。
+      evidence: z.array(evidenceSchema).max(20).default([]),
       scenarioRefs: z.array(z.string().regex(/^(?:HP|EC|ER)-\d+$/)).max(40).default([]),
       relatedUnitKeys: z.array(z.string().min(1).max(500)).max(20).optional(),
       relatedScenarioRefs: z.array(z.string().min(1).max(200)).max(40).optional(),

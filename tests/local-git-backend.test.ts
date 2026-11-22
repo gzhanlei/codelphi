@@ -48,6 +48,15 @@ describe("local git source backend", () => {
     expect(new TextDecoder().decode(blob)).toContain("return 1");
   });
 
+  it("reads blobs from the worktree when worktreeFallback is enabled", async () => {
+    const repoDir = makeTempRepo();
+    const revision = execFileSync("git", ["-C", repoDir, "rev-parse", "HEAD"]).toString().trim();
+    const backend = createLocalGitBackend({ repoDir, worktreeFallback: true });
+    const ref = { owner: "local", repo: "bench", revision } as import("../lib/remote-source-index/types").SourceRevisionRef;
+    const blob = await backend.fetchBlob(ref, "src/demo.ts", "ffffffffffffffffffffffffffffffffffffffff");
+    expect(new TextDecoder().decode(blob)).toContain("return 1");
+  });
+
   it("reports a missing revision as an error instead of guessing", async () => {
     const repoDir = makeTempRepo();
     const backend = createLocalGitBackend({ repoDir });
