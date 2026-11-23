@@ -65,14 +65,23 @@
 
 每次分析必须分别输出 **最终账本状态** 与 **变化分类**，不得只检查本次 AI 输出。
 
-| 分类 | 判定条件 | 禁止事项 |
+Modified 与 Removed 的区分依据不是行为结果是否改变，而是原业务能力是否仍然存在：原业务能力仍然存在但语义发生变化，归为 Modified；原业务能力已被正向证据确认不存在，归为 Removed；无法确定业务能力是否仍然存在，归为 Uncertain。
+
+Lifecycle / Delta 与 Judgment / Integrity 是两个独立维度，不得在数据模型中合并为互斥状态：
+
+| 维度 | 分类 | 判定条件 |
 | --- | --- | --- |
-| Added | 新证据确认此前不存在的身份，且外部行为成立 | 重提取偶然发现不得直接等同新增 |
-| Modified | 身份保持，但关键条件、权限、流程或外部结果改变 | 不得因结果改变而自动拆分身份 |
-| Removed | 有充分正向证据确认行为已不存在 | 未提取、未命中、证据失效或身份丢失不得判 Removed |
-| Unchanged | 身份与行为语义均不变 | 不要求源码文本或证据位置不变 |
-| Uncertain | 无法确认新增、修改、删除或不变 | 不得强行 Added/Removed/Unchanged |
-| Conflict | 条件重叠时，同一业务目标出现互斥结果 | 不得激活，不得静默保留双方 |
+| Lifecycle / Delta | Added | 新证据确认此前不存在的身份，且外部行为成立；重提取偶然发现不得直接等同新增 |
+| Lifecycle / Delta | Modified | 身份保持，但关键条件、权限、流程或外部结果改变；不得因结果改变而自动拆分身份 |
+| Lifecycle / Delta | Removed | 有充分正向证据确认行为已不存在；未提取、未命中、证据失效或身份丢失不得判 Removed |
+| Lifecycle / Delta | Unchanged | 身份与行为语义均不变；不要求源码文本或证据位置不变 |
+| Judgment / Integrity | Confirmed | 判断获得充分证据支持 |
+| Judgment / Integrity | Uncertain | 无法确认新增、修改、删除或不变；不得强行作出确定结论 |
+| Judgment / Integrity | Conflict | 条件重叠时，同一业务目标出现互斥结果；不得激活，不得静默保留双方 |
+
+允许组合判定，例如 Modified + Confirmed、Modified + Conflict、Unchanged + Uncertain、Removed + Confirmed。Conflict 是账本完整性约束，不是普通 Delta 的替代品。
+
+Lifecycle / Delta 必须分别适用于 Behavior Identity 和 Scenario Identity，行为级状态与场景级状态独立判定。一个行为下部分场景 Removed，不意味着整个行为 Removed。例如发布业务能力与管理员、登录用户场景均可 Unchanged，而匿名访客场景单独 Removed。
 
 ### 3.1 Removed 的必要证据
 
@@ -107,7 +116,7 @@ Removed 是关于行为不存在的**正向结论**，不是“当前分析没�
 - `current`：证据仍支持当前行为；
 - `re-anchored`：行为不变，证据已重新定位；
 - `stale`：原证据失效，需要复核；
-- 行为状态独立为 Added / Modified / Removed / Unchanged / Uncertain / Conflict。
+- Lifecycle / Delta 与 Judgment / Integrity 分别记录，不用证据状态替代行为状态，也不用行为状态替代证据状态。
 
 证据失效只表示需要重锚或复核，不等于 Removed。
 
@@ -123,7 +132,14 @@ Conflict 基于条件的逻辑关系，而不是条件字符串是否一致，�
 | 条件重叠且结果互斥 | Conflict |
 | 条件关系无法判断 | Uncertain，不能默认无冲突 |
 
-不同功能的场景也可能对同一业务目标构成冲突。人工规格与人工裁决不得被自动覆盖；冲突解决前不得将版本声明为可信。
+条件判断必须使用明确的业务谓词及其证据，不得仅凭模型对自然语言条件的相似度判断：
+
+1. 能够证明条件不相交：不构成冲突；
+2. 能够证明条件重叠且结果互斥：Conflict；
+3. 无法判断条件是否重叠：Uncertain；
+4. 不得将无法求解的条件默认视为不冲突。
+
+不同功能的场景也可能对同一业务目标构成冲突。无需一开始实现通用逻辑求解器，但系统必须诚实表达无法判断。人工规格与人工裁决不得被自动覆盖；冲突解决前不得将版本声明为可信。
 
 ## 5. Release、零变化对账与历史状态
 
@@ -139,6 +155,8 @@ Release 只有同时满足以下条件才可标记 Trusted：
 6. `missingExpected` 不含应发现而未发现的行为，`unexpected` 不含计划外行为变化，人工规格未被覆盖；
 7. 覆盖率、Unknown、未决项和降级如实披露；
 8. 未被更新 Run 在验收完成前 supersede；被 supersede 的 Run 不得激活或冒充 Trusted Release。
+
+存在与本次变更、影响范围或关键业务路径有关的未决 Uncertain，或者存在可能影响完整性判断的证据缺口时，Release 必须进入 Review。与本次变更无关且已明确披露的历史未决事项，可以按能力范围和风险等级决定是否允许 Trusted，但不得在 MCP 输出中将其解释为已确认不存在。
 
 后续快照可以修复证据，但不能 retroactively 证明某个丢失的 Release 曾经完整。
 
@@ -160,6 +178,8 @@ Release 是不可变历史记录。Superseded 不意味着删除，也不意味�
 - 已完成并可信，后来被更新版本替代；
 - 尚未完成就被 supersede；
 - 已完成但尚未通过可信性验收就被 supersede。
+
+Release 历史记录不可变；当前有效 Release 的指针必须通过原子条件更新维护。只有满足预期版本、提交关系和 superseding 状态的 Run 才能激活。已被 supersede 的 Run 不得在之后重新成为当前有效版本，防止过期 Run 在验收完成后覆盖更新版本。
 
 Golden 测试所需的不可变快照和运行记录必须提前具备；Release 最终可信性修复可以在后续阶段完成。
 
@@ -191,6 +211,13 @@ Golden 测试所需的不可变快照和运行记录必须提前具备；Release
 不得通过漏提取获得虚假的零 Delta。路径 intent 只能做路径验收，不能单独证明行为身份。
 
 ## 6. MCP 两类能力及端到端验收
+
+| Release 状态 | 知识检索 A | 开发决策 B |
+| --- | --- | --- |
+| Trusted | 可以使用 | 满足对应范围的验收后可以使用 |
+| Review | 可提供有限辅助信息并披露缺口 | 不得作为权威决策依据 |
+| Superseded | 可查询历史 | 不得作为当前版本依据 |
+| Failed | 仅可用于诊断 | 不可使用 |
 
 ### 6.1 能力 A：项目知识检索
 
@@ -292,7 +319,7 @@ MCP 的差异化价值是跨版本身份、历史变化、已验证证据、前�
 
 **重放一致性**：同一提交重新处理，不产生重复身份、额外变化或额外冲突。
 
-**顺序一致性**：不同提交处理顺序或 Run superseding 不得改变最终有效版本的语义。
+**顺序一致性**：在相同提交图、相同有效版本和相同输入条件下，不同处理顺序或 Run superseding 不得改变最终有效版本的语义；不要求不同业务提交产生相同的历史事件序列。
 
 证据位置可以变化，但必须重新验证有效性；运行 ID、时间戳和分析耗时不要求一致。
 
@@ -306,6 +333,8 @@ MCP 的差异化价值是跨版本身份、历史变化、已验证证据、前�
 | False Delta Rate | 虚假 Delta / 全部报告 Delta | 是否制造噪声 |
 | Removal Accuracy | 正确删除的行为 / 全部预期删除行为 | 删除是否正确 |
 | Conflict Detection | 检出的真实冲突 / 全部预期冲突 | 是否漏掉矛盾 |
+
+指标分母为零时记为 N/A，不参与该案例的比率计算，也不得因此判失败；但该案例仍须满足明确的负向断言，例如不得产生虚假 Removed 或 Conflict。
 
 Golden Validation v1.1 采用严格 fixture 级验收：
 
