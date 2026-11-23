@@ -26,6 +26,7 @@ export interface ReconcileReleaseInput {
     error: string | null;
   };
   expectedIntents?: ExpectedIntent[];
+  expectNoChange?: boolean;
   legacySourceIssueCount?: number;
 }
 
@@ -104,14 +105,14 @@ export function reconcileRelease(input: ReconcileReleaseInput) {
     stableKey: result.stableKey,
     reasonCodes: [result.stableKey ? "identity_not_found" : "paths_not_covered"],
   }));
-  const unexpected = !input.expectedIntents ? [] : changes.filter((change) => !matchedIds.has(change.id)).map((change) => ({
+  const unexpected = !input.expectedIntents && !input.expectNoChange ? [] : changes.filter((change) => input.expectNoChange || !matchedIds.has(change.id)).map((change) => ({
     changeId: change.id,
     stableKey: featureKeyOf(change),
     evidencePaths: [...new Set([...evidencePathsFromSubject(change.before), ...evidencePathsFromSubject(change.after)])],
     beforePaths: evidencePathsFromSubject(change.before),
     afterPaths: evidencePathsFromSubject(change.after),
     releaseFilePaths: input.releaseFilePaths.map(normalizePath),
-    reasonCode: "not_covered_by_intents",
+    reasonCode: input.expectNoChange ? "unexpected_change" : "not_covered_by_intents",
   }));
 
   const projectionGroups = new Map<number, ReconcileChange[]>();
@@ -177,11 +178,16 @@ export function reconcileRelease(input: ReconcileReleaseInput) {
     }));
 
   const hasPartial = intentResults.some((result) => result.status === "partial" || result.status === "unverified");
+  const hasExpectedIntents = input.expectNoChange === true || (input.expectedIntents?.length ?? 0) > 0;
+  const noChangeStatus = input.expectNoChange
+    ? unexpected.length > 0 ? "unexpected_change" : "unverified_no_change"
+    : null;
   const reasons: string[] = [];
   if (missingExpected.length > 0) reasons.push("expected_intents_missing");
   if (unexpected.length > 0) reasons.push("unexpected_changes_present");
   if (input.analysis.status !== "complete") reasons.push("analysis_incomplete");
-  if (!input.expectedIntents) reasons.push("no_expected_intents");
+  if (!hasExpectedIntents) reasons.push("no_expected_intents");
+  if (noChangeStatus) reasons.push(noChangeStatus);
   if (hasPartial) reasons.push("intent_match_unverified");
   if (duplicateClusters.length > 0) reasons.push("duplicate_records_present");
   if ((input.legacySourceIssueCount ?? 0) > 0) reasons.push("legacy_source_links_present");
@@ -189,7 +195,7 @@ export function reconcileRelease(input: ReconcileReleaseInput) {
 
   let verdict: "pass" | "warning" | "failed" | "review";
   if (missingExpected.length > 0 || unexpected.length > 0) verdict = "failed";
-  else if (input.analysis.status !== "complete" || !input.expectedIntents || hasPartial) verdict = "review";
+  else if (input.analysis.status !== "complete" || !hasExpectedIntents || noChangeStatus === "unverified_no_change" || hasPartial) verdict = "review";
   else if (duplicateClusters.length > 0 || (input.legacySourceIssueCount ?? 0) > 0 || sharedEvidenceWarnings.length > 0) verdict = "warning";
   else verdict = "pass";
   return {
@@ -198,6 +204,7 @@ export function reconcileRelease(input: ReconcileReleaseInput) {
     sha: input.sha,
     analysis: input.analysis,
     evidenceComplete: input.analysis.status === "complete",
+    noChangeStatus,
     intentResults,
     missingExpected,
     unexpected,

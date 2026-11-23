@@ -328,6 +328,23 @@ describe("mcp server (A1)", () => {
     expect(JSON.stringify(result)).not.toContain("beforeJson");
   });
 
+  it("accepts a commit-level no-change declaration without stableKey intents", async () => {
+    execute.mockImplementation(async (sql: string) => {
+      if (String(sql).includes("FROM products WHERE organization_id")) return [[{ id: 9, slug: "radar", name: "Radar", description: "d" }]];
+      if (String(sql).includes("FROM repositories")) return [[{ provider: "github", owner: "gzhanlei", name: "radar", defaultBranch: "main", sha: "abc123" }]];
+      if (String(sql).includes("FROM releases WHERE id = ?")) return [[{ id: 229, title: "v", summary: "s", sha: "abc123", url: "u", committedAt: new Date(), specVersionId: 230, analysisRunId: 333 }]];
+      if (String(sql).includes("FROM analysis_runs WHERE id = ?")) return [[{ id: 333, status: "succeeded", after_sha: "abc123", error_message: null }]];
+      if (String(sql).includes("FROM release_files")) return [[{ path: "lib/a.ts" }]];
+      return [[]];
+    });
+
+    const response = await handleMcpRpc(runtime, rpc("tools/call", { name: "reconcile_release", arguments: { slug: "radar", releaseId: 229, expectNoChange: true } }));
+    const result = (response?.result as { structuredContent: { verdict: string; noChangeStatus: string; reasons: string[] } }).structuredContent;
+    expect(result.verdict).toBe("review");
+    expect(result.noChangeStatus).toBe("unverified_no_change");
+    expect(result.reasons).not.toContain("no_expected_intents");
+  });
+
   it("does not pass reconciliation when run SHA differs from release SHA", async () => {
     execute.mockImplementation(async (sql: string) => {
       if (String(sql).includes("FROM products WHERE organization_id")) return [[{ id: 9, slug: "radar", name: "Radar", description: "d" }]];

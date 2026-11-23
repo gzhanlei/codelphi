@@ -83,7 +83,7 @@ export const MCP_WORKFLOW_INSTRUCTIONS = [
   "本服务是所在组织的产品行为账本（只读查询 + send_feedback 上报）。接入仓库的 coding agent 按以下约定工作：",
   "1. 做 plan 或改任何文件前：先用 list_projects 按 git remote 的 owner/name 匹配产品取 slug，再 lookup_by_files 反查计划要改文件的爆炸半径，把回归红线场景与 push 后对账锚点写进计划；必要时 get_feature_connections(path) 看共享邻域。",
   "2. 需要理解既有行为：search_scenarios 检索规格原文，用 stableKey 深入 get_feature，不要只靠读代码猜约定。默认 fallback 在当前无场景时查询发布历史；历史结果 source=release，只作历史线索，不证明当前仍存在。",
-  "3. push 后：wait_for_release 等待本次 sha 对应的最新 run 与 release 完成，再用 reconcile_release 传入本次开发意图（stableKey 为名称级匹配、paths 为证据路径）核对；计划外变化回查并向用户报告。需要原始前后差异时再 get_release。",
+  "3. push 后：wait_for_release 等待本次 sha 对应的最新 run 与 release 完成，再用 reconcile_release 传入本次开发意图（stableKey 为名称级匹配、paths 为证据路径；纯重构用 expectNoChange=true）核对；计划外变化回查并向用户报告。需要原始前后差异时再 get_release。",
   "4. 发现账本与代码不符：send_feedback(kind:bug) 带三要素（哪个场景、哪份证据、代码实际行为）上报由 AI 裁决管线自动核实处置（确认缺陷即触发修复性重建，误报驳回），仅证据不足的进入人工队列；账本是只读面，「没搜到 ≠ 不存在」，用 get_project_summary 的 specSnapshot/evidenceCoverage 判断覆盖。",
 ].join("\n");
 
@@ -96,7 +96,7 @@ export const MCP_TOOLS: McpToolDef[] = [
   { name: "lookup_by_files", description: "做计划或改文件前必查：按文件路径反查以该文件为证据的功能与场景（爆炸半径；paths 最多 20 个，每功能场景截前 10 条并附真实总数；账本未覆盖的文件返回空）", inputSchema: { type: "object", properties: { slug: { type: "string" }, paths: { type: "array", items: { type: "string" } }, view: { type: "string", enum: ["raw", "canonical", "risk"] } }, required: ["slug", "paths"] } },
   { name: "list_releases", description: "列产品的发布（per-push 一条，docs-only 也有零变化条目；时间倒序，默认 10 条）。push 后用本次 sha 找对应发布", inputSchema: { type: "object", properties: { slug: { type: "string" }, limit: { type: "number" } }, required: ["slug"] } },
   { name: "get_release", description: "单条发布的行为变化清单（含前后差异摘要与证据链接）。push 后对账：与本次提交意图核对，计划外变化要回查报告", inputSchema: { type: "object", properties: { slug: { type: "string" }, releaseId: { type: "number" }, view: { type: "string", enum: ["raw", "canonical"] }, offset: { type: "number" }, limit: { type: "number" } }, required: ["slug", "releaseId"] } },
-  { name: "reconcile_release", description: "按 stableKey（名称级）与 evidence paths 对账发布意图，返回 missing/unexpected/重复信号与 verdict，不返回完整 before/after", inputSchema: { type: "object", properties: { slug: { type: "string" }, releaseId: { type: "number" }, expectedIntents: { type: "array", items: { type: "object", properties: { stableKey: { type: "string" }, paths: { type: "array", items: { type: "string" } }, note: { type: "string" } } } } }, required: ["slug", "releaseId"] } },
+  { name: "reconcile_release", description: "按 stableKey（名称级）与 evidence paths 对账发布意图；纯重构用 expectNoChange 声明提交级零变化，返回 missing/unexpected/重复信号与 verdict，不返回完整 before/after", inputSchema: { type: "object", properties: { slug: { type: "string" }, releaseId: { type: "number" }, expectNoChange: { type: "boolean" }, expectedIntents: { type: "array", items: { type: "object", properties: { stableKey: { type: "string" }, paths: { type: "array", items: { type: "string" } }, note: { type: "string" } } } } }, required: ["slug", "releaseId"] } },
   { name: "get_feedback", description: "读取反馈的裁决、corrective analysis 与独立 verification 状态；不推断修复或复验", inputSchema: { type: "object", properties: { slug: { type: "string" }, feedbackId: { type: "number" } }, required: ["slug", "feedbackId"] } },
   { name: "wait_for_release", description: "按 after_sha 等待最新分析尝试与 release 持久化；最长 60 秒，timeout 不等于 failed", inputSchema: { type: "object", properties: { slug: { type: "string" }, sha: { type: "string" }, timeoutSeconds: { type: "number" }, pollSeconds: { type: "number" } }, required: ["slug", "sha"] } },
   { name: "get_knowledge_health", description: "知识健康事实统计（漂移清单/核实覆盖/回归四态/维护分布；无综合分、无 Bus Factor）", inputSchema: { type: "object", properties: { slug: { type: "string" } }, required: ["slug"] } },
@@ -512,6 +512,7 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
         error: run?.error_message ?? null,
       },
       expectedIntents,
+      expectNoChange: args.expectNoChange === true,
       legacySourceIssueCount: Number(legacyLinks[0]?.count ?? 0),
     });
   }

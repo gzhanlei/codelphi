@@ -187,4 +187,53 @@ describe("reconcileRelease", () => {
     expect(result.verdict).toBe("review");
     expect(result.analysis.status).toBe("partial");
   });
+
+  it("rejects unexpected deltas for a commit-level no-change declaration", () => {
+    const result = reconcileRelease({
+      releaseId: 229,
+      slug: "codelphi",
+      sha: "abc",
+      changes: [change(1, "功能", "EC-1")],
+      releaseFilePaths: ["lib/a.ts"],
+      analysis: completeAnalysis,
+      expectNoChange: true,
+    });
+
+    expect(result.verdict).toBe("failed");
+    expect(result.noChangeStatus).toBe("unexpected_change");
+    expect(result.missingExpected).toEqual([]);
+    expect(result.unexpected[0].reasonCode).toBe("unexpected_change");
+  });
+
+  it("does not prove behavior preservation from zero deltas alone", () => {
+    const result = reconcileRelease({
+      releaseId: 229,
+      slug: "codelphi",
+      sha: "abc",
+      changes: [],
+      releaseFilePaths: ["lib/a.ts"],
+      analysis: completeAnalysis,
+      expectNoChange: true,
+    });
+
+    expect(result.verdict).toBe("review");
+    expect(result.noChangeStatus).toBe("unverified_no_change");
+    expect(result.reasons).toContain("unverified_no_change");
+    expect(result.missingExpected).toEqual([]);
+  });
+
+  it("does not treat an empty intent list as a no-change declaration", () => {
+    const result = reconcileRelease({
+      releaseId: 229,
+      slug: "codelphi",
+      sha: "abc",
+      changes: [],
+      releaseFilePaths: ["lib/a.ts"],
+      analysis: completeAnalysis,
+      expectedIntents: [],
+    });
+
+    expect(result.verdict).toBe("review");
+    expect(result.reasons).toContain("no_expected_intents");
+  });
 });

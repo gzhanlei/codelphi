@@ -94,7 +94,15 @@ reconcile_release(slug, releaseId, expectedIntents: [
 ])
 ```
 
-返回 `missingExpected`、`unexpected`、`duplicateClusters`、`sharedEvidenceWarnings` 和 `verdict`。path-only intent 只能做路径验收，不能单独产生 pass；stableKey 是名称级匹配，不是行为身份。shared path 只是复核信号，不是重复证明。
+返回 `missingExpected`、`unexpected`、`duplicateClusters`、`sharedEvidenceWarnings` 和 `verdict`。path-only intent 只能做路径验收，不能单独产生 pass；stableKey 是名称级匹配，不是行为身份。shared path 只是复核信号，不是重复证明。空 `expectedIntents` 不是零变化声明。
+
+纯重构使用提交级断言，不要用 stableKey 反查未变功能：
+
+```
+reconcile_release(slug, releaseId, expectNoChange: true)
+```
+
+出现 Delta 时返回 `noChangeStatus=unexpected_change` 且 `verdict=failed`。零 Delta 本身不足以证明身份保持与证据重锚有效；在这些证据尚未独立核验时返回 `noChangeStatus=unverified_no_change` 且 `verdict=review`，不会误报 `identity_not_found` 或虚假通过。
 
 `get_release` 默认 raw 全量；显式 `limit/offset` 分页时保留 `{release, changes}` 字段。`get_feature` 与 `lookup_by_files` 可用 `view=canonical` 合并已证明身份的重复投影；`lookup_by_files?view=risk` 返回前 10 条稳定排序的红线及 uncoveredPaths。
 
