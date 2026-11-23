@@ -9,6 +9,12 @@ import { reconcileRelease, evidencePathsFromSubject as evidencePathsForReconcile
 import { canonicalizeScenarios, compactSearchProjection, paginateById, projectFileRisks } from "./projections";
 import { loadLedgerFreshnessForServer } from "./freshness";
 import { buildFeedbackLifecycle, buildReleaseHealth, waitForRelease } from "./operations";
+import { createRemoteSourceIndex } from "../remote-source-index";
+import { defaultRemoteSourceBudgets, type OpenedRemoteSourceRevision } from "../remote-source-index/types";
+import { getCodeHostingAdapter } from "../code-hosting/registry";
+import { loadBaseVersionMap, loadVersionFeatureMap } from "../spec-versions";
+import { noChangeUnavailable, verifyNoChange } from "./no-change";
+import type { NoChangeVerification, ReconcileReleaseInput } from "./reconcile";
 
 /**
  * 稳定键解析内联版（与 lib/stable-links.ts 同语义）。2026-11-10 生产事故：各 route bundle
@@ -96,7 +102,7 @@ export const MCP_TOOLS: McpToolDef[] = [
   { name: "lookup_by_files", description: "做计划或改文件前必查：按文件路径反查以该文件为证据的功能与场景（爆炸半径；paths 最多 20 个，每功能场景截前 10 条并附真实总数；账本未覆盖的文件返回空）", inputSchema: { type: "object", properties: { slug: { type: "string" }, paths: { type: "array", items: { type: "string" } }, view: { type: "string", enum: ["raw", "canonical", "risk"] } }, required: ["slug", "paths"] } },
   { name: "list_releases", description: "列产品的发布（per-push 一条，docs-only 也有零变化条目；时间倒序，默认 10 条）。push 后用本次 sha 找对应发布", inputSchema: { type: "object", properties: { slug: { type: "string" }, limit: { type: "number" } }, required: ["slug"] } },
   { name: "get_release", description: "单条发布的行为变化清单（含前后差异摘要与证据链接）。push 后对账：与本次提交意图核对，计划外变化要回查报告", inputSchema: { type: "object", properties: { slug: { type: "string" }, releaseId: { type: "number" }, view: { type: "string", enum: ["raw", "canonical"] }, offset: { type: "number" }, limit: { type: "number" } }, required: ["slug", "releaseId"] } },
-  { name: "reconcile_release", description: "按 stableKey（名称级）与 evidence paths 对账发布意图；纯重构用 expectNoChange 声明提交级零变化，返回 missing/unexpected/重复信号与 verdict，不返回完整 before/after", inputSchema: { type: "object", properties: { slug: { type: "string" }, releaseId: { type: "number" }, expectNoChange: { type: "boolean" }, expectedIntents: { type: "array", items: { type: "object", properties: { stableKey: { type: "string" }, paths: { type: "array", items: { type: "string" } }, note: { type: "string" } } } } }, required: ["slug", "releaseId"] } },
+  { name: "reconcile_release", description: "按 stableKey（名称级）与 evidence paths 对账发布意图；纯重构用 expectNoChange 声明提交级零变化并核验前后身份、语义与 afterSha 证据，返回 missing/unexpected/重复信号与 verdict，不返回完整 before/after", inputSchema: { type: "object", properties: { slug: { type: "string" }, releaseId: { type: "number" }, expectNoChange: { type: "boolean" }, expectedIntents: { type: "array", items: { type: "object", properties: { stableKey: { type: "string" }, paths: { type: "array", items: { type: "string" } }, note: { type: "string" } } } } }, required: ["slug", "releaseId"] } },
   { name: "get_feedback", description: "读取反馈的裁决、corrective analysis 与独立 verification 状态；不推断修复或复验", inputSchema: { type: "object", properties: { slug: { type: "string" }, feedbackId: { type: "number" } }, required: ["slug", "feedbackId"] } },
   { name: "wait_for_release", description: "按 after_sha 等待最新分析尝试与 release 持久化；最长 60 秒，timeout 不等于 failed", inputSchema: { type: "object", properties: { slug: { type: "string" }, sha: { type: "string" }, timeoutSeconds: { type: "number" }, pollSeconds: { type: "number" } }, required: ["slug", "sha"] } },
   { name: "get_knowledge_health", description: "知识健康事实统计（漂移清单/核实覆盖/回归四态/维护分布；无综合分、无 Bus Factor）", inputSchema: { type: "object", properties: { slug: { type: "string" } }, required: ["slug"] } },
@@ -109,10 +115,29 @@ export const MCP_TOOLS: McpToolDef[] = [
 interface RpcRequest { jsonrpc: string; id?: string | number | null; method: string; params?: Record<string, unknown> }
 interface RpcResult { jsonrpc: "2.0"; id: string | number | null; result?: unknown; error?: { code: number; message: string } }
 
+interface NoChangeIndexRequest {
+  provider: string;
+  owner: string;
+  repo: string;
+  revision: string;
+  connectionId: number | null;
+  organizationId: number;
+}
+
 export interface McpRuntime {
   execute?: Execute;
+  openNoChangeIndex?: (request: NoChangeIndexRequest) => Promise<Pick<OpenedRemoteSourceRevision, "readLines">>;
   /** API key（keyId）或 OAuth token（grantId/userId）身份，工具面只用 organizationId 做作用域。 */
   identity: { organizationId: number; keyId?: number; userId?: number; grantId?: number };
+}
+
+async function openNoChangeIndex(request: NoChangeIndexRequest) {
+  const adapter = getCodeHostingAdapter(request.provider);
+  const access = { connectionId: request.connectionId, organizationId: request.organizationId };
+  return createRemoteSourceIndex(
+    { owner: request.owner, repo: request.repo, revision: request.revision },
+    { scopeRoots: [], access, provider: adapter.provider, backend: adapter.createSourceBackend(access), budgets: defaultRemoteSourceBudgets },
+  );
 }
 
 function rpcError(id: RpcRequest["id"], code: number, message: string): RpcResult {
@@ -500,19 +525,56 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
       if (paths?.some((path) => path.startsWith("/") || path.split("/").includes(".."))) throw new Error("paths must be relative repository paths");
       return { stableKey: stableKey || undefined, paths, note: intent.note === undefined ? undefined : String(intent.note) };
     });
+    const analysis: ReconcileReleaseInput["analysis"] = {
+      status: !run || run.after_sha !== release.sha ? "unknown" : run.status === "succeeded" ? "complete" : run.status === "failed" ? "failed" : "partial",
+      runId: run?.id ?? null,
+      error: run?.error_message ?? null,
+    };
+    let noChangeVerification: NoChangeVerification | undefined;
+    if (args.expectNoChange === true && changes.length === 0 && analysis.status === "complete" && release.specVersionId !== null) {
+      try {
+        const specVersionId = release.specVersionId;
+        const [baseVersions, versionRows] = await Promise.all([
+          loadBaseVersionMap(execute, [specVersionId]),
+          queryRows<{ id: number; sha: string; provider: string; owner: string; name: string; connectionId: number | null }>(
+            execute("SELECT v.id, v.sha, r.provider, r.owner, r.name, r.connection_id AS connectionId FROM spec_versions v JOIN repositories r ON r.id = v.repository_id WHERE v.id = ?", [specVersionId]),
+          ),
+        ]);
+        const version = versionRows[0];
+        if (version?.sha !== release.sha) {
+          noChangeVerification = noChangeUnavailable("spec_version_sha_mismatch");
+        } else {
+          const baseVersionId = baseVersions.get(specVersionId) ?? null;
+          const versionIds = baseVersionId === null ? [specVersionId] : [specVersionId, baseVersionId];
+          const featureMap = await loadVersionFeatureMap(execute, versionIds);
+          const index = await (runtime.openNoChangeIndex ?? openNoChangeIndex)({
+            provider: version.provider,
+            owner: version.owner,
+            repo: version.name,
+            revision: release.sha,
+            connectionId: version.connectionId,
+            organizationId: runtime.identity.organizationId,
+          });
+          noChangeVerification = await verifyNoChange({
+            baseFeatures: baseVersionId === null ? undefined : featureMap.get(baseVersionId),
+            currentFeatures: featureMap.get(specVersionId),
+            index,
+          });
+        }
+      } catch {
+        noChangeVerification = noChangeUnavailable("no_change_verification_unavailable");
+      }
+    }
     return reconcileRelease({
       releaseId: release.id,
       slug: product.slug,
       sha: release.sha,
       changes: changes.map((change) => ({ id: change.id, featureName: change.featureName, featureKey: change.featureKey, entityType: change.entityType, scenarioReference: change.scenarioReference, before: change.beforeJson, after: change.afterJson })),
       releaseFilePaths: releaseFiles.map((file) => file.path),
-      analysis: {
-        status: !run || run.after_sha !== release.sha ? "unknown" : run.status === "succeeded" ? "complete" : run.status === "failed" ? "failed" : "partial",
-        runId: run?.id ?? null,
-        error: run?.error_message ?? null,
-      },
+      analysis,
       expectedIntents,
       expectNoChange: args.expectNoChange === true,
+      noChangeVerification,
       legacySourceIssueCount: Number(legacyLinks[0]?.count ?? 0),
     });
   }

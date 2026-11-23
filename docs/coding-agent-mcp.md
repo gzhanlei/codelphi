@@ -102,7 +102,7 @@ reconcile_release(slug, releaseId, expectedIntents: [
 reconcile_release(slug, releaseId, expectNoChange: true)
 ```
 
-出现 Delta 时返回 `noChangeStatus=unexpected_change` 且 `verdict=failed`。零 Delta 本身不足以证明身份保持与证据重锚有效；在这些证据尚未独立核验时返回 `noChangeStatus=unverified_no_change` 且 `verdict=review`，不会误报 `identity_not_found` 或虚假通过。
+出现 Delta 时返回 `noChangeStatus=unexpected_change` 且 `verdict=failed`。零 Delta 本身不足以证明行为不变：工具还会比较前后版本的 Behavior / Scenario 身份集合与语义，检查冲突，并在 afterSha 实际读取每条证据的完整行范围。全部通过才返回 `noChangeStatus=verified_no_change` 且 `verdict=pass`；身份丢失、缺基线、缺行锚、证据不可读或校验不可用均返回 `noChangeStatus=unverified_no_change` 且 `verdict=review`，不会误报 `identity_not_found` 或虚假通过。
 
 `get_release` 默认 raw 全量；显式 `limit/offset` 分页时保留 `{release, changes}` 字段。`get_feature` 与 `lookup_by_files` 可用 `view=canonical` 合并已证明身份的重复投影；`lookup_by_files?view=risk` 返回前 10 条稳定排序的红线及 uncoveredPaths。
 

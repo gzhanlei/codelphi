@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { handleMcpRpc, MCP_PROTOCOL_VERSION, MCP_TOOLS } from "../lib/mcp/server";
 import type { Execute } from "../lib/db";
+import type { SourceLineRequest, SourceLineSlice } from "../lib/remote-source-index/types";
 
 const execute = vi.fn();
 const runtime = { execute: execute as unknown as Execute, identity: { keyId: 7, organizationId: 5 } };
@@ -11,6 +12,22 @@ beforeEach(() => {
 });
 
 const rpc = (method: string, params?: Record<string, unknown>, id: string | number = 1) => ({ jsonrpc: "2.0", id, method, params });
+
+function sourceSlice(request: SourceLineRequest): SourceLineSlice {
+  return {
+    path: request.path,
+    blobSha: "blob",
+    treeEntrySha: "blob",
+    startLine: request.startLine,
+    endLine: request.endLine,
+    lines: Array.from({ length: request.endLine - request.startLine + 1 }, () => "return <Publish />;"),
+    byteSize: 20,
+    lineCount: 10,
+    verified: true,
+    cacheState: "fetched",
+    readReceipt: { requestedBy: request.requestedBy, reason: request.reason, fetchedAt: "2026-11-23T00:00:00.000Z" },
+  };
+}
 
 describe("mcp server (A1)", () => {
   it("answers initialize with protocol version, tool capability and workflow instructions", async () => {
@@ -343,6 +360,38 @@ describe("mcp server (A1)", () => {
     expect(result.verdict).toBe("review");
     expect(result.noChangeStatus).toBe("unverified_no_change");
     expect(result.reasons).not.toContain("no_expected_intents");
+  });
+
+  it("passes no-change reconciliation with preserved identities and verified afterSha evidence", async () => {
+    const base = { id: 1001, versionId: 229, name: "发布入口", summary: "访客可以打开发布入口", parentKey: null, source: "generated" };
+    const current = { ...base, id: 1002, versionId: 230 };
+    execute.mockImplementation(async (sql: string) => {
+      const query = String(sql);
+      if (query.includes("FROM products WHERE organization_id")) return [[{ id: 9, slug: "radar", name: "Radar", description: "d" }]];
+      if (query.includes("FROM repositories")) return [[{ provider: "github", owner: "wrong-owner", name: "wrong-repo", defaultBranch: "main", sha: "abc123", connectionId: 1 }]];
+      if (query.includes("FROM releases WHERE id = ?")) return [[{ id: 229, title: "v", summary: "s", sha: "abc123", url: "u", committedAt: new Date(), specVersionId: 230, analysisRunId: 333 }]];
+      if (query.includes("FROM analysis_runs WHERE id = ?")) return [[{ id: 333, status: "succeeded", after_sha: "abc123", error_message: null }]];
+      if (query.includes("FROM release_files")) return [[{ path: "components/publish.tsx" }]];
+      if (query.includes("FROM spec_versions v WHERE v.id IN")) return [[{ versionId: 230, baseVersionId: 229 }]];
+      if (query.includes("FROM spec_versions v JOIN repositories")) return [[{ id: 230, sha: "abc123", provider: "github", owner: "gzhanlei", name: "radar", connectionId: 55 }]];
+      if (query.includes("FROM spec_features WHERE spec_version_id IN")) return [[base, current]];
+      if (query.includes("FROM spec_scenarios ss JOIN spec_features sf")) return [[
+        { versionId: 229, featureId: 1001, reference: "HP-1", context: "访客打开产品页", action: "点击发布入口", outcome: "进入发布流程", category: "happy", step: 1, source: "generated", evidence: [{ path: "components/publish.tsx", startLine: 5, endLine: 6 }] },
+        { versionId: 230, featureId: 1002, reference: "HP-1", context: "访客打开产品页", action: "点击发布入口", outcome: "进入发布流程", category: "happy", step: 1, source: "generated", evidence: [{ path: "components/publish.tsx", startLine: 8, endLine: 9 }] },
+      ]];
+      return [[]];
+    });
+    const readLines = vi.fn(async (request: SourceLineRequest) => sourceSlice(request));
+    const openNoChangeIndex = vi.fn(async () => ({ readLines }));
+    const verifiedRuntime = { ...runtime, openNoChangeIndex };
+
+    const response = await handleMcpRpc(verifiedRuntime, rpc("tools/call", { name: "reconcile_release", arguments: { slug: "radar", releaseId: 229, expectNoChange: true } }));
+    const result = (response?.result as { structuredContent: { verdict: string; noChangeStatus: string; noChangeVerification: { evidenceVerified: number } } }).structuredContent;
+    expect(result.verdict).toBe("pass");
+    expect(result.noChangeStatus).toBe("verified_no_change");
+    expect(result.noChangeVerification.evidenceVerified).toBe(1);
+    expect(openNoChangeIndex).toHaveBeenCalledWith(expect.objectContaining({ owner: "gzhanlei", repo: "radar", revision: "abc123", connectionId: 55 }));
+    expect(readLines).toHaveBeenCalledWith(expect.objectContaining({ path: "components/publish.tsx", startLine: 8, endLine: 9 }));
   });
 
   it("does not pass reconciliation when run SHA differs from release SHA", async () => {

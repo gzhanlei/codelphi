@@ -236,4 +236,32 @@ describe("reconcileRelease", () => {
     expect(result.verdict).toBe("review");
     expect(result.reasons).toContain("no_expected_intents");
   });
+
+  it("passes a no-change declaration only with independent ledger and evidence verification", () => {
+    const verification = {
+      verified: true,
+      identityPreserved: true,
+      semanticsUnchanged: true,
+      conflictFree: true,
+      evidenceComplete: true,
+      evidenceTotal: 1,
+      evidenceVerified: 1,
+      reasons: [],
+    };
+    const result = reconcileRelease({
+      releaseId: 229,
+      slug: "codelphi",
+      sha: "abc",
+      changes: [],
+      releaseFilePaths: ["lib/a.ts"],
+      analysis: completeAnalysis,
+      expectNoChange: true,
+      noChangeVerification: verification,
+    });
+
+    expect(result.verdict).toBe("pass");
+    expect(result.noChangeStatus).toBe("verified_no_change");
+    expect(result.noChangeVerification).toEqual(verification);
+    expect(result.reasons).toEqual([]);
+  });
 });

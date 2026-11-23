@@ -14,6 +14,17 @@ export interface ExpectedIntent {
   note?: string;
 }
 
+export interface NoChangeVerification {
+  verified: boolean;
+  identityPreserved: boolean;
+  semanticsUnchanged: boolean;
+  conflictFree: boolean;
+  evidenceComplete: boolean;
+  evidenceTotal: number;
+  evidenceVerified: number;
+  reasons: string[];
+}
+
 export interface ReconcileReleaseInput {
   releaseId: number;
   slug: string;
@@ -27,6 +38,7 @@ export interface ReconcileReleaseInput {
   };
   expectedIntents?: ExpectedIntent[];
   expectNoChange?: boolean;
+  noChangeVerification?: NoChangeVerification;
   legacySourceIssueCount?: number;
 }
 
@@ -179,15 +191,17 @@ export function reconcileRelease(input: ReconcileReleaseInput) {
 
   const hasPartial = intentResults.some((result) => result.status === "partial" || result.status === "unverified");
   const hasExpectedIntents = input.expectNoChange === true || (input.expectedIntents?.length ?? 0) > 0;
+  const noChangeVerified = input.noChangeVerification?.verified === true;
   const noChangeStatus = input.expectNoChange
-    ? unexpected.length > 0 ? "unexpected_change" : "unverified_no_change"
+    ? unexpected.length > 0 ? "unexpected_change" : noChangeVerified ? "verified_no_change" : "unverified_no_change"
     : null;
   const reasons: string[] = [];
   if (missingExpected.length > 0) reasons.push("expected_intents_missing");
   if (unexpected.length > 0) reasons.push("unexpected_changes_present");
   if (input.analysis.status !== "complete") reasons.push("analysis_incomplete");
   if (!hasExpectedIntents) reasons.push("no_expected_intents");
-  if (noChangeStatus) reasons.push(noChangeStatus);
+  if (noChangeStatus && noChangeStatus !== "verified_no_change") reasons.push(noChangeStatus);
+  if (noChangeStatus === "unverified_no_change") reasons.push(...(input.noChangeVerification?.reasons ?? []));
   if (hasPartial) reasons.push("intent_match_unverified");
   if (duplicateClusters.length > 0) reasons.push("duplicate_records_present");
   if ((input.legacySourceIssueCount ?? 0) > 0) reasons.push("legacy_source_links_present");
@@ -205,6 +219,7 @@ export function reconcileRelease(input: ReconcileReleaseInput) {
     analysis: input.analysis,
     evidenceComplete: input.analysis.status === "complete",
     noChangeStatus,
+    noChangeVerification: input.noChangeVerification ?? null,
     intentResults,
     missingExpected,
     unexpected,
