@@ -12,5 +12,11 @@ artifacts
 dist
 coverage
 target
-docs
+docs/*
+!docs/benchmark/
+docs/benchmark/*
+!docs/benchmark/frozen/
+docs/benchmark/frozen/*
+!docs/benchmark/frozen/legacy-analysis-cases-v1.json
+!docs/benchmark/frozen/legacy-analysis-baseline-v1.json
 .metrics
