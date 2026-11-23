@@ -148,7 +148,7 @@ export async function loadBaseVersionMap(execute: Execute, versionIds: number[])
   const placeholders = versionIds.map(() => "?").join(",");
   const result = await execute(
     `SELECT v.id AS versionId,
-            (SELECT prev.id FROM spec_versions prev WHERE prev.repository_id = v.repository_id AND prev.id < v.id ORDER BY prev.id DESC LIMIT 1) AS baseVersionId
+            COALESCE(v.base_spec_version_id, (SELECT prev.id FROM spec_versions prev WHERE prev.repository_id = v.repository_id AND prev.id < v.id ORDER BY prev.id DESC LIMIT 1)) AS baseVersionId
      FROM spec_versions v WHERE v.id IN (${placeholders})`,
     versionIds,
   );
@@ -160,10 +160,15 @@ export async function loadBaseVersionMap(execute: Execute, versionIds: number[])
   return baseMap;
 }
 
-async function loadPreviousSpec(connection: PoolConnection, run: RunContext) {
+async function loadPreviousSpec(connection: PoolConnection, run: RunContext, base: "latest" | "beforeRun" = "latest", baseVersionId?: number | null) {
+  if (baseVersionId === null) return null;
   const [versions] = await connection.execute(
-    "SELECT id FROM spec_versions WHERE repository_id = ? ORDER BY id DESC LIMIT 1",
-    [run.repositoryId],
+    baseVersionId !== undefined
+      ? "SELECT id FROM spec_versions WHERE repository_id = ? AND id = ?"
+      : base === "beforeRun"
+        ? "SELECT id FROM spec_versions WHERE repository_id = ? AND analysis_run_id < ? ORDER BY id DESC LIMIT 1"
+        : "SELECT id FROM spec_versions WHERE repository_id = ? ORDER BY id DESC LIMIT 1",
+    baseVersionId !== undefined ? [run.repositoryId, baseVersionId] : base === "beforeRun" ? [run.repositoryId, run.id] : [run.repositoryId],
   );
   const version = (versions as Array<{ id: number }>)[0];
   if (!version) return null;
@@ -327,8 +332,8 @@ export function foldVariantFeatures(previousFeatures: SpecFeature[], features: S
   return { features: result, folds };
 }
 
-export async function insertSpecVersion(connection: PoolConnection, run: RunContext, result: AnalysisResult, options: { affectedKeys?: ReadonlySet<string>; behavioralChangePaths?: ReadonlySet<string>; changedHunksByPath?: ReadonlyMap<string, readonly PatchHunk[]> } = {}): Promise<{ specVersionId: number; specChanges: ReleaseChangeFact[]; baseline?: boolean; features: ReturnType<typeof mergeSpecSources>; collapse: SpecVersionCollapse | null; featureCollapses: FeatureCollapse[]; misplacedScenarios: MisplacedScenario[]; identityHijacksDropped: number; featureFolds: FeatureFold[]; scenarioIdByLocalKey: Map<string, number> }> {
-  const [previous, manual, tombstones] = await Promise.all([loadPreviousSpec(connection, run), loadManualSpec(connection, run.productId), loadManualTombstones(connection, run.productId)]);
+export async function insertSpecVersion(connection: PoolConnection, run: RunContext, result: AnalysisResult, options: { affectedKeys?: ReadonlySet<string>; behavioralChangePaths?: ReadonlySet<string>; changedHunksByPath?: ReadonlyMap<string, readonly PatchHunk[]>; base?: "latest" | "beforeRun"; baseVersionId?: number | null } = {}): Promise<{ specVersionId: number; specChanges: ReleaseChangeFact[]; baseline?: boolean; features: ReturnType<typeof mergeSpecSources>; collapse: SpecVersionCollapse | null; featureCollapses: FeatureCollapse[]; misplacedScenarios: MisplacedScenario[]; identityHijacksDropped: number; featureFolds: FeatureFold[]; scenarioIdByLocalKey: Map<string, number> }> {
+  const [previous, manual, tombstones] = await Promise.all([loadPreviousSpec(connection, run, options.base, options.baseVersionId), loadManualSpec(connection, run.productId), loadManualTombstones(connection, run.productId)]);
   // M9 增量模式：受影响集之外的 generated 条目原样沿用上一版（三分合并：carried 种子 < AI < manual）。
   const affectedKeys = options.affectedKeys;
   const carried = affectedKeys && previous
@@ -391,8 +396,8 @@ export async function insertSpecVersion(connection: PoolConnection, run: RunCont
   const featureCollapses = detectFeatureCollapses(previous, foldedFeatures);
   const misplacedScenarios = detectMisplacedScenarios(previous, foldedFeatures);
   const [versionResult] = await connection.execute(
-    "INSERT INTO spec_versions (product_id, repository_id, analysis_run_id, sha, output_language) VALUES (?, ?, ?, ?, ?)",
-    [run.productId, run.repositoryId, run.id, run.afterSha, run.outputLanguage === "en" ? "en" : "zh-CN"],
+    "INSERT INTO spec_versions (product_id, repository_id, analysis_run_id, base_spec_version_id, sha, output_language) VALUES (?, ?, ?, ?, ?, ?)",
+    [run.productId, run.repositoryId, run.id, previous?.id ?? null, run.afterSha, run.outputLanguage === "en" ? "en" : "zh-CN"],
   );
   const versionId = Number((versionResult as { insertId: number }).insertId);
   const scenarioIdByLocalKey = await insertFeatures(connection, versionId, foldedFeatures);

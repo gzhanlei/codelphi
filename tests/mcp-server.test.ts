@@ -130,7 +130,7 @@ describe("mcp server (A1)", () => {
       if (query.includes("FROM products WHERE organization_id")) return [[{ id: 9, slug: "radar", name: "Radar", description: "d" }]];
       if (query.includes("COUNT(*) AS count FROM features")) return [[{ count: 13 }]];
       if (query.includes("SELECT id, title, sha, committed_at AS committedAt")) {
-        return query.includes("ORDER BY analysis_run_id DESC, id DESC")
+        return query.includes("is_current = 1") && query.includes("ORDER BY analysis_run_id DESC, id DESC")
           ? [[{ id: 2, title: "after", sha: "d96ae8e", committedAt: new Date("2026-11-22T03:17:18Z"), specVersionId: 2 }]]
           : [[{ id: 1, title: "before", sha: "214cd96", committedAt: new Date("2026-11-23T08:00:00Z"), specVersionId: 1 }]];
       }

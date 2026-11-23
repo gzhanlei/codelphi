@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { PoolConnection } from "mysql2/promise";
-import { getDb } from "./db";
+import { getDb, type Execute } from "./db";
 import { analyzeWithAI, type AnalysisResult } from "./ai";
 import { recordRunFailureFeedback } from "./feedback";
 import { BillingError, capture, enqueueRunWithReservation, hasActiveReservation, heartbeat, release, reserveForNewRun } from "./billing/core";
@@ -47,6 +47,8 @@ export interface RunContext {
   name: string;
   beforeSha: string | null;
   afterSha: string;
+  baseSpecVersionId?: number | null;
+  baseCapturedAt?: Date | null;
   connectionId: number | null;
   provider: CodeHostingProvider;
   organizationId: number;
@@ -59,10 +61,14 @@ export interface RunContext {
   outputLanguage?: "zh-CN" | "en";
 }
 
-export async function assertLatestRun(connection: PoolConnection, run: RunContext) {
+async function loadLatestRunId(connection: PoolConnection, run: RunContext) {
   const [rows] = await connection.execute("SELECT id FROM analysis_runs WHERE repository_id = ? ORDER BY id DESC LIMIT 1", [run.repositoryId]);
   const latestRun = (rows as Array<{ id: number }>)[0];
-  const latestRunId = latestRun ? Number(latestRun.id) : 0;
+  return latestRun ? Number(latestRun.id) : 0;
+}
+
+export async function assertLatestRun(connection: PoolConnection, run: RunContext) {
+  const latestRunId = await loadLatestRunId(connection, run);
   if (latestRunId !== run.id) throw new Error(`Analysis superseded by run ${latestRunId}`);
 }
 
@@ -117,7 +123,7 @@ export async function upsertGeneratedSpec(connection: PoolConnection, run: RunCo
   for (const feature of features) await upsertFeature(connection, run, feature);
 }
 
-export async function upsertRelease(connection: PoolConnection, run: RunContext, result: AnalysisResult, change: ChangeContext, specVersionId: number | null = null, specChanges: ReleaseChangeFact[] = [], baselineFeatures: SpecFeature[] | null = null): Promise<{ releaseId: number; projections: ReleaseChangeProjection[] }> {
+export async function upsertRelease(connection: PoolConnection, run: RunContext, result: AnalysisResult, change: ChangeContext, specVersionId: number | null = null, specChanges: ReleaseChangeFact[] = [], baselineFeatures: SpecFeature[] | null = null, options: { activate?: boolean } = {}): Promise<{ releaseId: number; projections: ReleaseChangeProjection[] }> {
   // 先查既有发布归属：webhook 重放（同一 run）走幂等短路；reanalyze-latest（新 run 重分析
   // 同一 sha）会把 release 重指向新 spec 版本，旧 changes 投影必须删除重建，否则发布页
   // 永远呈现被用户点名要修掉的旧分析结果（hasChanges 短路只该服务重放幂等）。
@@ -127,6 +133,7 @@ export async function upsertRelease(connection: PoolConnection, run: RunContext,
   );
   const priorRows = (Array.isArray(priorRelease) ? priorRelease : []) as Array<{ id: number; analysisRunId: number | null }>;
   const priorRow = priorRows[0];
+  if (priorRow && options.activate === false) return { releaseId: Number(priorRow.id), projections: [] };
   const reanalyzed = priorRow !== undefined && Number(priorRow.analysisRunId) !== run.id;
   await connection.execute(
     `INSERT INTO releases
@@ -218,13 +225,17 @@ async function persistBehaviorFinalMappings(connection: PoolConnection, run: Run
 
 export async function saveResult(run: RunContext, result: AnalysisResult, change: ChangeContext, affectedKeys: ReadonlySet<string> | null = null, coverage?: AnalysisCoverageReceipt, behaviorLinks: readonly AnchorScenarioLink[] = []) {
   const connection = await getDb().getConnection();
+  let committed = false;
   try {
     await connection.beginTransaction();
-    await assertLatestRun(connection, run);
-    await connection.execute(
-      "UPDATE products SET description = ?, description_source = 'generated', description_evidence = ? WHERE id = ? AND description = ''",
-      [result.product.description, JSON.stringify(result.product.evidence), run.productId],
-    );
+    const latestRunId = await loadLatestRunId(connection, run);
+    const activate = latestRunId === run.id;
+    if (activate) {
+      await connection.execute(
+        "UPDATE products SET description = ?, description_source = 'generated', description_evidence = ? WHERE id = ? AND description = ''",
+        [result.product.description, JSON.stringify(result.product.evidence), run.productId],
+      );
+    }
     const behavioralPaths = behavioralChangePaths(change.files);
     // 逐锚点保真判定（2026-11-19 根治 release 280 丢 20 场景）：行为文件的 hunk 供
     // preserveUnchangedEvidence 做锚点级相交判定与确定性行号重映射。
@@ -233,38 +244,50 @@ export async function saveResult(run: RunContext, result: AnalysisResult, change
         .filter((file) => behavioralPaths.has(file.path))
         .map((file) => [file.path, parsePatchHunks(file.patch)] as const),
     );
-    const { specVersionId, specChanges, baseline, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds, scenarioIdByLocalKey } = await insertSpecVersion(connection, run, result, { ...(affectedKeys ? { affectedKeys } : {}), behavioralChangePaths: behavioralPaths, changedHunksByPath });
-    // BM-11 别名登记：变体名 → canonical 旧键，走 feature_aliases 显式归并通道
-    // （migrations/030；progress-summary 的历史 spec_changes 归并已消费该表）。幂等 INSERT IGNORE。
-    for (const fold of featureFolds) {
-      await connection.execute(
-        "INSERT IGNORE INTO feature_aliases (product_id, alias_key, canonical_key) VALUES (?, ?, ?)",
-        [run.productId, fold.fromKey, fold.intoKey],
-      );
+    const { specVersionId, specChanges, baseline, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds, scenarioIdByLocalKey } = await insertSpecVersion(connection, run, result, { ...(affectedKeys ? { affectedKeys } : {}), behavioralChangePaths: behavioralPaths, changedHunksByPath, base: activate ? "latest" : "beforeRun", baseVersionId: run.baseCapturedAt ? run.baseSpecVersionId : undefined });
+    if (activate) {
+      // BM-11 别名登记：变体名 → canonical 旧键，走 feature_aliases 显式归并通道
+      // （migrations/030；progress-summary 的历史 spec_changes 归并已消费该表）。幂等 INSERT IGNORE。
+      for (const fold of featureFolds) {
+        await connection.execute(
+          "INSERT IGNORE INTO feature_aliases (product_id, alias_key, canonical_key) VALUES (?, ?, ?)",
+          [run.productId, fold.fromKey, fold.intoKey],
+        );
+      }
     }
     // Task 12：行为锚点 ↔ 最终场景映射回填（同事务；缺失即抛错回滚）
     await persistBehaviorFinalMappings(connection, run, behaviorLinks, scenarioIdByLocalKey);
-    await rebuildSpecFileIndex(connection, run.repositoryId, specVersionId);
-    await markSpecDrift(connection, run.productId, specVersionId);
+    if (activate) {
+      await rebuildSpecFileIndex(connection, run.repositoryId, specVersionId);
+      await markSpecDrift(connection, run.productId, specVersionId);
+    }
     // B1：覆盖率回执与规格版本同事务落库（append-only，历史版本可回溯）
     if (coverage) await saveCoverageReceipt(connection, specVersionId, coverage);
     if (collapse) {
-      console.error("[spec] suspected spec collapse", { runId: run.id, specVersionId, previousScenarios: collapse.previousScenarios, currentScenarios: collapse.currentScenarios });
-      throw new Error(`spec_collapse_rejected:${collapse.previousScenarios}->${collapse.currentScenarios}`);
+      console.error("[spec] suspected spec collapse", { runId: run.id, specVersionId, previousScenarios: collapse.previousScenarios, currentScenarios: collapse.currentScenarios, activate });
+      if (activate) throw new Error(`spec_collapse_rejected:${collapse.previousScenarios}->${collapse.currentScenarios}`);
     }
-    // P0(I1):下线基准必须是 carry-forward 合并后的完整规格——用 AI 原始输出会让
-    // 增量模式把未受影响的 generated 功能全部下线,工作台坍缩为本次触及的功能。
-    await upsertGeneratedSpec(connection, run, mergedFeatures);
-    const { releaseId, projections: releaseChangeProjections } = await upsertRelease(connection, run, result, change, specVersionId, specChanges, baseline ? mergedFeatures : null);
-    const [succeeded] = await connection.execute("UPDATE analysis_runs SET status = 'succeeded', finished_at = CURRENT_TIMESTAMP(3) WHERE id = ? AND status = 'running'", [run.id]) as [{ affectedRows?: number }, unknown];
-    if ((succeeded.affectedRows ?? 0) !== 1) {
-      // run 已不归本执行持有（被恢复路径重置）：回滚整笔落库，规格与 run 状态保持一致
-      throw new Error(`analysis run ${run.id} is no longer running; result discarded`);
+    if (activate) {
+      // P0(I1):下线基准必须是 carry-forward 合并后的完整规格——用 AI 原始输出会让
+      // 增量模式把未受影响的 generated 功能全部下线,工作台坍缩为本次触及的功能。
+      await upsertGeneratedSpec(connection, run, mergedFeatures);
+    }
+    const { releaseId, projections: releaseChangeProjections } = await upsertRelease(connection, run, result, change, specVersionId, specChanges, baseline ? mergedFeatures : null, { activate });
+    if (activate) {
+      await connection.execute("UPDATE releases SET is_current = 0 WHERE repository_id = ?", [run.repositoryId]);
+      await connection.execute("UPDATE releases SET is_current = 1 WHERE id = ? AND repository_id = ?", [releaseId, run.repositoryId]);
+      const [succeeded] = await connection.execute("UPDATE analysis_runs SET status = 'succeeded', finished_at = CURRENT_TIMESTAMP(3) WHERE id = ? AND status = 'running'", [run.id]) as [{ affectedRows?: number }, unknown];
+      if ((succeeded.affectedRows ?? 0) !== 1) {
+        // run 已不归本执行持有（被恢复路径重置）：回滚整笔落库，规格与 run 状态保持一致
+        throw new Error(`analysis run ${run.id} is no longer running; result discarded`);
+      }
     }
     await connection.commit();
+    committed = true;
+    if (!activate) throw new Error(`Analysis superseded by run ${latestRunId}`);
     return { specVersionId, releaseId, releaseChangeProjections, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds };
   } catch (error) {
-    await connection.rollback();
+    if (!committed) await connection.rollback();
     throw error;
   } finally {
     connection.release();
@@ -293,6 +316,7 @@ async function loadRun(runId: number) {
   const [rows] = await getDb().execute(
     `SELECT r.id, r.repository_id AS repositoryId, p.id AS productId, p.slug AS productSlug, p.name AS productName,
             repo.owner, repo.name, r.before_sha AS beforeSha, r.after_sha AS afterSha, repo.connection_id AS connectionId,
+            r.base_spec_version_id AS baseSpecVersionId, r.base_captured_at AS baseCapturedAt,
             repo.provider, p.organization_id AS organizationId, r.account_id AS accountId, p.analyze_mode AS analyzeMode, p.output_language AS outputLanguage
      FROM analysis_runs r
      JOIN repositories repo ON repo.id = r.repository_id
@@ -309,6 +333,16 @@ async function loadSourceRoots(productId: number) {
   return parseSourceRoots(product?.sourceRoots);
 }
 
+export async function captureRunBase(run: RunContext, execute: Execute = (sql, params) => getDb().execute(sql, params)) {
+  if (run.baseCapturedAt) return;
+  const result = await execute("SELECT id FROM spec_versions WHERE repository_id = ? ORDER BY id DESC LIMIT 1", [run.repositoryId]);
+  const rows = (Array.isArray(result) ? result[0] : []) as Array<{ id: number }>;
+  const baseSpecVersionId = rows[0] ? Number(rows[0].id) : null;
+  await execute("UPDATE analysis_runs SET base_spec_version_id = ?, base_captured_at = CURRENT_TIMESTAMP(3) WHERE id = ? AND base_captured_at IS NULL", [baseSpecVersionId, run.id]);
+  run.baseSpecVersionId = baseSpecVersionId;
+  run.baseCapturedAt = new Date();
+}
+
 async function performAnalysis(run: RunContext) {
   // 原子认领：只有 queued/failed 的 run 才能翻成 running。双派发（webhook 幂等回传
   // runId + sweep 认领 + 手动补分析并发）下输家静默退出——防双跑双计费、防终态互踩。
@@ -320,6 +354,7 @@ async function performAnalysis(run: RunContext) {
     console.warn("[analysis] run claim lost to a concurrent dispatcher; skipped", { runId: run.id });
     return;
   }
+  await captureRunBase(run);
   // 执行入口预留检查（契约 §6.6/§9）：failed run 重试 / 恢复重派发时无 active 预留 → 重新预留
   // （封死免费重试漏洞）；有则沿用原预留。额度被拒的 BillingError 冒泡为失败原因。
   await ensureReservation(run);

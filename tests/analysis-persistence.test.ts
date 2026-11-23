@@ -4,7 +4,7 @@ import type { PoolConnection } from "mysql2/promise";
 import type { AnalysisResult } from "../lib/ai";
 import type { AnchorScenarioLink } from "../lib/behavior-unit-state";
 import type { Execute } from "../lib/db";
-import { assertLatestRun, upsertGeneratedSpec, upsertRelease, type RunContext } from "../lib/analysis";
+import { assertLatestRun, captureRunBase, upsertGeneratedSpec, upsertRelease, type RunContext } from "../lib/analysis";
 // saveResult 由 Task 12 导出；命名空间引用保证 RED 阶段既有用例仍能加载本文件。
 import * as analysis from "../lib/analysis";
 import type { MergeResult } from "../lib/extraction-merge";
@@ -61,6 +61,19 @@ describe("analysis persistence guards", () => {
     await expect(assertLatestRun(connection, run)).resolves.toBeUndefined();
   });
 
+  it("captures the run base once and preserves it on retry", async () => {
+    const captured = { ...run, baseSpecVersionId: null, baseCapturedAt: null };
+    const execute = vi.fn(async (sql: string) => sql.includes("SELECT id FROM spec_versions") ? [[{ id: 77 }]] : [{ affectedRows: 1 }]);
+
+    await captureRunBase(captured, execute);
+    await captureRunBase(captured, execute);
+
+    expect(captured.baseSpecVersionId).toBe(77);
+    expect(captured.baseCapturedAt).not.toBeNull();
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(execute).toHaveBeenCalledWith("UPDATE analysis_runs SET base_spec_version_id = ?, base_captured_at = CURRENT_TIMESTAMP(3) WHERE id = ? AND base_captured_at IS NULL", [77, run.id]);
+  });
+
   it("does not duplicate changes for an existing release", async () => {
     const connection = connectionWithCount(1);
     const { projections } = await upsertRelease(connection, run, result, change, null, specChanges);
@@ -88,6 +101,23 @@ describe("analysis persistence guards", () => {
     expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("DELETE FROM release_reviewed_items WHERE release_id = ?"), [10]);
     expect(projections).toHaveLength(2);
     expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO change_sources"), expect.anything());
+  });
+
+  it("does not re-point or rebuild an existing release during historical persistence", async () => {
+    const connection = {
+      execute: vi.fn(async (sql: string) => {
+        if (sql.includes("analysis_run_id AS analysisRunId")) return [[{ id: 10, analysisRunId: run.id + 1 }]];
+        if (sql.includes("SELECT id FROM releases")) return [[{ id: 10 }]];
+        if (sql.includes("SELECT COUNT(*)")) return [[{ count: 1 }]];
+        return [{}];
+      }),
+    } as unknown as PoolConnection;
+
+    const { releaseId, projections } = await upsertRelease(connection, run, result, change, 99, specChanges, null, { activate: false });
+    expect(releaseId).toBe(10);
+    expect(projections).toEqual([]);
+    expect(connection.execute).not.toHaveBeenCalledWith(expect.stringContaining("INSERT INTO releases"), expect.anything());
+    expect(connection.execute).not.toHaveBeenCalledWith(expect.stringContaining("DELETE FROM changes"), expect.anything());
   });
 
   it("persists one source-linked projection per canonical feature and keeps reviewed out of user changes", async () => {
@@ -310,6 +340,7 @@ describe("saveResult 行为来源最终映射 (Task 12)", () => {
       expect.stringContaining("UPDATE analysis_behavior_anchor_scenarios SET final_scenario_id = ?"),
       [700, run.id, sha256(link.anchorKey), sha256(link.localScenarioKey)],
     );
+    expect(stub.execute).toHaveBeenCalledWith("UPDATE releases SET is_current = 1 WHERE id = ? AND repository_id = ?", [10, 3]);
     expect(stub.commit).toHaveBeenCalledTimes(1);
     expect(stub.rollback).not.toHaveBeenCalled();
   });
@@ -333,12 +364,21 @@ describe("saveResult 行为来源最终映射 (Task 12)", () => {
     expect(stub.commit).not.toHaveBeenCalled();
   });
 
-  it("keeps the superseded-run guard ahead of any spec writes", async () => {
+  it("persists a superseded run as history without activating its spec", async () => {
     const stub = connection({ latestRunId: 999 });
     dbMock.connection = stub;
-    await expect(analysis.saveResult(run, resultWithOrigins, change, null, undefined, [link])).rejects.toThrow("Analysis superseded by run 999");
-    expect(stub.rollback).toHaveBeenCalledTimes(1);
-    expect(stub.execute).not.toHaveBeenCalledWith(expect.stringContaining("INSERT INTO spec_versions"), expect.anything());
-    expect(stub.execute).not.toHaveBeenCalledWith(expect.stringContaining("UPDATE analysis_behavior_anchor_scenarios"), expect.anything());
+    const historicalRun = { ...run, baseSpecVersionId: 11, baseCapturedAt: new Date("2026-11-01T00:00:00Z") };
+    await expect(analysis.saveResult(historicalRun, resultWithOrigins, change, null, undefined, [link])).rejects.toThrow("Analysis superseded by run 999");
+
+    expect(stub.commit).toHaveBeenCalledTimes(1);
+    expect(stub.rollback).not.toHaveBeenCalled();
+    expect(stub.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO spec_versions"), expect.anything());
+    expect(stub.execute).toHaveBeenCalledWith("SELECT id FROM spec_versions WHERE repository_id = ? AND id = ?", [3, 11]);
+    expect(stub.execute).toHaveBeenCalledWith(expect.stringContaining("UPDATE analysis_behavior_anchor_scenarios"), expect.anything());
+    expect(stub.execute).not.toHaveBeenCalledWith(expect.stringContaining("UPDATE products SET description"), expect.anything());
+    expect(stub.execute).not.toHaveBeenCalledWith(expect.stringContaining("UPDATE releases SET is_current"), expect.anything());
+    expect(stub.execute).not.toHaveBeenCalledWith(expect.stringContaining("INSERT INTO features (product_id"), expect.anything());
+    expect(stub.execute).not.toHaveBeenCalledWith(expect.stringContaining("DELETE FROM spec_file_index"), expect.anything());
+    expect(stub.execute).not.toHaveBeenCalledWith(expect.stringContaining("UPDATE analysis_runs SET status = 'succeeded'"), expect.anything());
   });
 });

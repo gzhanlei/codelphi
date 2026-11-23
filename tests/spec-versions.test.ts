@@ -3,7 +3,7 @@ import type { PoolConnection } from "mysql2/promise";
 import type { AnalysisResult } from "../lib/ai";
 import type { RunContext } from "../lib/analysis";
 import type { MergeResult } from "../lib/extraction-merge";
-import { detectFeatureCollapses, detectMisplacedScenarios, detectSpecCollapse, featureParentKey, foldVariantFeatures, insertSpecVersion, loadLatestSpecVersionLanguage, loadPreviousFeatureNames } from "../lib/spec-versions";
+import { detectFeatureCollapses, detectMisplacedScenarios, detectSpecCollapse, featureParentKey, foldVariantFeatures, insertSpecVersion, loadBaseVersionMap, loadLatestSpecVersionLanguage, loadPreviousFeatureNames } from "../lib/spec-versions";
 const run: RunContext = { id: 8, repositoryId: 3, productId: 4, owner: "gzhanlei", name: "radar", beforeSha: "a", afterSha: "b", connectionId: null, provider: "github", organizationId: 1, productSlug: "radar", productName: "Radar" };
 const scenario = { reference: "HP-1", context: "Visitor", action: "Signs in", outcome: "Dashboard", category: "happy" as const, evidence: [] };
 const previousScenario = (reference: string, path: string) => ({ featureId: 1, reference, context: "User", action: "Uses links", outcome: "Links work", category: "happy", source: "generated", evidence: JSON.stringify([{ path, startLine: 1 }]) });
@@ -67,6 +67,30 @@ describe("spec version persistence", () => {
     expect(db.changes.filter((change) => change[2] === "feature").every((change) => change[6] === "")).toBe(true);
     expect(db.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO spec_features"), expect.arrayContaining([null, "generated"]));
     expect(db.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO spec_scenarios"), expect.arrayContaining(["generated"]));
+  });
+
+  it("persists the explicit base version and reads it instead of inferring from insertion order", async () => {
+    const db = connection([{ id: 11 }]);
+    await insertSpecVersion(db, run, result);
+    const insert = (db.execute as ReturnType<typeof vi.fn>).mock.calls.find(([sql]) => String(sql).includes("INSERT INTO spec_versions"));
+    expect(insert?.[0]).toContain("base_spec_version_id");
+    expect(insert?.[1]).toContain(11);
+
+    const execute = vi.fn(async () => [[{ versionId: 99, baseVersionId: 11 }]]);
+    await loadBaseVersionMap(execute, [99]);
+    expect(execute).toHaveBeenCalledWith(expect.stringContaining("v.base_spec_version_id"), [99]);
+  });
+
+  it("selects a historical base from runs that already existed at the run start", async () => {
+    const db = connection([{ id: 11 }]);
+    await insertSpecVersion(db, run, result, { base: "beforeRun" });
+    expect(db.execute).toHaveBeenCalledWith(expect.stringContaining("analysis_run_id < ?"), [3, 8]);
+  });
+
+  it("loads the exact captured base version when one is provided", async () => {
+    const db = connection([{ id: 11 }]);
+    await insertSpecVersion(db, run, result, { baseVersionId: 11 });
+    expect(db.execute).toHaveBeenCalledWith("SELECT id FROM spec_versions WHERE repository_id = ? AND id = ?", [3, 11]);
   });
 
   it("records no changes for a first version", async () => {
