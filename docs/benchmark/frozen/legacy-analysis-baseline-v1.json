@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "path": "legacy",
+  "targetRevision": "2659429e588da466fcb712ba096531343aa75d08",
+  "database": "codelphi_bench_l",
+  "runId": 82,
+  "specVersionId": 65,
+  "outputHash": "e23dc1bcef615ab4dd790f5a5483c62af427378e5e8ade3e65b338d24e0e12d6",
+  "usage": {
+    "llmCalls": 148,
+    "totalTokens": 1268333,
+    "costAmount": 0.276366,
+    "currency": "USD",
+    "pricingVersion": "deepseek-flash-2026-11:offPeak",
+    "cacheHitTokens": 120960,
+    "cacheMissTokens": 916491,
+    "durationMs": 880200
+  },
+  "provenance": "Frozen L output and real receipts from the completed 2026-11-22 analysis-pipeline-quality-cost run; not replaced by a new run."
+}

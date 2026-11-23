@@ -1,0 +1,318 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "id": "archive_limit",
+      "kind": "fact_recall",
+      "before": [
+        {
+          "path": "tests/fixtures/legacy-analysis/archive-limit.ts",
+          "content": "export const MAX_ARCHIVE_BYTES = 500_000_000;\nexport function exceedsArchiveLimit(size: number, maxArchiveBytes = MAX_ARCHIVE_BYTES) {\n  return size > maxArchiveBytes;\n}\n"
+        }
+      ],
+      "after": [
+        {
+          "path": "tests/fixtures/legacy-analysis/archive-limit.ts",
+          "content": "export const MAX_ARCHIVE_BYTES = 500_000_000;\nexport function exceedsArchiveLimit(size: number, maxArchiveBytes = MAX_ARCHIVE_BYTES) {\n  return size > maxArchiveBytes;\n}\n"
+        }
+      ],
+      "expected": {
+        "behaviors": [
+          {
+            "id": "archive_size_boundary",
+            "state": "same",
+            "description": "严格大于 500,000,000 字节才越界；等于该值不越界。"
+          }
+        ],
+        "impacted": [],
+        "unaffected": ["archive_size_boundary"],
+        "unknown": []
+      }
+    },
+    {
+      "id": "alias_and_shadowing",
+      "kind": "fact_recall",
+      "before": [
+        {
+          "path": "tests/fixtures/legacy-analysis/archive-limit.ts",
+          "content": "export const MAX_ARCHIVE_BYTES = 500_000_000;\nconst ARCHIVE_LIMIT = MAX_ARCHIVE_BYTES;\nexport function exceedsArchiveLimit(size: number, maxArchiveBytes = ARCHIVE_LIMIT) {\n  return size > maxArchiveBytes;\n}\nexport function exceedsShadowedLimit(size: number, MAX_ARCHIVE_BYTES = 100) {\n  return size > MAX_ARCHIVE_BYTES;\n}\n"
+        }
+      ],
+      "after": [
+        {
+          "path": "tests/fixtures/legacy-analysis/archive-limit.ts",
+          "content": "export const MAX_ARCHIVE_BYTES = 500_000_000;\nconst ARCHIVE_LIMIT = MAX_ARCHIVE_BYTES;\nexport function exceedsArchiveLimit(size: number, maxArchiveBytes = ARCHIVE_LIMIT) {\n  return size > maxArchiveBytes;\n}\nexport function exceedsShadowedLimit(size: number, MAX_ARCHIVE_BYTES = 100) {\n  return size > MAX_ARCHIVE_BYTES;\n}\n"
+        }
+      ],
+      "expected": {
+        "behaviors": [
+          {
+            "id": "archive_alias_value",
+            "state": "same",
+            "description": "ARCHIVE_LIMIT 的同文件别名值为 500,000,000。"
+          },
+          {
+            "id": "archive_shadowed_value",
+            "state": "same",
+            "description": "函数参数 MAX_ARCHIVE_BYTES 遮蔽外层常量，默认值为 100。"
+          }
+        ],
+        "impacted": [],
+        "unaffected": ["archive_alias_value", "archive_shadowed_value"],
+        "unknown": []
+      }
+    },
+    {
+      "id": "shared_permission",
+      "kind": "dependency_impact",
+      "before": [
+        {
+          "path": "tests/fixtures/legacy-analysis/permission.ts",
+          "content": "export function checkPermission(user: { canUpload: boolean }) {\n  return user.canUpload;\n}\n"
+        },
+        {
+          "path": "tests/fixtures/legacy-analysis/upload.ts",
+          "content": "import { checkPermission } from \"./permission\";\nexport function uploadFile(user: { canUpload: boolean }, content: string) {\n  if (!checkPermission(user)) throw new Error(\"upload forbidden\");\n  return content;\n}\nexport function listFiles(files: string[]) {\n  return files;\n}\n"
+        }
+      ],
+      "after": [
+        {
+          "path": "tests/fixtures/legacy-analysis/permission.ts",
+          "content": "export function checkPermission(user: { canUpload: boolean; mfaVerified: boolean }) {\n  return user.canUpload && user.mfaVerified;\n}\n"
+        },
+        {
+          "path": "tests/fixtures/legacy-analysis/upload.ts",
+          "content": "import { checkPermission } from \"./permission\";\nexport function uploadFile(user: { canUpload: boolean; mfaVerified: boolean }, content: string) {\n  if (!checkPermission(user)) throw new Error(\"upload forbidden\");\n  return content;\n}\nexport function listFiles(files: string[]) {\n  return files;\n}\n"
+        }
+      ],
+      "expected": {
+        "behaviors": [
+          {
+            "id": "upload_permission",
+            "state": "changed",
+            "description": "上传权限新增 mfaVerified 条件，uploadFile 需要复核。"
+          },
+          {
+            "id": "file_listing",
+            "state": "same",
+            "description": "listFiles 不调用 checkPermission，不受本次权限逻辑变化影响。"
+          }
+        ],
+        "impacted": ["uploadFile"],
+        "unaffected": ["listFiles"],
+        "unknown": []
+      }
+    },
+    {
+      "id": "strict_operator",
+      "kind": "fact_recall",
+      "before": [
+        {
+          "path": "tests/fixtures/legacy-analysis/archive-limit.ts",
+          "content": "export const MAX_ARCHIVE_BYTES = 500_000_000;\nexport function exceedsArchiveLimit(size: number) {\n  return size > MAX_ARCHIVE_BYTES;\n}\n"
+        }
+      ],
+      "after": [
+        {
+          "path": "tests/fixtures/legacy-analysis/archive-limit.ts",
+          "content": "export const MAX_ARCHIVE_BYTES = 500_000_000;\nexport function exceedsArchiveLimit(size: number) {\n  return size >= MAX_ARCHIVE_BYTES;\n}\n"
+        }
+      ],
+      "expected": {
+        "behaviors": [
+          {
+            "id": "archive_equality_boundary",
+            "state": "changed",
+            "description": "等于 500,000,000 时，> 为 false 而 >= 为 true。"
+          }
+        ],
+        "impacted": ["archive_equality_boundary"],
+        "unaffected": ["archive_above_boundary"],
+        "unknown": []
+      }
+    },
+    {
+      "id": "dynamic_unknown",
+      "kind": "dependency_impact",
+      "before": [
+        {
+          "path": "tests/fixtures/legacy-analysis/dynamic.ts",
+          "content": "export async function loadUploader(modulePath: string) {\n  return import(modulePath);\n}\n"
+        }
+      ],
+      "after": [
+        {
+          "path": "tests/fixtures/legacy-analysis/dynamic.ts",
+          "content": "export async function loadUploader(modulePath: string) {\n  return import(modulePath);\n}\n"
+        }
+      ],
+      "expected": {
+        "behaviors": [
+          {
+            "id": "dynamic_uploader_dependency",
+            "state": "unknown",
+            "description": "运行时 modulePath 决定实际依赖，静态分析不能断言依赖存在或不存在。"
+          }
+        ],
+        "impacted": [],
+        "unaffected": [],
+        "unknown": [
+          {
+            "id": "dynamic_uploader_dependency",
+            "resolution": "unknown"
+          }
+        ]
+      }
+    },
+    {
+      "id": "critical_unknown",
+      "kind": "dependency_impact",
+      "before": [
+        {
+          "path": "tests/fixtures/legacy-analysis/payment.ts",
+          "content": "interface PaymentGateway {\n  charge(amountCents: number): Promise<string>;\n}\nexport async function chargePayment(loadGateway: () => Promise<PaymentGateway>, amountCents: number) {\n  const gateway = await loadGateway();\n  return gateway.charge(amountCents);\n}\n"
+        }
+      ],
+      "after": [
+        {
+          "path": "tests/fixtures/legacy-analysis/payment.ts",
+          "content": "interface PaymentGateway {\n  charge(amountCents: number): Promise<string>;\n}\nexport async function chargePayment(loadGateway: () => Promise<PaymentGateway>, amountCents: number) {\n  const gateway = await loadGateway();\n  return gateway.charge(amountCents);\n}\n"
+        }
+      ],
+      "expected": {
+        "behaviors": [
+          {
+            "id": "payment_gateway_dependency",
+            "state": "unknown",
+            "description": "支付网关由运行时注入，关键支付边界允许保守回退全量复核。"
+          }
+        ],
+        "impacted": [],
+        "unaffected": [],
+        "unknown": [
+          {
+            "id": "payment_gateway_dependency",
+            "resolution": "unknown"
+          }
+        ]
+      }
+    },
+    {
+      "id": "refactor_same",
+      "kind": "evidence_reconciliation",
+      "before": [
+        {
+          "path": "tests/fixtures/legacy-analysis/refactor-a.ts",
+          "content": "export function canArchive(size: number) {\n  return size <= 500_000_000;\n}\n"
+        }
+      ],
+      "after": [
+        {
+          "path": "tests/fixtures/legacy-analysis/refactor-a.ts",
+          "content": "export function canStore(size: number) {\n  return size <= 500_000_000;\n}\n"
+        }
+      ],
+      "expected": {
+        "behaviors": [
+          {
+            "id": "archive_eligibility",
+            "state": "same",
+            "description": "函数改名但规范化实现不变，行为身份保持 same，证据重新锚定。"
+          }
+        ],
+        "impacted": [],
+        "unaffected": ["archive_eligibility"],
+        "unknown": []
+      }
+    },
+    {
+      "id": "refactor_changed",
+      "kind": "evidence_reconciliation",
+      "before": [
+        {
+          "path": "tests/fixtures/legacy-analysis/refactor-a.ts",
+          "content": "export function canArchive(size: number) {\n  return size <= 500_000_000;\n}\n"
+        }
+      ],
+      "after": [
+        {
+          "path": "tests/fixtures/legacy-analysis/refactor-b.ts",
+          "content": "export function canArchive(size: number) {\n  return size < 500_000_000;\n}\n"
+        }
+      ],
+      "expected": {
+        "behaviors": [
+          {
+            "id": "archive_eligibility",
+            "state": "changed",
+            "description": "等于 500,000,000 的输入在变更后不再允许，旧证据失效。"
+          }
+        ],
+        "impacted": ["archive_eligibility"],
+        "unaffected": [],
+        "unknown": []
+      }
+    },
+    {
+      "id": "split_unknown",
+      "kind": "evidence_reconciliation",
+      "before": [
+        {
+          "path": "tests/fixtures/legacy-analysis/refactor-a.ts",
+          "content": "export function canArchive(size: number) {\n  return size <= 500_000_000;\n}\n"
+        }
+      ],
+      "after": [
+        {
+          "path": "tests/fixtures/legacy-analysis/refactor-b.ts",
+          "content": "function hasValidSize(size: number) {\n  return size <= 500_000_000;\n}\nexport function canArchive(size: number) {\n  return hasValidSize(size);\n}\n"
+        }
+      ],
+      "expected": {
+        "behaviors": [
+          {
+            "id": "archive_eligibility_identity",
+            "state": "unknown",
+            "description": "实现被拆到辅助函数，首版不做智能相似度匹配，不能强行确认身份。"
+          }
+        ],
+        "impacted": [],
+        "unaffected": [],
+        "unknown": [
+          {
+            "id": "archive_eligibility_identity",
+            "resolution": "unknown"
+          }
+        ]
+      }
+    },
+    {
+      "id": "delete_stale",
+      "kind": "evidence_reconciliation",
+      "before": [
+        {
+          "path": "tests/fixtures/legacy-analysis/permission.ts",
+          "content": "export function checkPermission(user: { canUpload: boolean }) {\n  return user.canUpload;\n}\n"
+        }
+      ],
+      "after": [],
+      "expected": {
+        "behaviors": [
+          {
+            "id": "permission_behavior_existence",
+            "state": "unknown",
+            "description": "文件删除使历史证据 stale，但不能据此断言产品行为已删除。"
+          }
+        ],
+        "impacted": [],
+        "unaffected": [],
+        "unknown": [
+          {
+            "id": "permission_behavior_existence",
+            "resolution": "unknown"
+          }
+        ]
+      }
+    }
+  ]
+}
