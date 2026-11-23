@@ -57,6 +57,13 @@ export function aggregatePipelineUsage(
   };
 }
 
+export function resolveBenchDatabaseUrl(databaseUrl: string, databaseOverride?: string): string {
+  const url = new URL(databaseUrl);
+  if (databaseOverride) url.pathname = `/${databaseOverride}`;
+  assertBenchmarkDatabaseName(url.pathname.replace(/^\//, ""));
+  return url.toString();
+}
+
 export function assertBenchmarkDatabaseName(database: string): void {
   if (database !== "codelphi_bench" && !database.startsWith("codelphi_bench_") && !database.endsWith("_bench")) {
     throw new Error(`refusing to export usage from non-scratch database: ${database}`);

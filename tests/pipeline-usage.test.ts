@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   aggregatePipelineUsage,
   assertBenchmarkDatabaseName,
+  resolveBenchDatabaseUrl,
   type PipelineReceiptRow,
   type PipelineTaskRow,
 } from "../lib/pipeline-usage";
@@ -50,6 +51,13 @@ describe("aggregatePipelineUsage", () => {
 
   it("does not mark pending or failed tasks as reused terminal", () => {
     expect(aggregatePipelineUsage([], [{ taskKey: "task-a", status: "pending" }, { taskKey: "task-b", status: "failed" }]).tasks.map((task) => task.reusedTerminal)).toEqual([false, false]);
+  });
+});
+
+describe("resolveBenchDatabaseUrl", () => {
+  it("selects an explicit scratch database without exposing credentials", () => {
+    expect(resolveBenchDatabaseUrl("mysql://user:pass@example.test/radar", "codelphi_bench_i1")).toBe("mysql://user:pass@example.test/codelphi_bench_i1");
+    expect(() => resolveBenchDatabaseUrl("mysql://user:pass@example.test/radar", "radar")).toThrow(/scratch/);
   });
 });
 

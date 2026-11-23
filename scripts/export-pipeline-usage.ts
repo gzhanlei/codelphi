@@ -7,6 +7,7 @@ import { getDb } from "../lib/db";
 import {
   aggregatePipelineUsage,
   assertBenchmarkDatabaseName,
+  resolveBenchDatabaseUrl,
   type PipelineReceiptRow,
   type PipelineTaskRow,
 } from "../lib/pipeline-usage";
@@ -26,6 +27,7 @@ function args(argv: readonly string[]): { runId: number; out: string } {
 }
 
 export async function exportPipelineUsage(runId: number, out: string): Promise<void> {
+  process.env.DATABASE_URL = resolveBenchDatabaseUrl(process.env.DATABASE_URL!, process.env.BENCH_DATABASE);
   assertBenchmarkDatabaseName(databaseConfig().database ?? "");
   const db = getDb();
   try {

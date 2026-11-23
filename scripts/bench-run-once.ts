@@ -6,15 +6,27 @@
  * 退出码：0 = run succeeded；1 = failed/queued（error_message 已打印）。
  */
 import "dotenv/config";
+import { pathToFileURL } from "node:url";
+import { databaseConfig } from "../lib/database-config";
+import { assertBenchmarkDatabaseName, resolveBenchDatabaseUrl } from "../lib/pipeline-usage";
 
-const mode = process.argv[2] === "inventory" ? "inventory" : "legacy";
-process.env.FULL_ANALYSIS_MODE = mode;
+const DEFAULT_AFTER_SHA = "e157baba2bb1ae58f719c43f3a453e5b28326f33";
+
+export function resolveBenchRunConfig(input: { mode: string; database?: string; afterSha?: string }) {
+  const mode = input.mode === "inventory" ? "inventory" : "legacy";
+  const database = input.database ?? databaseConfig().database ?? "";
+  assertBenchmarkDatabaseName(database);
+  return { mode, database, afterSha: input.afterSha ?? DEFAULT_AFTER_SHA };
+}
 
 async function main() {
+  const config = resolveBenchRunConfig({ mode: process.argv[2] ?? "legacy", database: process.env.BENCH_DATABASE, afterSha: process.env.BENCH_AFTER_SHA });
+  process.env.FULL_ANALYSIS_MODE = config.mode;
+  process.env.DATABASE_URL = resolveBenchDatabaseUrl(process.env.DATABASE_URL!, config.database);
   const { getDb } = await import("../lib/db");
   const { runAnalysis } = await import("../lib/analysis");
   const db = getDb();
-  const afterSha = "e157baba2bb1ae58f719c43f3a453e5b28326f33";
+  const afterSha = config.afterSha;
   const [inserted] = (await db.execute(
     `INSERT INTO analysis_runs (repository_id, trigger_type, before_sha, after_sha, status, account_id)
      SELECT id, 'manual', NULL, ?, 'queued', 1 FROM repositories
@@ -22,7 +34,7 @@ async function main() {
     [afterSha],
   )) as unknown as [{ insertId: number }, unknown];
   const runId = Number(inserted.insertId);
-  console.log(`[bench] mode=${mode} runId=${runId} after=${afterSha.slice(0, 8)} starting`);
+  console.log(`[bench] mode=${config.mode} runId=${runId} after=${afterSha.slice(0, 8)} starting`);
   const startedAt = Date.now();
   await runAnalysis(runId);
   const [rows] = (await db.execute(
@@ -31,7 +43,7 @@ async function main() {
   )) as unknown as [Array<{ status: string; error_message: string | null }>, unknown];
   const row = rows[0];
   console.log(JSON.stringify({
-    mode,
+    mode: config.mode,
     runId,
     status: row.status,
     durationMs: Date.now() - startedAt,
@@ -40,7 +52,9 @@ async function main() {
   process.exitCode = row.status === "succeeded" ? 0 : 1;
 }
 
-void main().catch((error: unknown) => {
-  console.error("[bench] runner crashed:", error instanceof Error ? error.message : String(error));
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  void main().catch((error: unknown) => {
+    console.error("[bench] runner crashed:", error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  });
+}
