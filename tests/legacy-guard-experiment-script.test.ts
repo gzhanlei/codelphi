@@ -49,7 +49,9 @@ const BASE_CONFIG = {
   arms: ["A", "B", "C", "D"],
   repetitionsPerArm: 3,
   outputLanguage: "zh-CN",
-  promptSha256: { A: "", B: "", C: "", D: "" },
+  // 结构合法的占位 hash（frozenConfig() 会用真实计算值覆盖），
+  // 保证 validateConfig 的 schema 先行通过、arm/repetition/参数校验真正被触达。
+  promptSha256: { A: "a".repeat(64), B: "b".repeat(64), C: "c".repeat(64), D: "d".repeat(64) },
 } as unknown as ExperimentConfigFile;
 
 const REVIEWED_TRUTH: ExperimentTruthFile = {
@@ -182,14 +184,26 @@ describe("validateTruth", () => {
 });
 
 describe("validateConfig", () => {
+  function reasonsOf(config: unknown): string[] {
+    try {
+      validateConfig(config);
+    } catch (error) {
+      expect(error).toBeInstanceOf(ExperimentInputError);
+      return (error as ExperimentInputError).reasons;
+    }
+    throw new Error("validateConfig should have thrown");
+  }
+
   it("rejects configurations that are not exactly 4 arms x 3 repetitions", () => {
-    expect(() => validateConfig({ ...BASE_CONFIG, repetitionsPerArm: 2 })).toThrowError(ExperimentInputError);
-    expect(() => validateConfig({ ...BASE_CONFIG, arms: ["A", "B", "C"] })).toThrowError(ExperimentInputError);
-    expect(() => validateConfig({ ...BASE_CONFIG, arms: ["A", "B", "C", "C"] })).toThrowError(ExperimentInputError);
+    expect(reasonsOf({ ...BASE_CONFIG, repetitionsPerArm: 2 })).toContain("repetitions_per_arm_must_be_3");
+    expect(reasonsOf({ ...BASE_CONFIG, arms: ["A", "B", "C", "C"] })).toContain("arms_must_be_exactly_A_B_C_D");
+    // 臂数量不足 4 在 schema 层即失败封闭（zod length(4)），同样不得进入执行。
+    expect(reasonsOf({ ...BASE_CONFIG, arms: ["A", "B", "C"] }).some((reason) => reason.startsWith("config_schema_invalid"))).toBe(true);
   });
 
   it("rejects parameters that do not match the frozen gateway call", () => {
-    expect(() => validateConfig({ ...BASE_CONFIG, parameters: { temperature: 0.5, maxTokens: 16000, stream: false } })).toThrowError(ExperimentInputError);
+    expect(reasonsOf({ ...BASE_CONFIG, parameters: { temperature: 0.5, maxTokens: 16000, stream: false } }))
+      .toContain("parameters_mismatch_frozen_gateway_call");
   });
 });
 
@@ -245,6 +259,60 @@ describe("executeExperiment", () => {
     expect(result.runs[0].usage).toBeNull();
     expect(result.runs[0].actualCost).toBeNull();
     expect(result.runs[0].rawOutput).toBe(VALID_CONTENT);
+    expect(state.calls).toBe(1);
+  });
+
+  it("aborts on truncated output (finishReason=length) instead of counting it as a valid repetition", async () => {
+    const state = { calls: 0 };
+    const executor: CompletionExecutor = async () => {
+      state.calls += 1;
+      return {
+        content: VALID_CONTENT.slice(0, 40),
+        usageRaw: { prompt_tokens: 100, completion_tokens: 50 },
+        providerRequestId: "req-len",
+        finishReason: "length",
+      };
+    };
+    const result = await executeExperiment({
+      config: frozenConfig(),
+      truth: REVIEWED_TRUTH,
+      executor,
+      gitShow: fakeGitShow,
+      model: "ds-flash",
+      pricingRaw: PRICING_RAW,
+    });
+    expect(result.status).toBe("aborted");
+    expect(result.abortReason).toContain("output_truncated");
+    expect(result.runs).toHaveLength(1);
+    expect(result.runs[0].error).toBe("output_truncated");
+    expect(result.runs[0].usage).toEqual({ inputTokens: 100, outputTokens: 50, cacheHitTokens: 0 });
+    expect(state.calls).toBe(1);
+  });
+
+  it("aborts on unparseable output instead of counting it as a valid repetition", async () => {
+    const state = { calls: 0 };
+    const executor: CompletionExecutor = async () => {
+      state.calls += 1;
+      return {
+        content: "this is not JSON",
+        usageRaw: { prompt_tokens: 100, completion_tokens: 50 },
+        providerRequestId: "req-bad",
+        finishReason: "stop",
+      };
+    };
+    const result = await executeExperiment({
+      config: frozenConfig(),
+      truth: REVIEWED_TRUTH,
+      executor,
+      gitShow: fakeGitShow,
+      model: "ds-flash",
+      pricingRaw: PRICING_RAW,
+    });
+    expect(result.status).toBe("aborted");
+    expect(result.abortReason).toContain("parse_error");
+    expect(result.runs).toHaveLength(1);
+    expect(result.runs[0].parseError).not.toBeNull();
+    expect(result.runs[0].error).toBe("parse_error");
     expect(state.calls).toBe(1);
   });
 
@@ -305,6 +373,27 @@ describe("buildMeasurements", () => {
     expect(() => buildMeasurements(result.runs, [])).toThrowError(ExperimentInputError);
     expect(() => buildMeasurements(result.runs, makeJudgments().slice(0, 11))).toThrowError(ExperimentInputError);
   });
+
+  it("refuses to count truncated or unparseable runs as measurable repetitions", async () => {
+    const result = await executeExperiment({
+      config: frozenConfig(),
+      truth: REVIEWED_TRUTH,
+      executor: okExecutor,
+      gitShow: fakeGitShow,
+      model: "ds-flash",
+      pricingRaw: PRICING_RAW,
+    });
+    const truncated = result.runs.map((run, index) => (index === 0 ? { ...run, error: "output_truncated" } : run));
+    try {
+      buildMeasurements(truncated, makeJudgments());
+      throw new Error("buildMeasurements should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ExperimentInputError);
+      expect((error as ExperimentInputError).reasons.join(",")).toContain("run_not_measurable:A:1");
+    }
+    const unparseable = result.runs.map((run, index) => (index === 0 ? { ...run, parseError: "bad json" } : run));
+    expect(() => buildMeasurements(unparseable, makeJudgments())).toThrowError(ExperimentInputError);
+  });
 });
 
 describe("summarizeExperiment", () => {
@@ -354,6 +443,45 @@ describe("summarizeExperiment", () => {
     const verdict = summarizeExperiment(REVIEWED_TRUTH, mutated, makeJudgments());
     expect(verdict.status).toBe("inconclusive");
     expect(verdict.reasons).toContain("usage_missing");
+  });
+
+  it("is inconclusive when a run set aborted mid-experiment (defective repetition removed from measurement)", async () => {
+    const state = { calls: 0 };
+    const executor: CompletionExecutor = async () => {
+      state.calls += 1;
+      if (state.calls === 4) {
+        return {
+          content: VALID_CONTENT,
+          usageRaw: { prompt_tokens: 100, completion_tokens: 50 },
+          providerRequestId: "req-len",
+          finishReason: "length",
+        };
+      }
+      return {
+        content: VALID_CONTENT,
+        usageRaw: { prompt_tokens: 100, completion_tokens: 50 },
+        providerRequestId: `req-${state.calls}`,
+        finishReason: "stop",
+      };
+    };
+    const result = await executeExperiment({
+      config: frozenConfig(),
+      truth: REVIEWED_TRUTH,
+      executor,
+      gitShow: fakeGitShow,
+      model: "ds-flash",
+      pricingRaw: PRICING_RAW,
+    });
+    expect(result.status).toBe("aborted");
+    expect(result.runs).toHaveLength(4);
+    const recorded = new Set(result.runs.filter((run) => !run.error && !run.parseError).map((run) => `${run.arm}:${run.repetition}`));
+    const verdict = summarizeExperiment(
+      REVIEWED_TRUTH,
+      result.runs.filter((run) => recorded.has(`${run.arm}:${run.repetition}`)),
+      makeJudgments().filter((judgment) => recorded.has(`${judgment.arm}:${judgment.repetition}`)),
+    );
+    expect(verdict.status).toBe("inconclusive");
+    expect(verdict.reasons.some((reason) => reason.startsWith("incomplete_arm_repetitions"))).toBe(true);
   });
 
   it("passes only with reviewed truth, reviewed judgments and comparable cost basis", async () => {

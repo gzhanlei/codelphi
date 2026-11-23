@@ -362,13 +362,18 @@ export async function executeExperiment(deps: {
       let parseError: string | null = null;
       let error: string | null = null;
       if (details.finishReason === "length") {
-        error = "output_truncated";
-      } else {
-        try {
-          parseAnalysisContent(details.content);
-        } catch (parseFailure) {
-          parseError = parseFailure instanceof Error ? parseFailure.message : String(parseFailure);
-        }
+        // 截断是确定性缺陷样本：继续只会把不可判定的 repetition 混进 12 次测量（变相挑样本）。
+        // 记录成本与原始输出后立即中止，剩余调用不再发生 → aborted 只能判 inconclusive。
+        runs.push({ ...base, usage, actualCost: cost, parseError, error: "output_truncated" });
+        return abort(`output_truncated:${arm}:${repetition}`);
+      }
+      try {
+        parseAnalysisContent(details.content);
+      } catch (parseFailure) {
+        parseError = parseFailure instanceof Error ? parseFailure.message : String(parseFailure);
+        // 不可解析输出同理：保留记录（成本已发生）并中止，不得计为有效 repetition。
+        runs.push({ ...base, usage, actualCost: cost, parseError, error: "parse_error" });
+        return abort(`parse_error:${arm}:${repetition}`);
       }
       runs.push({ ...base, usage, actualCost: cost, parseError, error });
     }
@@ -424,6 +429,8 @@ export function buildMeasurements(runs: RawRunRecord[], judgments: RunJudgment[]
   const measurements: GuardRunMeasurement[] = [];
   for (const run of runs) {
     const key = `${run.arm}:${run.repetition}`;
+    // 缺陷样本（截断/不可解析/执行器错误）不得进入测量：宁缺毋滥，交给 incomplete_arm_repetitions 判 inconclusive。
+    if (run.error || run.parseError) reasons.push(`run_not_measurable:${key}`);
     const judgment = byKey.get(key);
     if (!judgment) {
       reasons.push(`judgment_missing:${key}`);
