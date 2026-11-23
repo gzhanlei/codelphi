@@ -204,7 +204,7 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
   if (name === "get_project_summary") {
     const featureCounts = await queryRows<{ count: number }>(execute("SELECT COUNT(*) AS count FROM features WHERE product_id = ? AND active = 1", [product.id]));
     const releaseRows = await queryRows<{ id: number; title: string; sha: string; committedAt: Date; specVersionId: number | null }>(
-      execute("SELECT id, title, sha, committed_at AS committedAt, spec_version_id AS specVersionId FROM releases WHERE product_id = ? ORDER BY committed_at DESC LIMIT 1", [product.id]),
+      execute("SELECT id, title, sha, committed_at AS committedAt, spec_version_id AS specVersionId FROM releases WHERE product_id = ? ORDER BY analysis_run_id DESC, id DESC LIMIT 1", [product.id]),
     );
     const latestRelease = releaseRows[0] ?? null;
     const coverage = latestRelease?.specVersionId ? await loadCoverageReceipt(execute as unknown as (sql: string, params?: unknown[]) => Promise<unknown>, latestRelease.specVersionId) : null;

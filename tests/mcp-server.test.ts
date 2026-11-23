@@ -124,6 +124,24 @@ describe("mcp server (A1)", () => {
     expect(summary.specSnapshot).toMatchObject({ specVersionId: 44, sha: "abc" });
   });
 
+  it("selects the snapshot by the newest successful run instead of fragile commit timestamps", async () => {
+    execute.mockImplementation(async (sql: string) => {
+      const query = String(sql);
+      if (query.includes("FROM products WHERE organization_id")) return [[{ id: 9, slug: "radar", name: "Radar", description: "d" }]];
+      if (query.includes("COUNT(*) AS count FROM features")) return [[{ count: 13 }]];
+      if (query.includes("SELECT id, title, sha, committed_at AS committedAt")) {
+        return query.includes("ORDER BY analysis_run_id DESC, id DESC")
+          ? [[{ id: 2, title: "after", sha: "d96ae8e", committedAt: new Date("2026-11-22T03:17:18Z"), specVersionId: 2 }]]
+          : [[{ id: 1, title: "before", sha: "214cd96", committedAt: new Date("2026-11-23T08:00:00Z"), specVersionId: 1 }]];
+      }
+      return [[]];
+    });
+
+    const response = await handleMcpRpc(runtime, rpc("tools/call", { name: "get_project_summary", arguments: { slug: "radar" } }));
+    const summary = (response?.result as { structuredContent: { specSnapshot: { sha: string; specVersionId: number } } }).structuredContent;
+    expect(summary.specSnapshot).toMatchObject({ sha: "d96ae8e", specVersionId: 2 });
+  });
+
   it("reports a null spec snapshot when the product has no releases", async () => {
     execute.mockImplementation(async (sql: string) => {
       if (String(sql).includes("FROM products WHERE organization_id")) return [[{ id: 9, slug: "radar", name: "Radar", description: "d" }]];
