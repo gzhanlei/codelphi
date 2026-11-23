@@ -520,3 +520,24 @@ describe("insertSpecVersion 行为来源最终映射 (Task 12)", () => {
     await expect(insertSpecVersion(db, run, input)).rejects.toThrow(/scenario\|dup/);
   });
 });
+
+
+describe("visibility conflict activation guard", () => {
+  it("rejects a version with conflicting visibility outcomes before insertion", async () => {
+    const db = connection([]);
+    const conflicting: AnalysisResult = {
+      ...result,
+      features: [{
+        name: "发布入口",
+        summary: "匿名访客的发布入口",
+        scenarios: [
+          { reference: "HP-1", context: "匿名访客访问公开演示产品页", action: "打开页面", outcome: "显示登录后可分析", category: "happy", evidence: [] },
+          { reference: "HP-2", context: "匿名访客访问公开演示产品页", action: "查看操作区", outcome: "不显示登录后可分析", category: "edge", evidence: [] },
+        ],
+      }],
+    };
+
+    await expect(insertSpecVersion(db, run, conflicting)).rejects.toThrow("spec_conflict_rejected");
+    expect(db.execute).not.toHaveBeenCalledWith(expect.stringContaining("INSERT INTO spec_versions"), expect.anything());
+  });
+});

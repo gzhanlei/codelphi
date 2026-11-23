@@ -11,6 +11,7 @@ import { isNegatedNearToken } from "./text-script";
 export interface ConsistencyScenario {
   reference: string;
   outcome: string;
+  context?: string;
 }
 
 export interface OutcomeConflict {
@@ -50,6 +51,66 @@ export function detectOutcomeConflicts(features: Array<{ name: string; scenarios
       if (entry.negated && entry.affirmative) {
         conflicts.push({ feature: feature.name, token, negated: entry.negated, affirmative: entry.affirmative });
       }
+    }
+  }
+  return conflicts;
+}
+
+
+interface VisibilityStatement {
+  token: string;
+  negated: boolean;
+}
+
+function visibilityStatements(outcome: string): VisibilityStatement[] {
+  const statements: VisibilityStatement[] = [];
+  for (const clause of outcome.split(/[，,。；;]/)) {
+    const match = /^(不)?(显示|渲染)(.+)$/.exec(clause.trim());
+    if (!match) continue;
+    const negated = match[1] === "不";
+    const tokens = new Set<string>();
+    const raw = match[3].trim();
+    if (raw && !raw.includes("「")) tokens.add(raw);
+    for (const quoted of raw.matchAll(/「([^」]+)」/g)) tokens.add(quoted[1]);
+    for (const token of tokens) {
+      const normalized = token.replace(/[「」『』"'\s]/g, "").replace(/(?:链接|按钮|提示|文案|CTA)$/i, "");
+      if (normalized) statements.push({ token: normalized, negated });
+    }
+  }
+  return statements;
+}
+
+function conditionKey(context: string): string {
+  const normalized = context.trim().toLowerCase();
+  const roles = [
+    normalized.includes("匿名") ? "anonymous" : null,
+    normalized.includes("只读") ? "readonly" : null,
+    normalized.includes("编辑") ? "editor" : null,
+    normalized.includes("管理员") || normalized.includes("owner") ? "owner" : null,
+    normalized.includes("成员") ? "member" : null,
+  ].filter((role): role is string => role !== null);
+  return roles.length === 1 ? roles[0] : normalized.replace(/\s+/g, "");
+}
+
+export function detectVisibilityConflicts(features: Array<{ name: string; scenarios: ConsistencyScenario[] }>): OutcomeConflict[] {
+  const conflicts: OutcomeConflict[] = [];
+  const byCondition = new Map<string, { feature: string; negated?: ConsistencyScenario; affirmative?: ConsistencyScenario }>();
+  for (const feature of features) {
+    for (const scenario of feature.scenarios) {
+      const condition = conditionKey(scenario.context ?? "");
+      if (!condition) continue;
+      for (const statement of visibilityStatements(scenario.outcome)) {
+        const key = `${condition}\n${statement.token}`;
+        const existing = byCondition.get(key) ?? { feature: feature.name };
+        if (statement.negated) existing.negated ??= scenario;
+        else existing.affirmative ??= scenario;
+        byCondition.set(key, existing);
+      }
+    }
+  }
+  for (const [key, entry] of byCondition) {
+    if (entry.negated && entry.affirmative) {
+      conflicts.push({ feature: entry.feature, token: key.split("\n")[1], negated: entry.negated, affirmative: entry.affirmative });
     }
   }
   return conflicts;

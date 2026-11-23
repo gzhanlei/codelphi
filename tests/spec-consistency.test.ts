@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectOutcomeConflicts } from "../lib/spec-consistency";
+import { detectOutcomeConflicts, detectVisibilityConflicts } from "../lib/spec-consistency";
 
 const scenario = (reference: string, outcome: string) => ({ reference, outcome });
 
@@ -67,5 +67,57 @@ describe("detectOutcomeConflicts", () => {
     ]);
     expect(conflicts).toHaveLength(1);
     expect(conflicts[0]).toMatchObject({ token: "422", negated: { reference: "HP-1" }, affirmative: { reference: "HP-2" } });
+  });
+});
+
+
+describe("detectVisibilityConflicts", () => {
+  it("detects the same visibility outcome asserted and negated for the same actor", () => {
+    const conflicts = detectVisibilityConflicts([
+      {
+        name: "公开演示产品页访问控制",
+        scenarios: [
+          { reference: "HP-1", context: "匿名访客访问公开演示产品页", outcome: "渲染演示页，canEdit=false，显示登录后可分析，不显示移除产品" },
+          { reference: "HP-10", context: "匿名访客访问公开演示产品页", outcome: "不渲染只读提示与「登录后可分析」链接，登录引导集中在顶栏" },
+        ],
+      },
+    ]);
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0]).toMatchObject({ token: "登录后可分析", negated: { reference: "HP-10" }, affirmative: { reference: "HP-1" } });
+  });
+
+  it("detects conflicts across equivalent anonymous-role wording", () => {
+    const conflicts = detectVisibilityConflicts([
+      {
+        name: "公开演示产品页访问控制",
+        scenarios: [
+          { reference: "HP-1", context: "匿名访问公开演示产品", outcome: "显示登录后可分析" },
+          { reference: "HP-10", context: "匿名访客访问公开演示产品页", outcome: "不显示「登录后可分析」链接" },
+        ],
+      },
+    ]);
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0]?.token).toBe("登录后可分析");
+  });
+
+  it("does not flag visibility outcomes whose actors do not overlap", () => {
+    expect(detectVisibilityConflicts([
+      {
+        name: "发布入口",
+        scenarios: [
+          { reference: "HP-1", context: "管理员", outcome: "显示发布按钮" },
+          { reference: "HP-2", context: "匿名访客", outcome: "不显示发布按钮" },
+        ],
+      },
+    ])).toEqual([]);
+  });
+
+  it("does not flag a single visibility polarity", () => {
+    expect(detectVisibilityConflicts([
+      {
+        name: "发布入口",
+        scenarios: [{ reference: "HP-1", context: "匿名访客", outcome: "不显示发布按钮" }],
+      },
+    ])).toEqual([]);
   });
 });

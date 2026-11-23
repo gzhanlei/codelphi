@@ -8,6 +8,7 @@ import { nextReference } from "./extraction-merge";
 import type { ReleaseChangeFact } from "./release-change-projection";
 import { diffSpec, featureScenarioPairMatch, featureVariantSimilar, mergeSpecSources, preserveUnchangedEvidence, scenarioBehaviorEqual, specFeatureKey, specScenarioKey, unionScenarioOriginKeys, type PatchHunk, type SpecChange, type SpecFeature, type SpecScenario, type SpecTombstones } from "./spec-diff";
 import { classifySpecHighlight } from "./spec-highlights";
+import { detectVisibilityConflicts } from "./spec-consistency";
 
 interface FeatureRow {
   id: number;
@@ -377,6 +378,11 @@ export async function insertSpecVersion(connection: PoolConnection, run: RunCont
   // 才能证伪一个新增功能（superset 盲评 #1009）。全量重建时整库重提取、窗口只覆盖本发布
   // 的几个文件——门禁会把所有新功能吞掉（生产 v201 实证：70 个新功能 0 条 added，
   // 118 个旧名记为移除）。语言与模式无关：确定性变化摘要按本版输出语言生成（072）。
+  const visibilityConflicts = detectVisibilityConflicts(foldedFeatures);
+  if (visibilityConflicts.length > 0) {
+    console.error("[spec] visibility outcome conflicts rejected", { runId: run.id, conflicts: visibilityConflicts.map((conflict) => ({ feature: conflict.feature, token: conflict.token })) });
+    throw new Error("spec_conflict_rejected");
+  }
   const changes = diffSpec(previous === null ? null : previous.features, foldedFeatures, {
     behavioralChangePaths: affectedKeys ? options.behavioralChangePaths : undefined,
     language: run.outputLanguage === "en" ? "en" : "zh-CN",
