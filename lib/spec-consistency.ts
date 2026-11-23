@@ -92,6 +92,14 @@ function conditionKey(context: string): string {
   return roles.length === 1 ? roles[0] : normalized.replace(/\s+/g, "");
 }
 
+export function hasModifiedVisibilityOutcome(previous: ConsistencyScenario, current: ConsistencyScenario): boolean {
+  if (conditionKey(previous.context ?? "") !== conditionKey(current.context ?? "")) return false;
+  const currentStatements = visibilityStatements(current.outcome);
+  return visibilityStatements(previous.outcome).some((previousStatement) =>
+    currentStatements.some((currentStatement) => previousStatement.token === currentStatement.token && previousStatement.negated !== currentStatement.negated),
+  );
+}
+
 export function detectVisibilityConflicts(features: Array<{ name: string; scenarios: ConsistencyScenario[] }>): OutcomeConflict[] {
   const conflicts: OutcomeConflict[] = [];
   const byCondition = new Map<string, { feature: string; negated?: ConsistencyScenario; affirmative?: ConsistencyScenario }>();

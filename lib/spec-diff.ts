@@ -1,5 +1,6 @@
 import { evidenceKind } from "./evidence";
 import { crossLanguageText, hasCjk, negationCountOf } from "./text-script";
+import { hasModifiedVisibilityOutcome } from "./spec-consistency";
 import type { Evidence } from "./types";
 
 export interface SpecScenario {
@@ -657,7 +658,7 @@ export function mergeSpecSources(generated: SpecFeature[], manual: SpecFeature[]
   return [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** 增量提取未覆盖的旧证据不等于行为已移除：只有证据进入本次行为变更集，才允许旧场景退出。 */
+/** 未覆盖不等于已移除；可见性目标发生极性翻转时，旧语义不得恢复。 */
 export function preserveUnchangedEvidence(
   previousFeatures: SpecFeature[],
   generated: SpecFeature[],
@@ -673,6 +674,7 @@ export function preserveUnchangedEvidence(
     // 路径不在行为变更集→安全；在变更集但旧行锚点不与任何 hunk 相交→安全（锚点随 hunk
     // 确定性重映射到新行号）；锚点落进变更 hunk 或无行号→保守不保，仍交 AI 重提取裁决。
     const carried: SpecScenario[] = [];
+    const current = byKey.get(specFeatureKey(previousFeature.name));
     for (const scenario of previousFeature.scenarios) {
       if (scenario.source === "manual") continue;
       let allSafe = true;
@@ -697,10 +699,10 @@ export function preserveUnchangedEvidence(
         return { ...item, ...(newStart === item.startLine ? {} : { startLine: newStart }), ...(item.endLine === undefined || newEnd === item.endLine ? {} : { endLine: newEnd }) };
       });
       if (!allSafe) continue;
+      if (current?.scenarios.some((candidate) => hasModifiedVisibilityOutcome(scenario, candidate))) continue;
       carried.push(shifted ? { ...scenario, evidence } : scenario);
     }
     if (carried.length === 0) continue;
-    const current = byKey.get(specFeatureKey(previousFeature.name));
     if (!current) {
       const restored = { ...previousFeature, scenarios: carried };
       result.push(restored);

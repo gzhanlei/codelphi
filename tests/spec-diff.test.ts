@@ -574,6 +574,35 @@ describe("preserveUnchangedEvidence (锚点级保真, 2026-11-19 根治)", () =>
   });
 });
 
+describe("可见性场景生命周期", () => {
+  const previous: SpecFeature = {
+    name: "公开演示产品页访问控制",
+    summary: "匿名访问公开演示产品",
+    source: "generated",
+    scenarios: [
+      { reference: "HP-1", context: "匿名访问公开演示产品", action: "打开页面", outcome: "显示登录后可分析", category: "happy", source: "generated", evidence: [{ path: "components/analyze-button.tsx", startLine: 20 }] },
+      { reference: "EC-2", context: "管理员", action: "打开页面", outcome: "显示登录后可分析", category: "happy", source: "generated", evidence: [{ path: "components/analyze-button.tsx", startLine: 20 }] },
+    ],
+  };
+
+  it("does not restore an old visibility outcome after the same scenario was modified", () => {
+    const after: SpecFeature = {
+      ...previous,
+      scenarios: [
+        { reference: "HP-10", context: "匿名访客访问公开演示产品页", action: "查看操作区", outcome: "不显示「登录后可分析」链接", category: "edge", source: "generated", evidence: [{ path: "components/analyze-button.tsx", startLine: 30 }] },
+        previous.scenarios[1],
+      ],
+    };
+
+    const merged = preserveUnchangedEvidence([previous], [after], new Set<string>());
+    const scenarios = merged.find((feature) => feature.name === previous.name)?.scenarios ?? [];
+    expect(scenarios.map((scenario) => scenario.reference)).not.toContain("HP-1");
+    expect(scenarios.map((scenario) => scenario.reference)).toContain("HP-10");
+    expect(scenarios.map((scenario) => scenario.reference)).toContain("EC-2");
+    expect(diffSpec([previous], merged)).toContainEqual(expect.objectContaining({ kind: "removed", scenarioReference: "HP-1" }));
+  });
+});
+
 describe("parsePatchHunks", () => {
   it("parses default and explicit counts and ignores non-hunk lines", () => {
     expect(parsePatchHunks("diff --git a/x b/x\n@@ -100,3 +100,5 @@\n@@ -50 +51,0 @@\ncontext")).toEqual([
