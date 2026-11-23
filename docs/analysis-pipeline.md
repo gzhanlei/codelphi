@@ -6,6 +6,7 @@
 > 修订：2026-11-17 v3：增量改为 diff 与受影响证据的定向装配；取消 run 级分区数量与总读取量止损线；覆盖回执按实际范围计算；用户视图移除内部装配指标。
 > 修订：2026-11-20 v4：全量分析三模式（`legacy` / `inventory_shadow` / `inventory`）与行为清单编排成文（§13）；不可变 manifest 恢复语义、双重覆盖门禁、at-least-once 执行、共享预算、摘要降级与激活门禁；完整性账本新增 inventory 枚举详情与新路径 sourceCoverage 口径（§9）。§0 概览修正「×6 分区」过时表述（v3 已取消分区数上限）。
 > 修订：2026-11-20 v5（Task 15）：配对行为 benchmark 统计层与冻结协议成文（`lib/behavior-benchmark.ts`、`docs/benchmark/frozen/behavior-inventory-v1.md`、离线测量脚本 `scripts/measure-inventory-analysis.ts`）；inventory 遥测口径修正（tasksExecuted 含发起后失败任务、tasksPending 按字面 pending 行计数）；明确 `primaryRangesOmitted` 只在账本 details JSON 中可见，不是 `analysis_coverage_receipts` 的表列。**人工 shadow 验收未执行，`inventory` 模式保持禁用。**
+> 修订：2026-11-23 v6：批处理候选 I1 实测否决。独立 scratch 中 batch/describe_judge 相对 task I0 的调用数降至 23.4%，但总 token 为 76.9%、实际成本为 2.62 倍，且激活门禁失败；**batch 不予采用，legacy 与 inventory task 默认均不改变。**
 
 ## 0. 一页总览
 

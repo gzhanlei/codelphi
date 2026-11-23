@@ -59,3 +59,9 @@
 output facts 必填：`featureCount`、`scenarioCount`、`duplicateClusters`、`factInterpretationErrors`、`activationPassed`。缺字段或不可比输入不得放行。
 
 usage 导出仅允许 scratch 数据库。导出器拒绝非 `codelphi_bench`、非 `codelphi_bench_*` 且不以 `_bench` 结尾的数据库；离线测量器不连接数据库、不调用 AI、不修改运行模式。
+
+## 8. 实测结果（2026-11-23）
+
+CoDelphi 自仓 batch/describe_judge 候选被否决：I1 runId=82 相对 I0 runId=83 的调用数为 1694/7237（23.4%，达标），总 token 为 14,343,705/18,653,105（76.9%，超过 60% 上限），实际成本为 USD 5.274997/2.016653（约 2.62 倍，超过 60% 上限）。I1 同时因 `anchorAccountingComplete`、`allUnitsInAllowedTerminalStates` 未通过激活门禁。
+
+结论：`adoptionReady=false`，停止后续模型调用和调优，不执行盲评追加投入，不部署 batch。legacy 与 inventory task 默认保持不变。
