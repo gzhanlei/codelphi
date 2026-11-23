@@ -38,6 +38,7 @@ import { baselineReleaseChangeFacts, buildReleaseChangeProjections, rewriteRelea
 import { requestStructuredCompletion } from "./ai";
 import { loadNoteByRelease, loadBlockViews } from "./release-notes-service";
 import { ensureRegressionTasks } from "./regression-tasks";
+import { PRESENTATION_CALL_KIND, schedulePresentationRefresh } from "./product-presentation-service";
 
 export interface RunContext {
   id: number;
@@ -862,6 +863,18 @@ async function runAnalysisBody(run: RunContext) {
     } catch (error) {
       console.error("[inventory-shadow] inventory orchestration shadow failed; activated legacy result unchanged", { runId: run.id, message: error instanceof Error ? error.message : String(error) });
     }
+  }
+  // 理解层（能力归纳 + 典型使用场景，migration 083）：规格变化后按节流刷新。这里只做指纹比较与
+  // 标记/后台启动，不等待模型调用——不延长 run，任何失败都不影响已提交的分析结果。
+  try {
+    const refresh = await schedulePresentationRefresh({
+      productId: run.productId,
+      specVersionId,
+      billing: { runId: run.id, accountId: run.accountId ?? null, chargeComponent: "main", callKind: PRESENTATION_CALL_KIND },
+    });
+    console.log("[product-presentation] refresh scheduled", { runId: run.id, outcome: refresh.outcome, reason: refresh.reason });
+  } catch (error) {
+    console.error("[product-presentation] refresh scheduling failed", { runId: run.id, message: error instanceof Error ? error.message : String(error) });
   }
 }
 

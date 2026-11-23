@@ -125,3 +125,21 @@ export function behaviorAnalysisBudget(): {
     currency: (process.env.ANALYSIS_BEHAVIOR_COST_CURRENCY ?? "").trim() || "CNY",
   };
 }
+
+/** 产品理解层（能力归纳 + 使用场景）的刷新节流：同一产品距上次成功生成满这么多小时才自动重算。默认 24。 */
+export function presentationRefreshIntervalHours(): number {
+  const raw = Number(process.env.PRESENTATION_REFRESH_INTERVAL_HOURS ?? "");
+  return Number.isInteger(raw) && raw >= 1 ? raw : 24;
+}
+
+/** 理解层单个产品的旅程总数上限（成本闸门）。默认 60。 */
+export function presentationMaxJourneys(): number {
+  const raw = Number(process.env.PRESENTATION_MAX_JOURNEYS ?? "");
+  return Number.isInteger(raw) && raw > 0 ? raw : 60;
+}
+
+/** 理解层单个产品每轮深挖的模型调用上限（成本闸门；不含能力归组自身的调用）。默认 16。 */
+export function presentationMaxPasses(): number {
+  const raw = Number(process.env.PRESENTATION_MAX_PASSES ?? "");
+  return Number.isInteger(raw) && raw > 0 ? raw : 16;
+}

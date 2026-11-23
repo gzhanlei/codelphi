@@ -105,6 +105,119 @@ export function parseSnapshotPresentation(content: string, result: AnalysisResul
   return validatePresentation(parseJson(content, presentationSchema), result);
 }
 
+/**
+ * 宽松形状（relax 模式，站内理解层用）：与 presentationSchema 同构，但不因数量上限整份拒绝——
+ * 数组与名称超长时截断；引用是否成立由 parseSnapshotPresentationRelaxed 逐条过滤。
+ * Radar 报告自身仍走上面的严格 schema（任何一条不合规就整体回退，行为不变）。
+ */
+const relaxedPresentationSchema = z.object({
+  tagline: z.string().trim().min(1).transform((value) => value.slice(0, 300)),
+  coreCapabilities: z.array(z.object({
+    name: z.string().trim().min(1).transform((value) => value.slice(0, 160)),
+    summary: z.string().trim().min(1).transform((value) => value.slice(0, 600)),
+    featureNames: z.array(z.string().trim().min(1)).min(1),
+    scenarioRefs: z.array(scenarioRefSchema),
+  })).min(1).transform((capabilities) => capabilities.slice(0, 8)),
+  journeys: z.array(z.object({
+    name: z.string().trim().min(1).transform((value) => value.slice(0, 160)),
+    steps: z.array(scenarioRefSchema),
+  })).default([]),
+  concepts: z.array(z.object({
+    name: z.string().trim().min(1).transform((value) => value.slice(0, 160)),
+    summary: z.string().trim().min(1).transform((value) => value.slice(0, 600)),
+    scenarioRefs: z.array(scenarioRefSchema),
+    relations: z.array(z.object({
+      targetName: z.string().trim().min(1),
+      summary: z.string().trim().min(1).transform((value) => value.slice(0, 300)),
+      scenarioRef: scenarioRefSchema,
+    })),
+  })).default([]),
+});
+
+/**
+ * 宽松解析（relax 模式）：生产实测模型经常给出多于两条的能力示例引用、或某条没连够两个功能的旅程，
+ * 严格模式下这会让整份归组作废。这里逐条 salvage：
+ * - 示例引用不存在或逃出所属能力 → 丢弃该引用；
+ * - 旅程引用不是 happy 场景 / 没连接两个功能 → 丢弃该旅程；
+ * - 概念及其关系同理逐条丢弃。
+ * 唯一保持严格的硬约束是能力归属：每个功能恰好出现一次、不得出现未知功能——它是总览
+ * 「AI 归纳 · 已校验每个功能恰好归属一次」这句标注的依据，不成立就整体放弃归组。
+ */
+export function parseSnapshotPresentationRelaxed(content: string, result: AnalysisResult): SnapshotPresentation {
+  const parsed = parseJson(content, relaxedPresentationSchema);
+  const featureByName = new Map(result.features.map((feature) => [feature.name, feature]));
+  const scenarioOf = (ref: SnapshotScenarioRef) => featureByName.get(ref.featureName)?.scenarios.find((candidate) => candidate.reference === ref.reference);
+  const coreCapabilities = parsed.coreCapabilities.map((capability) => ({
+    ...capability,
+    scenarioRefs: capability.scenarioRefs.filter((ref) => capability.featureNames.includes(ref.featureName) && scenarioOf(ref)).slice(0, 2),
+  }));
+  const assigned = new Set<string>();
+  for (const capability of coreCapabilities) {
+    for (const featureName of capability.featureNames) {
+      if (!featureByName.has(featureName) || assigned.has(featureName)) throw new Error("Invalid feature coverage in presentation");
+      assigned.add(featureName);
+    }
+  }
+  if (assigned.size !== result.features.length) throw new Error("Presentation must cover every existing feature without adding new ones");
+  const journeys = parsed.journeys
+    .filter((journey) => journey.steps.length >= 2 && journey.steps.every((step) => scenarioOf(step)?.category === "happy"))
+    .filter((journey) => result.features.length <= 1 || new Set(journey.steps.map((step) => step.featureName)).size >= 2)
+    .map((journey) => ({ ...journey, steps: journey.steps.slice(0, 6) }))
+    .slice(0, 5);
+  const conceptNames = new Set<string>();
+  const concepts = parsed.concepts
+    .map((concept) => ({ ...concept, scenarioRefs: concept.scenarioRefs.filter((ref) => scenarioOf(ref)).slice(0, 3) }))
+    .filter((concept) => concept.scenarioRefs.length > 0 && !conceptNames.has(concept.name))
+    .slice(0, 12)
+    .map((concept) => { conceptNames.add(concept.name); return concept; })
+    .map((concept) => ({
+      ...concept,
+      relations: concept.relations.filter((relation) => conceptNames.has(relation.targetName) && scenarioOf(relation.scenarioRef)).slice(0, 6),
+    }));
+  return withIds(coreCapabilities, journeys, concepts, "generated", parsed.tagline);
+}
+
+/** 旅程候选输入：一条已有场景的最小叙述（引用链之外不携带任何事实）。 */
+export interface JourneyCandidate {
+  featureName: string;
+  reference: string;
+  context: string;
+  action: string;
+  outcome: string;
+}
+
+const journeyCandidatesSchema = z.object({
+  journeys: z.array(z.object({
+    name: z.string().trim().min(1).max(160),
+    steps: z.array(scenarioRefSchema),
+  })),
+});
+
+/** 旅程挖掘的输出结构（提示词与纠正重试共用同一份字面量，避免两处漂移）。 */
+export const JOURNEY_OUTPUT_SHAPE = '{"journeys":[{"name":"","steps":[{"featureName":"","reference":"HP-1"}]}]}';
+
+/**
+ * 站内理解层（CoDelphi 产品页「使用场景」）的旅程挖掘提示词：与上面的旅程生成同一
+ * 「只重组已有场景、不新增事实」契约，差别是按窗口给候选场景并要求逐字引用，
+ * 以便对大产品分多趟深挖（Radar 报告本身仍只用上面的单次生成）。capabilityName 为 null
+ * 表示跨能力的全局典型场景。
+ * 「只返回 JSON」连同确切结构放在数据之前的最后一句：生产实测把它埋在说明中间时，
+ * 模型会改成输出 Markdown 叙事。
+ */
+export function journeyMiningPrompt(input: { productDescription: string; capabilityName: string | null; maxJourneys: number; candidates: JourneyCandidate[] }, language: OutputLanguage): string {
+  const scope = input.capabilityName === null ? "" : input.capabilityName;
+  const shape = JOURNEY_OUTPUT_SHAPE;
+  if (language === "en") {
+    return `Create user journeys for a first-time reader using only the existing evidence-backed scenarios listed below. Do not add facts, steps, features or claims. A journey must connect at least two different features and read as one user goal from trigger to visible result; do not force a journey when the scenarios do not support one, and do not present one feature's internal steps as a cross-feature flow. Name each journey by the user goal in plain language, without implementation jargon. Prefer journeys that use features no other journey in this response uses; journeys repeating the same steps are not useful.${scope ? `\n\nCapability: ${scope}` : ""}\n\nReturn at most ${input.maxJourneys} journeys, each with 2-6 ordered steps copied verbatim (exact featureName and reference) from the candidate list. Return exactly one JSON object and nothing else — no Markdown, headings, numbered lists or explanations — with this shape: ${shape}\n\nProduct description: ${input.productDescription}\n\nCandidate scenarios:\n${JSON.stringify(input.candidates)}`;
+  }
+  return `只使用下列已有、带证据的场景，为第一次接触产品的读者创建用户旅程。不得新增事实、步骤、功能或结论。旅程必须连接至少两个不同功能，并读起来像同一个用户目标从触发到可见结果的过程；场景不足以支持时不要强行生成，也不要把单个功能内部的步骤拼成跨功能流程。旅程名称用平实语言概括用户目标，不使用实现术语。优先覆盖本次响应中其他旅程尚未用到的功能；步骤互相重复的旅程没有价值。${scope ? `\n\n所属能力：${scope}` : ""}\n\n最多返回 ${input.maxJourneys} 条旅程，每条包含 2-6 个有序步骤，步骤必须逐字取自候选列表（featureName 与 reference 完全一致）。只返回一个 JSON 对象，不要 Markdown、标题、编号列表或任何解释，结构为：${shape}\n\n产品简介：${input.productDescription}\n\n候选场景：\n${JSON.stringify(input.candidates)}`;
+}
+
+/** 解析一趟旅程挖掘输出：只做形状校验，引用是否成立由调用方逐条校验（坏条目丢弃，不连坐）。 */
+export function parseJourneyCandidates(content: string): Array<{ name: string; steps: SnapshotScenarioRef[] }> {
+  return parseJson(content, journeyCandidatesSchema).journeys;
+}
+
 function evenlySample<T>(items: T[], limit: number): T[] {
   if (items.length <= limit) return items;
   return Array.from({ length: limit }, (_, index) => items[Math.floor(index * items.length / limit)]);
@@ -114,6 +227,7 @@ async function createLargeSnapshotPresentation(options: {
   result: AnalysisResult;
   language: OutputLanguage;
   client: StructuredCompletionClient;
+  relax?: boolean;
 }): Promise<SnapshotPresentation> {
   const languageName = options.language === "en" ? "English" : "Simplified Chinese";
   const planSchema = z.object({
@@ -174,7 +288,7 @@ async function createLargeSnapshotPresentation(options: {
       outcome: scenario.outcome,
     }));
   }));
-  const detailSchema = presentationSchema.pick({ journeys: true, concepts: true });
+  const detailSchema = (options.relax ? relaxedPresentationSchema : presentationSchema).pick({ journeys: true, concepts: true });
   const detailPrompt = options.language === "en"
     ? `Create the understanding layer for a first-time user using only these existing evidence-backed scenarios. Do not add facts, objects, relations, or claims. Create up to five end-to-end user journeys, each with 2-6 ordered exact scenario steps. Every journey must connect at least two features; do not force one when evidence is insufficient. Prefer product-level goals and cross-module flows over isolated class calls. When alternatives exist, choose journeys that apply across providers or integrations before provider-specific examples; include at most one provider-specific journey. Extract up to twelve key domain concepts and only explicitly supported relations. Every concept and relation must cite exact scenario references. Return JSON only with this shape: {"journeys":[{"name":"","steps":[{"featureName":"","reference":"HP-1"}]}],"concepts":[{"name":"","summary":"","scenarioRefs":[{"featureName":"","reference":"HP-1"}],"relations":[{"targetName":"","summary":"","scenarioRef":{"featureName":"","reference":"HP-1"}}]}]}.\n\nProduct description: ${options.result.product.description}\n\nCandidate scenarios:\n${JSON.stringify(candidates)}`
     : `只使用这些已有、带证据的场景，为第一次接触项目的用户生成理解层。不得新增事实、对象、关系或结论。创建最多五条端到端用户旅程，每条包含 2-6 个有序的原有场景步骤，必须连接至少两个功能；证据不足就不要强行生成。优先选择产品级目标和跨模块流程，避免孤立的类调用。有其他选择时，优先生成可跨 Provider 或集成复用的旅程，Provider 专属实例最多保留一条。提取最多十二个关键领域概念，只建立有明确场景支持的关系。每个概念和关系都必须引用原有场景。只返回 JSON，结构为：{"journeys":[{"name":"","steps":[{"featureName":"","reference":"HP-1"}]}],"concepts":[{"name":"","summary":"","scenarioRefs":[{"featureName":"","reference":"HP-1"}],"relations":[{"targetName":"","summary":"","scenarioRef":{"featureName":"","reference":"HP-1"}}]}]}。\n\n产品简介：${options.result.product.description}\n\nCandidate scenarios:\n${JSON.stringify(candidates)}`;
@@ -182,13 +296,15 @@ async function createLargeSnapshotPresentation(options: {
     { role: "system", content: `You reorganize specifications without adding facts. Use ${languageName} for name and summary fields.` },
     { role: "user", content: detailPrompt },
   ]), detailSchema);
-  return parseSnapshotPresentation(JSON.stringify({ ...grouping, ...details }), options.result);
+  return (options.relax ? parseSnapshotPresentationRelaxed : parseSnapshotPresentation)(JSON.stringify({ ...grouping, ...details }), options.result);
 }
 
 export async function createSnapshotPresentation(options: {
   result: AnalysisResult;
   language: OutputLanguage;
   client: StructuredCompletionClient;
+  /** relax=true 走宽松解析（站内理解层用）：逐条 salvage，只保「每个功能恰好归属一次」这条硬约束。缺省保持 Radar 的严格行为。 */
+  relax?: boolean;
 }): Promise<SnapshotPresentation> {
   if (options.result.features.length > 40) return createLargeSnapshotPresentation(options);
   const languageName = options.language === "en" ? "English" : "Simplified Chinese";
@@ -204,5 +320,5 @@ export async function createSnapshotPresentation(options: {
     { role: "system", content: `You reorganize specifications without adding facts. Use ${languageName} for name and summary fields.` },
     { role: "user", content: prompt },
   ]);
-  return parseSnapshotPresentation(content, options.result);
+  return (options.relax ? parseSnapshotPresentationRelaxed : parseSnapshotPresentation)(content, options.result);
 }

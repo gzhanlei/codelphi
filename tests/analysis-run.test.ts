@@ -76,6 +76,9 @@ vi.mock("../lib/spec-versions", () => ({ loadLatestSpecVersionLanguage: vi.fn(as
 vi.mock("../lib/architecture-version", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/architecture-version")>(), generateRepositoryArchitectureVersion: vi.fn(async () => ({ status: "accepted", errorMessage: null })) }));
 const { syncFeatureFlowsForVersion } = vi.hoisted(() => ({ syncFeatureFlowsForVersion: vi.fn(async () => ({ generated: 0, copied: 0, failed: 0 })) }));
 vi.mock("../lib/feature-flow-service", () => ({ syncFeatureFlowsForVersion, regenerateFeatureFlowForWorkbenchFeature: vi.fn() }));
+// 理解层刷新（migration 083）：这里只验证钩子的调用契约与「失败不影响 run」，调度逻辑见 product-presentation-service.test.ts。
+const { schedulePresentationRefresh } = vi.hoisted(() => ({ schedulePresentationRefresh: vi.fn(async () => ({ outcome: "generating" })) }));
+vi.mock("../lib/product-presentation-service", () => ({ schedulePresentationRefresh, PRESENTATION_CALL_KIND: "product_presentation" }));
 
 const run = {
   id: 8,
@@ -199,6 +202,26 @@ describe("analysis orchestration", () => {
     expect(connection.commit.mock.invocationCallOrder[0]).toBeLessThan(syncFeatureFlowsForVersion.mock.invocationCallOrder[0]);
     expect(connection.release).toHaveBeenCalledOnce();
     expect(execute).not.toHaveBeenCalledWith(expect.stringContaining("status = 'failed'"), expect.anything());
+    // 理解层刷新在主事务提交之后才调度：绑定本次 run 计费，传入最新规格版本
+    expect(schedulePresentationRefresh).toHaveBeenCalledWith({
+      productId: run.productId,
+      specVersionId: 44,
+      billing: { runId: 8, accountId: null, chargeComponent: "main", callKind: "product_presentation" },
+    });
+    expect(connection.commit.mock.invocationCallOrder[0]).toBeLessThan(schedulePresentationRefresh.mock.invocationCallOrder[0]);
+  });
+
+  it("keeps the committed run successful when presentation refresh scheduling fails", async () => {
+    schedulePresentationRefresh.mockRejectedValueOnce(new Error("product_presentations is missing"));
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      await expect(runAnalysis(8)).resolves.toBeUndefined();
+      expect(connection.commit).toHaveBeenCalledOnce();
+      expect(error).toHaveBeenCalledWith("[product-presentation] refresh scheduling failed", expect.objectContaining({ runId: 8 }));
+      expect(execute).not.toHaveBeenCalledWith(expect.stringContaining("status = 'failed'"), expect.anything());
+    } finally {
+      error.mockRestore();
+    }
   });
 
   it("rewrites persisted projections only after the canonical transaction commits", async () => {

@@ -1,8 +1,9 @@
-import { defaultExecute, getDb } from "./db";
+import { defaultExecute, getDb, type Execute } from "./db";
 import { evidenceItems } from "./evidence";
 import { loadFeatureFlowErrors, loadFeatureFlowGraphs } from "./feature-flow-store";
 import { evidenceUrl } from "./evidence-url";
 import { parseJsonValue } from "./json";
+import { loadProductPresentation, type ProductPresentationRow } from "./product-presentation";
 import { RELEASE_PAGE_SIZE, type ReleasePagePayload } from "./release-client";
 import { loadRegressionTasks } from "./regression-tasks";
 import { annotateSuspectedRenames } from "./spec-rename";
@@ -245,8 +246,15 @@ export async function getProductDetails(slug: string, organizationId?: number, o
   );
   const latestReleaseNote = (noteDetailRows as Array<{ status: string; releaseId: number; publishedAt: Date | null; blocks: number }>)[0] ?? null;
 
+  // 产品理解层（migration 083）：总览形态才加载（总览 / 地图 / 发布稿 / 使用场景视图共用这一形态；
+  // 发布变化与各 API 调用方不需要）。best-effort——表尚未创建或读取失败按「尚未生成」处理，不影响产品页。
+  const presentation: ProductPresentationRow | null = view === "overview"
+    ? await loadProductPresentation(db.execute.bind(db) as unknown as Execute, product.id).catch(() => null)
+    : null;
+
   return {
     product: { ...product, descriptionEvidence: decorateEvidence(parseJsonValue(product.descriptionEvidence), source) },
+    presentation,
     releaseNotes,
     latestReleaseNote: latestReleaseNote ?? null,
     repository,

@@ -5,6 +5,7 @@ import { AnalysisStatusRefresh } from "./analysis-status-refresh";
 import { ProductChanges } from "./product-changes";
 import { ProductMapView } from "./product-map-view";
 import { ProductOverview } from "./product-overview";
+import { ProductUseCases } from "./product-use-cases";
 import { ReleaseNotesView } from "./release-notes-view";
 import { buildProductOverview, type ProductOverviewData } from "@/lib/product-overview";
 import { explainRunFailure } from "@/lib/run-failure-explain";
@@ -42,10 +43,12 @@ export function RunStatus({ run, locale = "zh-CN" }: { run?: { status: string; e
   return <div className={`run-status ${run.status}`} role="status" aria-live="polite"><span>{pick(locale, RUN_STATUS.label)}{run.status}</span><RunError message={run.errorMessage} /><AnalysisStatusRefresh status={run.status} /></div>;
 }
 
-export function ProductTabs({ productBase, view, featureCount, releaseCount, noteBadge, showSettings = false, locale = "zh-CN" }: { productBase: string; view: string; featureCount: number; releaseCount: number; noteBadge?: string; showSettings?: boolean; locale?: UiLocale }) {
+export function ProductTabs({ productBase, view, featureCount, releaseCount, journeyCount, noteBadge, showSettings = false, locale = "zh-CN" }: { productBase: string; view: string; featureCount: number; releaseCount: number; journeyCount?: number; noteBadge?: string; showSettings?: boolean; locale?: UiLocale }) {
   return (
     <nav className="view-tabs" aria-label={pick(locale, PRODUCT_TABS.aria)}>
       <Link className={selectedClass(view === "overview")} href={productBase}>{pick(locale, PRODUCT_TABS.overview)}</Link>
+      {/* 使用场景始终展示（含未生成的真实空态），不因数据为空被隐藏（入口偏好）；有旅程时带计数。 */}
+      <Link className={selectedClass(view === "journeys")} href={`${productBase}?view=journeys`}>{pick(locale, PRODUCT_TABS.journeys)}{journeyCount ? <span>{journeyCount}</span> : null}</Link>
       {/* 产品地图始终展示（含 0 功能空态），不因数据为空被隐藏（入口偏好）。 */}
       <Link className={selectedClass(view === "map")} href={`${productBase}?view=map`}>{pick(locale, PRODUCT_TABS.map)}</Link>
       <Link className={selectedClass(view === "spec")} href={`${productBase}?view=spec`}>{pick(locale, PRODUCT_TABS.spec)} <span>{featureCount}</span></Link>
@@ -95,6 +98,8 @@ function ProductWorkspace({ view, productSlug, productBase, features, scenarios,
 
 export function ProductView(props: ProductViewProps) {
   if (props.view === "overview") return <ProductOverview data={props.overview} canEdit={props.canEdit} locale={props.locale} />;
+  // 使用场景视图：理解层投影由 buildProductOverview 一并算好（总览精简卡与这里共用一次解析）。
+  if (props.view === "journeys") return <ProductUseCases presentation={props.overview.presentation} hasFeatures={props.features.length > 0} canEdit={Boolean(props.canEdit)} locale={props.locale} />;
   if (props.view === "map") return <ProductMapView features={props.features} scenarios={props.scenarios} />;
   if (props.view === "notes") {
     return props.latestReleaseId ? <ReleaseNotesView slug={props.productSlug} releaseId={props.latestReleaseId} canEdit={Boolean(props.canEdit)} changelogHref={props.changelogHref} locale={props.locale} /> : <p className="overview-note">{pick(props.locale ?? "zh-CN", PRODUCT_TABS.noReleases)}</p>;

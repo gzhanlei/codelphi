@@ -11,6 +11,7 @@ import { NotificationSettings } from "@/components/notification-settings";
 import { ProductIdentitySettings } from "@/components/product-identity-settings";
 import { ProductOutputLanguageSettings } from "@/components/product-output-language-settings";
 import { DomainCandidateReview } from "@/components/domain-candidate-review";
+import { PresentationSettings } from "@/components/presentation-settings";
 import { countNewUngroupedFeatures } from "@/lib/business-domains";
 import { resolveUiLocale } from "@/lib/ui-locale-server";
 import { pick, type UiLocale } from "@/lib/ui-locale";
@@ -72,7 +73,7 @@ function ProductPageBody({ productBase, view, mode, featureId, details, overview
       <RunStatus run={details.latestRun} locale={locale} />
       {details.driftCount > 0 ? <div className="drift-banner" role="status">⚠️ {details.driftCount}{pick(locale, PRODUCT_PAGE.driftBanner)}{driftFeatureId ? <Link className="drift-banner-link" href={featureHref(driftFeatureId)}>{pick(locale, PRODUCT_PAGE.driftBannerGo)}</Link> : null}</div> : null}
       {showFeedback && details.latestRun?.status === "failed" ? <AnalysisFeedbackButton slug={details.product.slug} /> : null}
-      <ProductTabs productBase={productBase} view={view} featureCount={details.features.length} releaseCount={details.releaseTotal} noteBadge={details.latestReleaseNote?.status === "draft" ? pick(locale, PRODUCT_PAGE.noteBadgeDraft) : details.latestReleaseNote?.status === "published" ? "✓" : undefined} showSettings={showSettings} locale={locale} />
+      <ProductTabs productBase={productBase} view={view} featureCount={details.features.length} releaseCount={details.releaseTotal} journeyCount={overview.journeyTotal} noteBadge={details.latestReleaseNote?.status === "draft" ? pick(locale, PRODUCT_PAGE.noteBadgeDraft) : details.latestReleaseNote?.status === "published" ? "✓" : undefined} showSettings={showSettings} locale={locale} />
       {settings}
       {/* settings 是独立视图；ProductView 对未知 view 会静默落到发布变化，这里显式排除 */}
       {view === "settings" ? null : <ProductView view={view} productSlug={details.product.slug} productBase={productBase} features={details.features} featureFlows={details.featureFlows} featureFlowErrors={details.featureFlowErrors} scenarios={details.scenarios} releases={details.releases} changes={details.changes} behaviorChanges={details.behaviorChanges} foldedChanges={details.foldedChanges} regressionTasks={details.regressionTasks} releaseTotal={details.releaseTotal} coverage={details.coverage} completeness={details.completeness} mode={mode} featureId={featureId} overview={overview} canEdit={canEdit} changelogHref={details.product.isPublicDemo ? `/share/changelog${productBase.replace(/^\/products/, "")}` : undefined} latestReleaseId={details.releases[0]?.id} locale={locale} />}
@@ -104,7 +105,7 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
     }
     const productBase = productBasePath(demo.organizationSlug, demo.slug);
     const demoView = view === "settings" ? "overview" : view;
-    const detailsView = demoView === "spec" || demoView === "changes" ? demoView : ["overview", "map", "notes"].includes(demoView) ? "overview" : "changes";
+    const detailsView = demoView === "spec" || demoView === "changes" ? demoView : ["overview", "map", "notes", "journeys"].includes(demoView) ? "overview" : "changes";
     const demoDetails = await readPublicDemoCache(`${demo.organizationId}:${demo.slug}:${detailsView}`, () => getProductDetails(slug, demo.organizationId, { view: detailsView }));
     if (!demoDetails) notFound();
     const demoOverview = buildProductOverview({ ...demoDetails, productBase }, locale);
@@ -117,7 +118,7 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
   }
 
   const productBase = productBasePath(access.organization.slug, slug);
-  const detailsView = view === "spec" || view === "changes" ? view : ["overview", "map", "notes", "settings"].includes(view) ? "overview" : "changes";
+  const detailsView = view === "spec" || view === "changes" ? view : ["overview", "map", "notes", "journeys", "settings"].includes(view) ? "overview" : "changes";
   const details = await getProductDetails(slug, access.product.organizationId, { view: detailsView });
   if (!details) notFound();
   const overview = buildProductOverview({ ...details, productBase }, locale);
@@ -150,6 +151,7 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
       />
 
       <DomainCandidateReview slug={details.product.slug} canEdit={access.role !== "viewer"} ungroupedCount={countNewUngroupedFeatures(details.features)} />
+      <PresentationSettings slug={details.product.slug} presentation={details.presentation} hasFeatures={details.features.length > 0} canEdit={access.role !== "viewer"} locale={locale} />
     </>
   ) : null;
 

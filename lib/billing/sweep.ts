@@ -12,6 +12,7 @@ import { runDailyReconcileOnce } from "./reconcile";
 import { runAnalysisTriggerSweepOnce } from "../analysis-trigger";
 import { runDigestSweepOnce } from "../digest-sweep";
 import { runFeedbackAdjudicationSweepOnce } from "../feedback-adjudication";
+import { runPresentationRefreshSweepOnce } from "../product-presentation-service";
 import { DEADLOCK_RETRIES, FIRST_RUN_UNITS, HEARTBEAT_FRESH_WINDOW_MINUTES, RESERVATION_TTL_MINUTES, SWEEP_RESERVATION_INTERVAL_MS } from "./constants";
 
 /**
@@ -161,6 +162,12 @@ export async function runFeedbackAdjudicationJob(): Promise<JobResult> {
   return { executed: true, detail: { ...outcome } };
 }
 
+/** 理解层刷新作业（migration 083）：规格已变、按节流间隔到期待重算的产品，10 分钟一轮，每轮至多 2 个。 */
+export async function runPresentationRefreshJob(): Promise<JobResult> {
+  const outcome = await runPresentationRefreshSweepOnce();
+  return { executed: true, detail: { ...outcome } };
+}
+
 /** 调度入口（instrumentation.ts 调用一次）：幂等启动，重复调用直接返回。 */
 export function startBillingSweeps() {
   if (process.env.BILLING_SWEEP_ENABLED === "false") return { started: false };
@@ -174,6 +181,7 @@ export function startBillingSweeps() {
   scheduleJob("analysis-trigger", 60 * 60 * 1_000, runAnalysisTriggerSweepJob);
   scheduleJob("digest-weekly", 60 * 60 * 1_000, runDigestWeeklyJob);
   scheduleJob("feedback-adjudication", 10 * 60 * 1_000, runFeedbackAdjudicationJob);
+  scheduleJob("presentation-refresh", 10 * 60 * 1_000, runPresentationRefreshJob);
   return { started: true, jobs: [...startedJobs] };
 }
 

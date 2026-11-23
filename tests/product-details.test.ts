@@ -190,6 +190,31 @@ describe("product detail view profiles", () => {
     expect(queries.some((sql) => sql.includes("FROM release_reviewed_items"))).toBe(false);
   });
 
+  it("loads the presentation only for the overview profile and treats a missing table as not generated", async () => {
+    const presentationRow = {
+      product_id: 4, spec_version_id: 3, language: "zh-CN", status: "generated", source: "generated", tagline: null,
+      capabilities_json: "[]", journeys_json: JSON.stringify([{ name: "登录后查看规格", steps: [{ featureName: "Login", reference: "happy" }] }]), coverage_json: null,
+      fingerprint: "f", pending: 0, refreshing: 0, model_name: null, passes: 2, last_error: null, generated_at: null,
+    };
+    const fallback = execute.getMockImplementation()!;
+    execute.mockImplementation(async (sql: string = "", params: unknown[] = []) => (sql.includes("FROM product_presentations") ? [[presentationRow]] : fallback(sql, params)));
+
+    const overview = await getProductDetails("radar", 7, { view: "overview" });
+    expect(overview?.presentation).toMatchObject({ productId: 4, status: "generated", pending: false, refreshing: false, passes: 2 });
+    expect(overview?.presentation?.journeys[0].name).toBe("登录后查看规格");
+
+    execute.mockClear();
+    await getProductDetails("radar", 7, { view: "changes" });
+    expect(execute.mock.calls.some(([sql]) => String(sql).includes("FROM product_presentations"))).toBe(false);
+
+    // 迁移尚未执行 / 读取失败：按「尚未生成」处理，产品页不 500
+    execute.mockImplementation(async (sql: string = "", params: unknown[] = []) => {
+      if (sql.includes("FROM product_presentations")) throw new Error("Table 'product_presentations' doesn't exist");
+      return fallback(sql, params);
+    });
+    await expect(getProductDetails("radar", 7, { view: "overview" })).resolves.toMatchObject({ presentation: null });
+  });
+
   it("spec loads feature flows without reading release-only historical data", async () => {
     await getProductDetails("radar", 7, { view: "spec" });
     const queries = execute.mock.calls.map(([sql]) => String(sql));

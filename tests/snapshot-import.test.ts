@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { parseGithubOrigin, slugifyRepoName, validateImportArtifact } from "../lib/snapshot-import";
+import { buildImportedPresentation, parseGithubOrigin, slugifyRepoName, validateImportArtifact } from "../lib/snapshot-import";
+import { presentationFingerprint } from "../lib/product-presentation";
 
 /** BYO 导入校验链（设计 §4.2）：校验失败拒绝、contractVersion 门、引用唯一性、锚点路径卫生。 */
 
@@ -198,5 +199,107 @@ describe("importSnapshotArtifact 幂等回归（refactor 曾丢早退）", () =>
     expect(receipt.mode).toBe("idempotent");
     expect(receipt.featuresImported).toBe(0);
     expect(calls.some((sql) => sql.startsWith("INSERT INTO"))).toBe(false);
+  });
+});
+
+describe("importSnapshotArtifact 理解层随导入落库（migration 083）", () => {
+  /** 两个功能：统一登录（1 条 happy）、发布稿（1 条 happy + 1 条 edge）。 */
+  const withPresentation = () => {
+    const artifact = JSON.parse(JSON.stringify(validArtifact));
+    artifact.features.push({
+      name: "发布稿",
+      summary: "对外发布说明",
+      scenarios: [
+        { reference: "HP-1", context: "有新发布", action: "点击发布", outcome: "生成分享页", category: "happy", evidence: [{ path: "lib/notes.ts", startLine: 3 }] },
+        { reference: "EC-1", context: "未登录", action: "点击发布", outcome: "提示登录", category: "edge", evidence: [{ path: "lib/notes.ts", startLine: 9 }] },
+      ],
+    });
+    artifact.presentation = {
+      tagline: "一句话说明产品",
+      coreCapabilities: [
+        { name: "账户与发布", summary: "登录后对外发布", featureNames: ["统一登录", "发布稿"], scenarioRefs: [] },
+        { name: "成员都没导入", summary: "s", featureNames: ["不存在的功能"], scenarioRefs: [] },
+      ],
+      journeys: [
+        { name: "登录后发布", steps: [{ featureName: "统一登录", reference: "HP-1" }, { featureName: "发布稿", reference: "HP-1" }] },
+        { name: "引用了 edge 场景", steps: [{ featureName: "统一登录", reference: "HP-1" }, { featureName: "发布稿", reference: "EC-1" }] },
+        { name: "引用了未导入的场景", steps: [{ featureName: "统一登录", reference: "HP-1" }, { featureName: "不存在的功能", reference: "HP-1" }] },
+      ],
+      concepts: [{ name: "概念不随导入", summary: "s", scenarioRefs: [], relations: [] }],
+    };
+    return artifact;
+  };
+  const recordingDeps = (onExecute?: (sql: string) => unknown) => {
+    const calls: Array<{ sql: string; params: unknown[] }> = [];
+    const execute = (async (sql: string, params: unknown[] = []) => {
+      calls.push({ sql, params });
+      const scripted = onExecute?.(sql);
+      if (scripted !== undefined) return scripted;
+      if (sql.startsWith("INSERT INTO products")) return [{ insertId: 77 }];
+      if (sql.startsWith("INSERT INTO features")) return [{ insertId: 501 }];
+      return [[]];
+    }) as unknown as (sql: string, params?: unknown[]) => Promise<unknown>;
+    return { calls, deps: { execute, currentContractVersion: "1.0.0", organizationId: 2, probeRemote: async () => ({ state: "unverified" as const }) } };
+  };
+
+  it("keeps only capabilities and journeys whose references exist in the imported spec", async () => {
+    const artifact = withPresentation();
+    const payload = buildImportedPresentation(artifact.presentation, validateImportArtifact(artifact, "1.0.0"), "zh-CN");
+    expect(payload!.status).toBe("generated");
+    expect(payload!.tagline).toBe("一句话说明产品");
+    // 成员全部落空的能力分组、引用 edge 场景或未导入场景的旅程逐条丢弃
+    expect(payload!.capabilities.map((capability) => [capability.name, capability.featureNames])).toEqual([["账户与发布", ["统一登录", "发布稿"]]]);
+    expect(payload!.journeys.map((journey) => [journey.name, journey.tier, journey.capabilityName])).toEqual([["登录后发布", "headline", null]]);
+    expect(payload!.coverage).toEqual({ featuresTotal: 2, featuresInJourneys: 2, scenariosInJourneys: 2 });
+    expect(buildImportedPresentation({ coreCapabilities: "garbage", journeys: 42 }, [], "zh-CN")).toBeNull();
+    expect(buildImportedPresentation(null, [], "zh-CN")).toBeNull();
+  });
+
+  it("writes the presentation with the import source and a fingerprint equal to the ledger's", async () => {
+    const { importSnapshotArtifact } = await import("../lib/snapshot-import");
+    const artifact = withPresentation();
+    const { calls, deps } = recordingDeps();
+    const receipt = await importSnapshotArtifact(deps, artifact);
+    expect(receipt.productId).toBe(77);
+    const save = calls.find((call) => call.sql.startsWith("INSERT INTO product_presentations"));
+    expect(save).toBeDefined();
+    const [productId, specVersionId, language, status, source, tagline, capabilitiesJson, journeysJson] = save!.params;
+    expect([productId, specVersionId, language, status, source, tagline]).toEqual([77, null, "zh-CN", "generated", "ai_snapshot_import", "一句话说明产品"]);
+    expect(JSON.parse(String(capabilitiesJson))).toEqual([{ name: "账户与发布", summary: "登录后对外发布", featureNames: ["统一登录", "发布稿"] }]);
+    expect(JSON.parse(String(journeysJson))).toEqual([{ name: "登录后发布", tier: "headline", capabilityName: null, steps: [{ featureName: "统一登录", reference: "HP-1" }, { featureName: "发布稿", reference: "HP-1" }] }]);
+    // 指纹与「导入后按库内数据算出的账本指纹」逐字相同：后续分析钩子判定未变化，不会为同一份规格再调模型
+    const ledger = {
+      language: "zh-CN" as const,
+      features: [{ id: 501, name: "统一登录", parentId: null }, { id: 900, name: "发布稿", parentId: null }],
+      scenarios: [
+        { featureId: 501, reference: "HP-1", category: "happy" },
+        { featureId: 900, reference: "HP-1", category: "happy" },
+        { featureId: 900, reference: "EC-1", category: "edge" },
+      ],
+    };
+    expect(save!.params[9]).toBe(presentationFingerprint(ledger));
+  });
+
+  it("leaves product_presentations untouched when the artifact carries no presentation", async () => {
+    const { importSnapshotArtifact } = await import("../lib/snapshot-import");
+    const { calls, deps } = recordingDeps();
+    await importSnapshotArtifact(deps, JSON.parse(JSON.stringify(validArtifact)));
+    expect(calls.some((call) => call.sql.includes("product_presentations"))).toBe(false);
+  });
+
+  it("keeps the import alive when presentation persistence fails", async () => {
+    const { importSnapshotArtifact } = await import("../lib/snapshot-import");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { deps } = recordingDeps((sql) => {
+      if (sql.startsWith("INSERT INTO product_presentations")) throw new Error("Table 'product_presentations' doesn't exist");
+      return undefined;
+    });
+    try {
+      const receipt = await importSnapshotArtifact(deps, withPresentation());
+      expect(receipt).toMatchObject({ productId: 77, featuresImported: 2, scenariosImported: 3 });
+      expect(warn).toHaveBeenCalledWith("[snapshot-import] presentation persistence skipped", expect.objectContaining({ productId: 77 }));
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

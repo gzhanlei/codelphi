@@ -4,6 +4,7 @@ import { pick, type UiLocale } from "./ui-locale";
 import { OVERVIEW_DATA } from "./ui-strings/product";
 import { evidenceItems, isTestOnlyEvidence } from "./evidence";
 import { buildBusinessDomainCards } from "./business-domains";
+import { buildProductPresentationView, type ProductPresentationRow, type ProductPresentationView } from "./product-presentation";
 import type { RegressionTaskView } from "./regression-task-view";
 import { featureHref } from "./spec-editor-ui";
 import type { BehaviorChangeRow, ChangeRow, FeatureRow, ReleaseRow, ScenarioRow } from "./types";
@@ -26,6 +27,40 @@ interface ProductOverviewInput {
   releaseNotes?: Array<{ releaseId: number; status: string; headline: string | null }>;
   /** 覆盖率回执仅用于内部分析诊断，不在总览展示。 */
   coverage?: { coverageRatio: number; implFilesAssembled: number; implFilesTotal: number; partitionsCapped: boolean } | null;
+  /** 产品理解层（migration 083）：能力归纳与典型使用场景的落库行；没有或读取失败时为空。 */
+  presentation?: ProductPresentationRow | null;
+}
+
+/** 总览能力卡：三种来源共用一个形状，渲染时按 origin 分形态。 */
+export interface OverviewCapabilityCard {
+  /** 业务域卡 / 平铺卡 = 功能行 id；AI 归纳卡 = 序号（只作列表 key）。 */
+  id: number;
+  /** 原始名称（问答检索身份）；AI 归纳卡即分组名。 */
+  canonicalName: string;
+  name: string;
+  summary: string;
+  source: string;
+  scenarioCount: number;
+  /** 业务域卡 → 父功能规格页；平铺卡 → 功能规格页；AI 归纳卡 → 使用场景视图里该能力的分组。 */
+  href: string;
+  /** domains = 人工确认的业务域；flat = 平铺功能；ai = 理解层的 AI 归纳分组（未经人工确认）。 */
+  origin: "domains" | "flat" | "ai";
+  featureCount?: number;
+  /** AI 归纳卡的成员功能（已解析到当前活跃行）。 */
+  members?: Array<{ id: number; name: string; displayName: string; href: string }>;
+}
+
+/** 总览只放「一句话讲完」的典型场景，完整步骤在使用场景视图。 */
+const JOURNEY_HIGHLIGHTS = 3;
+
+export interface JourneyHighlight {
+  id: string;
+  name: string;
+  startingPoint: string;
+  finalOutcome: string;
+  stepCount: number;
+  featureCount: number;
+  href: string;
 }
 
 function analysisLabel(status: string | undefined, locale: UiLocale = "zh-CN") {
@@ -229,9 +264,9 @@ export function buildProductOverview(input: ProductOverviewInput, locale: "zh-CN
   }
   const userImpact = buildUserImpact(input, latestRelease, latestChanges, changeStats, locale);
   // 业务分组（Task 2）：有人工确认的「父节点 + 子级」树时，首页能力卡聚合为业务域卡片；
-  // 没有分组的产品保持现有平铺卡片。组织用父节点不进入问答建议——检索身份始终是原始功能。
-  const businessDomains = buildBusinessDomainCards(input.features, input.scenarios, input.productBase);
-  const capabilityCard = (feature: FeatureRow) => ({
+  // 没有分组的产品依次回退 AI 归纳分组、平铺卡片。组织用父节点不进入问答建议——检索身份始终是原始功能。
+  const businessDomains: OverviewCapabilityCard[] = buildBusinessDomainCards(input.features, input.scenarios, input.productBase).map((card) => ({ ...card, origin: "domains" }));
+  const capabilityCard = (feature: FeatureRow): OverviewCapabilityCard => ({
     id: feature.id,
     canonicalName: feature.name,
     name: feature.displayName || feature.name,
@@ -239,20 +274,57 @@ export function buildProductOverview(input: ProductOverviewInput, locale: "zh-CN
     source: feature.source,
     scenarioCount: input.scenarios.filter((scenario) => scenario.featureId === feature.id).length,
     href: `${input.productBase}${featureHref(feature.id)}`,
+    origin: "flat",
   });
   const parentIdSet = new Set(input.features.filter((feature) => feature.parentId !== null && input.features.some((parent) => parent.id === feature.parentId)).map((feature) => feature.parentId));
+  // 理解层视图：旅程引用链解析到当前活跃场景（失效步骤保留并标注），总览与使用场景视图共用一次投影。
+  const presentation: ProductPresentationView | null = input.presentation
+    ? buildProductPresentationView({ row: input.presentation, features: input.features, scenarios: input.scenarios, productBase: input.productBase })
+    : null;
+  // 能力卡取值链第二档（2026-11-23 用户裁决）：没有人工业务域时直接展示理解层的 AI 归纳分组并标注来源
+  // （生成器已校验每个功能恰好归属一次；成员解析不到当前行的名字在投影里剔除，空壳分组不出现）。
+  const aiCapabilities: OverviewCapabilityCard[] = businessDomains.length === 0 && presentation
+    ? presentation.capabilities.map((capability, order) => ({
+      id: order + 1,
+      canonicalName: capability.name,
+      name: capability.name,
+      summary: capability.summary,
+      source: "generated",
+      scenarioCount: capability.scenarioCount,
+      href: `${input.productBase}?view=journeys#${capability.id}`,
+      origin: "ai",
+      featureCount: capability.features.length,
+      members: capability.features,
+    }))
+    : [];
+  const journeyHighlights: JourneyHighlight[] = (presentation?.intactJourneys ?? [])
+    .map((journey, order) => ({ journey, order, tier: journey.tier === "headline" ? 0 : 1 }))
+    .sort((a, b) => a.tier - b.tier || a.order - b.order)
+    .slice(0, JOURNEY_HIGHLIGHTS)
+    .map(({ journey }) => ({
+      id: journey.id,
+      name: journey.name,
+      startingPoint: journey.startingPoint ?? "",
+      finalOutcome: journey.finalOutcome ?? "",
+      stepCount: journey.resolvedSteps,
+      featureCount: journey.featureCount,
+      href: journey.href,
+    }));
 
   return {
     focus: buildProductFocus(input),
     slug: input.product.slug,
     productBase: input.productBase,
+    presentation,
+    journeyHighlights,
+    journeyTotal: presentation?.intactJourneys.length ?? 0,
     description: input.product.description,
     headline: input.product.description.trim() || pick(locale, OVERVIEW_DATA.headlineFallback),
     headlineSource: input.product.descriptionSource === undefined ? "manual" : input.product.descriptionSource,
     headlineEvidence: evidenceItems(input.product.descriptionEvidence),
     freshness: specLabel(specVersionId, revision, latestRelease?.committedAt, locale),
     analysisLabel: analysisLabel(input.latestRun ? input.latestRun.status : undefined, locale),
-    capabilities: businessDomains.length > 0 ? businessDomains : input.features.map(capabilityCard).sort(compareCapabilities).slice(0, 6),
+    capabilities: businessDomains.length > 0 ? businessDomains : aiCapabilities.length > 0 ? aiCapabilities : input.features.map(capabilityCard).sort(compareCapabilities).slice(0, 6),
     questionCapabilities: input.features.filter((feature) => !parentIdSet.has(feature.id)).map(capabilityCard).filter((card) => card.scenarioCount > 0).sort(compareCapabilities),
     changes: [...latestChanges]
       .sort((a, b) => (changeKindPriority[a.kind] ?? 9) - (changeKindPriority[b.kind] ?? 9) || a.id - b.id)

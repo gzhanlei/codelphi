@@ -2,21 +2,70 @@ import Link from "next/link";
 import { ProductFocus } from "./product-focus";
 import type { UiLocale } from "@/lib/ui-locale";
 import { pick } from "@/lib/ui-locale";
-import { PRODUCT_OVERVIEW, SPEC_EDITOR } from "@/lib/ui-strings/product";
+import { PRODUCT_JOURNEYS, PRODUCT_OVERVIEW, SPEC_EDITOR } from "@/lib/ui-strings/product";
 import { SpecAsk } from "./spec-ask";
-import type { ProductOverviewData, TimelineEntry } from "@/lib/product-overview";
+import type { JourneyHighlight, OverviewCapabilityCard, ProductOverviewData, TimelineEntry } from "@/lib/product-overview";
 
+/** 人工业务域卡与平铺功能卡：整卡是一个链接，进入对应的规格页。 */
 function CapabilityList({ capabilities, locale = "zh-CN" }: { capabilities: ProductOverviewData["capabilities"]; locale?: UiLocale }) {
   if (capabilities.length === 0) return <p className="overview-note">{pick(locale, PRODUCT_OVERVIEW.emptyCapabilities)}</p>;
-  return <div className="capability-list">{capabilities.map((feature) => <Link href={feature.href} className="capability-item" key={feature.id}><strong>{feature.name}</strong><span>{feature.scenarioCount}{pick(locale, PRODUCT_OVERVIEW.capabilityScenarios)}{feature.source === "manual" ? pick(locale, SPEC_EDITOR.sourceManual) : pick(locale, SPEC_EDITOR.sourceGenerated)}</span><p>{feature.summary}</p></Link>)}</div>;
+  return <div className="capability-list">{capabilities.map((capability) => (capability.origin === "ai"
+    ? <AiCapabilityCard capability={capability} locale={locale} key={`ai-${capability.id}`} />
+    : <Link href={capability.href} className="capability-item" key={capability.id}><strong>{capability.name}</strong><span>{capability.scenarioCount}{pick(locale, PRODUCT_OVERVIEW.capabilityScenarios)}{capability.source === "manual" ? pick(locale, SPEC_EDITOR.sourceManual) : pick(locale, SPEC_EDITOR.sourceGenerated)}</span><p>{capability.summary}</p></Link>))}</div>;
+}
+
+/**
+ * AI 归纳的能力分组卡（2026-11-23 用户裁决：没有人工业务域时直接展示并标注来源）。
+ * 分组本身不是功能行，所以不整卡可点：标题链到该能力的使用场景，成员功能各自链到规格页。
+ */
+function AiCapabilityCard({ capability, locale }: { capability: OverviewCapabilityCard; locale: UiLocale }) {
+  return (
+    <article className="capability-item capability-item-ai">
+      <div className="capability-item-title">
+        <Link href={capability.href}><strong>{capability.name}</strong></Link>
+        <span className="ai-badge">{pick(locale, PRODUCT_OVERVIEW.aiBadge)}</span>
+      </div>
+      <span>{pick(locale, PRODUCT_OVERVIEW.capabilityFeatures).replace("{count}", String(capability.featureCount ?? 0))} · {pick(locale, PRODUCT_OVERVIEW.capabilityScenariosCount).replace("{count}", String(capability.scenarioCount))}</span>
+      <p>{capability.summary}</p>
+      {capability.members && capability.members.length > 0 ? (
+        <details className="capability-members">
+          <summary>{pick(locale, PRODUCT_OVERVIEW.capabilityFeaturesToggle)}</summary>
+          <ul>{capability.members.map((member) => <li key={member.id}><Link href={member.href}>{member.displayName}</Link></li>)}</ul>
+        </details>
+      ) : null}
+    </article>
+  );
 }
 
 export function CapabilitiesPanel({ data, locale = "zh-CN" }: { data: ProductOverviewData; locale?: UiLocale }) {
   if (data.capabilities.length === 0) return <p className="overview-note">{pick(locale, PRODUCT_OVERVIEW.emptyCapabilities)}</p>;
+  const onlyAi = data.capabilities.every((capability) => capability.origin === "ai");
   return (
     <section className="overview-panel">
-      <div className="overview-panel-heading"><h2>{pick(locale, PRODUCT_OVERVIEW.capabilitiesHeading)}</h2><p>{pick(locale, PRODUCT_OVERVIEW.capabilitiesNote)}</p><Link className="overview-text-link" href={`${data.productBase}?view=spec`}>完整能力（规格） →</Link></div>
+      <div className="overview-panel-heading"><h2>{pick(locale, PRODUCT_OVERVIEW.capabilitiesHeading)}</h2><p>{pick(locale, onlyAi ? PRODUCT_OVERVIEW.capabilitiesNoteAi : PRODUCT_OVERVIEW.capabilitiesNote)}</p><Link className="overview-text-link" href={`${data.productBase}?view=spec`}>{pick(locale, PRODUCT_OVERVIEW.fullCapabilitiesLink)}</Link></div>
       <CapabilityList capabilities={data.capabilities} locale={locale} />
+    </section>
+  );
+}
+
+/**
+ * 典型使用场景（精简版）：每条只讲「起点 → 终点」，完整步骤在使用场景视图。
+ * 没有完好旅程时整块不渲染——空态与原因由「使用场景」Tab 承担，入口不因数据为空而消失。
+ */
+function JourneysPanel({ data, locale = "zh-CN" }: { data: ProductOverviewData; locale?: UiLocale }) {
+  if (data.journeyHighlights.length === 0) return null;
+  return (
+    <section className="overview-panel" data-overview-journeys="">
+      <div className="overview-panel-heading"><h2>{pick(locale, PRODUCT_OVERVIEW.journeysHeading)}</h2><p>{pick(locale, PRODUCT_OVERVIEW.journeysNote)}</p><Link className="overview-text-link" href={`${data.productBase}?view=journeys`}>{pick(locale, PRODUCT_OVERVIEW.allJourneys).replace("{count}", String(data.journeyTotal))}</Link></div>
+      <div className="journey-highlights">
+        {data.journeyHighlights.map((journey: JourneyHighlight) => (
+          <Link className="journey-highlight" href={journey.href} key={journey.id}>
+            <strong>{journey.name}</strong>
+            <p className="journey-arc"><span><b>{pick(locale, PRODUCT_JOURNEYS.startingPoint)}</b>{journey.startingPoint}</span><span aria-hidden="true">→</span><span><b>{pick(locale, PRODUCT_JOURNEYS.finalOutcome)}</b>{journey.finalOutcome}</span></p>
+            <span className="journey-highlight-meta">{pick(locale, PRODUCT_OVERVIEW.journeySteps).replace("{count}", String(journey.stepCount))} · {pick(locale, PRODUCT_OVERVIEW.journeyFeatures).replace("{count}", String(journey.featureCount))}</span>
+          </Link>
+        ))}
+      </div>
     </section>
   );
 }
@@ -75,6 +124,7 @@ export function ProductOverview({ data, canEdit = false, locale = "zh-CN" }: { d
   return (
     <div className="product-overview">
       <CapabilitiesPanel data={data} locale={locale} />
+      <JourneysPanel data={data} locale={locale} />
       <ProductFocus data={data.focus} locale={locale} />
       <TaskEntriesPanel data={data} locale={locale} />
       <div className="overview-ask">

@@ -571,3 +571,37 @@ dialog.publish-dialog h3 { margin: 0 0 8px; font-size: 16px; }
 
 .spec-ask-refusal { background: #fdf3e0; border-color: #e5d3a1; }
 .spec-ask-refusal p { color: #7a6226; }
+
+/* 产品理解层（migration 083）：总览 AI 归纳能力卡、典型使用场景精简卡、使用场景视图、设置页状态卡 */
+.capability-item-title { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }.capability-item-title a { color: var(--ink); }.capability-item-title a:hover { color: var(--green); }
+.capability-item .ai-badge { display: inline-block; flex-shrink: 0; margin: 0; padding: 1px 6px; border-radius: 8px; background: var(--green-light); color: var(--green); font-size: 11px; font-weight: 650; white-space: nowrap; }
+.capability-members { margin-top: 8px; font-size: 12px; }.capability-members summary { cursor: pointer; color: var(--green); }.capability-members ul { margin: 8px 0 0; padding-left: 18px; }.capability-members li { margin: 3px 0; }.capability-members a { color: var(--muted); }.capability-members a:hover { color: var(--green); }
+.journey-highlights { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.journey-highlight { display: block; padding: 12px 14px; background: #fbfcfb; border: 1px solid var(--line); border-radius: 8px; }.journey-highlight:hover { border-color: var(--green); }.journey-highlight strong { font-size: 13px; }
+.journey-arc { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 8px; margin: 8px 0 0; font-size: 12px; line-height: 1.5; }.journey-arc span { min-width: 0; color: var(--ink); overflow-wrap: anywhere; }.journey-arc span[aria-hidden] { color: var(--green); }.journey-arc b { margin-right: 6px; color: var(--green); font-weight: 650; }
+.journey-highlight-meta { display: block; margin-top: 8px; color: var(--green); font-size: 12px; }
+.use-cases { display: grid; gap: 18px; }
+.overview-panel > .use-cases-summary { color: var(--ink); }
+.overview-panel > .use-cases-notice { padding: 8px 12px; border-left: 3px solid var(--amber); background: #fdf8ef; border-radius: 0 6px 6px 0; }
+.use-cases-nav { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }.use-cases-nav a { padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--green); font-size: 12px; text-decoration: none; }.use-cases-nav a:hover { border-color: var(--green); }
+.use-case-group > summary { list-style: none; cursor: pointer; }.use-case-group > summary::-webkit-details-marker { display: none; }
+.use-case-group-heading { display: flex; align-items: baseline; gap: 10px; }.use-case-group-heading h3 { margin: 0; font-size: 16px; }.use-case-group-heading span { color: var(--green); font-size: 12px; font-weight: 700; }
+.use-case-group[open] > .use-case-group-heading { margin-bottom: 16px; }
+.use-case-group:target, .journey:target { border-color: var(--green); box-shadow: 0 0 0 3px var(--green-light); }
+.journey-list { display: grid; gap: 14px; }
+.journey { padding: 16px 18px; background: #fbfcfb; border: 1px solid var(--line); border-radius: 10px; scroll-margin-top: 16px; }.journey h4 { margin: 0; font-size: 15px; }
+.journey-steps { display: grid; gap: 10px; margin: 12px 0 0; padding: 0; list-style: none; }
+.journey-step { padding: 10px 12px; border-left: 2px solid var(--line); background: var(--surface); border-radius: 0 8px 8px 0; }
+.journey-step-head { display: flex; align-items: baseline; gap: 10px; }.journey-step-head strong { font-size: 13px; }
+.journey-step-index { flex-shrink: 0; color: var(--green); font-size: 12px; font-weight: 700; }
+.journey-step-fields { display: grid; gap: 4px; margin: 8px 0 0; font-size: 12px; }.journey-step-fields div { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 8px; }.journey-step-fields dt { color: var(--muted); }.journey-step-fields dd { margin: 0; color: var(--ink); line-height: 1.5; }
+.journey-step-link { display: inline-block; margin-top: 8px; color: var(--green); font-size: 12px; }.journey-step-missing { display: inline-block; margin-top: 8px; color: var(--amber); font-size: 12px; }
+.journey-step-evidence { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin-top: 6px; font-size: 12px; }.journey-step-evidence > span { color: var(--muted); }.journey-step-evidence .evidence-list { margin-top: 0; }
+.use-case-group-stale .journey { opacity: .85; }
+.use-cases-empty .overview-text-link { font-size: 13px; }
+/* 从使用场景深链到达时高亮目标场景：读者一眼看到落在哪一条 */
+.scenario:target { background: var(--green-light); box-shadow: inset 3px 0 0 var(--green); scroll-margin-top: 16px; }
+.settings-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin: 0 0 14px; }.settings-facts div { padding: 10px 12px; background: #f5f7f5; border-radius: 7px; min-width: 0; }.settings-facts dt { color: var(--muted); font-size: 12px; }.settings-facts dd { margin: 4px 0 0; font-size: 13px; overflow-wrap: anywhere; }.settings-facts code { font-size: 12px; }
+.presentation-regenerate { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; font-size: 13px; }.presentation-error { color: #9b4237; font-size: 12px; }
+@media (max-width: 900px) { .journey-highlights { grid-template-columns: 1fr; } }
+@media (max-width: 620px) { .journey-arc { grid-template-columns: minmax(0, 1fr); }.journey-arc span[aria-hidden] { display: none; }.journey { padding: 14px; }.journey-step-fields div { grid-template-columns: 36px minmax(0, 1fr); } }

@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { parsePresentationPayload, presentationFingerprint, type PresentationCapability } from "./product-presentation";
+import { acceptImportedJourneys, journeyCoverage, presentationLedgerFingerprint, saveProductPresentation, type GeneratedPresentation, type PresentationLedger } from "./product-presentation-service";
 
 /**
  * BYO 快照导入（设计 2026-11-18-radar-import-byo §4/§5/§6，2026-11-19 落地）：
@@ -68,6 +70,8 @@ export const importArtifactSchema = z.object({
     evidence: z.array(anchorSchema),
   }).optional(),
   features: z.array(featureSchema).min(1),
+  /** Radar 快照自带的理解层（能力归纳 + 典型使用场景）；形状宽松接收，落库前逐条校验。 */
+  presentation: z.unknown().optional(),
 });
 
 export type ImportArtifact = z.infer<typeof importArtifactSchema>;
@@ -270,6 +274,64 @@ async function insertDraftFeatures(deps: ImportDeps, productId: number, features
   return scenariosImported;
 }
 
+/**
+ * 导入快照自带的理解层（能力归纳 + 典型使用场景）：此前导入会把它丢掉。逐条校验——能力分组的成员
+ * 必须是导入进来的功能，旅程每一步必须指向导入进来的 happy 场景；坏条目丢弃，不连坐。
+ * 指纹与账本口径一致（导入后按库内数据算出的值相同），所以后续分析钩子看到的是「未变化」，
+ * 不会为同一份规格再花一次模型调用。
+ */
+export function buildImportedPresentation(raw: unknown, features: ImportArtifactFeatures[], language: "zh-CN" | "en"): GeneratedPresentation | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const source = raw as { coreCapabilities?: unknown; journeys?: unknown; tagline?: unknown };
+  const parsed = parsePresentationPayload({ status: "generated", capabilities: source.coreCapabilities, journeys: source.journeys, coverage: undefined });
+  const ledger: PresentationLedger = {
+    productId: 0,
+    name: "",
+    description: "",
+    language,
+    specVersionId: null,
+    features: features.map((feature, index) => ({ id: index + 1, name: feature.name, displayName: "", summary: feature.summary, parentId: null })),
+    scenarios: features.flatMap((feature, index) => feature.scenarios.map((scenario) => ({
+      featureId: index + 1, reference: scenario.reference, context: scenario.context, action: scenario.action, outcome: scenario.outcome, category: scenario.category, step: scenario.step, evidence: [],
+    }))),
+  };
+  const imported = new Set(features.map((feature) => feature.name));
+  const capabilities = parsed.capabilities
+    .filter((capability) => capability.featureNames.some((name) => imported.has(name)))
+    .map((capability, index): PresentationCapability => ({ id: `capability-${index + 1}`, name: capability.name, summary: capability.summary, featureNames: capability.featureNames.filter((name) => imported.has(name)) }));
+  // Radar 快照里的旅程都是跨能力的全局典型场景。
+  const journeys = acceptImportedJourneys({ ledger, journeys: parsed.journeys });
+  if (capabilities.length === 0 && journeys.length === 0) return null;
+  const tagline = typeof source.tagline === "string" && source.tagline.trim() !== "" ? source.tagline.slice(0, 300) : undefined;
+  return {
+    status: capabilities.length > 0 && journeys.length > 0 ? "generated" : "partial",
+    language,
+    ...(tagline ? { tagline } : {}),
+    capabilities,
+    journeys,
+    coverage: journeyCoverage(ledger, journeys),
+    passes: 0,
+  };
+}
+
+/** best-effort：理解层写不进去（含迁移尚未执行）不影响导入本身，只告警。 */
+async function persistImportedPresentation(deps: ImportDeps, productId: number, raw: unknown, features: ImportArtifactFeatures[], language: "zh-CN" | "en"): Promise<void> {
+  const payload = buildImportedPresentation(raw, features, language);
+  if (!payload) return;
+  await saveProductPresentation(deps.execute, {
+    productId,
+    specVersionId: null,
+    source: IMPORT_SOURCE,
+    fingerprint: presentationFingerprint({
+      language,
+      features: features.map((feature, index) => ({ id: index + 1, name: feature.name, parentId: null })),
+      scenarios: features.flatMap((feature, index) => feature.scenarios.map((scenario) => ({ featureId: index + 1, reference: scenario.reference, category: scenario.category }))),
+    }),
+    payload,
+    modelName: null,
+  });
+}
+
 
 /** 首次导入赠 SAU（§11，用户拍板 2026-11-18）：mode=create_product 时赠 1 SAU 到该组织
  * 账户的 Trial 钱包，幂等键 grt:import-gift:{productId}（同产品只赠一次）。best-effort：
@@ -374,6 +436,12 @@ export async function importSnapshotArtifact(deps: ImportDeps, raw: unknown, ide
     `UPDATE products SET seeded_snapshot_sha = ?, seeded_tree_sha = ?, seeded_dirty = ?, seeded_contract_version = ?, seeded_at = CURRENT_TIMESTAMP(3) WHERE id = ?`,
     [identity.revision, identity.treeSha ?? null, identity.workingTreeDirty ? 1 : 0, artifact.contractVersion, target.productId],
   );
+  // 快照自带的理解层随导入落库（与草稿同一事务；写入失败只告警）。
+  if (artifact.presentation !== undefined) {
+    await persistImportedPresentation(deps, target.productId, artifact.presentation, features, artifact.language).catch((error) => {
+      console.warn("[snapshot-import] presentation persistence skipped", { productId: target.productId, message: error instanceof Error ? error.message : String(error) });
+    });
+  }
   const gift = target.mode === "create_product" ? await grantImportGift(deps, deps.organizationId, target.productId) : { granted: false };
   const remote = target.binding === "created" ? await (deps.probeRemote ? deps.probeRemote(identity, origin) : probeRemoteReachability(deps, identity, origin)) : { state: "unverified" as const, reason: "reused_or_unbound" };
   // evidence mode B 是 BYO 默认（§8.1）：导入只持久化 path+行号锚点，代码摘录（artifact 的

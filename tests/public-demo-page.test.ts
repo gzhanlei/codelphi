@@ -44,8 +44,8 @@ const details = {
   features: [], scenarios: [], releases: [], changes: [], behaviorChanges: [], latestRun: undefined,
 } as never;
 
-async function renderPage(org: string, slug: string) {
-  return renderToStaticMarkup(await ProductPage({ params: Promise.resolve({ slug: org, product: slug }), searchParams: Promise.resolve({}) }));
+async function renderPage(org: string, slug: string, searchParams: Record<string, string> = {}) {
+  return renderToStaticMarkup(await ProductPage({ params: Promise.resolve({ slug: org, product: slug }), searchParams: Promise.resolve(searchParams) }));
 }
 
 describe("public demo product page (canonical org-qualified route)", () => {
@@ -72,6 +72,15 @@ describe("public demo product page (canonical org-qualified route)", () => {
     vi.mocked(resolvePublicDemoProduct).mockResolvedValue(demo);
     const html = await renderPage("default", "reporadar");
     expect(html).toContain('data-base="/products/default/reporadar"');
+  });
+
+  it("serves the use cases view to anonymous demo visitors with the overview data shape (migration 083)", async () => {
+    vi.mocked(resolvePublicDemoProduct).mockResolvedValue(demo);
+    const html = await renderPage("default", "reporadar", { view: "journeys" });
+    // 使用场景与总览共用同一加载形态（理解层随总览形态一起读出），仍是只读演示
+    expect(getProductDetails).toHaveBeenCalledWith("reporadar", 3, { view: "overview" });
+    expect(html).toContain('data-can-edit="false"');
+    expect(html).not.toContain("?view=settings");
   });
 
   it("no longer renders the generic product-source note in the page heading", async () => {
