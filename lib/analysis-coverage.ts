@@ -86,6 +86,14 @@ export async function enumerateRequiredImplementationSurface(index: OpenedRemote
  * 覆盖率回执：装配面 = 各分区 slice 文件去重（与 assertEvidence 允许集同源）；
  * 总面 = 全量时的全树实现面，或定向增量时的 requiredPaths 实现面。字节数用装配内容实长。
  */
+function rawSourceBytes(content: string): number {
+  const lines = content.split("\n");
+  const matches = lines.map((line) => /^\d+: (.*)$/.exec(line));
+  const numbered = lines.every((line, index) => matches[index] || (index === lines.length - 1 && line === ""));
+  if (!numbered) return Buffer.byteLength(content, "utf8");
+  return Buffer.byteLength(lines.map((line, index) => matches[index]?.[1] ?? line).join("\n"), "utf8");
+}
+
 export function computeCoverageReceipt(input: {
   index: OpenedRemoteSourceRevision;
   partitions: AnalysisPartition[];
@@ -101,10 +109,14 @@ export function computeCoverageReceipt(input: {
   }
   const assembledAll = assembledPaths;
   const assembled = [...assembledPaths].filter((path) => evidenceKind(path) === "implementation");
-  const implBytesAssembled = input.partitions.reduce((total, partition) => {
-    return total + partition.sources.reduce((sum, source) => sum + Buffer.byteLength(source.content, "utf8"), 0);
-  }, 0);
-  const surface = input.implSurface ?? [];
+  const bytesByPath = new Map<string, number>();
+  for (const partition of input.partitions) {
+    for (const source of partition.sources) bytesByPath.set(source.path, rawSourceBytes(source.content));
+  }
+  const implBytesAssembled = [...bytesByPath.values()].reduce((total, size) => total + size, 0);
+  const surface = input.implSurface?.length
+    ? input.implSurface
+    : assembled.map((path) => ({ path, size: bytesByPath.get(path) ?? 0 }));
   const implBytesTotal = surface.reduce((total, file) => total + file.size, 0);
   // W0-9 评审采纳：diff 必选 ≠ diff 全覆盖——diff 面自身的入选/遗漏单独计数，
   // 6 分区帽或不可读导致的遗漏必须可见（「优先选择」不等于「实际覆盖」）。

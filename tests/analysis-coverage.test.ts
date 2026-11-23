@@ -99,6 +99,29 @@ describe("computeCoverageReceipt", () => {
     expect(receipt.coverageRatio).toBe(0);
   });
 
+  it("counts raw source bytes instead of line-number prefixes", () => {
+    const index = fakeIndex([{ path: "lib/a.ts", size: 3 }]);
+    const receipt = computeCoverageReceipt({
+      index,
+      partitions: [partition([{ path: "lib/a.ts", content: "1: a\n2: b" }])],
+      implSurface: [{ path: "lib/a.ts", size: 3 }],
+    });
+    expect(receipt.implBytesAssembled).toBe(3);
+    expect(receipt.coverageRatio).toBe(1);
+  });
+
+  it("falls back to the assembled implementation surface instead of reporting zero totals", () => {
+    const index = fakeIndex([]);
+    const receipt = computeCoverageReceipt({
+      index,
+      partitions: [partition([{ path: "lib/a.ts", content: "1: a\n2: b" }])],
+      implSurface: [],
+    });
+    expect(receipt.implFilesTotal).toBe(1);
+    expect(receipt.implBytesTotal).toBe(3);
+    expect(receipt.coverageRatio).toBe(1);
+  });
+
   it("marks legacy receipts with null primaryRangesOmitted (inventory-only accounting, historical semantics preserved)", () => {
     // Task 14：主覆盖区间遗漏只由 inventory 编排路径填写；旧分区回执恒为 null，
     // sourceCoverage 完整性判定对旧回执保持历史语义（不新增 partial 条件）。
