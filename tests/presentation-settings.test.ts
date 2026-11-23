@@ -16,7 +16,7 @@ function row(overrides: Partial<ProductPresentationRow> = {}): ProductPresentati
     status: "generated",
     source: "generated",
     capabilities: [],
-    journeys: [{ id: "journey-1", name: "登录后查看规格", tier: "headline", capabilityName: null, steps: [] }],
+    journeys: [{ id: "journey-1", name: "登录后查看规格", tier: "headline", capabilityNames: [], steps: [] }],
     coverage: { featuresTotal: 30, featuresInJourneys: 12, scenariosInJourneys: 9 },
     fingerprint: "f".repeat(64),
     pending: false,

@@ -204,13 +204,24 @@ export const JOURNEY_OUTPUT_SHAPE = '{"journeys":[{"name":"","steps":[{"featureN
  * 「只返回 JSON」连同确切结构放在数据之前的最后一句：生产实测把它埋在说明中间时，
  * 模型会改成输出 Markdown 叙事。
  */
-export function journeyMiningPrompt(input: { productDescription: string; capabilityName: string | null; maxJourneys: number; candidates: JourneyCandidate[] }, language: OutputLanguage): string {
+export function journeyMiningPrompt(input: { productDescription: string; capabilityName: string | null; groups?: Array<{ name: string; features: string[] }>; maxJourneys: number; candidates: JourneyCandidate[] }, language: OutputLanguage): string {
   const scope = input.capabilityName === null ? "" : input.capabilityName;
+  // 打包窗口：候选来自多个能力分组（每个都太小，不值得单独一趟）时，把「哪个功能属于哪个分组」明确告诉模型，
+  // 并要求每个分组都有出场机会——只列分组名、不给成员归属时，模型无从按分组构造场景（生产实测 12 个分组只有 3 个被触及）。
+  const packed = input.groups && input.groups.length > 1;
+  const membership = packed
+    ? input.groups!.map((group) => (language === "en" ? `${group.name}: ${group.features.join(", ")}` : `${group.name}：${group.features.join("、")}`)).join(language === "en" ? "; " : "；")
+    : "";
+  const groups = packed
+    ? (language === "en"
+      ? `\n\nThe candidate scenarios come from several small capabilities. Capability membership: ${membership}. Write one journey for as many of these capabilities as you can — a journey may stay within one capability or cross several — so that every capability gets a chance to appear.`
+      : `\n\n候选场景来自多个较小的能力分组。分组与成员功能：${membership}。请为尽可能多的分组各写一条旅程（可以只在一个分组内，也可以跨分组），让每个分组都有出场机会。`)
+    : "";
   const shape = JOURNEY_OUTPUT_SHAPE;
   if (language === "en") {
-    return `Create user journeys for a first-time reader using only the existing evidence-backed scenarios listed below. Do not add facts, steps, features or claims. A journey must connect at least two different features and read as one user goal from trigger to visible result; do not force a journey when the scenarios do not support one, and do not present one feature's internal steps as a cross-feature flow. Name each journey by the user goal in plain language, without implementation jargon. Prefer journeys that use features no other journey in this response uses; journeys repeating the same steps are not useful.${scope ? `\n\nCapability: ${scope}` : ""}\n\nReturn at most ${input.maxJourneys} journeys, each with 2-6 ordered steps copied verbatim (exact featureName and reference) from the candidate list. Return exactly one JSON object and nothing else — no Markdown, headings, numbered lists or explanations — with this shape: ${shape}\n\nProduct description: ${input.productDescription}\n\nCandidate scenarios:\n${JSON.stringify(input.candidates)}`;
+    return `Create user journeys for a first-time reader using only the existing evidence-backed scenarios listed below. Do not add facts, steps, features or claims. A journey must connect at least two different features and read as one user goal from trigger to visible result; consecutive steps must not come from the same feature — never chain two or three scenarios of one feature and call it a journey; do not force a journey when the scenarios do not support one, and do not present one feature's internal steps as a cross-feature flow. Name each journey by the user goal in plain language, without implementation jargon. Prefer journeys that use features no other journey in this response uses; journeys repeating the same steps are not useful.${scope ? `\n\nCapability: ${scope}` : ""}${groups}\n\nReturn at most ${input.maxJourneys} journeys, each with 2-6 ordered steps copied verbatim (exact featureName and reference) from the candidate list. Return exactly one JSON object and nothing else — no Markdown, headings, numbered lists or explanations — with this shape: ${shape}\n\nProduct description: ${input.productDescription}\n\nCandidate scenarios:\n${JSON.stringify(input.candidates)}`;
   }
-  return `只使用下列已有、带证据的场景，为第一次接触产品的读者创建用户旅程。不得新增事实、步骤、功能或结论。旅程必须连接至少两个不同功能，并读起来像同一个用户目标从触发到可见结果的过程；场景不足以支持时不要强行生成，也不要把单个功能内部的步骤拼成跨功能流程。旅程名称用平实语言概括用户目标，不使用实现术语。优先覆盖本次响应中其他旅程尚未用到的功能；步骤互相重复的旅程没有价值。${scope ? `\n\n所属能力：${scope}` : ""}\n\n最多返回 ${input.maxJourneys} 条旅程，每条包含 2-6 个有序步骤，步骤必须逐字取自候选列表（featureName 与 reference 完全一致）。只返回一个 JSON 对象，不要 Markdown、标题、编号列表或任何解释，结构为：${shape}\n\n产品简介：${input.productDescription}\n\n候选场景：\n${JSON.stringify(input.candidates)}`;
+  return `只使用下列已有、带证据的场景，为第一次接触产品的读者创建用户旅程。不得新增事实、步骤、功能或结论。旅程必须连接至少两个不同功能，并读起来像同一个用户目标从触发到可见结果的过程；相邻两步不要取自同一个功能——不要把同一个功能的两三个场景首尾相接当成一条旅程；场景不足以支持时不要强行生成，也不要把单个功能内部的步骤拼成跨功能流程。旅程名称用平实语言概括用户目标，不使用实现术语。优先覆盖本次响应中其他旅程尚未用到的功能；步骤互相重复的旅程没有价值。${scope ? `\n\n所属能力：${scope}` : ""}${groups}\n\n最多返回 ${input.maxJourneys} 条旅程，每条包含 2-6 个有序步骤，步骤必须逐字取自候选列表（featureName 与 reference 完全一致）。只返回一个 JSON 对象，不要 Markdown、标题、编号列表或任何解释，结构为：${shape}\n\n产品简介：${input.productDescription}\n\n候选场景：\n${JSON.stringify(input.candidates)}`;
 }
 
 /** 解析一趟旅程挖掘输出：只做形状校验，引用是否成立由调用方逐条校验（坏条目丢弃，不连坐）。 */

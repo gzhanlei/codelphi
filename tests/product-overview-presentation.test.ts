@@ -22,8 +22,8 @@ const happyScenarios: ScenarioRow[] = [
   { id: 31, featureId: 3, reference: "HP-1", context: "有新发布", action: "打开发布稿", outcome: "看到本次变化", category: "happy", source: "generated", evidence: [{ path: "app/notes.ts", startLine: 9 }] },
 ];
 
-function journey(order: number, name: string, tier: PresentationJourney["tier"], refs: Array<[string, string]>, capabilityName: string | null = null): PresentationJourney {
-  return { id: `journey-${order}`, name, tier, capabilityName, steps: refs.map(([featureName, reference]) => ({ featureName, reference })) };
+function journey(order: number, name: string, tier: PresentationJourney["tier"], refs: Array<[string, string]>, capabilityNames: string[] = []): PresentationJourney {
+  return { id: `journey-${order}`, name, tier, capabilityNames, steps: refs.map(([featureName, reference]) => ({ featureName, reference })) };
 }
 
 function presentationRow(journeys: PresentationJourney[], capabilities: ProductPresentationRow["capabilities"] = [{ id: "capability-1", name: "账户与规格", summary: "登录后查看产品规格", featureNames: ["登录", "规格"] }]): ProductPresentationRow {
@@ -97,10 +97,10 @@ describe("overview capability sourcing chain", () => {
 describe("overview journey highlights", () => {
   it("puts the headline journey first, caps at three and links each card to its full view", () => {
     const journeys = [
-      journey(1, "深挖旅程甲", "capability", [["登录", "HP-1"], ["发布", "HP-1"]], "账户与规格"),
+      journey(1, "深挖旅程甲", "capability", [["登录", "HP-1"], ["发布", "HP-1"]], ["账户与规格"]),
       journey(2, "全局典型", "headline", [["登录", "HP-1"], ["规格", "HP-1"]]),
-      journey(3, "深挖旅程乙", "capability", [["规格", "HP-1"], ["发布", "HP-1"]], "账户与规格"),
-      journey(4, "深挖旅程丙", "capability", [["登录", "HP-1"], ["发布", "HP-1"]], "其他"),
+      journey(3, "深挖旅程乙", "capability", [["规格", "HP-1"], ["发布", "HP-1"]], ["账户与规格"]),
+      journey(4, "深挖旅程丙", "capability", [["登录", "HP-1"], ["发布", "HP-1"]], ["其他"]),
     ];
     const overview = build({ presentation: presentationRow(journeys) });
     expect(overview.journeyHighlights.map((item) => [item.id, item.name])).toEqual([["journey-2", "全局典型"], ["journey-1", "深挖旅程甲"], ["journey-3", "深挖旅程乙"]]);
@@ -120,7 +120,7 @@ describe("overview journey highlights", () => {
 describe("overview rendering with the understanding layer", () => {
   const withJourneys = () => build({ presentation: presentationRow([
     journey(1, "登录后查看规格", "headline", [["登录", "HP-1"], ["规格", "HP-1"]]),
-    journey(2, "从规格到发布", "capability", [["规格", "HP-1"], ["发布", "HP-1"]], "账户与规格"),
+    journey(2, "从规格到发布", "capability", [["规格", "HP-1"], ["发布", "HP-1"]], ["账户与规格"]),
   ]) });
 
   it("renders AI capability cards with their source label and member features", () => {

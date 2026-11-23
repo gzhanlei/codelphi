@@ -101,10 +101,11 @@ describe("product presentation generation", () => {
     expect(generated.status).toBe("generated");
     expect(generated.tagline).toBe("把采集的数据变成复盘");
     expect(generated.capabilities.map((capability) => [capability.name, capability.featureNames])).toEqual([["采集与转写", ["A", "B"]], ["复盘分析", ["C", "D"]]]);
-    expect(generated.journeys.map((journey) => [journey.id, journey.name, journey.tier, journey.capabilityName])).toEqual([
-      ["journey-1", "从采集到复盘", "headline", null],
-      ["journey-2", "A 与 B 的流程", "capability", "采集与转写"],
-      ["journey-3", "C 与 D 的流程", "capability", "复盘分析"],
+    expect(generated.journeys.map((journey) => [journey.id, journey.name, journey.tier, journey.capabilityNames])).toEqual([
+      // 标签 = 旅程实际触及的能力：全局典型场景横跨两个能力，所以两个都记
+      ["journey-1", "从采集到复盘", "headline", ["采集与转写", "复盘分析"]],
+      ["journey-2", "A 与 B 的流程", "capability", ["采集与转写"]],
+      ["journey-3", "C 与 D 的流程", "capability", ["复盘分析"]],
     ]);
     expect(generated.passes).toBe(3);
     expect(complete.complete).toHaveBeenCalledTimes(3);
@@ -132,10 +133,10 @@ describe("product presentation generation", () => {
     // 人工业务域优先于 AI 归组：名称用首页显示名，成员是子级功能
     expect(generated.capabilities).toEqual([{ id: "capability-1", name: "采集域", summary: "采集 的摘要", featureNames: ["A", "B"] }]);
     expect(generated.status).toBe("generated");
-    expect(generated.journeys.map((journey) => [journey.name, journey.tier, journey.capabilityName])).toEqual([
-      ["全局典型", "headline", null],
-      ["采集域内部流程", "capability", "采集域"],
-      ["未归组流程", "capability", null],
+    expect(generated.journeys.map((journey) => [journey.name, journey.tier, journey.capabilityNames])).toEqual([
+      ["全局典型", "headline", ["采集域"]],
+      ["采集域内部流程", "capability", ["采集域"]],
+      ["未归组流程", "capability", []],
     ]);
     // 一趟全局采样 + 采集域窗口 + 未归组功能窗口
     expect(generated.passes).toBe(3);
@@ -168,7 +169,7 @@ describe("product presentation generation", () => {
     const generated = await generateProductPresentation({ ledger: leafLedger(), client: complete });
     // 「与乙高度相似」严格包含「有效旅程乙」且多出一步：更完整的那条原位胜出
     expect(generated.journeys.map((journey) => journey.name)).toEqual(["从采集到复盘", "有效旅程甲", "与乙高度相似"]);
-    expect(generated.journeys.map((journey) => journey.capabilityName)).toEqual([null, "采集与转写", "复盘分析"]);
+    expect(generated.journeys.map((journey) => journey.capabilityNames)).toEqual([["采集与转写", "复盘分析"], ["采集与转写"], ["复盘分析"]]);
     // 所有落库步骤都是规范引用
     expect(generated.journeys[1].steps).toEqual([{ featureName: "A", reference: "HP-2" }, { featureName: "B", reference: "HP-1" }]);
   });
@@ -184,6 +185,98 @@ describe("product presentation generation", () => {
     // 后到的「完整版本」原位替换「短版本」：不留两条，位置不变；同名重名仍只留一条
     expect(generated.journeys.map((journey) => journey.name)).toEqual(["完整版本"]);
     expect(generated.coverage.featuresInJourneys).toBe(3);
+  });
+
+  it("packs tiny domains into shared windows when they would not fit the call cap, and labels journeys by what they touch", async () => {
+    // 生产实测形态（codelphi 产品，2026-11-24）：10 个只有 2 个功能的人工业务域 + 10 个未分组功能。
+    // 这种「一部分在域里、其余未分组」的形态只出现在人工业务域路径上（AI 归组必须覆盖每个功能恰好一次）。
+    const names = Array.from({ length: 30 }, (_, index) => `F${index + 1}`);
+    const tiny: PresentationLedger = {
+      ...leafLedger(),
+      features: [
+        ...Array.from({ length: 10 }, (_, index) => feature(101 + index, `域${index + 1}`)),
+        ...names.slice(0, 20).map((name, index) => feature(index + 1, name, 101 + Math.floor(index / 2))),
+        ...names.slice(20).map((name, index) => feature(21 + index, name)),
+      ],
+    };
+    tiny.scenarios = tiny.features.filter((item) => item.id <= 30).map((item) => scenario(item.id, "HP-1"));
+    const seen: Array<{ members: string[]; packed: boolean }> = [];
+    const complete = client((messages) => {
+      expect(isMining(messages), "business-domain products must not call the grouping prompt").toBe(true);
+      const content = messages[1].content;
+      const members = windowMembers(messages);
+      const packed = content.includes("分组与成员功能：");
+      seen.push({ members, packed });
+      // 只有打包窗口才造得出跨域的场景：故意横跨域一和域三；另有一条只碰未归组功能
+      return miningAnswer([
+        { name: "纯未归组", steps: [{ featureName: "F21", reference: "HP-1" }, { featureName: "F22", reference: "HP-1" }] },
+        ...(packed ? [{ name: "跨域", steps: [{ featureName: "F1", reference: "HP-1" }, { featureName: "F5", reference: "HP-1" }] }] : []),
+      ]);
+    });
+    // maxPasses=3：功能预算 120 个功能位、调用上限 6。10 个小域各自成窗会超调用上限，于是合并成一个打包窗口。
+    // 第一轮：全局采样（30 个功能各一条场景，不分能力）、打包窗口 20 个功能（10 个域）、未分组窗口 10 个功能。
+    // 第一轮新增了旅程，所以进入第二轮：只送仍未被覆盖的功能——10 个域共剩 18 个（仍超调用上限，再并成打包窗口）、
+    // 未归组剩 8 个。
+    const generated = await generateProductPresentation({ ledger: tiny, client: complete, maxPasses: 3 });
+    expect(generated.passes).toBe(5);
+    expect(seen.map(({ members, packed }) => [members.length, packed])).toEqual([[30, false], [20, true], [10, false], [18, true], [8, false]]);
+    // 打包窗口的提示词列出「分组 → 成员功能」的归属，并要求每组都有出场机会
+    // （只给分组名、不给成员归属时模型无从按分组构造场景；分组间顺序取决于排序规则，不在此断言）
+    const packedPrompt = complete.complete.mock.calls[1][0][1].content;
+    expect(packedPrompt).toContain("请为尽可能多的分组各写一条旅程");
+    // 成员归属完整且正确：域 N 拥有 F(2N-1)、F(2N)（分组间、功能间的先后取决于排序规则，按集合比对）
+    const membership = packedPrompt.slice(packedPrompt.indexOf("分组与成员功能：") + "分组与成员功能：".length, packedPrompt.indexOf("。", packedPrompt.indexOf("分组与成员功能：")));
+    const sorted = (members: string[]) => [...members].sort();
+    const byGroup = Object.fromEntries(membership.split("；").map((entry: string) => { const [name, members] = entry.split("："); return [name, sorted(members.split("、"))]; }));
+    expect(byGroup).toEqual(Object.fromEntries(Array.from({ length: 10 }, (_, index) => [`域${index + 1}`, sorted([`F${index * 2 + 1}`, `F${index * 2 + 2}`])])));
+    // 第二轮不再送已覆盖的功能：F1、F5（跨域场景）、F21、F22（纯未归组场景）都不再出现
+    expect(seen.slice(3).flatMap((entry) => entry.members)).not.toContain("F1");
+    expect(seen.slice(3).flatMap((entry) => entry.members)).not.toContain("F21");
+    // 30 个功能全部被送到模型面前
+    expect(new Set(seen.flatMap((entry) => entry.members)).size).toBe(30);
+    const byName = Object.fromEntries(generated.journeys.map((journey) => [journey.name, journey.capabilityNames]));
+    // F1 属于域1、F5 属于域3
+    expect(byName).toEqual({ 纯未归组: [], 跨域: ["域1", "域3"] });
+    expect(generated.capabilities).toHaveLength(10);
+  });
+
+  it("spends the feature budget before the call cap", async () => {
+    // 90 个未分组功能：窗口是 40 / 40 / 10。maxPasses=1 即 40 个功能位——只够第一个窗口
+    const wide: PresentationLedger = { ...leafLedger(), features: Array.from({ length: 90 }, (_, index) => feature(index + 1, `F${index + 1}`)) };
+    wide.scenarios = wide.features.map((item) => scenario(item.id, "HP-1"));
+    const seen: number[] = [];
+    const complete = client((messages) => {
+      if (!isMining(messages)) throw new Error("no grouping");
+      const members = windowMembers(messages);
+      seen.push(members.length);
+      return miningAnswer([{ name: `旅程 ${seen.length}`, steps: [{ featureName: members[0], reference: "HP-1" }, { featureName: members[1], reference: "HP-1" }] }]);
+    });
+    const generated = await generateProductPresentation({ ledger: wide, client: complete, maxPasses: 1 });
+    // 全局采样 40 个功能（每个功能一条场景）+ 第一个窗口 40 个；第二个窗口（再 40 个）超出功能预算，不发
+    expect(seen).toEqual([40, 40]);
+    expect(generated.passes).toBe(2);
+    expect(generated.journeys).toHaveLength(2);
+  });
+
+  it("gives a capability that owns a single feature a destination", async () => {
+    // 只有一个功能的业务域：单独成窗挖不出跨功能场景，并进别的窗口后才有机会作为某一步出现
+    const single: PresentationLedger = {
+      ...leafLedger(),
+      features: [feature(10, "单功能域", null, "单功能域"), feature(1, "A", 10), feature(2, "X"), feature(3, "Y")],
+    };
+    single.scenarios = [scenario(1, "HP-1"), scenario(2, "HP-1"), scenario(3, "HP-1")];
+    const seen: string[][] = [];
+    const complete = client((messages) => {
+      expect(isMining(messages), "business-domain products must not call the grouping prompt").toBe(true);
+      const members = windowMembers(messages);
+      seen.push(members);
+      return miningAnswer([{ name: "经过单功能域", steps: [{ featureName: "X", reference: "HP-1" }, { featureName: "A", reference: "HP-1" }] }]);
+    });
+    const generated = await generateProductPresentation({ ledger: single, client: complete });
+    // A 至少被送到过模型面前（不因为单功能而被丢掉），并且落在带标签的旅程里
+    expect(seen.some((members) => members.includes("A"))).toBe(true);
+    expect(generated.capabilities.map((capability) => capability.name)).toEqual(["单功能域"]);
+    expect(generated.journeys.map((journey) => [journey.name, journey.capabilityNames])).toEqual([["经过单功能域", ["单功能域"]]]);
   });
 
   it("drops journeys that are only a sub-segment of an accepted one", async () => {
@@ -228,10 +321,14 @@ describe("product presentation generation", () => {
     expect(noMining.journeys.map((journey) => journey.name)).toEqual(["从采集到复盘"]);
 
     complete.complete.mockClear();
-    // 预算 1：只发一趟挖掘；归组自身的调用不占这份预算
-    const oneMining = await generateProductPresentation({ ledger, client: complete, maxPasses: 1, maxJourneys: 60 });
-    expect(complete.complete.mock.calls.filter((call) => isMining(call[0]))).toHaveLength(1);
-    expect(oneMining.passes).toBe(2);
+    // 预算按功能量计：maxPasses=1 即 40 个功能位、调用上限 2。归组不带典型旅程，所以先花一趟做全局采样；
+    // 窗口只剩 1 趟额度，两个小桶各自成窗放不下，于是合并成一个打包窗口（4 个功能）一趟挖完
+    const tightClient = client((messages) => (isMining(messages) ? miningAnswer([{ name: `旅程 ${tightClient.complete.mock.calls.length}`, steps: [{ featureName: "A", reference: "HP-1" }, { featureName: "C", reference: "HP-1" }] }]) : groupingWithoutJourneys));
+    const tight = await generateProductPresentation({ ledger, client: tightClient, maxPasses: 1, maxJourneys: 60 });
+    const tightMining = tightClient.complete.mock.calls.filter((call) => isMining(call[0]));
+    expect(tightMining).toHaveLength(2);
+    expect(tightMining[1][0][1].content).toContain("分组与成员功能：采集与转写：A、B；复盘分析：C、D");
+    expect(tight.passes).toBe(3);
 
     complete.complete.mockClear();
     const capped = await generateProductPresentation({ ledger, client: complete, maxPasses: 16, maxJourneys: 1 });
@@ -331,8 +428,8 @@ describe("product presentation generation", () => {
 
 describe("merging with the previous presentation", () => {
   const step = (featureName: string, reference = "HP-1") => ({ featureName, reference });
-  const previousOf = (journeys: Array<{ name: string; steps: Array<{ featureName: string; reference: string }> }>) => ({ capabilities: [{ id: "capability-1", name: "旧分组", summary: "s", featureNames: ["A", "B"] }], journeys: journeys.map((journey, index) => ({ id: `journey-${index + 1}`, name: journey.name, tier: "headline" as const, capabilityName: null, steps: journey.steps })) });
-  const nextOf = (journeys: Array<{ name: string; steps: Array<{ featureName: string; reference: string }> }>): GeneratedPresentation => ({ status: "generated", language: "zh-CN", capabilities: [{ id: "capability-1", name: "新分组", summary: "s", featureNames: ["A", "B", "C", "D"] }], journeys: journeys.map((journey, index) => ({ id: `journey-${index + 1}`, name: journey.name, tier: "headline" as const, capabilityName: null, steps: journey.steps })), coverage: { featuresTotal: 4, featuresInJourneys: 0, scenariosInJourneys: 0 }, passes: 3 });
+  const previousOf = (journeys: Array<{ name: string; steps: Array<{ featureName: string; reference: string }> }>) => ({ capabilities: [{ id: "capability-1", name: "旧分组", summary: "s", featureNames: ["A", "B"] }], journeys: journeys.map((journey, index) => ({ id: `journey-${index + 1}`, name: journey.name, tier: "headline" as const, capabilityNames: [], steps: journey.steps })) });
+  const nextOf = (journeys: Array<{ name: string; steps: Array<{ featureName: string; reference: string }> }>): GeneratedPresentation => ({ status: "generated", language: "zh-CN", capabilities: [{ id: "capability-1", name: "新分组", summary: "s", featureNames: ["A", "B", "C", "D"] }], journeys: journeys.map((journey, index) => ({ id: `journey-${index + 1}`, name: journey.name, tier: "headline" as const, capabilityNames: [], steps: journey.steps })), coverage: { featuresTotal: 4, featuresInJourneys: 0, scenariosInJourneys: 0 }, passes: 3 });
 
   it("unions both versions and only ever grows coverage", () => {
     const merged = mergePresentation({
@@ -350,6 +447,8 @@ describe("merging with the previous presentation", () => {
     // 分组用本次的新归组
     expect(merged.capabilities[0].name).toBe("新分组");
     expect(merged.status).toBe("generated");
+    // 上一版旅程的标签按当前归组重算（它们入参里没有标签，也不该带着旧分组的名字）
+    expect(merged.journeys.find((journey) => journey.name === "上一版旅程二")!.capabilityNames).toEqual(["新分组"]);
   });
 
   it("drops previous journeys whose scenarios no longer exist in the current spec", () => {
@@ -546,7 +645,7 @@ describe("presentation refresh scheduling", () => {
   const storedPresentation = {
     capabilities: JSON.stringify([{ name: "旧分组", summary: "s", featureNames: ["A", "B"] }]),
     journeys: JSON.stringify([
-      { name: "上一版保留的旅程", tier: "headline", capabilityName: null, steps: [{ featureName: "A", reference: "HP-1" }, { featureName: "B", reference: "HP-1" }] },
+      { name: "上一版保留的旅程", tier: "headline", capabilityNames: [], steps: [{ featureName: "A", reference: "HP-1" }, { featureName: "B", reference: "HP-1" }] },
       { name: "引用已失效的旧旅程", tier: "capability", capabilityName: "旧分组", steps: [{ featureName: "A", reference: "HP-1" }, { featureName: "已被删除的功能", reference: "HP-1" }] },
     ]),
   };

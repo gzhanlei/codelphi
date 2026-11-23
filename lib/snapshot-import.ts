@@ -299,8 +299,8 @@ export function buildImportedPresentation(raw: unknown, features: ImportArtifact
   const capabilities = parsed.capabilities
     .filter((capability) => capability.featureNames.some((name) => imported.has(name)))
     .map((capability, index): PresentationCapability => ({ id: `capability-${index + 1}`, name: capability.name, summary: capability.summary, featureNames: capability.featureNames.filter((name) => imported.has(name)) }));
-  // Radar 快照里的旅程都是跨能力的全局典型场景。
-  const journeys = acceptImportedJourneys({ ledger, journeys: parsed.journeys });
+  // Radar 快照里的旅程都是跨能力的全局典型场景；标签按它们触及的导入能力算出。
+  const journeys = acceptImportedJourneys({ ledger, journeys: parsed.journeys, capabilities });
   if (capabilities.length === 0 && journeys.length === 0) return null;
   const tagline = typeof source.tagline === "string" && source.tagline.trim() !== "" ? source.tagline.slice(0, 300) : undefined;
   return {

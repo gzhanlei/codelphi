@@ -20,8 +20,8 @@ const scenarios: ScenarioRow[] = [
   { id: 31, featureId: 3, reference: "HP-1", context: "有新发布", action: "打开发布稿", outcome: "看到本次变化", category: "happy", source: "generated", evidence: [] },
 ];
 
-function journey(order: number, name: string, tier: PresentationJourneyTier, refs: Array<[string, string]>, capabilityName: string | null = null): PresentationJourney {
-  return { id: `journey-${order}`, name, tier, capabilityName, steps: refs.map(([featureName, reference]) => ({ featureName, reference })) };
+function journey(order: number, name: string, tier: PresentationJourneyTier, refs: Array<[string, string]>, capabilityNames: string[] = []): PresentationJourney {
+  return { id: `journey-${order}`, name, tier, capabilityNames, steps: refs.map(([featureName, reference]) => ({ featureName, reference })) };
 }
 
 function row(journeys: PresentationJourney[], overrides: Partial<ProductPresentationRow> = {}): ProductPresentationRow {
@@ -55,7 +55,7 @@ function render(props: Partial<Parameters<typeof ProductUseCases>[0]> = {}) {
 
 const full = [
   journey(1, "登录后查看规格", "headline", [["登录", "HP-1"], ["规格", "HP-1"]]),
-  journey(2, "从规格到发布", "capability", [["规格", "HP-1"], ["发布", "HP-1"]], "账户与规格"),
+  journey(2, "从规格到发布", "capability", [["规格", "HP-1"], ["发布", "HP-1"]], ["账户与规格"]),
 ];
 
 describe("use cases view", () => {
@@ -103,8 +103,8 @@ describe("use cases view", () => {
   it("keeps journeys whose scenarios changed in a collapsed refresh group and discloses the hidden ones", () => {
     const html = render({ presentation: view([
       journey(1, "登录后查看规格", "headline", [["登录", "HP-1"], ["规格", "HP-1"]]),
-      journey(2, "引用部分失效", "capability", [["登录", "HP-1"], ["已被删除的功能", "HP-1"]], "账户与规格"),
-      journey(3, "引用全部失效", "capability", [["没了", "HP-1"], ["也没了", "HP-1"]], "账户与规格"),
+      journey(2, "引用部分失效", "capability", [["登录", "HP-1"], ["已被删除的功能", "HP-1"]], ["账户与规格"]),
+      journey(3, "引用全部失效", "capability", [["没了", "HP-1"], ["也没了", "HP-1"]], ["账户与规格"]),
     ], { pending: true }) });
     expect(html).toContain("待更新（引用的场景已变更）");
     expect(html).toContain("有 1 步引用的场景在当前规格里已找不到");

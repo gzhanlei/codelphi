@@ -249,7 +249,8 @@ describe("importSnapshotArtifact 理解层随导入落库（migration 083）", (
     expect(payload!.tagline).toBe("一句话说明产品");
     // 成员全部落空的能力分组、引用 edge 场景或未导入场景的旅程逐条丢弃
     expect(payload!.capabilities.map((capability) => [capability.name, capability.featureNames])).toEqual([["账户与发布", ["统一登录", "发布稿"]]]);
-    expect(payload!.journeys.map((journey) => [journey.name, journey.tier, journey.capabilityName])).toEqual([["登录后发布", "headline", null]]);
+    // 旅程按它实际触及的能力打标签：两步都在「账户与发布」里
+    expect(payload!.journeys.map((journey) => [journey.name, journey.tier, journey.capabilityNames])).toEqual([["登录后发布", "headline", ["账户与发布"]]]);
     expect(payload!.coverage).toEqual({ featuresTotal: 2, featuresInJourneys: 2, scenariosInJourneys: 2 });
     expect(buildImportedPresentation({ coreCapabilities: "garbage", journeys: 42 }, [], "zh-CN")).toBeNull();
     expect(buildImportedPresentation(null, [], "zh-CN")).toBeNull();
@@ -266,7 +267,7 @@ describe("importSnapshotArtifact 理解层随导入落库（migration 083）", (
     const [productId, specVersionId, language, status, source, tagline, capabilitiesJson, journeysJson] = save!.params;
     expect([productId, specVersionId, language, status, source, tagline]).toEqual([77, null, "zh-CN", "generated", "ai_snapshot_import", "一句话说明产品"]);
     expect(JSON.parse(String(capabilitiesJson))).toEqual([{ name: "账户与发布", summary: "登录后对外发布", featureNames: ["统一登录", "发布稿"] }]);
-    expect(JSON.parse(String(journeysJson))).toEqual([{ name: "登录后发布", tier: "headline", capabilityName: null, steps: [{ featureName: "统一登录", reference: "HP-1" }, { featureName: "发布稿", reference: "HP-1" }] }]);
+    expect(JSON.parse(String(journeysJson))).toEqual([{ name: "登录后发布", tier: "headline", capabilityNames: ["账户与发布"], steps: [{ featureName: "统一登录", reference: "HP-1" }, { featureName: "发布稿", reference: "HP-1" }] }]);
     // 指纹与「导入后按库内数据算出的账本指纹」逐字相同：后续分析钩子判定未变化，不会为同一份规格再调模型
     const ledger = {
       language: "zh-CN" as const,

@@ -36,7 +36,13 @@ export interface PresentationJourney {
   id: string;
   name: string;
   tier: PresentationJourneyTier;
-  capabilityName: string | null;
+  /**
+   * 这条旅程实际触及的能力分组（可多个，按首次出现排序）——由步骤所属功能对照能力分组得出，
+   * 而不是「挖出它的那个窗口」。跨能力的场景因此会同时出现在每个相关能力的分组下，
+   * 每张能力卡都有落点。空数组 = 只触及未归组的功能。生成后会按当前分组重新计算，
+   * 所以归组变化时旧旅程的标签自动跟上。
+   */
+  capabilityNames: string[];
   steps: PresentationScenarioRef[];
 }
 
@@ -122,15 +128,18 @@ export function parsePresentationPayload(value: unknown): Pick<ProductPresentati
   const journeys: PresentationJourney[] = [];
   for (const [index, item] of (Array.isArray(record.journeys) ? record.journeys : []).entries()) {
     if (typeof item !== "object" || item === null) continue;
-    const journey = item as { name?: unknown; steps?: unknown; tier?: unknown; capabilityName?: unknown };
+    const journey = item as { name?: unknown; steps?: unknown; tier?: unknown; capabilityNames?: unknown; capabilityName?: unknown };
     if (typeof journey.name !== "string" || !Array.isArray(journey.steps)) continue;
     const steps = journey.steps.map(refOf).filter((ref): ref is PresentationScenarioRef => ref !== null);
     if (steps.length === 0) continue;
+    // capabilityName 是首版落库的单标签写法：读得出来，下次生成合并时会被重新计算成多标签。
+    const legacyName = typeof journey.capabilityName === "string" && journey.capabilityName.trim() !== "" ? [journey.capabilityName] : [];
+    const names = Array.isArray(journey.capabilityNames) ? journey.capabilityNames.filter((name): name is string => typeof name === "string" && name.trim() !== "") : legacyName;
     journeys.push({
       id: `journey-${index + 1}`,
       name: journey.name,
       tier: journey.tier === "headline" ? "headline" : "capability",
-      capabilityName: typeof journey.capabilityName === "string" ? journey.capabilityName : null,
+      capabilityNames: [...new Set(names)],
       steps,
     });
   }
@@ -302,22 +311,23 @@ export function buildProductPresentationView(input: {
   const intactJourneys = journeys.filter((journey) => journey.intact);
   const staleJourneys = journeys.filter((journey) => !journey.intact && journey.resolvedSteps > 0);
   const featuresInJourneys = new Set(intactJourneys.flatMap((journey) => journey.steps.map((step) => step.featureId))).size;
-  const grouped = journeys.filter((journey) => journey.tier === "capability" && journey.capabilityName !== null);
-  // 能力分组：成员解析到当前活跃行的才出卡（空壳分组不出现）；旅程按同一份分组归属，页内锚点与总览 AI 能力卡一致。
+  // 能力分组：成员解析到当前活跃行的才出卡（空壳分组不出现）；页内锚点与总览 AI 能力卡一致。
   const capabilityViews = buildPresentationCapabilities({ capabilities: input.row.capabilities, features: input.features, scenarios: input.scenarios, productBase: input.productBase });
   const groupNames = capabilityViews.map((capability) => capability.name);
-  for (const journey of grouped) {
-    if (!groupNames.includes(journey.capabilityName!)) groupNames.push(journey.capabilityName!);
+  for (const journey of intactJourneys) {
+    for (const name of journey.capabilityNames) if (!groupNames.includes(name)) groupNames.push(name);
   }
+  // 分组里只放完好旅程（失效的在「待更新」组里单独披露）。一条旅程触及多个能力时就出现在每个相关分组下；
+  // 全局典型场景也按它触及的能力归组——这样每张能力卡点进来都有落点，而不是只有「挖出它的那个窗口」才有。
   const groups: PresentationJourneyGroup[] = [
-    { kind: "headline", key: "headline", name: null, journeys: journeys.filter((journey) => journey.tier === "headline") },
-    ...groupNames.map((name) => ({
+    { kind: "headline", key: "headline", name: null, journeys: intactJourneys.filter((journey) => journey.tier === "headline") },
+    ...groupNames.map((name, order) => ({
       kind: "capability" as const,
-      key: capabilityViews.find((capability) => capability.name === name)?.id ?? `capability-${groupNames.indexOf(name) + 1}`,
+      key: capabilityViews.find((capability) => capability.name === name)?.id ?? `capability-extra-${order}`,
       name,
-      journeys: grouped.filter((journey) => journey.capabilityName === name),
+      journeys: intactJourneys.filter((journey) => journey.capabilityNames.includes(name)),
     })),
-    { kind: "ungrouped", key: "ungrouped", name: null, journeys: journeys.filter((journey) => journey.tier === "capability" && journey.capabilityName === null) },
+    { kind: "ungrouped", key: "ungrouped", name: null, journeys: intactJourneys.filter((journey) => journey.tier !== "headline" && journey.capabilityNames.length === 0) },
   ];
   return {
     row: input.row,

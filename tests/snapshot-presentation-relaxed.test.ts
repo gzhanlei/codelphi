@@ -113,6 +113,8 @@ describe("journey mining prompt layout", () => {
     expect(shapeAt).toBeGreaterThan(prompt.indexOf("所属能力：计划与跟踪"));
     expect(shapeAt).toBeLessThan(prompt.indexOf("产品简介："));
     expect(prompt).toContain("不要 Markdown");
+    // 生产实测：模型会把同一功能的两三个场景首尾相接当成旅程；提示词明确禁止相邻两步同功能
+    expect(prompt).toContain("相邻两步不要取自同一个功能");
     const english = journeyMiningPrompt({ productDescription: "d", capabilityName: null, maxJourneys: 5, candidates: [] }, "en");
     expect(english.indexOf("with this shape:")).toBeLessThan(english.indexOf("Product description:"));
     expect(english.indexOf("with this shape:")).toBeGreaterThan(english.indexOf("Return at most 5 journeys"));

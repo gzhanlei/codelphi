@@ -43,11 +43,25 @@ const SCENARIOS_PER_FEATURE = 3;
 const JOURNEYS_PER_PASS = 6;
 const HEADLINE_MAX_JOURNEYS = 5;
 /** 全局典型旅程的候选采样：每个能力桶均匀取这么多功能。 */
-const HEADLINE_FEATURES_PER_BUCKET = 12;
+const HEADLINE_FEATURES_PER_BUCKET = 8;
+/** 全局采样的功能数上限：每个功能只带一条场景，所以多覆盖功能比多带场景更有用。 */
+const HEADLINE_UNGROUPED_FEATURES = 40;
+const HEADLINE_MAX_FEATURES = 80;
 const PASS_CONCURRENCY = 3;
 const JOURNEY_SIMILARITY_THRESHOLD = 0.6;
 /** 深挖的轮数上限：第一轮全覆盖，之后只针对仍未覆盖的功能再挖，至多三轮。 */
 const MINING_ROUNDS = 3;
+/**
+ * 分桶挖掘的窗口规划（生产实测 2026-11-24：620 功能的产品有 31 个人工业务域，其中 13 个只有 1 个功能；
+ * 每个小域各占一整趟调用时，16 趟预算被它们吃掉，占产品 88% 的 545 个未分组功能几乎没被挖到）。
+ * - 预算按「送进模型的功能量」计：maxPasses × WINDOW_FEATURES 个功能位——一趟只送 3 个功能不该和
+ *   一趟送 40 个功能等价；另设调用次数硬上限，约束每趟的固定开销。
+ * - 桶大到单独成窗时按窗口切；小桶在「不合并就放不进调用上限」时合并成打包窗口一起挖。
+ */
+const SMALL_BUCKET_FEATURES = 8;
+/** 一个打包窗口最多容纳的分组数与要求的旅程数上限。 */
+const PACKED_WINDOW_BUCKETS = 10;
+const PACKED_MAX_JOURNEYS = 12;
 
 export interface PresentationLedgerFeature {
   id: number;
@@ -184,14 +198,14 @@ function jaccard(a: Set<string>, b: Set<string>) {
  * 接纳顺序即落库顺序，调用方必须按确定的顺序调用（与模型返回的先后无关）。
  */
 function createJourneyAcceptor(index: ReturnType<typeof buildJourneyIndex>, featureCount: number, maxJourneys = Number.POSITIVE_INFINITY) {
-  const accepted: Array<RawJourney & { tier: PresentationJourney["tier"]; capabilityName: string | null }> = [];
+  const accepted: Array<RawJourney & { tier: PresentationJourney["tier"]; capabilityNames: string[] }> = [];
   const seenStepSets: Array<Set<string>> = [];
   const seenNames: Array<string> = [];
   const contains = (outer: Set<string>, inner: Set<string>) => [...inner].every((key) => outer.has(key));
   return {
     accepted,
     /** 接纳成功返回旅程在落库顺序中的位置（-1 = 被丢弃）。 */
-    accept(journey: RawJourney, tier: PresentationJourney["tier"], capabilityName: string | null): number {
+    accept(journey: RawJourney, tier: PresentationJourney["tier"], capabilityNames: string[] = []): number {
       if (accepted.length >= maxJourneys) return -1;
       if (!validJourney(journey, index, featureCount)) return -1;
       const keys = new Set(journey.steps.map((step) => index.key(step.featureName, step.reference)));
@@ -202,7 +216,7 @@ function createJourneyAcceptor(index: ReturnType<typeof buildJourneyIndex>, feat
       if (seenStepSets.some((set, position) => position !== replacedAt && (jaccard(set, keys) >= JOURNEY_SIMILARITY_THRESHOLD || contains(set, keys)))) return -1;
       const nameKey = normalize(journey.name);
       if (nameKey === "" || (seenNames.includes(nameKey) && seenNames[replacedAt] !== nameKey)) return -1;
-      const entry = { ...journey, tier, capabilityName };
+      const entry = { ...journey, tier, capabilityNames };
       if (replacedAt >= 0) {
         accepted.splice(replacedAt, 1, entry);
         seenStepSets.splice(replacedAt, 1, keys);
@@ -214,16 +228,41 @@ function createJourneyAcceptor(index: ReturnType<typeof buildJourneyIndex>, feat
       accepted.push(entry);
       return accepted.length - 1;
     },
-    /** 把已接纳的旅程固化成落库形状：步骤存规范引用（与库里的功能名逐字一致），读侧直接按名解析。 */
+    /**
+     * 把已接纳的旅程固化成落库形状：步骤存规范引用（与库里的功能名逐字一致），读侧直接按名解析。
+     */
     finalize(): PresentationJourney[] {
       return accepted.map((journey, order) => ({
         id: `journey-${order + 1}`,
         name: journey.name,
         tier: journey.tier,
-        capabilityName: journey.capabilityName,
+        capabilityNames: journey.capabilityNames,
         steps: journey.steps.map((step) => index.happy.get(index.key(step.featureName, step.reference))!),
       }));
     },
+  };
+}
+
+/**
+ * 功能 → 所属能力分组名（人工业务域或 AI 归组；未归组的功能没有条目）。返回的函数给一条旅程算标签：
+ * 它的步骤实际触及了哪些能力（按首次出现排序、去重）。标签在每次生成 / 合并时按当前分组重算，
+ * 所以归组变化后旧旅程的标签自动跟上，跨能力的场景会同时出现在每个相关能力的分组下。
+ */
+function capabilityLabels(index: ReturnType<typeof buildJourneyIndex>, capabilities: PresentationCapability[]): (steps: PresentationScenarioRef[]) => string[] {
+  const namesByFeatureId = new Map<number, string[]>();
+  for (const capability of capabilities) {
+    for (const name of capability.featureNames) {
+      const id = index.featureIdOf(name);
+      if (id !== null) namesByFeatureId.set(id, [...(namesByFeatureId.get(id) ?? []), capability.name]);
+    }
+  }
+  return (steps) => {
+    const names: string[] = [];
+    for (const step of steps) {
+      const featureId = index.featureOf.get(index.key(step.featureName, step.reference));
+      for (const name of featureId === undefined ? [] : namesByFeatureId.get(featureId) ?? []) if (!names.includes(name)) names.push(name);
+    }
+    return names;
   };
 }
 
@@ -243,14 +282,17 @@ function leafFeaturesOf(ledger: PresentationLedger): PresentationLedgerFeature[]
 export function mergePresentation(input: { previous: { capabilities: PresentationCapability[]; journeys: PresentationJourney[]; tagline?: string }; next: GeneratedPresentation; ledger: PresentationLedger; maxJourneys?: number }): GeneratedPresentation {
   const maxJourneys = input.maxJourneys ?? presentationMaxJourneys();
   const leafFeatures = leafFeaturesOf(input.ledger);
-  const acceptor = createJourneyAcceptor(buildJourneyIndex(input.ledger), leafFeatures.length, maxJourneys);
+  const capabilities = input.next.capabilities.length > 0 ? input.next.capabilities : input.previous.capabilities;
+  const index = buildJourneyIndex(input.ledger);
+  const labelOf = capabilityLabels(index, capabilities);
+  const acceptor = createJourneyAcceptor(index, leafFeatures.length, maxJourneys);
   const take = (journeys: PresentationJourney[], budget: number) => {
-    for (const journey of journeys.slice(0, budget)) acceptor.accept({ name: journey.name, steps: journey.steps }, journey.tier, journey.capabilityName);
+    // 标签按当前归组重算：上一版旅程带的是旧分组的名字
+    for (const journey of journeys.slice(0, budget)) acceptor.accept({ name: journey.name, steps: journey.steps }, journey.tier, labelOf(journey.steps));
   };
   take(input.previous.journeys, Math.floor(maxJourneys * 2 / 3));
   take(input.next.journeys, maxJourneys);
   const journeys = acceptor.finalize();
-  const capabilities = input.next.capabilities.length > 0 ? input.next.capabilities : input.previous.capabilities;
   const tagline = input.next.tagline ?? input.previous.tagline;
   return {
     status: capabilities.length > 0 && journeys.length > 0 ? "generated" : "partial",
@@ -267,9 +309,11 @@ export function mergePresentation(input: { previous: { capabilities: Presentatio
  * 快照导入用：校验一批外部生成的旅程引用链（Radar 快照里的典型使用场景），全部按全局典型层登记。
  * 引用必须落在导入进来的 happy 场景上，否则丢弃。
  */
-export function acceptImportedJourneys(input: { ledger: PresentationLedger; journeys: Array<{ name: string; steps: PresentationScenarioRef[] }> }): PresentationJourney[] {
-  const acceptor = createJourneyAcceptor(buildJourneyIndex(input.ledger), input.ledger.features.length);
-  for (const journey of input.journeys) acceptor.accept(journey, "headline", null);
+export function acceptImportedJourneys(input: { ledger: PresentationLedger; journeys: Array<{ name: string; steps: PresentationScenarioRef[] }>; capabilities?: PresentationCapability[] }): PresentationJourney[] {
+  const index = buildJourneyIndex(input.ledger);
+  const labelOf = capabilityLabels(index, input.capabilities ?? []);
+  const acceptor = createJourneyAcceptor(index, input.ledger.features.length);
+  for (const journey of input.journeys) acceptor.accept(journey, "headline", labelOf(journey.steps));
   return acceptor.finalize();
 }
 
@@ -314,6 +358,80 @@ interface Bucket {
   features: PresentationLedgerFeature[];
 }
 
+/** 一个挖掘窗口：scope 是提示词里的单一能力名（打包窗口为 null）；groups 是窗口涉及的分组及其成员功能（打包窗口 ≥ 2 个）。 */
+interface MiningWindow {
+  scope: string | null;
+  groups: Array<{ name: string; features: string[] }>;
+  features: PresentationLedgerFeature[];
+}
+
+type PendingBucket = { bucket: Bucket; features: PresentationLedgerFeature[] };
+
+/**
+ * 把各桶的待挖功能规划成窗口，按优先级排好返回：
+ * - 大桶（≥ SMALL_BUCKET_FEATURES）单独成窗，按功能数降序；
+ * - 小桶在「各自成窗就放不进剩余调用额度」时合并成打包窗口（≤ PACKED_WINDOW_BUCKETS 个分组、≤ WINDOW_FEATURES 个功能）；
+ *   否则各自成窗——额度不紧张时单独成窗对每个能力更聚焦，也挖得更多；
+ * - 只有一个功能的桶永远并入打包窗口：它单独成窗挖不出跨功能场景，并进去才有机会作为某一步出现，
+ *   它所属的能力也才有落点。
+ * 打包窗口排在最前：一趟就给很多小分组各一次出场机会。窗口带着「分组 → 成员功能」的归属，
+ * 提示词据此让模型为每个分组构造场景。
+ */
+function planWindows(remaining: PendingBucket[], remainingCalls: number): MiningWindow[] {
+  // 桶大的优先；同样大小时保持声明顺序（能力分组的顺序，未归组功能在最后）。
+  const ordered = remaining.map((part, order) => ({ part, order })).sort((a, b) => b.part.features.length - a.part.features.length || a.order - b.order).map(({ part }) => part);
+  const own = (part: PendingBucket, features = part.features): MiningWindow => ({
+    scope: part.bucket.name,
+    groups: part.bucket.name === null ? [] : [{ name: part.bucket.name, features: features.map((feature) => feature.name) }],
+    features,
+  });
+  const singles: MiningWindow[] = [];
+  const small: PendingBucket[] = [];
+  const orphans: PendingBucket[] = [];
+  for (const part of ordered) {
+    if (part.features.length >= SMALL_BUCKET_FEATURES) {
+      const chunks: PresentationLedgerFeature[][] = [];
+      for (let start = 0; start < part.features.length; start += WINDOW_FEATURES) chunks.push(part.features.slice(start, start + WINDOW_FEATURES));
+      // 末窗只剩一个功能时并入前一窗（旅程至少要两个功能，单功能窗口挖不出东西）
+      if (chunks.length > 1 && chunks.at(-1)!.length === 1) chunks.at(-2)!.push(...chunks.pop()!);
+      for (const features of chunks) singles.push(own(part, features));
+    } else if (part.features.length > 1) small.push(part);
+    else orphans.push(part);
+  }
+  // 与「剩余」调用额度比较（不是总上限）：前面各轮已经用掉的调用不再可用。
+  const packSmall = singles.length + small.length > remainingCalls;
+  const packed: MiningWindow[] = [];
+  const empty = (): MiningWindow => ({ scope: null, groups: [], features: [] });
+  let current = empty();
+  for (const part of [...(packSmall ? small : []), ...orphans]) {
+    const addsGroup = part.bucket.name !== null && !current.groups.some((group) => group.name === part.bucket.name);
+    if (current.features.length > 0 && ((addsGroup && current.groups.length >= PACKED_WINDOW_BUCKETS) || current.features.length + part.features.length > WINDOW_FEATURES)) {
+      packed.push(current);
+      current = empty();
+    }
+    const names = part.features.map((feature) => feature.name);
+    // 未归组功能（name 为 null）并入打包窗口，但不占用分组名额
+    if (part.bucket.name !== null) {
+      const existing = current.groups.find((group) => group.name === part.bucket.name);
+      if (existing) existing.features.push(...names);
+      else current.groups.push({ name: part.bucket.name, features: names });
+    }
+    current.features.push(...part.features);
+  }
+  if (!packSmall) singles.push(...small.map((part) => own(part)));
+  if (current.features.length === 1) {
+    // 打包到最后只剩孤零零一个功能：并入第一个还有余量的单桶窗口，别让它落单
+    // （单功能窗口挖不出跨功能场景，会被下面的过滤丢掉，这个功能就永远没机会出现）。
+    const host = singles.find((window) => window.features.length < WINDOW_FEATURES);
+    if (host) {
+      host.features.push(...current.features);
+      current = empty();
+    }
+  }
+  if (current.features.length > 0) packed.push(current);
+  return [...packed, ...singles];
+}
+/** 窗口候选：每个功能取前 perFeature 条 happy 场景，只带叙述所需的最小字段（引用链之外不携带任何事实）。 */
 function happyCandidates(ledger: PresentationLedger, features: PresentationLedgerFeature[], perFeature: number): JourneyCandidate[] {
   const scenariosByFeature = new Map<number, PresentationLedgerScenario[]>();
   for (const scenario of ledger.scenarios) {
@@ -335,18 +453,18 @@ function happyCandidates(ledger: PresentationLedger, features: PresentationLedge
  * 一趟挖掘最多发两次请求：生产实测模型会把 JSON 要求忽略成 Markdown 叙事，
  * 首次输出不是 JSON 时带着原输出要求纠正一次，仍不行则该趟按空结果处理（不连坐其他趟）。
  */
-async function mineJourneys(options: { client: StructuredCompletionClient; language: PresentationLanguage; description: string; capabilityName: string | null; maxJourneys: number; candidates: JourneyCandidate[] }): Promise<{ journeys: RawJourney[]; calls: number }> {
+async function mineJourneys(options: { client: StructuredCompletionClient; language: PresentationLanguage; description: string; scope: string | null; groups?: Array<{ name: string; features: string[] }>; maxJourneys: number; candidates: JourneyCandidate[] }): Promise<{ journeys: RawJourney[]; calls: number }> {
   if (options.candidates.length === 0) return { journeys: [], calls: 0 };
   const english = options.language === "en";
   const messages: StructuredCompletionMessage[] = [
     { role: "system", content: english ? "You reorganize existing scenarios into user journeys without adding facts. Output exactly one JSON object and nothing else. Use English for the journey names." : "你把已有场景重组成用户旅程，不新增事实。只输出一个 JSON 对象，不输出任何其他内容。旅程名称使用简体中文。" },
-    { role: "user", content: journeyMiningPrompt({ productDescription: options.description, capabilityName: options.capabilityName, maxJourneys: options.maxJourneys, candidates: options.candidates }, options.language) },
+    { role: "user", content: journeyMiningPrompt({ productDescription: options.description, capabilityName: options.scope, groups: options.groups, maxJourneys: options.maxJourneys, candidates: options.candidates }, options.language) },
   ];
   const first = await options.client.complete(messages);
   try {
     return { journeys: parseJourneyCandidates(first), calls: 1 };
   } catch (error) {
-    console.warn("[product-presentation] journey pass output is not JSON; asking for JSON once", { capability: options.capabilityName, message: errorMessage(error) });
+    console.warn("[product-presentation] journey pass output is not JSON; asking for JSON once", { scope: options.scope, groups: options.groups?.length, message: errorMessage(error) });
   }
   const corrected = await options.client.complete([
     ...messages,
@@ -358,7 +476,7 @@ async function mineJourneys(options: { client: StructuredCompletionClient; langu
   try {
     return { journeys: parseJourneyCandidates(corrected), calls: 2 };
   } catch (error) {
-    console.warn("[product-presentation] journey pass output still unparsable after one correction", { capability: options.capabilityName, message: errorMessage(error) });
+    console.warn("[product-presentation] journey pass output still unparsable after one correction", { scope: options.scope, groups: options.groups?.length, message: errorMessage(error) });
     return { journeys: [], calls: 2 };
   }
 }
@@ -430,44 +548,51 @@ export async function generateProductPresentation(input: { ledger: PresentationL
     }
   }
 
-  const grouped = new Set(capabilities.flatMap((capability) => capability.featureNames.map((name) => index.featureIdOf(name)).filter((id): id is number => id !== null)));
+  const groupedIds = new Set(capabilities.flatMap((capability) => capability.featureNames.map((name) => index.featureIdOf(name)).filter((id): id is number => id !== null)));
+  // 单功能的能力分组也留在桶里：它单独成窗挖不出跨功能场景，但并进打包窗口后有机会作为某一步出现。
   const buckets: Bucket[] = [
     ...capabilities.map((capability) => ({ name: capability.name, features: capability.featureNames.flatMap((name) => { const id = index.featureIdOf(name); const feature = id === null ? undefined : featureById.get(id); return feature && leafFeatures.includes(feature) ? [feature] : []; }) })),
-    { name: null, features: leafFeatures.filter((feature) => !grouped.has(feature.id)) },
-  ].filter((bucket) => bucket.features.length > 1);
+    { name: null, features: leafFeatures.filter((feature) => !groupedIds.has(feature.id)) },
+  ].filter((bucket) => bucket.features.length > 0);
 
   // 2) 全局典型旅程：Radar 归组路径已带出；业务域路径（或归组失败）补一趟跨桶采样。
   if (headline.length === 0 && leafFeatures.length > 1) {
-    const sample = buckets.flatMap((bucket) => evenlySample(bucket.features, HEADLINE_FEATURES_PER_BUCKET));
+    // 每个功能只带一条场景：带两条时，模型会把同一功能的两步首尾相接当成「旅程」（生产实测 5 条里 4 条如此），
+    // 这些不跨功能的链会被校验拒掉；把额度用在覆盖更多功能上，才能得到真正的全局典型场景。
+    const sample = evenlySample([
+      ...buckets.filter((bucket) => bucket.name !== null).flatMap((bucket) => evenlySample(bucket.features, HEADLINE_FEATURES_PER_BUCKET)),
+      ...buckets.filter((bucket) => bucket.name === null).flatMap((bucket) => evenlySample(bucket.features, HEADLINE_UNGROUPED_FEATURES)),
+    ], HEADLINE_MAX_FEATURES);
     const description = tagline ?? ledger.description;
-    const mined = await mineJourneys({ client, language, description, capabilityName: null, maxJourneys: HEADLINE_MAX_JOURNEYS, candidates: happyCandidates(ledger, sample, 2) });
+    const mined = await mineJourneys({ client, language, description, scope: null, maxJourneys: HEADLINE_MAX_JOURNEYS, candidates: happyCandidates(ledger, sample, 1) });
     headline = mined.journeys;
     miningCalls += mined.calls;
     passes += mined.calls;
   }
 
+  // 标签 = 旅程实际触及的能力（按步骤所属功能对照当前归组算出），与它在哪个窗口被挖出来无关。
+  const labelOf = capabilityLabels(index, capabilities);
   const acceptor = createJourneyAcceptor(index, leafFeatures.length, maxJourneys);
-  const accept = acceptor.accept;
-  for (const journey of headline) accept(journey, "headline", null);
+  for (const journey of headline) acceptor.accept(journey, "headline", labelOf(journey.steps));
 
-  // 3) 深挖（逐轮收敛）：第一轮每个桶内功能按 happy 场景数定序后切成连续窗口（每个功能只进一个窗口）；
-  //    之后的轮次只送「仍未被任何旅程覆盖」的功能，直到挖掘预算用完、旅程数到上限、一轮下来没有新增，
-  //    或已没有含两个以上未覆盖功能的桶。成本由 maxPasses（仅计挖掘调用）/ maxJourneys 封顶。
+  // 3) 深挖（逐轮收敛）：每轮把尚未被任何旅程覆盖的功能规划成窗口（见 planWindows），直到预算用完、
+  //    旅程数到上限、一轮下来没有新增，或已没有可挖的功能。
+  //    预算按「送进模型的功能量」计（featureBudget）——一趟只送 3 个功能不该和一趟送 40 个功能等价；
+  //    调用次数另设硬上限（callCap）约束每趟的固定开销。全局典型场景那一趟计入调用上限。
   const happyCount = new Map<number, number>();
   for (const scenario of ledger.scenarios) if (scenario.category === "happy") happyCount.set(scenario.featureId, (happyCount.get(scenario.featureId) ?? 0) + 1);
-  let remaining = buckets.map((bucket) => ({ bucket, features: [...bucket.features].sort((a, b) => (happyCount.get(b.id) ?? 0) - (happyCount.get(a.id) ?? 0) || a.name.localeCompare(b.name)) }));
-  for (let round = 0; round < MINING_ROUNDS && acceptor.accepted.length < maxJourneys && miningCalls < maxPasses; round += 1) {
-    const windows: Array<{ bucket: Bucket; features: PresentationLedgerFeature[] }> = [];
-    for (const { bucket, features } of remaining) {
-      for (let start = 0; start < features.length; start += WINDOW_FEATURES) windows.push({ bucket, features: features.slice(start, start + WINDOW_FEATURES) });
-      // 末窗只剩一个功能时并入前一窗（旅程至少要两个功能，单功能窗口挖不出东西）
-      const last = windows.at(-1)!;
-      if (windows.length > 1 && last.features.length === 1 && windows.at(-2)!.bucket === bucket) {
-        windows.splice(windows.length - 1, 1);
-        windows.at(-1)!.features.push(...last.features);
-      }
+  const featureBudget = maxPasses * WINDOW_FEATURES;
+  const callCap = maxPasses * 2;
+  let featuresSent = 0;
+  let remaining: PendingBucket[] = buckets.map((bucket) => ({ bucket, features: [...bucket.features].sort((a, b) => (happyCount.get(b.id) ?? 0) - (happyCount.get(a.id) ?? 0) || a.name.localeCompare(b.name)) }));
+  for (let round = 0; round < MINING_ROUNDS && acceptor.accepted.length < maxJourneys && miningCalls < callCap && featuresSent < featureBudget; round += 1) {
+    const toRun: MiningWindow[] = [];
+    for (const window of planWindows(remaining, callCap - miningCalls)) {
+      if (window.features.length < 2) continue;
+      if (featuresSent + window.features.length > featureBudget || miningCalls + toRun.length >= callCap) break;
+      toRun.push(window);
+      featuresSent += window.features.length;
     }
-    const toRun = windows.filter((window) => window.features.length > 1).slice(0, maxPasses - miningCalls);
     if (toRun.length === 0) break;
     const results: Array<RawJourney[] | null> = new Array(toRun.length).fill(null);
     let cursor = 0;
@@ -477,12 +602,18 @@ export async function generateProductPresentation(input: { ledger: PresentationL
       while (cursor < toRun.length) {
         const passIndex = cursor++;
         const pass = toRun[passIndex];
+        const packed = pass.groups.length > 1;
         try {
-          const mined = await mineJourneys({ client, language, description: tagline ?? ledger.description, capabilityName: pass.bucket.name, maxJourneys: JOURNEYS_PER_PASS, candidates: happyCandidates(ledger, pass.features, SCENARIOS_PER_FEATURE) });
+          const mined = await mineJourneys({
+            client, language, description: tagline ?? ledger.description, scope: pass.scope, groups: packed ? pass.groups : undefined,
+            // 打包窗口涉及多个分组：多要几条，才够每个分组都有一条
+            maxJourneys: packed ? Math.min(PACKED_MAX_JOURNEYS, Math.max(JOURNEYS_PER_PASS, pass.groups.length)) : JOURNEYS_PER_PASS,
+            candidates: happyCandidates(ledger, pass.features, SCENARIOS_PER_FEATURE),
+          });
           results[passIndex] = mined.journeys;
           calls += mined.calls;
         } catch (error) {
-          console.error("[product-presentation] journey pass failed", { productId: ledger.productId, capability: pass.bucket.name, message: errorMessage(error) });
+          console.error("[product-presentation] journey pass failed", { productId: ledger.productId, scope: pass.scope, groups: pass.groups.length, message: errorMessage(error) });
         }
       }
     };
@@ -491,16 +622,16 @@ export async function generateProductPresentation(input: { ledger: PresentationL
     passes += calls;
     // 严格按窗口顺序接纳（产出顺序确定，不随请求完成先后变化）。
     const before = acceptor.accepted.length;
-    for (const [passIndex, result] of results.entries()) {
+    for (const result of results) {
       if (acceptor.accepted.length >= maxJourneys) break;
-      for (const journey of result ?? []) accept(journey, "capability", toRun[passIndex].bucket.name);
+      for (const journey of result ?? []) acceptor.accept(journey, "capability", labelOf(journey.steps));
     }
     // 一轮下来没有新增就停：同样的输入再挖一轮也不会有新东西。
     if (acceptor.accepted.length === before) break;
     const covered = new Set(acceptor.accepted.flatMap((journey) => journey.steps.map((step) => index.featureOf.get(index.key(step.featureName, step.reference)))));
     remaining = remaining
       .map(({ bucket, features }) => ({ bucket, features: features.filter((feature) => !covered.has(feature.id)) }))
-      .filter(({ features }) => features.length > 1);
+      .filter(({ features }) => features.length > 0);
     if (remaining.length === 0) break;
   }
 
@@ -552,7 +683,7 @@ export async function saveProductPresentation(execute: Execute, input: { product
     [
       input.productId, input.specVersionId, input.payload.language, input.payload.status, input.source, input.payload.tagline ?? null,
       JSON.stringify(input.payload.capabilities.map((capability) => ({ name: capability.name, summary: capability.summary, featureNames: capability.featureNames }))),
-      JSON.stringify(input.payload.journeys.map((journey) => ({ name: journey.name, tier: journey.tier, capabilityName: journey.capabilityName, steps: journey.steps }))),
+      JSON.stringify(input.payload.journeys.map((journey) => ({ name: journey.name, tier: journey.tier, capabilityNames: journey.capabilityNames, steps: journey.steps }))),
       JSON.stringify(input.payload.coverage), input.fingerprint, input.modelName ?? null, input.payload.passes,
       presentationRefreshIntervalHours(),
     ],
