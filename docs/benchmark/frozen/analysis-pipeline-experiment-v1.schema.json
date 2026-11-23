@@ -31,7 +31,7 @@
   "$defs": {
     "identity": {
       "type": "object",
-      "required": ["repo", "beforeSha", "afterSha", "benchmarkTruthVersion", "model", "modelConfigHash", "outputLanguage", "budgetConfigHash", "pricingConfigHash", "cacheCondition", "legacyResult", "baselineCodeSha", "candidateCodeSha", "describePromptHash", "judgePromptBaselineHash", "repairPromptBaselineHash"],
+      "required": ["repo", "beforeSha", "afterSha", "benchmarkTruthVersion", "model", "modelConfigHash", "outputLanguage", "budgetConfigHash", "pricingConfigHash", "cacheCondition", "legacyResult", "baselineCodeSha", "candidateCodeSha", "describePromptHash", "judgePromptBaselineHash", "repairPromptBaselineHash", "promptDelta"],
       "additionalProperties": false,
       "properties": {
         "repo": { "type": "string", "minLength": 1 },
@@ -57,7 +57,8 @@
         "candidateCodeSha": { "type": "string", "minLength": 7 },
         "describePromptHash": { "$ref": "#/$defs/promptHashes" },
         "judgePromptBaselineHash": { "$ref": "#/$defs/promptHashes" },
-        "repairPromptBaselineHash": { "$ref": "#/$defs/promptHashes" }
+        "repairPromptBaselineHash": { "$ref": "#/$defs/promptHashes" },
+        "promptDelta": { "const": "batch_execution_only" }
       }
     },
     "promptHashes": {

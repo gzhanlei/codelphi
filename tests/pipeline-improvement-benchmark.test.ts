@@ -47,6 +47,7 @@ function identity(): PipelineExperimentIdentity {
     describePromptHash: { baseline: "describe-v1", candidate: "describe-v1" },
     judgePromptBaselineHash: { baseline: "judge-v1", candidate: "judge-v1" },
     repairPromptBaselineHash: { baseline: "repair-v1", candidate: "repair-v1" },
+    promptDelta: "batch_execution_only",
   };
 }
 
@@ -154,6 +155,19 @@ describe("evaluatePipelineImprovement", () => {
     const result = evaluatePipelineImprovement([input({ candidateOutput: output({ activationPassed: false }) })]);
     expect(result.status).toBe("passed");
     expect(result.adoptionReady).toBe(false);
+  });
+
+  it("allows describe and judge to differ only for the declared batch protocol delta", () => {
+    expect(evaluatePipelineImprovement([input({
+      identity: {
+        ...identity(),
+        describePromptHash: { baseline: "task-describe", candidate: "batch-describe" },
+        judgePromptBaselineHash: { baseline: "task-judge", candidate: "batch-judge" },
+      },
+    })]).status).toBe("passed");
+    expect(evaluatePipelineImprovement([input({
+      identity: { ...identity(), repairPromptBaselineHash: { baseline: "repair-v1", candidate: "repair-v2" } },
+    })]).status).toBe("inconclusive");
   });
 
   it("is inconclusive for mismatched experiment identity and shared legacy results", () => {

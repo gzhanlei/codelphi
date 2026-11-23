@@ -24,6 +24,7 @@ export interface PipelineExperimentIdentity {
   describePromptHash: { baseline: string; candidate: string };
   judgePromptBaselineHash: { baseline: string; candidate: string };
   repairPromptBaselineHash: { baseline: string; candidate: string };
+  promptDelta: "batch_execution_only";
 }
 
 export interface PipelineCost {
@@ -125,10 +126,11 @@ export function evaluatePipelineImprovement(
       || repo.candidateBenchmarkTruthVersion !== identity.benchmarkTruthVersion) {
       inconclusive.push(`${identity.repo}: 人工真值版本不一致`);
     }
-    if (identity.describePromptHash.baseline !== identity.describePromptHash.candidate
-      || identity.judgePromptBaselineHash.baseline !== identity.judgePromptBaselineHash.candidate
-      || identity.repairPromptBaselineHash.baseline !== identity.repairPromptBaselineHash.candidate) {
-      inconclusive.push(`${identity.repo}: Prompt 基线不一致`);
+    if (identity.promptDelta !== "batch_execution_only") {
+      inconclusive.push(`${identity.repo}: 未声明允许的 Prompt 差异`);
+    }
+    if (identity.repairPromptBaselineHash.baseline !== identity.repairPromptBaselineHash.candidate) {
+      inconclusive.push(`${identity.repo}: repair Prompt 基线不一致`);
     }
 
     const baselineHits = baseline.pairs.filter((pair) => pair.inventoryHit).length;

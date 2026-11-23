@@ -30,6 +30,7 @@ const identitySchema = z.object({
   describePromptHash: promptHashes,
   judgePromptBaselineHash: promptHashes,
   repairPromptBaselineHash: promptHashes,
+  promptDelta: z.literal("batch_execution_only"),
 }).strict();
 const experimentSchema = z.object({
   schema: z.literal("analysis-pipeline-experiment-v1"),

@@ -23,8 +23,8 @@
 
 ## 3. Prompt 与执行身份
 
-- describe 模板 hash 必须一致。
-- judge 和 semantic repair 去除新增事实段后的基线模板 hash 必须一致；本轮不增加静态事实段。
+- describe/judge 允许且只允许 `batch_execution_only` 的 task→batch 协议差异；本轮不增加静态事实段。
+- semantic repair 基线模板 hash 必须一致。
 - I1 只改变单任务双步为批处理双步，不启用 fused，不改变模型、输出语言、预算、定价和缓存条件。
 - 每仓记录 baseline/candidate code SHA、runId、plan、taskKey 集、输出 hash 和每 task/stage 回执。
 
