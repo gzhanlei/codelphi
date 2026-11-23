@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codelphi.dev/schemas/analysis-pipeline-experiment-v1.schema.json",
+  "title": "Analysis Pipeline Improvement Experiment (v1)",
+  "type": "object",
+  "required": ["schema", "identity", "baselineComparison", "candidateComparison", "baselineUsage", "candidateUsage", "baselineOutput", "candidateOutput", "targets"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "analysis-pipeline-experiment-v1" },
+    "identity": { "$ref": "#/$defs/identity" },
+    "baselineComparison": { "type": "string", "minLength": 1 },
+    "candidateComparison": { "type": "string", "minLength": 1 },
+    "baselineUsage": { "type": "string", "minLength": 1 },
+    "candidateUsage": { "type": "string", "minLength": 1 },
+    "baselineOutput": { "type": "string", "minLength": 1 },
+    "candidateOutput": { "type": "string", "minLength": 1 },
+    "targets": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["behaviorId", "errorClass"],
+        "additionalProperties": false,
+        "properties": {
+          "behaviorId": { "type": "string", "minLength": 1 },
+          "errorClass": { "enum": ["fact_omission", "fact_extraction_error", "fact_interpretation_error", "behavior_omission", "evidence_mismatch"] }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "identity": {
+      "type": "object",
+      "required": ["repo", "beforeSha", "afterSha", "benchmarkTruthVersion", "model", "modelConfigHash", "outputLanguage", "budgetConfigHash", "pricingConfigHash", "cacheCondition", "legacyResult", "baselineCodeSha", "candidateCodeSha", "describePromptHash", "judgePromptBaselineHash", "repairPromptBaselineHash"],
+      "additionalProperties": false,
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "beforeSha": { "type": ["string", "null"] },
+        "afterSha": { "type": "string", "minLength": 7 },
+        "benchmarkTruthVersion": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 },
+        "modelConfigHash": { "type": "string", "minLength": 1 },
+        "outputLanguage": { "enum": ["zh-CN", "en"] },
+        "budgetConfigHash": { "type": "string", "minLength": 1 },
+        "pricingConfigHash": { "type": "string", "minLength": 1 },
+        "cacheCondition": { "type": "string", "minLength": 1 },
+        "legacyResult": {
+          "type": "object",
+          "required": ["runId", "outputHash"],
+          "additionalProperties": false,
+          "properties": {
+            "runId": { "type": "integer", "minimum": 1 },
+            "outputHash": { "type": "string", "minLength": 1 }
+          }
+        },
+        "baselineCodeSha": { "type": "string", "minLength": 7 },
+        "candidateCodeSha": { "type": "string", "minLength": 7 },
+        "describePromptHash": { "$ref": "#/$defs/promptHashes" },
+        "judgePromptBaselineHash": { "$ref": "#/$defs/promptHashes" },
+        "repairPromptBaselineHash": { "$ref": "#/$defs/promptHashes" }
+      }
+    },
+    "promptHashes": {
+      "type": "object",
+      "required": ["baseline", "candidate"],
+      "additionalProperties": false,
+      "properties": {
+        "baseline": { "type": "string", "minLength": 1 },
+        "candidate": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}
