@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "experiment": "legacy-guard-anchor-v1",
+  "revision": "2659429e588da466fcb712ba096531343aa75d08",
+  "frozenAt": "2026-11-23",
+  "status": "reviewed",
+  "note": "真值已经独立 Ground Truth 评审（agent-5，2026-11-23）：CB-18 VALID；CB-30 表述 VALID，证据行窗按评审意见修正为 lib/analysis.ts:586-616（覆盖 marginal 计算与 if (marginal < epsilon) break），保留 lib/env.ts:47-62。CB-34 已判定真值与实现不符，明确排除，不在本文件内。",
+  "truths": [
+    {
+      "id": "CB-18",
+      "kind": "anchor",
+      "statement": "只有最新 run 可激活规格，旧 run 不覆盖新 run 的结果。",
+      "expectedBehavior": {
+        "context": "同一 repository 存在多个 analysis run，某次 run 执行到激活规格前",
+        "action": "assertLatestRun 查询该 repository 最新 run id 并与当前 run.id 比较",
+        "outcome": "当前 run 不是最新（latestRunId !== run.id）时抛出 \"Analysis superseded by run <id>\"，旧 run 的分析结果被中止，不得覆盖更新 run 已激活的规格"
+      },
+      "evidence": [
+        { "path": "lib/analysis.ts", "startLine": 62, "endLine": 66 }
+      ],
+      "independentlyReviewed": true,
+      "reviewer": "agent-5 (independent Ground Truth review)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "CB-30",
+      "kind": "non-anchor",
+      "statement": "边际场景增益严格 < epsilon 才停止收敛，且增益轮数有上限。",
+      "expectedBehavior": {
+        "context": "全量模式（affectedKeys === null）且 analysisConvergenceRounds() > 1 时启用收敛式全量提取",
+        "action": "第 2..maxRounds 轮对同一分区计划重复提取并按行为等价合并去重，计算本轮新增锚定场景数 marginal = count - lastCount",
+        "outcome": "仅当 marginal < epsilon（analysisConvergenceEpsilon()，默认 5）时 break 停止；轮数上限为 analysisConvergenceRounds()（env ANALYSIS_CONVERGENCE_ROUNDS，默认 1，clamp [1,10]），增益不会无限增长"
+      },
+      "evidence": [
+        { "path": "lib/analysis.ts", "startLine": 586, "endLine": 616 },
+        { "path": "lib/env.ts", "startLine": 47, "endLine": 62 }
+      ],
+      "independentlyReviewed": true,
+      "reviewer": "agent-5 (independent Ground Truth review)",
+      "reviewedAt": "2026-11-23"
+    }
+  ]
+}
