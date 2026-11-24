@@ -93,6 +93,30 @@ describe("spec version persistence", () => {
     expect(db.execute).toHaveBeenCalledWith("SELECT id FROM spec_versions WHERE repository_id = ? AND id = ?", [3, 11]);
   });
 
+  it("dedupes exact projections on both versions before writing release changes", async () => {
+    const previous = [
+      previousScenario("HP-1", "lib/github-repositories.ts"),
+      { ...previousScenario("HP-1", "lib/github-repositories.ts"), featureId: 2 },
+    ];
+    const db = connection([{ id: 11 }], false, {}, previous);
+    const currentScenario = {
+      ...scenario,
+      context: "User",
+      action: "Uses links",
+      outcome: "Links work",
+      evidence: [{ path: "lib/github-repositories.ts", startLine: 1 }],
+    };
+    await insertSpecVersion(db, run, {
+      ...result,
+      features: [
+        { name: "Authentication", summary: "Old", scenarios: [currentScenario] },
+        { name: "GitHub repositories", summary: "Duplicate", scenarios: [{ ...currentScenario, reference: "ER-1" }] },
+      ],
+    });
+
+    expect(db.changes).toEqual([]);
+  });
+
   it("records no changes for a first version", async () => {
     const db = connection([]);
     await insertSpecVersion(db, run, { ...result, features: [result.features[0]] });

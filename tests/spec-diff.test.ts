@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diffSpec, diffSpecWithFolded, mergeSpecSources, normalizeSpecText, parsePatchHunks, preserveUnchangedEvidence, scenarioVariantSimilar, scenarioBehaviorEqual, specChangeWordingOnly, specFeatureKey, specScenarioKey, specTextEquivalent, type SpecFeature } from "../lib/spec-diff";
+import { dedupeExactScenarioProjections, diffSpec, diffSpecWithFolded, mergeSpecSources, normalizeSpecText, parsePatchHunks, preserveUnchangedEvidence, scenarioVariantSimilar, scenarioBehaviorEqual, specChangeWordingOnly, specFeatureKey, specScenarioKey, specTextEquivalent, type SpecFeature } from "../lib/spec-diff";
 
 const authentication: SpecFeature = {
   name: "Authentication",
@@ -638,5 +638,54 @@ describe("preserveUnchangedEvidence 全模式 carry（release 284 根治）", ()
     const merged = result.find((f) => f.name === "统一登录")!;
     expect(merged.scenarios.some((s) => s.reference === "HP-1" && s.outcome === "o-new")).toBe(true); // AI 新版优先
     expect(merged.scenarios.some((s) => s.reference === "HP-2")).toBe(true); // 积累场景锚点安全→保
+  });
+});
+
+
+describe("dedupeExactScenarioProjections", () => {
+  const duplicateScenario = (reference: string, overrides: Record<string, unknown> = {}) => ({
+    reference,
+    context: "GitHub 返回 401/403 或 404",
+    action: "listGitHubRepositories 执行",
+    outcome: "分别抛出权限不足或安装不存在错误，状态映射为 400",
+    category: "error" as const,
+    originKeys: [`scenario|${reference}`],
+    evidence: [{ path: "lib/github-repositories.ts", startLine: 10 }],
+    ...overrides,
+  });
+
+  it("drops only exact duplicate generated projections and unions their origins", () => {
+    const first: SpecFeature = { name: "GitHub App 接入与仓库列表", summary: "s", scenarios: [duplicateScenario("ER-1")] };
+    const second: SpecFeature = { name: "GitHub 仓库列表与令牌解析", summary: "s2", scenarios: [duplicateScenario("ER-2", { context: "GitHub 返回 401/403 或 404 ", evidence: [{ path: "lib/github-repositories.ts", startLine: 99 }] })] };
+
+    const result = dedupeExactScenarioProjections([first, second]);
+    expect(result).toHaveLength(1);
+    expect(result[0].name).toBe(first.name);
+    expect(result[0].scenarios).toHaveLength(1);
+    expect(result[0].scenarios[0].originKeys).toEqual(["scenario|ER-1", "scenario|ER-2"]);
+  });
+
+  it("never drops a manual scenario as a generated duplicate", () => {
+    const generated: SpecFeature = { name: "Generated", summary: "s", scenarios: [duplicateScenario("ER-1")] };
+    const manual: SpecFeature = { name: "Manual", summary: "s2", source: "manual", scenarios: [duplicateScenario("ER-M", { source: "manual" })] };
+
+    const result = dedupeExactScenarioProjections([generated, manual]);
+    expect(result).toHaveLength(2);
+    expect(result[1].scenarios[0].reference).toBe("ER-M");
+  });
+
+  it("does not merge scenarios that have different evidence paths", () => {
+    const first: SpecFeature = { name: "A", summary: "s", scenarios: [duplicateScenario("ER-1")] };
+    const second: SpecFeature = { name: "B", summary: "s2", scenarios: [duplicateScenario("ER-2", { evidence: [{ path: "lib/other.ts", startLine: 10 }] })] };
+
+    expect(dedupeExactScenarioProjections([first, second])).toHaveLength(2);
+  });
+
+  it("canonicalizes previous duplicates before computing the release delta", () => {
+    const previousDuplicate: SpecFeature = { name: "Old duplicate", summary: "s", scenarios: [duplicateScenario("ER-1")] };
+    const current: SpecFeature = { name: "GitHub App 接入与仓库列表", summary: "s", scenarios: [duplicateScenario("ER-1")] };
+    const previous = dedupeExactScenarioProjections([current, previousDuplicate]);
+
+    expect(diffSpec(previous, [current])).toEqual([]);
   });
 });

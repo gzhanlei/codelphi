@@ -6,7 +6,7 @@ import { defaultExecute, type Execute } from "./db";
 import { evidenceItems } from "./evidence";
 import { nextReference } from "./extraction-merge";
 import type { ReleaseChangeFact } from "./release-change-projection";
-import { diffSpec, featureScenarioPairMatch, featureVariantSimilar, mergeSpecSources, preserveUnchangedEvidence, scenarioBehaviorEqual, specFeatureKey, specScenarioKey, unionScenarioOriginKeys, type PatchHunk, type SpecChange, type SpecFeature, type SpecScenario, type SpecTombstones } from "./spec-diff";
+import { dedupeExactScenarioProjections, diffSpec, featureScenarioPairMatch, featureVariantSimilar, mergeSpecSources, preserveUnchangedEvidence, scenarioBehaviorEqual, specFeatureKey, specScenarioKey, unionScenarioOriginKeys, type PatchHunk, type SpecChange, type SpecFeature, type SpecScenario, type SpecTombstones } from "./spec-diff";
 import { classifySpecHighlight } from "./spec-highlights";
 import { detectVisibilityConflicts } from "./spec-consistency";
 
@@ -383,27 +383,29 @@ export async function insertSpecVersion(connection: PoolConnection, run: RunCont
   // 才能证伪一个新增功能（superset 盲评 #1009）。全量重建时整库重提取、窗口只覆盖本发布
   // 的几个文件——门禁会把所有新功能吞掉（生产 v201 实证：70 个新功能 0 条 added，
   // 118 个旧名记为移除）。语言与模式无关：确定性变化摘要按本版输出语言生成（072）。
-  const visibilityConflicts = detectVisibilityConflicts(foldedFeatures);
+  const previousCanonical = previous === null ? null : { ...previous, features: dedupeExactScenarioProjections(previous.features) };
+  const finalFeatures = dedupeExactScenarioProjections(foldedFeatures);
+  const visibilityConflicts = detectVisibilityConflicts(finalFeatures);
   if (visibilityConflicts.length > 0) {
     console.error("[spec] visibility outcome conflicts rejected", { runId: run.id, conflicts: visibilityConflicts.map((conflict) => ({ feature: conflict.feature, token: conflict.token })) });
     throw new Error("spec_conflict_rejected");
   }
-  const changes = diffSpec(previous === null ? null : previous.features, foldedFeatures, {
+  const changes = diffSpec(previousCanonical?.features ?? null, finalFeatures, {
     behavioralChangePaths: affectedKeys ? options.behavioralChangePaths : undefined,
     language: run.outputLanguage === "en" ? "en" : "zh-CN",
   });
-  const collapse = detectSpecCollapse(previous, foldedFeatures);
-  const featureCollapses = detectFeatureCollapses(previous, foldedFeatures);
-  const misplacedScenarios = detectMisplacedScenarios(previous, foldedFeatures);
+  const collapse = detectSpecCollapse(previousCanonical, finalFeatures);
+  const featureCollapses = detectFeatureCollapses(previousCanonical, finalFeatures);
+  const misplacedScenarios = detectMisplacedScenarios(previousCanonical, finalFeatures);
   const [versionResult] = await connection.execute(
     "INSERT INTO spec_versions (product_id, repository_id, analysis_run_id, base_spec_version_id, sha, output_language) VALUES (?, ?, ?, ?, ?, ?)",
     [run.productId, run.repositoryId, run.id, previous?.id ?? null, run.afterSha, run.outputLanguage === "en" ? "en" : "zh-CN"],
   );
   const versionId = Number((versionResult as { insertId: number }).insertId);
-  const scenarioIdByLocalKey = await insertFeatures(connection, versionId, foldedFeatures);
+  const scenarioIdByLocalKey = await insertFeatures(connection, versionId, finalFeatures);
   const specChanges = await insertChanges(connection, versionId, previous === null ? null : previous.id, changes);
   // 合并后的完整 spec 一并返回：M9 影子对比必须以 carry-forward 之后的规格为对象。
-  return { specVersionId: versionId, specChanges, baseline: previous === null, features: foldedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds, scenarioIdByLocalKey };
+  return { specVersionId: versionId, specChanges, baseline: previous === null, features: finalFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds, scenarioIdByLocalKey };
 }
 
 /** 规格坍缩（护栏）：新版场景数较上一版骤降超过阈值。生产 v95（2026-11-08）178→83 即此形态。 */

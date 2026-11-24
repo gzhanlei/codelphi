@@ -624,6 +624,50 @@ export function specScenarioKey(featureName: string, reference: string) {
   return `${specFeatureKey(featureName)}:${reference}`;
 }
 
+function exactScenarioProjectionKey(scenario: SpecScenario): string | null {
+  const paths = [...new Set(scenario.evidence.map((item) => item.path).filter(Boolean))].sort();
+  if (paths.length === 0) return null;
+  return JSON.stringify([
+    normalizeSpecText(scenario.context),
+    normalizeSpecText(scenario.action),
+    normalizeSpecText(scenario.outcome),
+    paths,
+  ]);
+}
+
+export function dedupeExactScenarioProjections(features: SpecFeature[]): SpecFeature[] {
+  const seen = new Map<string, SpecScenario>();
+  const result: SpecFeature[] = [];
+  for (const feature of features) {
+    if (feature.source === "manual") {
+      result.push(feature);
+      continue;
+    }
+    const scenarios: SpecScenario[] = [];
+    for (const scenario of feature.scenarios) {
+      if (scenario.source === "manual") {
+        scenarios.push(scenario);
+        continue;
+      }
+      const key = exactScenarioProjectionKey(scenario);
+      if (key === null) {
+        scenarios.push(scenario);
+        continue;
+      }
+      const existing = seen.get(key);
+      if (existing) {
+        unionScenarioOriginKeys(existing, scenario);
+        continue;
+      }
+      const kept = { ...scenario };
+      seen.set(key, kept);
+      scenarios.push(kept);
+    }
+    if (scenarios.length > 0 || feature.scenarios.length === 0) result.push({ ...feature, scenarios });
+  }
+  return result;
+}
+
 export function mergeSpecSources(generated: SpecFeature[], manual: SpecFeature[], tombstones: SpecTombstones = { featureKeys: new Set<string>(), scenarioKeys: new Set<string>() }, carried: SpecFeature[] = []) {
   const merged = new Map<string, SpecFeature>();
   for (const feature of carried) {
