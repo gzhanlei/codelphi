@@ -16,7 +16,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { classifyWindow } from "../lib/impact-classification";
-import type { WindowImpact, WindowOutcome } from "../lib/impact-classification";
+import type { GlobalReason, WindowImpact, WindowOutcome } from "../lib/impact-classification";
 import { countCommits, isAncestor, listCommits, readGitWindow, readTreeSizes } from "../lib/git-window";
 import type { GitWindow } from "../lib/git-window";
 import { aggregateWindows, measureWindow, simulateStale } from "../lib/incremental-trial-metrics";
@@ -164,6 +164,32 @@ export function verdictOf(summary: TrialSummary): Verdict {
   return { incrementalShare: share, tokenSavings: savings, passes: reasons.length === 0, reasons };
 }
 
+export interface LiftRow {
+  reason: GlobalReason;
+  /** 只因为这一条规则才全量的窗口数：这条规则一旦能封闭，它们立刻可以增量。 */
+  alone: number;
+  /** 与别的全局规则一起触发的窗口数：只封闭这一条救不回来。 */
+  withOthers: number;
+  /** 假如这条规则可以封闭，可增量窗口比例会变成多少。只算它单独触发的窗口。 */
+  incrementalShareIfClosed: number | null;
+}
+
+/** 规格 §19.4 要报告回答的问题：把某条全局规则换成范围有限的声明式登记表，可用率能提高多少。 */
+export function liftTable(rows: readonly TrialWindowRow[], summary: TrialSummary): LiftRow[] {
+  const full = rows.filter((row) => row.metrics && !row.metrics.incremental);
+  const reasons = new Set(full.flatMap((row) => [...(row.metrics?.globalReasons ?? [])]));
+  return [...reasons].sort().map((reason) => {
+    const triggered = full.filter((row) => row.metrics?.globalReasons.includes(reason));
+    const alone = triggered.filter((row) => row.metrics?.globalReasons.length === 1).length;
+    return {
+      reason,
+      alone,
+      withOthers: triggered.length - alone,
+      incrementalShareIfClosed: summary.windows === 0 ? null : (summary.incrementalWindows + alone) / summary.windows,
+    };
+  });
+}
+
 export interface RepositoryResult {
   repositoryId: number;
   windows: number;
@@ -174,6 +200,8 @@ export interface RepositoryResult {
   commitIncrementalShare: number | null;
   stale: StaleSummary;
   nonLinearWindows: Array<{ index: number; baseSha: string; headSha: string }>;
+  /** 每条全局规则触发全量的窗口数，以及它若能封闭时的可用率。 */
+  lift: LiftRow[];
 }
 
 interface RepositoryRun {
@@ -284,6 +312,29 @@ function staleLines(report: TrialReport): string[] {
   ];
 }
 
+function liftLines(report: TrialReport): string[] {
+  const cells: string[][] = [];
+  for (const result of report.repositories) {
+    if (result.lift.length === 0) cells.push([String(result.repositoryId), "（无）", "0", "0", percent(result.summary.incrementalShare ?? 0)]);
+    for (const lift of result.lift) {
+      cells.push([
+        String(result.repositoryId),
+        lift.reason,
+        String(lift.alone),
+        String(lift.withOthers),
+        percentOrNull(lift.incrementalShareIfClosed),
+      ]);
+    }
+  }
+  return [
+    "## 如果某条全局规则可以封闭",
+    "",
+    "只做算术，不改分类。可封闭的意思是：换成范围有限、可人工维护的声明式登记表之后，这条规则触发的窗口可以走增量。只算它单独触发的窗口，与其他规则一起触发的救不回来。token 节省率会随之上升，这里不估。",
+    "",
+    ...table(["仓库", "全局规则", "单独触发的窗口数", "与其他规则一起触发", "若能封闭，可增量窗口比例变为"], cells),
+  ];
+}
+
 function nonLinearLines(report: TrialReport): string[] {
   const lines: string[] = [];
   for (const result of report.repositories) {
@@ -307,7 +358,7 @@ export function renderReport(report: TrialReport): string {
     `主数据集：仓库 ${report.primaryRepositoryId}。阈值（跑之前写进规格 §19.4）：可增量窗口比例不低于 ${percent(report.thresholds.incrementalWindow)}，预估 token 节省率不低于 ${percent(report.thresholds.tokenSavings)}。`,
     "",
   ];
-  const sections = [verdictLines(report.verdict), repositoryLines(report), outcomeLines(report), reasonLines(report), staleLines(report), nonLinearLines(report), goldenLines(report)];
+  const sections = [verdictLines(report.verdict), repositoryLines(report), outcomeLines(report), reasonLines(report), liftLines(report), staleLines(report), nonLinearLines(report), goldenLines(report)];
   return `${intro.join("\n")}${sections.map((section) => `${section.join("\n")}\n`).join("\n")}`;
 }
 
@@ -372,18 +423,18 @@ async function runRepository(option: RepositoryOption, releases: readonly Ledger
     measured.map((window) => ({ impact: window.impact, removedLines: window.removedLines, nextAnchors: window.nextAnchors })),
   );
   const commitOutcomesAll = rows.flatMap((row) => row.commitOutcomes);
-  return {
-    rows,
-    result: {
-      repositoryId: option.repositoryId,
-      windows: rows.length,
-      summary: aggregateWindows(rows.flatMap((row) => (row.metrics ? [row.metrics] : []))),
-      commitWindows: commitOutcomesAll.length,
-      commitIncrementalShare: incrementalShare(commitOutcomesAll),
-      stale: summarizeStale(points, measured.map((window) => window.impact.outcome)),
-      nonLinearWindows: rows.filter((row) => !row.linear).map(({ index, baseSha, headSha }) => ({ index, baseSha, headSha })),
-    },
+  const summary = aggregateWindows(rows.flatMap((row) => (row.metrics ? [row.metrics] : [])));
+  const result: RepositoryResult = {
+    repositoryId: option.repositoryId,
+    windows: rows.length,
+    summary,
+    commitWindows: commitOutcomesAll.length,
+    commitIncrementalShare: incrementalShare(commitOutcomesAll),
+    stale: summarizeStale(points, measured.map((window) => window.impact.outcome)),
+    nonLinearWindows: rows.filter((row) => !row.linear).map(({ index, baseSha, headSha }) => ({ index, baseSha, headSha })),
+    lift: liftTable(rows, summary),
   };
+  return { rows, result };
 }
 
 /** Golden Repository 的冻结窗口取自主数据集：每个情形取发布顺序里第一个命中的窗口。 */

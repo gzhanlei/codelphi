@@ -11,6 +11,7 @@ import {
   INCREMENTAL_WINDOW_THRESHOLD,
   TOKEN_SAVINGS_THRESHOLD,
   incrementalShare,
+  liftTable,
   parseArgs,
   pickGolden,
   renderReport,
@@ -103,6 +104,23 @@ describe("go/no-go 判定", () => {
   });
 });
 
+const metrics = (outcome: WindowOutcome, fastPathStale = 0) =>
+  ({
+    outcome,
+    globalReasons: [],
+    incremental: true,
+    reanalyzedFeatures: outcome === "direct" ? 1 : 0,
+    featureShare: 0,
+    newImplementationFiles: 0,
+    incrementalFiles: 0,
+    incrementalBytes: 0,
+    fullFiles: 0,
+    fullBytes: 0,
+    tokenSavings: 0,
+    exceedsFull: false,
+    fastPath: { stale: fastPathStale, touched: fastPathStale, nonBehavioralTouched: 0 },
+  }) as NonNullable<TrialWindowRow["metrics"]>;
+
 describe("stale 汇总", () => {
   it("counts new stale anchors on fast-path windows only, and sums what recovered them", () => {
     const points = [
@@ -137,24 +155,36 @@ describe("stale 汇总", () => {
   });
 });
 
-describe("Golden Repository 窗口", () => {
-  const metrics = (outcome: WindowOutcome, fastPathStale = 0) =>
-    ({
-      outcome,
-      globalReasons: [],
-      incremental: true,
-      reanalyzedFeatures: outcome === "direct" ? 1 : 0,
-      featureShare: 0,
-      newImplementationFiles: 0,
-      incrementalFiles: 0,
-      incrementalBytes: 0,
-      fullFiles: 0,
-      fullBytes: 0,
-      tokenSavings: 0,
-      exceedsFull: false,
-      fastPath: { stale: fastPathStale, touched: fastPathStale, nonBehavioralTouched: 0 },
-    }) as NonNullable<TrialWindowRow["metrics"]>;
+describe("如果某条全局规则可以封闭", () => {
+  const full = (index: number, globalReasons: string[]) =>
+    row(index, {
+      metrics: {
+        ...metrics("global_unbounded"),
+        incremental: false,
+        globalReasons: globalReasons as never,
+      } as never,
+    });
 
+  it("counts the windows each rule triggers alone and with others, and the share if it were closed", () => {
+    const rows = [
+      row(0, { metrics: metrics("direct") }),
+      full(1, ["schema_migration"]),
+      full(2, ["schema_migration"]),
+      full(3, ["schema_migration", "shared_module"]),
+      full(4, ["shared_module"]),
+    ];
+    expect(liftTable(rows, summary({ windows: 5, incrementalWindows: 1, incrementalShare: 0.2 }))).toEqual([
+      { reason: "schema_migration", alone: 2, withOthers: 1, incrementalShareIfClosed: 3 / 5 },
+      { reason: "shared_module", alone: 1, withOthers: 1, incrementalShareIfClosed: 2 / 5 },
+    ]);
+  });
+
+  it("stays empty when nothing forced a full resync", () => {
+    expect(liftTable([row(0, { metrics: metrics("direct") })], summary({ windows: 1, incrementalWindows: 1, incrementalShare: 1 }))).toEqual([]);
+  });
+});
+
+describe("Golden Repository 窗口", () => {
   it("keeps only the coordinates of each picked window", () => {
     const readme = row(3, { metrics: metrics("no_behavior"), files: [{ path: "README.md", oldPath: null, status: "modified", classification: "no_behavior", reason: "document", directFeatureKeys: [] }] });
     const picks = pickGolden([row(0), readme]);
@@ -177,6 +207,7 @@ describe("报告渲染", () => {
         commitIncrementalShare: 0.8,
         stale: { fastPathWindows: 1, meanNewlyStale: 1, meanNewlyStaleShare: 0.1, maxStaleShare: 0.1, finalStaleShare: 0, finalAnchors: 10, recoveredByReanalysis: 1, recoveredByFullResync: 0 },
         nonLinearWindows: [{ index: 0, baseSha: "abcdef12", headSha: "ffffffff" }],
+        lift: [{ reason: "dependency_manifest", alone: 1, withOthers: 0, incrementalShareIfClosed: 1.5 }],
       },
     ],
     golden: Object.fromEntries(GOLDEN_CATEGORIES.map((category) => [category.id, null])),
@@ -189,9 +220,10 @@ describe("报告渲染", () => {
     expect(text).toContain("可增量窗口比例不低于 70.0%，预估 token 节省率不低于 50.0%");
     expect(text).toContain("| 8 | 2 | 1 | 100.0% | 60.0% |");
     expect(text).toContain("| 8 | dependency_manifest | 1 |");
+    expect(text).toContain("| 8 | dependency_manifest | 1 | 0 | 150.0% |");
     expect(text).toContain("abcdef12 → ffffffff");
     expect(text).toContain("真实历史里没有找到，需要合成夹具");
-    for (const heading of ["## 结论", "## 各仓库", "## 窗口归宿分布", "## 全量重同步的触发原因", "## stale 锚点", "## 非线性窗口（不计入比例）", "## Golden Repository 的冻结窗口"]) {
+    for (const heading of ["## 结论", "## 各仓库", "## 窗口归宿分布", "## 全量重同步的触发原因", "## 如果某条全局规则可以封闭", "## stale 锚点", "## 非线性窗口（不计入比例）", "## Golden Repository 的冻结窗口"]) {
       expect(text).toContain(heading);
     }
   });
