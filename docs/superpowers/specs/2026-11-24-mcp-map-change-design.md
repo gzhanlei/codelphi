@@ -166,7 +166,7 @@ type MatchBasis =
 | 等级 | 允许的确定性依据 | 允许动作 |
 | --- | --- | --- |
 | `direct` | 意图中的明确场景 ID 或已有人工别名解析到当前场景，且当前证据有效 | `modify_candidate` |
-| `historical_direct` | 召回行为与历史行为可由相同场景 ID、逐字行为内容身份或人工确认别名连接，并有对应 release/diff | 按当前职责证据和 Git 生命周期矩阵决定动作 |
+| `historical_direct` | 召回行为与历史行为可由逐字行为内容身份或场景级人工确认别名连接，并有对应 release/diff | 按当前职责证据和 Git 生命周期矩阵决定动作 |
 | `related` | 共享证据路径、功能邻域或其他可解释关联 | 只能 `inspect` |
 | `lexical_only` | 只有分词、名称或关键词重合 | 只能 `inspect`，不得形成修改或创建建议 |
 
@@ -174,13 +174,22 @@ type MatchBasis =
 
 P0 可接受的强身份仅限：
 
-1. `scenario_id`：调用意图明确给出 `stableKey + reference`，可解析到具体行为记录；单独出现的 HP/EC/ER reference 不构成跨版本身份。
+1. `scenario_id`：调用意图按第 5.3 节唯一解析到具体当前 active 场景；单独出现的 HP/EC/ER reference 不够，`stableKey + reference` 也不得单独作为跨版本身份。
 2. `exact_behavior_text`：当前与历史的 `context/action/outcome` 规范化后逐字一致，并有相同规范路径支撑；计算 SHA-256 `textHash` 供审计。仅描述变化即失去该身份并降级。
 3. `manual_alias`：只有明确包含 `stableKey + reference` 的人工场景映射才可作为强身份。现有 `feature_aliases` 只是 `alias_key → canonical_key` 的功能名级映射，只能用于 Intent Retrieval 和 `related`，不得把该功能下全部场景升级为 Direct。P0 不新建场景别名库，不存在场景级映射时不得使用此强身份。
 
 `shared_evidence` 与 `feature_connection` 只证明实现邻域，不能升级为 Direct。`lexical` 只用于召回与排序末位，不是能力判断。
 
-### 5.3 `exact_behavior_text` 规范化与哈希
+### 5.3 `scenario_id` 意图抽取
+
+P0 使用以下确定性解析，不从单独 reference、模糊功能名或历史记录猜测 Direct：
+
+1. 对 intent 做 NFKC；功能标识比较使用现有 `specFeatureKey` 归一化。收集 intent 中完整出现的 active 功能名或其 stableKey，ASCII 标识两侧必须是起止位置或非字母数字字符，避免子串误命中。
+2. 以 `/(?:^|[^A-Za-z0-9])(HP|EC|ER)-([1-9]\d*)(?=$|[^A-Za-z0-9])/gi` 提取 reference，统一转为大写；不接受前导零或其他引用格式。
+3. 只组合同一功能内「完整功能标识 × reference」候选，并查询当前 active 场景。全产品恰好解析到一个 `(stableKey, reference, scenarioId)` 时才授予 `scenario_id`；零个、多个、功能未 active、场景未 active 或标识不完整均不授予。
+4. `scenario_id` 只证明意图指向当前场景，用于 `direct`。它不能单独连接历史版本；Historical direct 仍需 `exact_behavior_text` 或场景级 `manual_alias`。
+
+### 5.4 `exact_behavior_text` 规范化与哈希
 
 P0 冻结以下算法，所有实现与测试使用同一组规范向量：
 
@@ -192,7 +201,7 @@ P0 冻结以下算法，所有实现与测试使用同一组规范向量：
 
 两个行为只有在 `textHash` 相同且至少一个规范化证据路径相同的情况下，才可使用 `exact_behavior_text` 强身份。哈希相同但路径不同只能是 `related`。
 
-### 5.4 降级原则
+### 5.5 降级原则
 
 - 强身份依据缺失、冲突或无法读取时，逐级降为 `related`；没有关联时保留 `lexical_only`。
 - 同一行为拆分、合并或措辞变化，P0 不推断身份，标为 `related` 或 `unknown`，交由 agent 阅读。
@@ -541,6 +550,7 @@ MCP 指南与仓库工作流改为「先导航、再反查、后对账」，不�
 测试至少覆盖：
 
 - Intent Retrieval 与 Behavior Identity Resolution 分离：自然语言关键词召回不能单独产生 Direct；
+- `scenario_id` 的完整功能标识、reference 边界、唯一解析、零/多命中降级，以及它不能单独连接历史版本；
 - `exact_behavior_text` 的字段顺序、NFKC、空白、大小写、null/空字符串、JSON 与 SHA-256 固定测试向量；
 - active × 路径存在 × 逐证据 freshness 的完整状态矩阵，快照新鲜与场景过期不得混淆；
 - snapshot 与 freshness analyzedSha 不一致、freshness 文件清单 capped 时必须 unknown；
