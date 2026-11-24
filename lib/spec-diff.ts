@@ -773,6 +773,68 @@ export function preserveExactScenarioIdentities(
   return result.filter((feature) => feature.source === "manual" || feature.scenarios.length > 0 || originalCounts.get(feature) === 0);
 }
 
+export function preserveUncertainDisappearances(previousFeatures: SpecFeature[], currentFeatures: SpecFeature[], changes: SpecChange[]): SpecFeature[] {
+  const result = currentFeatures.map((feature) => ({ ...feature, scenarios: [...feature.scenarios] }));
+  const byKey = new Map(result.map((feature) => [specFeatureKey(feature.name), feature]));
+  for (const change of changes) {
+    if (change.kind !== "uncertain") continue;
+    const previousFeature = previousFeatures.find((feature) => specFeatureKey(feature.name) === specFeatureKey(change.featureName));
+    if (!previousFeature) continue;
+    const key = specFeatureKey(previousFeature.name);
+    if (change.entityType === "feature" && !byKey.has(key)) {
+      byKey.set(key, { ...previousFeature, scenarios: [...previousFeature.scenarios] });
+      result.push(byKey.get(key)!);
+      continue;
+    }
+    if (change.entityType !== "scenario") continue;
+    const previousScenario = change.before as SpecScenario;
+    const currentFeature = byKey.get(key);
+    if (!currentFeature) {
+      byKey.set(key, { ...previousFeature, scenarios: [previousScenario] });
+      result.push(byKey.get(key)!);
+      continue;
+    }
+    if (!currentFeature.scenarios.some((scenario) => scenario.reference === previousScenario.reference)) {
+      currentFeature.scenarios.push(previousScenario);
+    }
+  }
+  return result;
+}
+
+export function buildRemovalProofs(
+  previousFeatures: SpecFeature[],
+  currentFeatures: SpecFeature[],
+  options: { changeFiles: readonly { path: string; status: string; patch: string }[]; fullAnalysis: boolean; coverageComplete: boolean },
+): Map<string, RemovalProof> {
+  const removedPaths = new Set(options.changeFiles.filter((file) => file.status === "removed").map((file) => file.path));
+  const proofs = new Map<string, RemovalProof>();
+  if (!options.fullAnalysis || !options.coverageComplete || removedPaths.size === 0) return proofs;
+  for (const feature of previousFeatures) {
+    const current = currentFeatures.find((candidate) => specFeatureKey(candidate.name) === specFeatureKey(feature.name));
+    if (!current && feature.scenarios.every((scenario) => scenario.evidence.length === 1 && removedPaths.has(scenario.evidence[0].path))) {
+      proofs.set(specFeatureKey(feature.name), {
+        originalImplementationChecked: true,
+        alternativePathsChecked: true,
+        behaviorBoundaryVerified: true,
+        evidence: feature.scenarios.flatMap((scenario) => scenario.evidence),
+        evidenceValid: true,
+      });
+    }
+    for (const scenario of feature.scenarios) {
+      if (current?.scenarios.some((candidate) => candidate.reference === scenario.reference)) continue;
+      if (scenario.evidence.length !== 1 || !removedPaths.has(scenario.evidence[0].path)) continue;
+      proofs.set(specScenarioKey(feature.name, scenario.reference), {
+        originalImplementationChecked: true,
+        alternativePathsChecked: true,
+        behaviorBoundaryVerified: true,
+        evidence: scenario.evidence,
+        evidenceValid: true,
+      });
+    }
+  }
+  return proofs;
+}
+
 export function mergeSpecSources(generated: SpecFeature[], manual: SpecFeature[], tombstones: SpecTombstones = { featureKeys: new Set<string>(), scenarioKeys: new Set<string>() }, carried: SpecFeature[] = []) {
   const merged = new Map<string, SpecFeature>();
   for (const feature of carried) {

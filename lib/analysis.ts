@@ -244,7 +244,7 @@ export async function saveResult(run: RunContext, result: AnalysisResult, change
         .filter((file) => behavioralPaths.has(file.path))
         .map((file) => [file.path, parsePatchHunks(file.patch)] as const),
     );
-    const { specVersionId, specChanges, baseline, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds, scenarioIdByLocalKey } = await insertSpecVersion(connection, run, result, { ...(affectedKeys ? { affectedKeys } : {}), behavioralChangePaths: behavioralPaths, changedHunksByPath, base: activate ? "latest" : "beforeRun", baseVersionId: run.baseCapturedAt ? run.baseSpecVersionId : undefined });
+    const { specVersionId, specChanges, baseline, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds, scenarioIdByLocalKey } = await insertSpecVersion(connection, run, result, { ...(affectedKeys ? { affectedKeys } : {}), behavioralChangePaths: behavioralPaths, changedHunksByPath, base: activate ? "latest" : "beforeRun", baseVersionId: run.baseCapturedAt ? run.baseSpecVersionId : undefined, changeFiles: change.files, fullAnalysis: affectedKeys === null, coverageComplete: affectedKeys === null && coverage?.coverageRatio === 1 && !coverage.partitionsCapped && coverage.diffOmittedPaths === 0 });
     if (activate) {
       // BM-11 别名登记：变体名 → canonical 旧键，走 feature_aliases 显式归并通道
       // （migrations/030；progress-summary 的历史 spec_changes 归并已消费该表）。幂等 INSERT IGNORE。

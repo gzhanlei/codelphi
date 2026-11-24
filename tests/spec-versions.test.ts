@@ -140,14 +140,27 @@ describe("spec version persistence", () => {
 
   it("persists uncertain removal judgment and evidence state", async () => {
     const db = connection([{ id: 11 }], false, {}, [previousScenario("HP-1", "lib/behavior-unit-ai.ts")]);
-    await insertSpecVersion(db, run, { ...result, features: [{ name: "Legacy", summary: "Removed", scenarios: [] }] }, { behavioralChangePaths: new Set(["lib/behavior-unit-ai.ts"]) });
+    const { features } = await insertSpecVersion(db, run, { ...result, features: [{ name: "Legacy", summary: "Removed", scenarios: [] }] }, { behavioralChangePaths: new Set(["lib/behavior-unit-ai.ts"]) });
 
+    expect(features.find((feature) => feature.name === "Authentication")?.scenarios.map((scenario) => scenario.reference)).toContain("HP-1");
     const change = db.changes.find((parameters) => parameters[2] === "feature");
     expect(change?.[2]).toBe("feature");
     expect(change?.[3]).toBe("uncertain");
     expect(change?.[12]).toBe("uncertain");
     expect(change?.[13]).toBe("not_observed");
     expect(JSON.parse(String(change?.[14]))).toEqual(["not_observed"]);
+  });
+
+  it("uses production deletion evidence to retire a fully proven removed feature", async () => {
+    const db = connection([{ id: 11 }], false, {}, [previousScenario("HP-1", "components/publish.tsx")]);
+    await insertSpecVersion(db, run, { ...result, features: [{ name: "Legacy", summary: "Removed", scenarios: [] }] }, {
+      behavioralChangePaths: new Set(["components/publish.tsx"]),
+      changeFiles: [{ path: "components/publish.tsx", status: "removed", patch: "" }],
+      fullAnalysis: true,
+      coverageComplete: true,
+    });
+
+    expect(db.changes.some((parameters) => parameters[2] === "feature" && parameters[3] === "removed")).toBe(true);
   });
 
   it("records no changes for a first version", async () => {
@@ -197,7 +210,7 @@ describe("spec version persistence", () => {
     expect(features.find((feature) => feature.name === "Authentication")?.scenarios.map((scenario) => scenario.reference)).toContain("HP-1");
   });
 
-  it("allows an omitted scenario to be removed when its evidence changed", async () => {
+  it("keeps an omitted scenario uncertain without positive removal proof", async () => {
     const db = connection([{ id: 11 }], false, {}, [previousScenario("HP-1", "server/web/src/utils/linkify.ts")]);
     const { features } = await insertSpecVersion(
       db,
@@ -205,7 +218,7 @@ describe("spec version persistence", () => {
       { ...result, features: [{ name: "Authentication", summary: "Fresh", scenarios: [] }] },
       { affectedKeys: new Set(["authentication"]), behavioralChangePaths: new Set(["server/web/src/utils/linkify.ts"]) },
     );
-    expect(features.find((feature) => feature.name === "Authentication")?.scenarios.map((scenario) => scenario.reference)).not.toContain("HP-1");
+    expect(features.find((feature) => feature.name === "Authentication")?.scenarios.map((scenario) => scenario.reference)).toContain("HP-1");
   });
 
   it("preserves a completely omitted feature when all of its evidence is unchanged", async () => {
@@ -222,7 +235,7 @@ describe("spec version persistence", () => {
   it("keeps full-mode semantics when no affected keys are given", async () => {
     const db = connection([{ id: 11 }]);
     await insertSpecVersion(db, run, { ...result, features: [result.features[0]] });
-    expect(db.execute).not.toHaveBeenCalledWith(expect.stringContaining("INSERT INTO spec_features"), expect.arrayContaining(["Legacy"]));
+    expect(db.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO spec_features"), expect.arrayContaining(["Legacy"]));
   });
 
   it("records feature additions in full mode even when their evidence is outside the behavioral window (生产 v201 事故形态)", async () => {

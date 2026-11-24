@@ -21,6 +21,7 @@ export interface ProgressRelease {
   added: number;
   changed: number;
   removed: number;
+  uncertain?: number;
   /** 重建口径（锚定上线前的分析）计「rebuild」；无 spec 版本或未知归「rebuild」（保守计入注释）。 */
   regime: "anchored" | "rebuild";
 }
@@ -97,7 +98,8 @@ export function renderProgressSummary(input: { productName: string; days: number
     lines.push("");
   }
   for (const item of releases) {
-    const counts = item.total > 0 ? `（行为变化 ${item.total} 条：新增 ${item.added} · 变化 ${item.changed} · 移除 ${item.removed}）` : "（无行为变化）";
+    const uncertainty = (item.uncertain ?? 0) > 0 ? ` · 未决 ${item.uncertain}` : "";
+    const counts = item.total > 0 ? `（行为变化 ${item.total} 条：新增 ${item.added} · 变化 ${item.changed} · 移除 ${item.removed}${uncertainty}）` : "（无行为变化）";
     lines.push(`- [${dayLabel(item.committedAt)}] [${item.title}](${item.url}) — ${firstSentence(item.summary)}${counts}`);
   }
   return lines.join("\n");
@@ -111,14 +113,15 @@ export async function loadRecentReleasesWithChanges(productId: number, days: num
             COUNT(c.id) AS total,
             COALESCE(SUM(c.kind = 'added'), 0) AS added,
             COALESCE(SUM(c.kind = 'changed'), 0) AS changed,
-            COALESCE(SUM(c.kind = 'removed'), 0) AS removed
+            COALESCE(SUM(c.kind = 'removed'), 0) AS removed,
+            COALESCE(SUM(c.kind = 'uncertain'), 0) AS uncertain
      FROM releases r
      LEFT JOIN spec_changes c ON c.spec_version_id = r.spec_version_id AND c.wording_only = 0
      LEFT JOIN spec_versions sv ON sv.id = r.spec_version_id
      WHERE r.product_id = ? AND r.committed_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
      GROUP BY r.id, sv.created_at ORDER BY r.committed_at DESC LIMIT 100`,
     [productId, days],
-  ) as [Array<{ id: number; title: string; summary: string; sha: string; url: string; committedAt: Date; anchored: number; total: number; added: number; changed: number; removed: number }>, unknown];
+  ) as [Array<{ id: number; title: string; summary: string; sha: string; url: string; committedAt: Date; anchored: number; total: number; added: number; changed: number; removed: number; uncertain: number }>, unknown];
   return rows.map((row) => ({
     id: Number(row.id),
     title: row.title,
@@ -130,6 +133,7 @@ export async function loadRecentReleasesWithChanges(productId: number, days: num
     added: Number(row.added),
     changed: Number(row.changed),
     removed: Number(row.removed),
+    uncertain: Number(row.uncertain),
     regime: row.anchored ? "anchored" : "rebuild",
   }));
 }
