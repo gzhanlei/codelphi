@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dedupeExactScenarioProjections, diffSpec, diffSpecWithFolded, mergeSpecSources, normalizeSpecText, parsePatchHunks, preserveUnchangedEvidence, scenarioVariantSimilar, scenarioBehaviorEqual, specChangeWordingOnly, specFeatureKey, specScenarioKey, specTextEquivalent, type SpecFeature } from "../lib/spec-diff";
+import { dedupeExactScenarioProjections, diffSpec, diffSpecWithFolded, mergeSpecSources, normalizeSpecText, parsePatchHunks, preserveExactScenarioIdentities, preserveUnchangedEvidence, scenarioVariantSimilar, scenarioBehaviorEqual, specChangeWordingOnly, specFeatureKey, specScenarioKey, specTextEquivalent, type SpecFeature } from "../lib/spec-diff";
 
 const authentication: SpecFeature = {
   name: "Authentication",
@@ -687,5 +687,61 @@ describe("dedupeExactScenarioProjections", () => {
     const previous = dedupeExactScenarioProjections([current, previousDuplicate]);
 
     expect(diffSpec(previous, [current])).toEqual([]);
+  });
+});
+
+
+describe("preserveExactScenarioIdentities", () => {
+  const projection = (reference: string, overrides: Record<string, unknown> = {}) => ({
+    reference,
+    context: "judge 输出的 internalKind 不在枚举内",
+    action: "parseJudgeContent 解析区域结论",
+    outcome: "剥除该字段并打 warn 日志，由状态推导落 unresolved，不使整个任务 parse 崩溃",
+    category: "error" as const,
+    originKeys: [`scenario|${reference}`],
+    evidence: [{ path: "lib/behavior-unit-ai.ts", startLine: 20 }],
+    ...overrides,
+  });
+
+  it("restores the previous feature and reference for an unambiguous exact match", () => {
+    const previous: SpecFeature = { name: "AI 规格分析与发布变化", summary: "s", scenarios: [projection("ER-1")] };
+    const current: SpecFeature = { name: "行为清单单元提取与状态推导", summary: "s2", scenarios: [projection("ER-2")] };
+
+    const result = preserveExactScenarioIdentities([previous], [current]);
+    expect(result).toHaveLength(1);
+    expect(result[0].name).toBe(previous.name);
+    expect(result[0].scenarios[0]).toMatchObject({ reference: "ER-1", originKeys: ["scenario|ER-2"] });
+  });
+
+  it("renumbers a conflicting current scenario instead of overwriting either behavior", () => {
+    const previous: SpecFeature = { name: "A", summary: "s", scenarios: [projection("ER-1")] };
+    const occupied: SpecFeature = { name: "A", summary: "s2", scenarios: [projection("ER-1", { outcome: "不同结果" })] };
+    const candidate: SpecFeature = { name: "B", summary: "s3", scenarios: [projection("ER-2")] };
+
+    const result = preserveExactScenarioIdentities([previous], [occupied, candidate]);
+    expect(result).toHaveLength(1);
+    const scenarios = result[0].scenarios;
+    expect(scenarios.find((scenario) => scenario.outcome === projection("ER-1").outcome)?.reference).toBe("ER-1");
+    expect(scenarios.find((scenario) => scenario.outcome === "不同结果")?.reference).not.toBe("ER-1");
+  });
+
+  it("does not restore behavior into a manual feature", () => {
+    const previous: SpecFeature = { name: "Manual", summary: "s", source: "manual", scenarios: [projection("ER-1")] };
+    const current: SpecFeature = { name: "Generated", summary: "s2", scenarios: [projection("ER-2")] };
+
+    const result = preserveExactScenarioIdentities([previous], [current]);
+    expect(result[0].name).toBe("Generated");
+    expect(result[0].scenarios[0].reference).toBe("ER-2");
+  });
+
+  it("uses the deterministic survivor when the previous version contains exact duplicates", () => {
+    const first: SpecFeature = { name: "A", summary: "s", scenarios: [projection("ER-1")] };
+    const duplicate: SpecFeature = { name: "Old duplicate", summary: "s2", scenarios: [projection("ER-9")] };
+    const current: SpecFeature = { name: "B", summary: "s3", scenarios: [projection("ER-2")] };
+
+    const result = preserveExactScenarioIdentities([first, duplicate], [current]);
+    expect(result).toHaveLength(1);
+    expect(result[0].name).toBe("A");
+    expect(result[0].scenarios[0].reference).toBe("ER-1");
   });
 });

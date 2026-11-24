@@ -668,6 +668,76 @@ export function dedupeExactScenarioProjections(features: SpecFeature[]): SpecFea
   return result;
 }
 
+export function preserveExactScenarioIdentities(
+  previousFeatures: SpecFeature[],
+  currentFeatures: SpecFeature[],
+  tombstones: SpecTombstones = { featureKeys: new Set<string>(), scenarioKeys: new Set<string>() },
+): SpecFeature[] {
+  const previous = dedupeExactScenarioProjections(previousFeatures);
+  const previousByProjection = new Map<string, { feature: SpecFeature; scenario: SpecScenario }>();
+  for (const feature of previous) {
+    if (feature.source === "manual" || tombstones.featureKeys.has(specFeatureKey(feature.name))) continue;
+    for (const scenario of feature.scenarios) {
+      if (scenario.source === "manual" || tombstones.scenarioKeys.has(specScenarioKey(feature.name, scenario.reference))) continue;
+      const key = exactScenarioProjectionKey(scenario);
+      if (key && !previousByProjection.has(key)) previousByProjection.set(key, { feature, scenario });
+    }
+  }
+
+  const result = currentFeatures.map((feature) => ({ ...feature, scenarios: [] as SpecScenario[] }));
+  const originalCounts = new Map(result.map((feature, index) => [feature, currentFeatures[index].scenarios.length]));
+  const byName = new Map(result.map((feature) => [specFeatureKey(feature.name), feature]));
+  const matchedScenarios = new Set<SpecScenario>();
+  for (const [featureIndex, currentFeature] of currentFeatures.entries()) {
+    const target = result[featureIndex];
+    for (const scenario of currentFeature.scenarios) {
+      const key = exactScenarioProjectionKey(scenario);
+      const match = currentFeature.source === "manual" || scenario.source === "manual" || !key ? undefined : previousByProjection.get(key);
+      if (!match) {
+        target.scenarios.push(scenario);
+        continue;
+      }
+      const previousName = match.feature.name;
+      const previousReference = match.scenario.reference;
+      if (currentFeature.name === previousName && scenario.reference === previousReference) {
+        target.scenarios.push(scenario);
+        matchedScenarios.add(scenario);
+        continue;
+      }
+      let destination = byName.get(specFeatureKey(previousName));
+      if (!destination) {
+        destination = { ...match.feature, scenarios: [] };
+        result.push(destination);
+        byName.set(specFeatureKey(previousName), destination);
+      }
+      const moved = { ...scenario, reference: previousReference };
+      destination.scenarios.push(moved);
+      matchedScenarios.add(moved);
+    }
+  }
+  for (const feature of result) {
+    const usedReferences = new Set<string>();
+    const ordered = [...feature.scenarios.filter((scenario) => matchedScenarios.has(scenario)), ...feature.scenarios.filter((scenario) => !matchedScenarios.has(scenario))];
+    feature.scenarios = ordered.map((scenario) => {
+      if (matchedScenarios.has(scenario)) {
+        usedReferences.add(scenario.reference);
+        return scenario;
+      }
+      const match = /^([A-Z]+)-(\d+)$/.exec(scenario.reference);
+      const prefix = match?.[1] ?? "HP";
+      let index = Number(match?.[2] ?? 1);
+      let reference = scenario.reference;
+      while (usedReferences.has(reference)) {
+        reference = `${prefix}-${index}`;
+        index += 1;
+      }
+      usedReferences.add(reference);
+      return reference === scenario.reference ? scenario : { ...scenario, reference };
+    });
+  }
+  return result.filter((feature) => feature.source === "manual" || feature.scenarios.length > 0 || originalCounts.get(feature) === 0);
+}
+
 export function mergeSpecSources(generated: SpecFeature[], manual: SpecFeature[], tombstones: SpecTombstones = { featureKeys: new Set<string>(), scenarioKeys: new Set<string>() }, carried: SpecFeature[] = []) {
   const merged = new Map<string, SpecFeature>();
   for (const feature of carried) {

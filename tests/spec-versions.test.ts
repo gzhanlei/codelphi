@@ -117,6 +117,27 @@ describe("spec version persistence", () => {
     expect(db.changes).toEqual([]);
   });
 
+  it("restores an exact scenario identity across a feature rename before computing changes", async () => {
+    const db = connection([{ id: 11 }], false, {}, [previousScenario("HP-1", "lib/behavior-unit-ai.ts")]);
+    const currentScenario = {
+      ...scenario,
+      reference: "ER-2",
+      context: "User",
+      action: "Uses links",
+      outcome: "Links work",
+      evidence: [{ path: "lib/behavior-unit-ai.ts", startLine: 1 }],
+    };
+    await insertSpecVersion(db, run, {
+      ...result,
+      features: [
+        { name: "行为清单单元提取与状态推导", summary: "Different", scenarios: [currentScenario] },
+        { name: "Legacy", summary: "Removed", scenarios: [] },
+      ],
+    }, { behavioralChangePaths: new Set(["lib/behavior-unit-ai.ts"]) });
+
+    expect(db.changes).toEqual([]);
+  });
+
   it("records no changes for a first version", async () => {
     const db = connection([]);
     await insertSpecVersion(db, run, { ...result, features: [result.features[0]] });

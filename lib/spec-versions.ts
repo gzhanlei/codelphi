@@ -6,7 +6,7 @@ import { defaultExecute, type Execute } from "./db";
 import { evidenceItems } from "./evidence";
 import { nextReference } from "./extraction-merge";
 import type { ReleaseChangeFact } from "./release-change-projection";
-import { dedupeExactScenarioProjections, diffSpec, featureScenarioPairMatch, featureVariantSimilar, mergeSpecSources, preserveUnchangedEvidence, scenarioBehaviorEqual, specFeatureKey, specScenarioKey, unionScenarioOriginKeys, type PatchHunk, type SpecChange, type SpecFeature, type SpecScenario, type SpecTombstones } from "./spec-diff";
+import { dedupeExactScenarioProjections, diffSpec, featureScenarioPairMatch, featureVariantSimilar, mergeSpecSources, preserveExactScenarioIdentities, preserveUnchangedEvidence, scenarioBehaviorEqual, specFeatureKey, specScenarioKey, unionScenarioOriginKeys, type PatchHunk, type SpecChange, type SpecFeature, type SpecScenario, type SpecTombstones } from "./spec-diff";
 import { classifySpecHighlight } from "./spec-highlights";
 import { detectVisibilityConflicts } from "./spec-consistency";
 
@@ -384,7 +384,7 @@ export async function insertSpecVersion(connection: PoolConnection, run: RunCont
   // 的几个文件——门禁会把所有新功能吞掉（生产 v201 实证：70 个新功能 0 条 added，
   // 118 个旧名记为移除）。语言与模式无关：确定性变化摘要按本版输出语言生成（072）。
   const previousCanonical = previous === null ? null : { ...previous, features: dedupeExactScenarioProjections(previous.features) };
-  const finalFeatures = dedupeExactScenarioProjections(foldedFeatures);
+  const finalFeatures = dedupeExactScenarioProjections(preserveExactScenarioIdentities(previous?.features ?? [], foldedFeatures, tombstones));
   const visibilityConflicts = detectVisibilityConflicts(finalFeatures);
   if (visibilityConflicts.length > 0) {
     console.error("[spec] visibility outcome conflicts rejected", { runId: run.id, conflicts: visibilityConflicts.map((conflict) => ({ feature: conflict.feature, token: conflict.token })) });
