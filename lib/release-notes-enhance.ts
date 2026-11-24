@@ -263,8 +263,8 @@ export async function rewriteReleaseNoteCopy(
 ): Promise<ReleaseCopyOutcome> {
   const en = language === "en";
   const kindPrefix = (kind: string) => en
-    ? (kind === "removed" ? "[Removed]" : kind === "added" ? "[Added]" : "[Changed]")
-    : (kind === "removed" ? "[下线]" : kind === "added" ? "[新增]" : "[改变]");
+    ? (kind === "removed" ? "[Removed]" : kind === "added" ? "[Added]" : kind === "uncertain" ? "[Uncertain]" : "[Changed]")
+    : (kind === "removed" ? "[下线]" : kind === "added" ? "[新增]" : kind === "uncertain" ? "[未决]" : "[改变]");
   const editorCopy = en
     ? "You are a product announcements editor who merges internal change records into one user-readable feature update note; reword only, never change the facts."
     : "你是产品公告编辑，把内部变化记录合并成一条用户可读的功能更新说明，只改写措辞不改变事实。";

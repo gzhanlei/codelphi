@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dedupeExactScenarioProjections, diffSpec, diffSpecWithFolded, evaluateRemovalProof, mergeSpecSources, normalizeSpecText, parsePatchHunks, preserveExactScenarioIdentities, preserveUnchangedEvidence, scenarioVariantSimilar, scenarioBehaviorEqual, specChangeWordingOnly, specFeatureKey, specScenarioKey, specTextEquivalent, type SpecFeature } from "../lib/spec-diff";
+import { buildRemovalProofs, dedupeExactScenarioProjections, diffSpec, diffSpecWithFolded, evaluateRemovalProof, mergeSpecSources, normalizeSpecText, parsePatchHunks, preserveExactScenarioIdentities, preserveUnchangedEvidence, preserveUncertainDisappearances, scenarioVariantSimilar, scenarioBehaviorEqual, specChangeWordingOnly, specFeatureKey, specScenarioKey, specTextEquivalent, type SpecFeature } from "../lib/spec-diff";
 
 const authentication: SpecFeature = {
   name: "Authentication",
@@ -806,5 +806,44 @@ describe("removal lifecycle in spec diffs", () => {
 
     expect(diffSpec([before], [])).toEqual([]);
     expect(diffSpec([{ ...before, source: "generated" }], [])).toEqual([]);
+  });
+});
+
+
+describe("uncertain activation and production removal proofs", () => {
+  const scenario = (reference: string): SpecFeature["scenarios"][number] => ({
+    reference,
+    context: "匿名访客",
+    action: "打开发布页",
+    outcome: "进入发布流程",
+    category: "happy",
+    evidence: [{ path: "components/publish.tsx", startLine: 10 }],
+  });
+
+  it("keeps unproven disappearances active in the final ledger but not confirmed removals", () => {
+    const previous: SpecFeature = { name: "发布入口", summary: "s", scenarios: [scenario("HP-1")] };
+    const uncertainChanges = diffSpec([previous], []);
+    const activated = preserveUncertainDisappearances([previous], [], uncertainChanges);
+    expect(activated[0].scenarios[0].reference).toBe("HP-1");
+
+    const removedProofs = new Map([["发布入口", {
+      originalImplementationChecked: true,
+      alternativePathsChecked: true,
+      behaviorBoundaryVerified: true,
+      evidence: [{ path: "components/publish.tsx", startLine: 10 }],
+    }]]);
+    const removedChanges = diffSpec([previous], [], { removedProofs });
+    const removed = preserveUncertainDisappearances([previous], [], removedChanges);
+    expect(removed).toEqual([]);
+  });
+
+  it("builds confirmed removal proofs only for full coverage and a deleted original path", () => {
+    const previous: SpecFeature = { name: "发布入口", summary: "s", scenarios: [scenario("HP-1")] };
+    const changeFiles = [{ path: "components/publish.tsx", status: "removed", patch: "" }];
+    const proofs = buildRemovalProofs([previous], [], { changeFiles, fullAnalysis: true, coverageComplete: true });
+    expect(proofs.get("发布入口")).toMatchObject({ originalImplementationChecked: true, alternativePathsChecked: true, behaviorBoundaryVerified: true, evidenceValid: true });
+
+    const incomplete = buildRemovalProofs([previous], [], { changeFiles, fullAnalysis: true, coverageComplete: false });
+    expect(incomplete.size).toBe(0);
   });
 });

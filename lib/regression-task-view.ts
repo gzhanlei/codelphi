@@ -149,7 +149,7 @@ export function planRegressionTasks(input: { changes: PlannedChange[]; fileHits:
   return [...tasks.values()];
 }
 
-const kindLabels: Record<string, string> = { added: "新增", changed: "变化", removed: "移除" };
+const kindLabels: Record<string, string> = { added: "新增", changed: "变化", removed: "移除", uncertain: "未决" };
 
 function flatten(text: string) {
   return text.replace(/\s*\n\s*/g, " ").trim();
