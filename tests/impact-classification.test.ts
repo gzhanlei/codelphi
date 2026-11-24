@@ -4,7 +4,9 @@ import { IMPACT_RULES_VERSION, classifyFile, classifyWindow, type ChangedFile } 
 const BEHAVIORAL_PATCH = "@@ -10,2 +10,2 @@\n-  return computeOld(input);\n+  return computeNew(input);\n";
 const COMMENT_ONLY_PATCH = "@@ -10,0 +11,2 @@\n+// 旧的实现已经换掉，下面走新的入口。\n+// 入参保持不变。\n";
 
-function file(partial: Partial<ChangedFile> & Pick<ChangedFile, "path">): ChangedFile {
+type FileOverride = Partial<Omit<ChangedFile, "status" | "oldPath">> & Pick<ChangedFile, "path"> & Partial<Pick<ChangedFile, "status" | "oldPath">>;
+
+function file(partial: FileOverride): ChangedFile {
   return {
     oldPath: null,
     status: "modified",
@@ -15,7 +17,7 @@ function file(partial: Partial<ChangedFile> & Pick<ChangedFile, "path">): Change
     binary: false,
     patch: BEHAVIORAL_PATCH,
     ...partial,
-  };
+  } as ChangedFile;
 }
 
 const index = new Map<string, readonly string[]>([
@@ -89,6 +91,12 @@ describe("impact-v1 逐文件分类", () => {
     });
   });
 
+  it("tells an indexed file apart from an unindexed one even when it proves exactly one feature", () => {
+    const singleKeyIndex = new Map([["lib/one.ts", ["only:feature"]]]);
+    expect(classifyFile(file({ path: "lib/one.ts" }), singleKeyIndex)).toMatchObject({ classification: "direct", reason: "indexed_implementation", directFeatureKeys: ["only:feature"] });
+    expect(classifyFile(file({ path: "lib/two.ts" }), singleKeyIndex)).toMatchObject({ classification: "direct", reason: "unindexed_implementation_file", directFeatureKeys: [] });
+  });
+
   it("treats a new implementation file that hits no index entry as a direct candidate", () => {
     expect(classifyFile(file({ path: "lib/brand-new.ts", status: "added", oldPath: null, oldBlobSha: null }), index)).toMatchObject({
       classification: "direct",
@@ -153,6 +161,12 @@ describe("impact-v1 逐文件分类", () => {
     expect(classifyFile(file({ path, binary }), index)).toMatchObject({ classification: "no_detected_behavior_change", reason: "static_asset" });
   });
 
+  it("keeps treating a renamed binary asset as an asset when its new name loses the asset extension", () => {
+    const sameBlob = "c".repeat(40);
+    const renamedAsset = file({ path: "assets/logo", oldPath: "assets/logo.png", status: "renamed", oldBlobSha: sameBlob, newBlobSha: sameBlob, binary: true, patch: null });
+    expect(classifyFile(renamedAsset, index)).toMatchObject({ classification: "no_detected_behavior_change", reason: "static_asset" });
+  });
+
   it("leaves other binary content unknown instead of guessing", () => {
     expect(classifyFile(file({ path: "assets/blob.bin", binary: true }), index)).toMatchObject({ classification: "unknown", reason: "binary_content" });
     expect(classifyFile(file({ path: "docs/blob.bin", binary: true }), index)).toMatchObject({
@@ -161,12 +175,31 @@ describe("impact-v1 逐文件分类", () => {
     });
   });
 
-  it("leaves a mode-only change unknown", () => {
+  it("treats a mode-only change as detected but not behavioral (diff contract)", () => {
     const sameBlob = "c".repeat(40);
     expect(classifyFile(file({ path: "scripts/run.sh", oldMode: "100644", newMode: "100755", oldBlobSha: sameBlob, newBlobSha: sameBlob, patch: "" }), index)).toMatchObject({
-      classification: "unknown",
-      reason: "mode_only_change",
+      classification: "no_detected_behavior_change",
+      reason: "mode_change",
     });
+  });
+
+  it("forces full resync when a symlink or submodule changes (diff contract)", () => {
+    expect(classifyFile(file({ path: "link.ts", status: "added", oldMode: null, oldBlobSha: null, newMode: "120000" }), index)).toMatchObject({
+      classification: "global_unbounded",
+      reason: "symlink",
+    });
+    expect(classifyFile(file({ path: "sub/mod", status: "modified", newMode: "160000" }), index)).toMatchObject({
+      classification: "global_unbounded",
+      reason: "submodule",
+    });
+    expect(classifyFile(file({ path: "link.ts", status: "deleted", oldMode: "120000", newMode: null, newBlobSha: null }), index)).toMatchObject({
+      classification: "global_unbounded",
+      reason: "symlink",
+    });
+  });
+
+  it("re-analyzes a changed file whose patch git could not render", () => {
+    expect(classifyFile(file({ path: "lib/analysis.ts", patch: "diff --git a/x b/x\nindex 111..222 100644\nBinary files a/x and b/x differ\n" }), index).classification).toBe("direct");
   });
 });
 

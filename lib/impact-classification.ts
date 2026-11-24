@@ -16,27 +16,30 @@ export const IMPACT_RULES_VERSION = "impact-v1";
 
 export type FileStatus = "modified" | "added" | "deleted" | "renamed";
 
-/** 与 §7.1 的 `git diff --raw -z` 清单逐项对应的变更文件。 */
-export interface ChangedFile {
+interface FileIdentity {
   path: string;
-  oldPath: string | null;
-  status: FileStatus;
   oldMode: string | null;
   newMode: string | null;
   oldBlobSha: string | null;
   newBlobSha: string | null;
-  binary: boolean;
-  /** unified diff（`-U0`）；缺失时按行为变更处理。 */
-  patch: string | null;
 }
+
+/**
+ * `git diff --raw -z` 清单里的一条记录。删除的文件 `path` 就是它原来的路径；只有重命名带两个路径，
+ * 所以 `oldPath` 只在重命名时有值，类型上写不出别的搭配。
+ */
+export type ManifestEntry = FileIdentity & ({ status: "renamed"; oldPath: string } | { status: Exclude<FileStatus, "renamed">; oldPath: null });
+
+/** 清单记录加上二进制判定（按 blob 内容）与补丁。 */
+export type ChangedFile = ManifestEntry & { binary: boolean; patch: string | null };
 
 /** 基线文件索引：证据路径 → 以它为证据的功能键。只应包含自动功能。 */
 export type FileIndex = ReadonlyMap<string, readonly string[]>;
 
-export type GlobalReason = "assembly_point" | "schema_migration" | "runtime_config" | "dependency_manifest" | "shared_module";
-export type UnknownReason = "binary_content" | "mode_only_change";
-export type NoBehaviorReason = "document" | "comment_or_format_only";
-export type NoDetectedReason = "test_code" | "ci_config" | "editor_or_vcs_config" | "static_asset";
+export type GlobalReason = "assembly_point" | "schema_migration" | "runtime_config" | "dependency_manifest" | "shared_module" | "symlink" | "submodule";
+export type UnknownReason = "binary_content";
+export type NoBehaviorReason = "document" | "comment_or_format_only" | "content_unchanged";
+export type NoDetectedReason = "test_code" | "ci_config" | "editor_or_vcs_config" | "static_asset" | "mode_change";
 export type DirectReason = "indexed_implementation" | "unindexed_implementation_file";
 
 interface ChangedPaths {
@@ -145,6 +148,10 @@ const GLOBAL_RULES: ReadonlyArray<{ reason: GlobalReason; patterns: readonly Reg
 
 const CI_CONFIG = /(?:^|\/)(?:Makefile|makefile|GNUmakefile)$|(?:^|\/)\.buildkite\/|(?:^|\/)azure-pipelines\.yml$|(?:^|\/)\.pre-commit-config\.ya?ml$|(?:^|\/)\.husky\/|(?:^|\/)lefthook\.ya?ml$|(?:^|\/)\.huskyrc(?:\.js)?$/;
 const EDITOR_OR_VCS_CONFIG = /(?:^|\/)\.(?:gitignore|gitattributes|gitmodules|git-blame-ignore-revs|editorconfig|mailmap|npmrc|DS_Store)$|^\/\.(?:vscode|idea)\//;
+/** §7.1 的契约：符号链接与子模块的变化一律全量重同步。 */
+const SPECIAL_MODE_REASON: Readonly<Record<string, GlobalReason>> = { "120000": "symlink", "160000": "submodule" };
+/** 没有任何 hunk 的补丁证明不了「无行为变化」：二进制，以及被 `-diff` 属性挡住的文本，git 都只给出 Binary files differ。 */
+const HUNK_HEADER = /^@@ -\d+/m;
 const STATIC_ASSET = /\.(?:png|jpe?g|gif|webp|avif|svg|ico|icns|bmp|tiff?|psd|pdf|mp3|mp4|m4a|aac|wav|ogg|opus|webm|mov|avi|mkv|ttf|otf|woff2?|eot)$/i;
 
 const RANK: Record<FileImpact["classification"], number> = {
@@ -164,34 +171,50 @@ function globalRuleFor(path: string): GlobalReason | null {
   return null;
 }
 
+type ChangedBase = ChangedPaths;
+
+function pathsOf(file: ChangedFile): ChangedBase {
+  return { path: file.path, oldPath: file.oldPath, status: file.status };
+}
+
+const noBehavior = (base: ChangedBase, reason: NoBehaviorReason): FileImpact => ({ ...base, classification: "no_behavior", reason });
+const noDetected = (base: ChangedBase, reason: NoDetectedReason): FileImpact => ({ ...base, classification: "no_detected_behavior_change", reason });
+
+function binaryImpact(file: ChangedFile, base: ChangedBase): FileImpact {
+  const knownAsset = (path: string) => /^(?:docs\/|[^/]*\.md$)/.test(path) || STATIC_ASSET.test(path);
+  return (file.status === "renamed" ? [file.path, file.oldPath] : [file.path]).some(knownAsset) ? noDetected(base, "static_asset") : { ...base, classification: "unknown", reason: "binary_content" };
+}
+
+/** 内容没变的变更：纯重命名、仅模式变化。新增与删除总是算内容有变。 */
+function unchangedContentImpact(file: ChangedFile, base: ChangedBase): FileImpact | null {
+  const sameBlob = file.oldBlobSha !== null && file.oldBlobSha === file.newBlobSha;
+  if (!sameBlob || file.status === "added" || file.status === "deleted") return null;
+  if (file.status === "renamed") return { ...base, classification: "no_detected_behavior_change", reason: "pure_rename", reanchorsTo: file.oldPath };
+  // 仅模式变化（如可执行位）：契约定为 no_detected_behavior_change，不是 unknown。
+  return file.oldMode === file.newMode ? noBehavior(base, "content_unchanged") : noDetected(base, "mode_change");
+}
+
+/** 按路径所在层级归类，数组顺序即优先级。都不命中的是普通实现文件。 */
+const PATH_TIERS: ReadonlyArray<{ matches: (path: string) => boolean; impact: (base: ChangedBase) => FileImpact }> = [
+  { matches: (path) => evidenceKind(path) === "test", impact: (base) => noDetected(base, "test_code") },
+  { matches: (path) => isInfrastructureEvidence(path) || CI_CONFIG.test(path), impact: (base) => noDetected(base, "ci_config") },
+  { matches: (path) => EDITOR_OR_VCS_CONFIG.test(path), impact: (base) => noDetected(base, "editor_or_vcs_config") },
+  { matches: (path) => STATIC_ASSET.test(path), impact: (base) => noDetected(base, "static_asset") },
+  { matches: (path) => evidenceKind(path) === "document", impact: (base) => noBehavior(base, "document") },
+];
+
 /** 不依赖索引与补丁内容的归类；返回 null 表示要按实现文件处理。 */
 function classifyByNature(file: ChangedFile): FileImpact | null {
-  const base = { path: file.path, oldPath: file.oldPath, status: file.status };
-  if (file.binary) {
-    const asset = /^(?:docs\/|[^/]*\.md$)/.test(file.path) || STATIC_ASSET.test(file.path) || STATIC_ASSET.test(file.oldPath ?? "");
-    return asset ? { ...base, classification: "no_detected_behavior_change", reason: "static_asset" } : { ...base, classification: "unknown", reason: "binary_content" };
-  }
-  const sameBlob = file.oldBlobSha !== null && file.oldBlobSha === file.newBlobSha;
-  if (file.status === "renamed" && sameBlob) {
-    return { ...base, classification: "no_detected_behavior_change", reason: "pure_rename", reanchorsTo: file.oldPath ?? file.path };
-  }
-  if (sameBlob && file.status !== "added" && file.status !== "deleted") {
-    return file.oldMode === file.newMode
-      ? { ...base, classification: "no_behavior", reason: "comment_or_format_only" }
-      : { ...base, classification: "unknown", reason: "mode_only_change" };
-  }
-  const path = file.path || file.oldPath || "";
-  if (evidenceKind(path) === "test") return { ...base, classification: "no_detected_behavior_change", reason: "test_code" };
-  if (isInfrastructureEvidence(path) || CI_CONFIG.test(path)) return { ...base, classification: "no_detected_behavior_change", reason: "ci_config" };
-  if (EDITOR_OR_VCS_CONFIG.test(path)) return { ...base, classification: "no_detected_behavior_change", reason: "editor_or_vcs_config" };
-  if (STATIC_ASSET.test(path)) return { ...base, classification: "no_detected_behavior_change", reason: "static_asset" };
-  if (evidenceKind(path) === "document") return { ...base, classification: "no_behavior", reason: "document" };
-  return null;
+  const base = pathsOf(file);
+  if (file.binary) return binaryImpact(file, base);
+  const unchanged = unchangedContentImpact(file, base);
+  if (unchanged) return unchanged;
+  const tier = PATH_TIERS.find((candidate) => candidate.matches(file.path));
+  return tier ? tier.impact(base) : null;
 }
 
 function lookupPaths(file: ChangedFile): string[] {
-  if (file.status === "deleted") return [file.oldPath ?? file.path];
-  if (file.status === "renamed") return [file.oldPath ?? file.path, file.path];
+  if (file.status === "renamed") return [file.oldPath, file.path];
   return [file.path];
 }
 
@@ -202,8 +225,9 @@ function featureKeysFor(paths: readonly string[], index: FileIndex): string[] {
 }
 
 function implementationImpact(file: ChangedFile, index: FileIndex): FileImpact {
-  const base = { path: file.path, oldPath: file.oldPath, status: file.status };
-  const behavioral = behavioralChangePaths([{ path: file.path, status: file.status, patch: file.patch ?? "" }]).has(file.path);
+  const base = pathsOf(file);
+  const hasHunk = file.patch !== null && HUNK_HEADER.test(file.patch);
+  const behavioral = !hasHunk || behavioralChangePaths([{ path: file.path, status: file.status, patch: file.patch ?? "" }]).has(file.path);
   if (!behavioral) return { ...base, classification: "no_behavior", reason: "comment_or_format_only" };
   const directFeatureKeys = featureKeysFor(lookupPaths(file), index);
   return { ...base, classification: "direct", reason: directFeatureKeys.length > 0 ? "indexed_implementation" : "unindexed_implementation_file", directFeatureKeys };
@@ -211,8 +235,10 @@ function implementationImpact(file: ChangedFile, index: FileIndex): FileImpact {
 
 /** 给一个变更文件定档。全局规则最先匹配，所以一个路径同时命中多行时取到的是最保守的一档。 */
 export function classifyFile(file: ChangedFile, index: FileIndex): FileImpact {
-  const globalReason = globalRuleFor(file.path) ?? (file.oldPath ? globalRuleFor(file.oldPath) : null);
-  if (globalReason) return { path: file.path, oldPath: file.oldPath, status: file.status, classification: "global_unbounded", reason: globalReason };
+  const base = pathsOf(file);
+  const specialReason = SPECIAL_MODE_REASON[file.oldMode ?? ""] ?? SPECIAL_MODE_REASON[file.newMode ?? ""];
+  const globalReason = specialReason ?? globalRuleFor(file.path) ?? (file.status === "renamed" ? globalRuleFor(file.oldPath) : null);
+  if (globalReason) return { ...base, classification: "global_unbounded", reason: globalReason };
   return classifyByNature(file) ?? implementationImpact(file, index);
 }
 
