@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diffSpec, diffSpecWithFolded, mergeSpecSources, normalizeSpecText, parsePatchHunks, preserveUnchangedEvidence, scenarioVariantSimilar, scenarioBehaviorEqual, specChangeWordingOnly, specFeatureKey, specScenarioKey, specTextEquivalent, type SpecFeature } from "../lib/spec-diff";
+import { dedupeExactScenarioProjections, diffSpec, diffSpecWithFolded, evaluateRemovalProof, mergeSpecSources, normalizeSpecText, parsePatchHunks, preserveExactScenarioIdentities, preserveUnchangedEvidence, scenarioVariantSimilar, scenarioBehaviorEqual, specChangeWordingOnly, specFeatureKey, specScenarioKey, specTextEquivalent, type SpecFeature } from "../lib/spec-diff";
 
 const authentication: SpecFeature = {
   name: "Authentication",
@@ -28,7 +28,7 @@ describe("spec behavior diff", () => {
 
     const removed = diffSpec([authentication], []);
     expect(removed).toHaveLength(1);
-    expect(removed[0]).toMatchObject({ kind: "removed", entityType: "feature", featureName: "Authentication" });
+    expect(removed[0]).toMatchObject({ kind: "uncertain", entityType: "feature", featureName: "Authentication" });
     expect(removed[0].after).toBeNull();
     expect(removed[0].before).toEqual(authentication);
   });
@@ -63,7 +63,7 @@ describe("spec behavior diff", () => {
     expect(result.map((change) => `${change.kind}:${change.entityType}`)).toEqual(["changed:feature", "added:scenario"]);
 
     const removedScenario = diffSpec([changed], [authentication]);
-    expect(removedScenario.map((change) => `${change.kind}:${change.entityType}`)).toEqual(["changed:feature", "removed:scenario"]);
+    expect(removedScenario.map((change) => `${change.kind}:${change.entityType}`)).toEqual(["changed:feature", "uncertain:scenario"]);
   });
 });
 
@@ -236,7 +236,7 @@ describe("spec wording equivalence (P0 noise collapse)", () => {
     before.scenarios.push({ reference: "HP-2", context: "任务不存在", action: "查询任务详情", outcome: "返回 404", category: "error", evidence: [] });
     const after = structuredClone(authentication);
     after.scenarios.push({ reference: "HP-6", context: "任务已被删除", action: "恢复任务", outcome: "恢复成功并通知成员", category: "happy", evidence: [] });
-    expect(diffSpec([before], [after]).map((change) => change.kind)).toEqual(["removed", "added"]);
+    expect(diffSpec([before], [after]).map((change) => change.kind)).toEqual(["uncertain", "added"]);
   });
 
   it("pairs renumbered scenarios greedily without reusing the same added row", () => {
@@ -477,7 +477,7 @@ describe("bilingual equivalence gates (EN output mode)", () => {
       [{ name: "Login", summary: "s", scenarios: [] }],
       { language: "en" },
     );
-    expect(englishScenario[0].summary).toBe('"Login" removed scenario HP-1');
+    expect(englishScenario[0].summary).toBe('"Login" uncertain scenario HP-1');
   });
 });
 
@@ -599,7 +599,7 @@ describe("可见性场景生命周期", () => {
     expect(scenarios.map((scenario) => scenario.reference)).not.toContain("HP-1");
     expect(scenarios.map((scenario) => scenario.reference)).toContain("HP-10");
     expect(scenarios.map((scenario) => scenario.reference)).toContain("EC-2");
-    expect(diffSpec([previous], merged)).toContainEqual(expect.objectContaining({ kind: "removed", scenarioReference: "HP-1" }));
+    expect(diffSpec([previous], merged)).toContainEqual(expect.objectContaining({ kind: "uncertain", scenarioReference: "HP-1" }));
   });
 });
 
@@ -638,5 +638,173 @@ describe("preserveUnchangedEvidence 全模式 carry（release 284 根治）", ()
     const merged = result.find((f) => f.name === "统一登录")!;
     expect(merged.scenarios.some((s) => s.reference === "HP-1" && s.outcome === "o-new")).toBe(true); // AI 新版优先
     expect(merged.scenarios.some((s) => s.reference === "HP-2")).toBe(true); // 积累场景锚点安全→保
+  });
+});
+
+
+describe("dedupeExactScenarioProjections", () => {
+  const duplicateScenario = (reference: string, overrides: Record<string, unknown> = {}) => ({
+    reference,
+    context: "GitHub 返回 401/403 或 404",
+    action: "listGitHubRepositories 执行",
+    outcome: "分别抛出权限不足或安装不存在错误，状态映射为 400",
+    category: "error" as const,
+    originKeys: [`scenario|${reference}`],
+    evidence: [{ path: "lib/github-repositories.ts", startLine: 10 }],
+    ...overrides,
+  });
+
+  it("drops only exact duplicate generated projections and unions their origins", () => {
+    const first: SpecFeature = { name: "GitHub App 接入与仓库列表", summary: "s", scenarios: [duplicateScenario("ER-1")] };
+    const second: SpecFeature = { name: "GitHub 仓库列表与令牌解析", summary: "s2", scenarios: [duplicateScenario("ER-2", { context: "GitHub 返回 401/403 或 404 ", evidence: [{ path: "lib/github-repositories.ts", startLine: 99 }] })] };
+
+    const result = dedupeExactScenarioProjections([first, second]);
+    expect(result).toHaveLength(1);
+    expect(result[0].name).toBe(first.name);
+    expect(result[0].scenarios).toHaveLength(1);
+    expect(result[0].scenarios[0].originKeys).toEqual(["scenario|ER-1", "scenario|ER-2"]);
+  });
+
+  it("never drops a manual scenario as a generated duplicate", () => {
+    const generated: SpecFeature = { name: "Generated", summary: "s", scenarios: [duplicateScenario("ER-1")] };
+    const manual: SpecFeature = { name: "Manual", summary: "s2", source: "manual", scenarios: [duplicateScenario("ER-M", { source: "manual" })] };
+
+    const result = dedupeExactScenarioProjections([generated, manual]);
+    expect(result).toHaveLength(2);
+    expect(result[1].scenarios[0].reference).toBe("ER-M");
+  });
+
+  it("does not merge scenarios that have different evidence paths", () => {
+    const first: SpecFeature = { name: "A", summary: "s", scenarios: [duplicateScenario("ER-1")] };
+    const second: SpecFeature = { name: "B", summary: "s2", scenarios: [duplicateScenario("ER-2", { evidence: [{ path: "lib/other.ts", startLine: 10 }] })] };
+
+    expect(dedupeExactScenarioProjections([first, second])).toHaveLength(2);
+  });
+
+  it("canonicalizes previous duplicates before computing the release delta", () => {
+    const previousDuplicate: SpecFeature = { name: "Old duplicate", summary: "s", scenarios: [duplicateScenario("ER-1")] };
+    const current: SpecFeature = { name: "GitHub App 接入与仓库列表", summary: "s", scenarios: [duplicateScenario("ER-1")] };
+    const previous = dedupeExactScenarioProjections([current, previousDuplicate]);
+
+    expect(diffSpec(previous, [current])).toEqual([]);
+  });
+});
+
+
+describe("preserveExactScenarioIdentities", () => {
+  const projection = (reference: string, overrides: Record<string, unknown> = {}) => ({
+    reference,
+    context: "judge 输出的 internalKind 不在枚举内",
+    action: "parseJudgeContent 解析区域结论",
+    outcome: "剥除该字段并打 warn 日志，由状态推导落 unresolved，不使整个任务 parse 崩溃",
+    category: "error" as const,
+    originKeys: [`scenario|${reference}`],
+    evidence: [{ path: "lib/behavior-unit-ai.ts", startLine: 20 }],
+    ...overrides,
+  });
+
+  it("restores the previous feature and reference for an unambiguous exact match", () => {
+    const previous: SpecFeature = { name: "AI 规格分析与发布变化", summary: "s", scenarios: [projection("ER-1")] };
+    const current: SpecFeature = { name: "行为清单单元提取与状态推导", summary: "s2", scenarios: [projection("ER-2")] };
+
+    const result = preserveExactScenarioIdentities([previous], [current]);
+    expect(result).toHaveLength(1);
+    expect(result[0].name).toBe(previous.name);
+    expect(result[0].scenarios[0]).toMatchObject({ reference: "ER-1", originKeys: ["scenario|ER-2"] });
+  });
+
+  it("renumbers a conflicting current scenario instead of overwriting either behavior", () => {
+    const previous: SpecFeature = { name: "A", summary: "s", scenarios: [projection("ER-1")] };
+    const occupied: SpecFeature = { name: "A", summary: "s2", scenarios: [projection("ER-1", { outcome: "不同结果" })] };
+    const candidate: SpecFeature = { name: "B", summary: "s3", scenarios: [projection("ER-2")] };
+
+    const result = preserveExactScenarioIdentities([previous], [occupied, candidate]);
+    expect(result).toHaveLength(1);
+    const scenarios = result[0].scenarios;
+    expect(scenarios.find((scenario) => scenario.outcome === projection("ER-1").outcome)?.reference).toBe("ER-1");
+    expect(scenarios.find((scenario) => scenario.outcome === "不同结果")?.reference).not.toBe("ER-1");
+  });
+
+  it("does not restore behavior into a manual feature", () => {
+    const previous: SpecFeature = { name: "Manual", summary: "s", source: "manual", scenarios: [projection("ER-1")] };
+    const current: SpecFeature = { name: "Generated", summary: "s2", scenarios: [projection("ER-2")] };
+
+    const result = preserveExactScenarioIdentities([previous], [current]);
+    expect(result[0].name).toBe("Generated");
+    expect(result[0].scenarios[0].reference).toBe("ER-2");
+  });
+
+  it("uses the deterministic survivor when the previous version contains exact duplicates", () => {
+    const first: SpecFeature = { name: "A", summary: "s", scenarios: [projection("ER-1")] };
+    const duplicate: SpecFeature = { name: "Old duplicate", summary: "s2", scenarios: [projection("ER-9")] };
+    const current: SpecFeature = { name: "B", summary: "s3", scenarios: [projection("ER-2")] };
+
+    const result = preserveExactScenarioIdentities([first, duplicate], [current]);
+    expect(result).toHaveLength(1);
+    expect(result[0].name).toBe("A");
+    expect(result[0].scenarios[0].reference).toBe("ER-1");
+  });
+});
+
+
+describe("evaluateRemovalProof", () => {
+  const completeProof = {
+    originalImplementationChecked: true,
+    alternativePathsChecked: true,
+    behaviorBoundaryVerified: true,
+    evidence: [{ path: "components/publish.tsx", startLine: 10 }],
+  };
+
+  it("distinguishes not observed, stale evidence, incomplete proof and confirmed removal", () => {
+    expect(evaluateRemovalProof(undefined)).toMatchObject({ classification: "not_observed", judgment: "uncertain" });
+    expect(evaluateRemovalProof({ ...completeProof, evidenceValid: false })).toMatchObject({ classification: "evidence_stale", judgment: "uncertain" });
+    expect(evaluateRemovalProof({ ...completeProof, originalImplementationChecked: false })).toMatchObject({ classification: "uncertain", judgment: "uncertain" });
+    expect(evaluateRemovalProof({ ...completeProof, alternativePathsChecked: false })).toMatchObject({ classification: "uncertain", judgment: "uncertain" });
+    expect(evaluateRemovalProof({ ...completeProof, behaviorBoundaryVerified: false })).toMatchObject({ classification: "uncertain", judgment: "uncertain" });
+    expect(evaluateRemovalProof(completeProof)).toMatchObject({ classification: "removed", judgment: "confirmed" });
+  });
+});
+
+describe("removal lifecycle in spec diffs", () => {
+  const publishScenario = (reference: string, context: string): SpecFeature["scenarios"][number] => ({
+    reference,
+    context,
+    action: "打开发布入口",
+    outcome: "进入发布流程",
+    category: "happy",
+    evidence: [{ path: "components/publish.tsx", startLine: 10 }],
+  });
+
+  it("returns uncertain instead of removed when only the old scenario is missing", () => {
+    const before: SpecFeature = { name: "发布入口", summary: "s", scenarios: [publishScenario("HP-1", "匿名访客")] };
+    const changes = diffSpec([before], []);
+
+    expect(changes[0]).toMatchObject({ kind: "uncertain", judgment: "uncertain", evidenceState: "not_observed" });
+  });
+
+  it("removes only the proven scenario while preserving the parent behavior and other scenarios", () => {
+    const before: SpecFeature = {
+      name: "发布入口",
+      summary: "s",
+      scenarios: [publishScenario("HP-1", "匿名访客"), publishScenario("HP-2", "登录用户")],
+    };
+    const after: SpecFeature = { ...before, scenarios: [publishScenario("HP-2", "登录用户")] };
+    const removedProofs = new Map([["发布入口:HP-1", {
+      originalImplementationChecked: true,
+      alternativePathsChecked: true,
+      behaviorBoundaryVerified: true,
+      evidence: [{ path: "components/publish.tsx", startLine: 10 }],
+    }]]);
+
+    const changes = diffSpec([before], [after], { removedProofs });
+    expect(changes).toHaveLength(1);
+    expect(changes[0]).toMatchObject({ kind: "removed", entityType: "scenario", scenarioReference: "HP-1", judgment: "confirmed", evidenceState: "removed" });
+  });
+
+  it("never auto-removes a manual feature or scenario", () => {
+    const before: SpecFeature = { name: "人工发布入口", summary: "s", source: "manual", scenarios: [{ ...publishScenario("HP-1", "匿名访客"), source: "manual" }] };
+
+    expect(diffSpec([before], [])).toEqual([]);
+    expect(diffSpec([{ ...before, source: "generated" }], [])).toEqual([]);
   });
 });

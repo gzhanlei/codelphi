@@ -161,7 +161,7 @@ describe("product overview rendering (Specsight 原则版式)", () => {
       latestRun: { status: "succeeded" },
     });
     expect(data.changes.map((change) => change.id)).toEqual([2, 3, 1]);
-    expect(data.changeStats).toEqual({ added: 1, removed: 1, changed: 2 });
+    expect(data.changeStats).toEqual({ added: 1, removed: 1, changed: 2, uncertain: 0 });
     // 发布产品对话框按功能勾选：changeGroups 供 feature 级复选框
     expect(data.changeGroups).toHaveLength(4);
     expect(Object.fromEntries(data.changeGroups.map((group) => [group.featureName, { added: group.added, changed: group.changed, removed: group.removed }]))).toMatchObject({

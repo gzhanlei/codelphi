@@ -123,7 +123,7 @@ export function planRegressionTasks(input: { changes: PlannedChange[]; fileHits:
   };
 
   for (const change of [...changes].sort((a, b) => a.id - b.id)) {
-    if (change.entityType === "scenario" && change.kind !== "removed" && change.scenarioId !== null) {
+    if (change.entityType === "scenario" && change.kind !== "removed" && change.kind !== "uncertain" && change.scenarioId !== null) {
       const subject: TaskSubject = { kind: "scenario", scenarioId: change.scenarioId };
       const value = task(subject);
       if (!value.sources.includes(change.id)) value.sources.push(change.id);

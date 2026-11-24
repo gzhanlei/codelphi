@@ -59,7 +59,7 @@ describe("spec version persistence", () => {
     expect(specChanges).toHaveLength(4);
     expect(specChanges.map((change) => change.id)).toEqual([500, 501, 502, 503]);
     expect(specChanges.map((change) => change.summary)).toEqual(db.changes.map((change) => change[7]));
-    expect(db.changes.map((change) => change[3])).toEqual(expect.arrayContaining(["added", "changed", "removed"]));
+    expect(db.changes.map((change) => change[3])).toEqual(expect.arrayContaining(["added", "changed", "uncertain"]));
     expect(db.changes.every((change) => change[1] === 11)).toBe(true);
     expect(db.changes.some((change) => change[8] === null)).toBe(true);
     expect(db.changes.some((change) => change[9] === null)).toBe(true);
@@ -91,6 +91,63 @@ describe("spec version persistence", () => {
     const db = connection([{ id: 11 }]);
     await insertSpecVersion(db, run, result, { baseVersionId: 11 });
     expect(db.execute).toHaveBeenCalledWith("SELECT id FROM spec_versions WHERE repository_id = ? AND id = ?", [3, 11]);
+  });
+
+  it("dedupes exact projections on both versions before writing release changes", async () => {
+    const previous = [
+      previousScenario("HP-1", "lib/github-repositories.ts"),
+      { ...previousScenario("HP-1", "lib/github-repositories.ts"), featureId: 2 },
+    ];
+    const db = connection([{ id: 11 }], false, {}, previous);
+    const currentScenario = {
+      ...scenario,
+      context: "User",
+      action: "Uses links",
+      outcome: "Links work",
+      evidence: [{ path: "lib/github-repositories.ts", startLine: 1 }],
+    };
+    await insertSpecVersion(db, run, {
+      ...result,
+      features: [
+        { name: "Authentication", summary: "Old", scenarios: [currentScenario] },
+        { name: "GitHub repositories", summary: "Duplicate", scenarios: [{ ...currentScenario, reference: "ER-1" }] },
+      ],
+    });
+
+    expect(db.changes).toEqual([]);
+  });
+
+  it("restores an exact scenario identity across a feature rename before computing changes", async () => {
+    const db = connection([{ id: 11 }], false, {}, [previousScenario("HP-1", "lib/behavior-unit-ai.ts")]);
+    const currentScenario = {
+      ...scenario,
+      reference: "ER-2",
+      context: "User",
+      action: "Uses links",
+      outcome: "Links work",
+      evidence: [{ path: "lib/behavior-unit-ai.ts", startLine: 1 }],
+    };
+    await insertSpecVersion(db, run, {
+      ...result,
+      features: [
+        { name: "行为清单单元提取与状态推导", summary: "Different", scenarios: [currentScenario] },
+        { name: "Legacy", summary: "Removed", scenarios: [] },
+      ],
+    }, { behavioralChangePaths: new Set(["lib/behavior-unit-ai.ts"]) });
+
+    expect(db.changes).toEqual([]);
+  });
+
+  it("persists uncertain removal judgment and evidence state", async () => {
+    const db = connection([{ id: 11 }], false, {}, [previousScenario("HP-1", "lib/behavior-unit-ai.ts")]);
+    await insertSpecVersion(db, run, { ...result, features: [{ name: "Legacy", summary: "Removed", scenarios: [] }] }, { behavioralChangePaths: new Set(["lib/behavior-unit-ai.ts"]) });
+
+    const change = db.changes.find((parameters) => parameters[2] === "feature");
+    expect(change?.[2]).toBe("feature");
+    expect(change?.[3]).toBe("uncertain");
+    expect(change?.[12]).toBe("uncertain");
+    expect(change?.[13]).toBe("not_observed");
+    expect(JSON.parse(String(change?.[14]))).toEqual(["not_observed"]);
   });
 
   it("records no changes for a first version", async () => {
