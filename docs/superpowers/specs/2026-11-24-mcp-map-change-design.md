@@ -104,7 +104,7 @@ P0 不追求通过关键词证明「相同能力」。无法使用强身份依�
   gaps: Array<{
     kind: "no_current_match" | "no_history" | "stale_evidence" |
       "existence_unavailable" | "history_unavailable" | "version_relation_unavailable" |
-      "snapshot_unavailable" | "coverage_incomplete" | "source_unavailable";
+      "snapshot_unavailable" | "freshness_unavailable" | "coverage_incomplete" | "source_unavailable";
     summary: string;
   }>;
   returnedCount: number;
@@ -176,7 +176,7 @@ P0 可接受的强身份仅限：
 
 1. `scenario_id`：调用意图明确给出 `stableKey + reference`，可解析到具体行为记录；单独出现的 HP/EC/ER reference 不构成跨版本身份。
 2. `exact_behavior_text`：当前与历史的 `context/action/outcome` 规范化后逐字一致，并有相同规范路径支撑；计算 SHA-256 `textHash` 供审计。仅描述变化即失去该身份并降级。
-3. `manual_alias`：产品内已有明确、可寻址的人工能力映射，可以把意图或行为记录解析到具体场景。P0 不新建别名库，不存在时不得使用。
+3. `manual_alias`：只有明确包含 `stableKey + reference` 的人工场景映射才可作为强身份。现有 `feature_aliases` 只是 `alias_key → canonical_key` 的功能名级映射，只能用于 Intent Retrieval 和 `related`，不得把该功能下全部场景升级为 Direct。P0 不新建场景别名库，不存在场景级映射时不得使用此强身份。
 
 `shared_evidence` 与 `feature_connection` 只证明实现邻域，不能升级为 Direct。`lexical` 只用于召回与排序末位，不是能力判断。
 
@@ -185,7 +185,7 @@ P0 可接受的强身份仅限：
 P0 冻结以下算法，所有实现与测试使用同一组规范向量：
 
 1. 按 `context → action → outcome` 固定顺序取值，不纳入 feature 名、reference、category、step 或 evidence 内容。
-2. 非 null 字符串依次执行 Unicode NFKC、CRLF/CR 转为 LF、去除首尾 Unicode 空白、把内部连续 Unicode 空白折叠为一个普通空格，再执行 JavaScript `toLowerCase()`。
+2. 非 null 字符串依次执行 Unicode NFKC、CRLF/CR 转为 LF、以 `/^\p{White_Space}+|\p{White_Space}+$/gu` 去除首尾空白、以 `/\p{White_Space}+/gu` 把内部连续空白折叠为一个普通空格，再执行 JavaScript `toLowerCase()`。
 3. null 始终保持 null；空字符串与只含空白字符串规范化为 `""`，二者不得改成 null。
 4. 对 `[normalizedContext, normalizedAction, normalizedOutcome]` 使用 JavaScript `JSON.stringify` 生成无多余空白的 JSON 数组，不追加换行。
 5. 对该 JSON 字符串的 UTF-8 字节计算 SHA-256，输出小写十六进制 `textHash`。
@@ -274,8 +274,10 @@ type EvidenceSource =
 
 现有类型与逐证据判定固定为：
 
+- `snapshot` 固定选择与 `get_project_summary` 相同的当前 release：`is_current=1`，按 `analysis_run_id DESC, id DESC` 取第一条；freshness 查询必须显式以该 `snapshot.sha` 为 analyzedSha，不得另取 `committed_at` 最新 release。若返回的 `freshness.analyzedSha !== snapshot.sha`，所有当前证据为 `unknown` 并增加 `freshness_unavailable`。
 - `snapshot.freshness` 使用 `LedgerFreshness`。`available=false` 时，所有当前证据的 `evidenceFreshness=unknown`。
-- `available=true` 时，若场景任一证据路径位于 `changedBehavioralPaths`，该场景为 `evidenceFreshness=stale`；否则该场景为 `fresh`。`changedBehavioralFiles` 只是快照级汇总，不能代替逐路径判断。
+- freshness 的 analyzedSha..HEAD 文件清单必须走未截断的元数据通道；若只有 120 文件预算结果或任何 capped 结果，所有依赖该窗口的证据为 `unknown` 并增加 `freshness_unavailable`，不得把未出现在截断列表中的路径标为 fresh。
+- `available=true` 且文件清单完整时，若场景任一证据路径位于 `changedBehavioralPaths`，该场景为 `evidenceFreshness=stale`；否则该场景为 `fresh`。`changedBehavioralFiles` 只是快照级汇总，不能代替逐路径判断。
 - 快照新鲜不等于每条场景证据新鲜；快照有后续变化也不等于所有场景都过期。
 - `evidenceCoverage=null` 或 `implFilesTotal=0` 时 `inputCoverageStatus=unknown`；`partitionsCapped=true` 时为 `capped`；`coverageRatio<1` 或 assembled 数小于 total 时为 `partial`；其余为 `complete`。该状态只描述已分析实现输入的覆盖，不证明产品行为完整。
 - `unknown/partial/capped` 均增加 `coverage_incomplete`，但摘要必须区分未知、部分覆盖和分片封顶。
@@ -297,7 +299,9 @@ type EvidenceSource =
 
 ### 7.2 快照边界
 
-存在性校验只针对分析快照，不是调用方 HEAD 或未提交工作区。快照树不可用时：
+存在性校验只针对分析快照，不是调用方 HEAD 或未提交工作区。校验必须读取原始树条目，pruned 只表示内容读取被裁剪，不表示文件不存在；不得直接复用会把 pruned 条目返回 null 的 `statPath` 语义。scope 越界、树展开预算耗尽或其他无法判定的情况统一映射为 `existsAtSnapshot=null`，不得映射为 false。
+
+快照树不可用或无法判定时：
 
 - `existsAtSnapshot=null`；
 - 依赖存在性的等级降为 `unknown`；
@@ -327,6 +331,31 @@ type EvidenceSource =
 
 `create_candidate` 不得只读取首次新增。必须保留完整可比较生命周期及删除原因；历史 diff 或祖先关系不可用则降级。现有 release 的 `sha/before_sha/after_sha` 不足以独立证明该关系，P0 必须向代码托管方补充查询或诚实降级，不能用时间排序代替。现有 `ChangeFile` 也只有 `path/status/patch`，rename 所需 oldPath 必须在适配层补充真实来源；无法取得时按非 rename 信息不足降级，不得推测旧路径。
 
+P0 在 `CodeHostingAdapter` 增加两个元数据方法，签名与方向固定为：
+
+```ts
+getCommitRelation(repo, baseSha, targetSha, access): Promise<{
+  relation: "same" | "base_is_ancestor" | "target_is_ancestor" | "diverged";
+  mergeBaseSha: string | null;
+  targetParentShas: string[] | null;
+}>;
+
+getCommitDiff(repo, beforeSha, afterSha, access): Promise<{
+  commitSha: string; // 必须等于 afterSha
+  parentShas: string[] | null;
+  files: Array<{
+    path: string;
+    status: "added" | "modified" | "deleted" | "renamed";
+    oldPath: string | null;
+    newPath: string | null;
+  }>;
+}>;
+```
+
+`getCommitDiff` 返回 before/after 范围的完整文件元数据，不返回 patch/blob，禁止复用 `getChangeContext` 的 120 文件 AI prompt 预算通道。GitHub 可从 compare 的 `status/merge_base_commit/previous_filename/commits[].parents` 取得，GitLab 可从 merge_base 与 diff 的 `old_path/new_path` 取得；其他适配器不能提供同等事实时必须返回不可用并降级，不得伪造 `relation` 或 rename。
+
+生命周期读取有独立成本预算：单次 `map_change` 按 `matchTier → releaseId` 稳定次序最多分析 16 个历史 release、最多发起 32 次托管元数据请求，并发上限 4，生命周期阶段总 deadline 为 8 秒。超出 release/请求预算、deadline 或发生限流时，不推断残缺链条的最终状态，相关路径降为 `inspect` 并返回 `history_unavailable` 或 `version_relation_unavailable`。成功取得的不可变关系按 `(repositoryId, baseSha, targetSha)`、完整 diff 按 `(repositoryId, beforeSha, afterSha)` 做进程内缓存；失败结果不做长期缓存，P0 无需新增迁移。
+
 ### 8.2 当前职责与动作判定
 
 历史路径在快照中存在只证明文件存在，不证明它仍承担原来的行为职责。`modify_candidate` 必须有当前有效行为证据；Historical direct 与文件存在性的组合不能单独支持修改建议。
@@ -343,6 +372,13 @@ type EvidenceSource =
 | 只有历史删除 | `historical_only` | `inspect` |
 | 快照树、历史 diff、祖先关系或来源不可用 | `unknown` | `inspect` |
 
+`creationIntent` 使用独立的确定性判定，不由身份解析器或模型猜测：
+
+1. 对 intent 执行 NFKC、小写化和空白折叠。
+2. 命中 `不添加|不要添加|无需添加|移除|删除|去掉|停用|disable|remove|delete|do not add|don't add` 时为 `not_explicit`；为避免误升级，本规则保守优先于创建词命中。
+3. 否则命中中文 `添加|新增|创建|引入|接入|恢复|重新启用`，或英文 `/\b(add|create|introduce|integrate|restore|reintroduce|re-add)\b/i` 时为 `explicit`。
+4. 其余均为 `not_explicit`。只有 `creationIntent=explicit` 才允许 `create_candidate`，该判定不提供行为身份，第 5 节强身份和生命周期条件仍必须独立成立。
+
 `create_candidate` 只表示「可比较历史中存在过该入口，当前快照缺失，且本次意图明确允许创建」，不表示历史实现是当前最佳方案或推荐恢复。
 
 若用户只提出「增加真人验证」而未明确采用 Turnstile，历史 Turnstile 文件只能 `inspect`。自然语言「添加 Turnstile」只表达技术选型意图，仍须先满足第 5 节的身份解析，不能绕过强身份要求直接创建。
@@ -354,7 +390,7 @@ P0 不返回 `delete_candidate`。
 ### 9.1 当前与历史分别检索
 
 1. 当前检索保留场景、证据和核实状态，供独立身份解析使用。
-2. 历史独立检索，不回填为当前事实；记录 release、SHA、变化类型、提交说明与真实 diff。
+2. 历史独立检索，不回填为当前事实；记录 release、SHA、变化类型、提交说明与真实 diff。生命周期查询不得复用 `searchReleaseHistory` 按 feature/reference 只保留最新一条的摘要「兴替去重」，必须保留同一召回集合内完整增删改记录，再受第 8.1 节 16 release 成本预算约束。
 3. 当前无命中不阻止历史；历史无命中不影响当前。
 4. 历史不可用保留当前结果并增加 `history_unavailable`。
 5. 快照不可用与覆盖不足分别披露。
@@ -380,10 +416,26 @@ P0 不返回 `delete_candidate`。
 
 ### 9.4 确定性排序
 
+规范化路径统一采用 `normalizeSourcePath` 语义：平台分隔符转为 `/`、去除开头 `./` 和末尾 `/`、根路径为 `""`；绝对路径与 `..` 越界路径拒绝作为证据输入。Git 路径按 UTF-8 字节级大小写敏感比较，不做大小写折叠。
+
+`role` 按以下优先级使用首个命中规则，保证测试/文档不会被通用实现规则吞掉：
+
+| role | 路径规则（匹配前已统一为 `/`） |
+| --- | --- |
+| `test` | `tests?/`、`__tests__/` 路径段，或 `.test.` / `.spec.` 文件名 |
+| `docs` | `docs/` 路径段、`README*`，或 `.md/.mdx` 后缀 |
+| `config` | `.env.example`、`package.json`、`tsconfig*.json`、锁文件、根目录或 `config/` 下的 `*.config.*` 与 `.yml/.yaml` |
+| `route` | `app/**/route.ts(x)`、`pages/api/**`、其他适配器明确登记的 API route |
+| `ui` | `components/**`、`app/**/page.tsx`、`app/**/layout.tsx`，或其他 `.tsx` 文件 |
+| `domain` | `lib/**`、`src/**` 中未命中以上规则的源码 |
+| `other` | 其余路径 |
+
+`entryRoleGroup` 中 `ui/route/domain` 按 route → ui → domain 排序，随后 config → test → docs → other；该次序只用于输出稳定，不代表修改顺序或架构依赖。
+
 ```text
 matchTier（direct → historical_direct → related → lexical_only）
-→ entryRoleGroup（ui/route/domain → config/test/docs → other）
-→ normalizedPath
+→ entryRoleGroup（route → ui → domain → config → test → docs → other）
+→ normalizedPath（UTF-8 字节序）
 ```
 
 不使用缺乏明确单位的综合分数。候选必须先在全量集合内完成路径去重和上述稳定排序，再应用 `offset/limit` 与字节预算；不得只排序当前页。
@@ -417,7 +469,7 @@ P0 固定以下上限；上限用于约束单条记录，不替代最终字节�
 
 48 KiB 是最终结果的硬上限，按以下顺序构造：
 
-1. 建立包含 snapshot、计数和必要信任缺口的最小响应信封。`stale_evidence`、`existence_unavailable`、`version_relation_unavailable`、`snapshot_unavailable` 和 `coverage_incomplete` 属于必要信任缺口，不得为了多返回候选而删除。
+1. 建立包含 snapshot、计数和必要信任缺口的最小响应信封。`stale_evidence`、`existence_unavailable`、`version_relation_unavailable`、`snapshot_unavailable`、`freshness_unavailable` 和 `coverage_incomplete` 属于必要信任缺口，不得为了多返回候选而删除。
 2. 从全量排序集合的 `offset` 开始，按序加入候选；每个候选先只带最高等级的一条 reason 和 `reasonCounts`。最小 reason 的 summary 最多 256 个 code point；`paths/stableKeys/terms` 只保留证明该关系所需的最小非空子集，`EvidenceSource` 同理。省略任何元素都记录截断；parentShas 无法完整保留时必须置 null 并把生命周期动作降为 inspect。加入前计算最终字节数，不能容纳整个最小候选时停止，不得留下没有最强来源的候选。
 3. 仍有预算时，按候选排序和 reason 等级补充其余 reasons，再依次补充 constraints、historicalChanges 和非必要 gaps。辅助数据不得挤掉已经能放入的主候选。
 4. 因预算少返回候选时，`returnedCount` 等于实际数量，`totalCount` 保持全量去重数，`hasMore = offset + returnedCount < totalCount`，且 `truncated=true`。普通 `limit` 分页只设置 `hasMore`，不单独把 `truncated` 标为预算截断。
@@ -430,6 +482,8 @@ P0 固定以下上限；上限用于约束单条记录，不替代最终字节�
 最终结果采用 JavaScript `JSON.stringify` 的确定性属性构造顺序、无多余空白序列化，按 UTF-8 计算字节数；包含 `responseBytes`、`truncated` 和所有响应字段，不包含 MCP transport envelope。
 
 `responseBytes` 采用不动点计算以包含自身十进制位数：从 0 开始，反复把当前值写入结果并重新序列化，直到「写入值 === 新计算字节数」。每次增删内容后都重新执行该计算；若最终结果超过 49,152 字节，则按第 10.2 节继续移除最低优先级可选项并复算。最大合法响应只有五位数，该迭代必然在有限轮内收敛。
+
+`map_change` 的 `content[0].text` 必须使用同一份无缩进 JSON，不得沿用 `JSON.stringify(result, null, 2)` 的 pretty 文本，使 agent 实际读取的文本与预算对象一致。`structuredContent` 和 MCP transport envelope 不在 `responseBytes` 内；本设计不宣称限制双份结构化内容造成的总线路字节，若未来需要约束传输总量必须另设预算，不能改变本字段含义。
 
 ## 11. 约束、缺口与错误
 
@@ -489,11 +543,15 @@ MCP 指南与仓库工作流改为「先导航、再反查、后对账」，不�
 - Intent Retrieval 与 Behavior Identity Resolution 分离：自然语言关键词召回不能单独产生 Direct；
 - `exact_behavior_text` 的字段顺序、NFKC、空白、大小写、null/空字符串、JSON 与 SHA-256 固定测试向量；
 - active × 路径存在 × 逐证据 freshness 的完整状态矩阵，快照新鲜与场景过期不得混淆；
-- Direct / Historical direct / Related / Lexical 的判定与降级；
-- 历史新增、修改、删除、重新引入和原子重命名；
+- snapshot 与 freshness analyzedSha 不一致、freshness 文件清单 capped 时必须 unknown；
+- Direct / Historical direct / Related / Lexical 的判定与降级，功能级 `feature_aliases` 不得升级为场景 Direct；
+- `creationIntent` 冻结词表的正负向量、否定优先及身份条件独立；
+- 历史新增、修改、删除、重新引入和原子重命名，适配器返回完整未截断元数据；
 - 同 SHA 去重、跨分支、revert、无共同祖先、祖先查询失败和生命周期无法连接快照时降级；
+- 生命周期 release/请求数、并发、deadline 和不可变缓存，超预算不得推断残缺链；
 - 历史 direct + 当前文件存在但无当前职责证据时只能 inspect；
-- 快照树、历史 diff 和来源不可用；
+- 原始树中的 pruned 路径仍存在，scope/树预算错误只能得到 null；
+- 快照树、历史 diff 和来源不可用，freshness 通过注入的 execute/deps 测试而非异常兜底；
 - 所有 `EvidenceSource` 类型与原始记录可追溯；
 - `verificationState` 不与 validity 合并。
 
@@ -504,9 +562,9 @@ MCP 指南与仓库工作流改为「先导航、再反查、后对账」，不�
 - 完整动作矩阵，尤其历史删除后的创建与 inspect；
 - 单路径多来源聚合：每条 reason 独立携带 matchTier/matchBasis，候选最高等级计算正确；
 - 最强 reason 保留、reasonCounts 与重复投影去重；
-- UI/路由/领域与配置/测试/文档入口保留；
+- role 路径规则优先级、route/ui/domain/config/test/docs/other 稳定排序与入口保留；
 - 所有可变字段上限、最大合法向量、辅助结果和 48 KiB 硬预算；
-- `responseBytes` 不动点包含自身字段，最终序列化结果不超过 49,152 UTF-8 字节；
+- `responseBytes` 不动点包含自身字段，最终序列化结果不超过 49,152 UTF-8 字节，`content[0].text` 与紧凑预算对象一致；
 - 全量去重排序后再分页，跨页无重复/遗漏，预算截断后按 `offset + returnedCount` 可继续推进；
 - 相同快照与召回数据版本下顺序稳定，跨快照不承诺一致；
 - `returned/total/truncated`、`hasMore`、MCP schema、鉴权、防枚举和只读约束。
@@ -541,6 +599,7 @@ P0-A 未通过不得进入 P0-B。
 - 一个只读 `map_change` 工具。
 - 意图召回与行为身份解析分离、强身份匹配与降级、当前/历史证据、真实 diff 元数据、快照存在性校验。
 - 可比较 Git 祖先链上的路径生命周期、当前职责证据、动作矩阵、确定性聚合排序、逐来源匹配、约束、缺口和 48 KiB 硬预算。
+- `getCommitRelation/getCommitDiff` 元数据适配器、原始树存在性、未截断 freshness 文件清单、生命周期调用预算和紧凑 MCP 文本输出；不需要新数据库 migration。
 - P0-A/B/C 分层验收。
 
 ### 后续仅在价值验证后考虑
