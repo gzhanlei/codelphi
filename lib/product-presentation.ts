@@ -38,8 +38,8 @@ export interface PresentationJourney {
   tier: PresentationJourneyTier;
   /**
    * 这条旅程实际触及的能力分组（可多个，按首次出现排序）——由步骤所属功能对照能力分组得出，
-   * 而不是「挖出它的那个窗口」。跨能力的场景因此会同时出现在每个相关能力的分组下，
-   * 每张能力卡都有落点。空数组 = 只触及未归组的功能。生成后会按当前分组重新计算，
+   * 而不是「挖出它的那个窗口」。第一个标签是它出发的能力：完整卡片只出现在那里；
+   * 其余途经的能力分组用链接引用它。空数组 = 只触及未归组的功能。生成后会按当前分组重新计算，
    * 所以归组变化时旧旅程的标签自动跟上。
    */
   capabilityNames: string[];
@@ -214,6 +214,61 @@ function normalizedKey(featureName: string, reference: string) {
   return `${featureName.trim().toLowerCase().replace(/\s+/g, " ")}\u0000${reference.trim()}`;
 }
 
+/** 旅程判重的相似度阈值：两条旅程的功能集合 Jaccard 达到它即视为同一个场景。 */
+export const JOURNEY_FEATURE_SIMILARITY = 0.6;
+
+function contains<T>(outer: Set<T>, inner: Set<T>): boolean {
+  return [...inner].every((item) => outer.has(item));
+}
+
+function jaccard<T>(a: Set<T>, b: Set<T>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let intersection = 0;
+  for (const item of a) if (b.has(item)) intersection += 1;
+  return intersection / (a.size + b.size - intersection);
+}
+
+/**
+ * 两条旅程是否算「同一个场景」——以经过的功能组合为准，这是写侧接纳器与读侧投影共用的唯一口径。
+ * 读者凭「走过哪些功能」分辨场景；场景编号只是同一个功能的不同细节。
+ * 生产实测（2026-11-24）：按「功能 + 场景编号」判重时，模型会给同一对功能换着编号写三四条
+ * （「配置加载 → 安全中间件」出现 4 次），11 个功能的产品挖出 20 条旅程只有 13 种走法。
+ * 功能组合相同或高度相似算重复；其中一组被另一组完全包含的也算——它只是更长场景的一段，对读者没有增量。
+ */
+export function sameJourneyFeatures(a: Set<string>, b: Set<string>): boolean {
+  return jaccard(a, b) >= JOURNEY_FEATURE_SIMILARITY || contains(a, b) || contains(b, a);
+}
+
+/**
+ * 按传入顺序保留先到的旅程，其后与已保留旅程经过同一组功能的归入 duplicates。
+ * 写侧接纳器在此之上另有「更完整者原位替换」，这里只做读侧展示前的折叠。
+ */
+export function splitDuplicateJourneys<T extends { steps: unknown[] }>(journeys: T[], featureKeyOf: (step: T["steps"][number]) => string): { kept: T[]; duplicates: T[] } {
+  const kept: T[] = [];
+  const duplicates: T[] = [];
+  const seen: Set<string>[] = [];
+  for (const journey of journeys) {
+    const features = new Set(journey.steps.map((step) => featureKeyOf(step)));
+    // 空集合被任何集合「包含」，单独处理：没有功能可比的旅程不参与判重
+    const duplicate = features.size > 0 && seen.some((set) => sameJourneyFeatures(set, features));
+    if (duplicate) duplicates.push(journey);
+    else {
+      kept.push(journey);
+      seen.push(features);
+    }
+  }
+  return { kept, duplicates };
+}
+
+/**
+ * 是否把同一个功能的多条场景首尾相接——这是在罗列变体，不是用户旅程的后续步骤
+ * （生产实测 2026-11-24：首轮生成的 codelphi 60 条旅程里 22 条如此，如「知识健康统计 HP-1 → HP-2 → HP-3 →
+ * 知识健康面板」，三步内容几乎一样）。写侧校验与读侧折叠共用；单功能产品的旅程只能如此，由调用方豁免。
+ */
+export function chainsScenariosOfOneFeature(featureKeys: unknown[]): boolean {
+  return featureKeys.some((key, position) => position > 0 && key === featureKeys[position - 1]);
+}
+
 export interface PresentationStepView extends PresentationScenarioRef {
   featureId: number | null;
   featureDisplayName: string;
@@ -242,7 +297,10 @@ export interface PresentationJourneyGroup {
   /** 页内锚点 id；能力分组与总览 AI 能力卡的跳转目标一致。 */
   key: string;
   name: string | null;
+  /** 在本组完整展示的旅程。全局典型场景只在全局组；能力场景归入它出发的能力（第一个标签）。 */
   journeys: PresentationJourneyView[];
+  /** 途经本能力、但在别处完整展示的旅程：只给链接，不重复画卡。 */
+  related: PresentationJourneyView[];
 }
 
 export interface ProductPresentationView {
@@ -252,6 +310,10 @@ export interface ProductPresentationView {
   staleJourneys: PresentationJourneyView[];
   /** 引用已全部失效、无法展示的旅程数（如实披露，不静默消失）。 */
   brokenJourneys: number;
+  /** 页面上实际展示的旅程 = 完好、不罗列同一功能的多条场景、且功能组合互不重复。计数、精简卡、覆盖率都以它为准。 */
+  visibleJourneys: PresentationJourneyView[];
+  /** 引用完好但未展示的旅程：与已展示旅程经过同一组功能，或把同一功能的多条场景首尾相接（较早的生成规则留下的）。 */
+  foldedJourneys: PresentationJourneyView[];
   groups: PresentationJourneyGroup[];
   /** 成员解析到当前活跃行的能力分组（总览 AI 能力卡与页内分组共用，锚点一致）。 */
   capabilities: PresentationCapabilityView[];
@@ -262,6 +324,9 @@ export interface ProductPresentationView {
 /**
  * 旅程视图投影：把引用链解析到当前活跃的功能与场景。步骤解析失败的旅程保留并标 stale
  * （说明「引用的场景已变更」），不静默丢弃；引用全部失效的只计数。
+ * 展示前再过一遍当前的两条规则——落库内容可能出自较早的规则，或来自快照导入：罗列同一功能多条场景的、
+ * 与已展示旅程经过同一组功能的都不展示，进 foldedJourneys 如实披露。每条旅程只完整展示一次：
+ * 全局典型场景只在全局组，能力场景归入它出发的能力，途经的其他能力分组用链接引用它（每张能力卡点进来仍有落点）。
  */
 export function buildProductPresentationView(input: {
   row: ProductPresentationRow;
@@ -310,24 +375,40 @@ export function buildProductPresentationView(input: {
   });
   const intactJourneys = journeys.filter((journey) => journey.intact);
   const staleJourneys = journeys.filter((journey) => !journey.intact && journey.resolvedSteps > 0);
-  const featuresInJourneys = new Set(intactJourneys.flatMap((journey) => journey.steps.map((step) => step.featureId))).size;
+  // 单功能产品的旅程只能在同一个功能里串场景，不算罗列（与写侧校验的豁免一致，按叶子功能数判断）
+  const multiFeature = input.features.filter((feature) => !domainParentIds.has(feature.id)).length > 1;
+  const chains = new Set(intactJourneys.filter((journey) => multiFeature && chainsScenariosOfOneFeature(journey.steps.map((step) => step.featureId))));
+  // 判重按解析到的功能（而非功能名）：改名后仍能认出是同一个功能组合
+  const { kept: visibleJourneys, duplicates } = splitDuplicateJourneys(
+    intactJourneys.filter((journey) => !chains.has(journey)),
+    (step) => (step.featureId === null ? `name:${step.featureName.trim().toLowerCase()}` : `id:${step.featureId}`),
+  );
+  // 未展示的按落库顺序排列（引用完好的那部分才参与）
+  const foldedJourneys = intactJourneys.filter((journey) => chains.has(journey) || duplicates.includes(journey));
+  const featuresInJourneys = new Set(visibleJourneys.flatMap((journey) => journey.steps.map((step) => step.featureId))).size;
   // 能力分组：成员解析到当前活跃行的才出卡（空壳分组不出现）；页内锚点与总览 AI 能力卡一致。
   const capabilityViews = buildPresentationCapabilities({ capabilities: input.row.capabilities, features: input.features, scenarios: input.scenarios, productBase: input.productBase });
   const groupNames = capabilityViews.map((capability) => capability.name);
-  for (const journey of intactJourneys) {
+  for (const journey of visibleJourneys) {
     for (const name of journey.capabilityNames) if (!groupNames.includes(name)) groupNames.push(name);
   }
-  // 分组里只放完好旅程（失效的在「待更新」组里单独披露）。一条旅程触及多个能力时就出现在每个相关分组下；
-  // 全局典型场景也按它触及的能力归组——这样每张能力卡点进来都有落点，而不是只有「挖出它的那个窗口」才有。
+  const headlineJourneys = visibleJourneys.filter((journey) => journey.tier === "headline");
+  const capabilityJourneys = visibleJourneys.filter((journey) => journey.tier !== "headline");
+  // 分组里只放完好且未重复的旅程（失效的在「待更新」组里单独披露）。
+  const passes = (journey: PresentationJourneyView, name: string) => journey.capabilityNames.includes(name);
   const groups: PresentationJourneyGroup[] = [
-    { kind: "headline", key: "headline", name: null, journeys: intactJourneys.filter((journey) => journey.tier === "headline") },
-    ...groupNames.map((name, order) => ({
-      kind: "capability" as const,
-      key: capabilityViews.find((capability) => capability.name === name)?.id ?? `capability-extra-${order}`,
-      name,
-      journeys: intactJourneys.filter((journey) => journey.capabilityNames.includes(name)),
-    })),
-    { kind: "ungrouped", key: "ungrouped", name: null, journeys: intactJourneys.filter((journey) => journey.tier !== "headline" && journey.capabilityNames.length === 0) },
+    { kind: "headline", key: "headline", name: null, journeys: headlineJourneys, related: [] },
+    ...groupNames.map((name, order) => {
+      const starting = capabilityJourneys.filter((journey) => journey.capabilityNames[0] === name);
+      return {
+        kind: "capability" as const,
+        key: capabilityViews.find((capability) => capability.name === name)?.id ?? `capability-extra-${order}`,
+        name,
+        journeys: starting,
+        related: visibleJourneys.filter((journey) => passes(journey, name) && !starting.includes(journey)),
+      };
+    }),
+    { kind: "ungrouped", key: "ungrouped", name: null, journeys: capabilityJourneys.filter((journey) => journey.capabilityNames.length === 0), related: [] },
   ];
   return {
     row: input.row,
@@ -335,12 +416,14 @@ export function buildProductPresentationView(input: {
     intactJourneys,
     staleJourneys,
     brokenJourneys: journeys.filter((journey) => !journey.intact && journey.resolvedSteps === 0).length,
-    groups: groups.filter((group) => group.journeys.length > 0),
+    visibleJourneys,
+    foldedJourneys,
+    groups: groups.filter((group) => group.journeys.length > 0 || group.related.length > 0),
     capabilities: capabilityViews,
     coverage: {
       featuresTotal: input.features.filter((feature) => !domainParentIds.has(feature.id)).length,
       featuresInJourneys,
-      scenariosInJourneys: new Set(intactJourneys.flatMap((journey) => journey.steps.map((step) => step.href))).size,
+      scenariosInJourneys: new Set(visibleJourneys.flatMap((journey) => journey.steps.map((step) => step.href))).size,
     },
     featuresTotal: input.features.length,
   };

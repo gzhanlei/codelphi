@@ -148,7 +148,7 @@ describe("product presentation view", () => {
     expect(view.brokenJourneys).toBe(1);
     // 分组锚点与总览 AI 能力卡一致：能力分组的 key 就是该能力卡的 id
     // 分组里只放完好旅程；失效的那条只在「待更新」里披露
-    expect(view.groups).toEqual([{ kind: "capability", key: "capability-1", name: "沟通域", journeys: view.intactJourneys }]);
+    expect(view.groups).toEqual([{ kind: "capability", key: "capability-1", name: "沟通域", journeys: view.intactJourneys, related: [] }]);
     expect(view.capabilities.map((capability) => [capability.id, capability.name])).toEqual([["capability-1", "沟通域"]]);
     // 覆盖率只统计完好旅程，分母排除业务域父节点（分组本身不是可被旅程覆盖的功能）
     expect(view.coverage).toEqual({ featuresTotal: 4, featuresInJourneys: 2, scenariosInJourneys: 2 });
@@ -168,29 +168,95 @@ describe("product presentation view", () => {
     expect(view.groups.map((group) => [group.kind, group.name])).toEqual([["headline", null], ["capability", "新分组"], ["ungrouped", null]]);
   });
 
-  it("files a journey under every capability it touches, so each capability card has a destination", () => {
+  it("shows each journey once and lists it as a related link under the other capabilities it touches", () => {
     const view = buildProductPresentationView({
       row: row([
-        // 跨两个能力的场景：同时出现在两个能力的分组下
-        { name: "跨域场景", tier: "capability", capabilityNames: ["采集与转写", "复盘分析"], steps: [{ featureName: "录音采集", reference: "HP-1" }, { featureName: "AI 复盘", reference: "HP-1" }] },
-        // 全局典型场景既在「全局典型」里，也按它触及的能力归组
-        { name: "带标签的典型场景", tier: "headline", capabilityNames: ["采集与转写"], steps: [{ featureName: "录音采集", reference: "HP-1" }, { featureName: "转写", reference: "HP-1" }] },
-        { name: "只碰未归组功能", tier: "capability", capabilityNames: [], steps: [{ featureName: "录音采集", reference: "HP-1" }, { featureName: "转写", reference: "HP-1" }] },
+        // 出发的能力（第一个标签）完整展示它；途经的另一个能力只给链接
+        { name: "跨域场景", tier: "capability", capabilityNames: ["沟通域", "复盘分析"], steps: [{ featureName: "速记", reference: "HP-1" }, { featureName: "AI 复盘", reference: "HP-1" }] },
+        { name: "沟通域内的场景", tier: "capability", capabilityNames: ["沟通域"], steps: [{ featureName: "转写", reference: "HP-1" }, { featureName: "速记", reference: "HP-1" }] },
+        // 全局典型场景只在「全局典型」里完整展示；它触及的能力分组用链接引用它
+        { name: "带标签的典型场景", tier: "headline", capabilityNames: ["沟通域"], steps: [{ featureName: "录音采集", reference: "HP-1" }, { featureName: "速记", reference: "HP-1" }] },
+        { name: "只碰未归组功能", tier: "capability", capabilityNames: [], steps: [{ featureName: "录音采集", reference: "HP-2" }, { featureName: "转写", reference: "HP-1" }] },
       ]),
       features,
       scenarios,
       productBase: base,
     });
-    const byGroup = Object.fromEntries(view.groups.map((group) => [`${group.kind}:${group.name ?? ""}`, group.journeys.map((journey) => journey.name)]));
-    expect(byGroup).toEqual({
-      "headline:": ["带标签的典型场景"],
-      "capability:采集与转写": ["跨域场景", "带标签的典型场景"],
-      "capability:复盘分析": ["跨域场景"],
-      "ungrouped:": ["只碰未归组功能"],
-    });
+    // 生产实测（2026-11-24）：一条多标签旅程在每个相关分组各画一张完整卡，20 条旅程在页面上成了 32 张卡
+    expect(view.groups.map((group) => [group.kind, group.name, group.journeys.map((journey) => journey.name), group.related.map((journey) => journey.name)])).toEqual([
+      ["headline", null, ["带标签的典型场景"], []],
+      ["capability", "沟通域", ["跨域场景", "沟通域内的场景"], ["带标签的典型场景"]],
+      ["capability", "复盘分析", [], ["跨域场景"]],
+      ["ungrouped", null, ["只碰未归组功能"], []],
+    ]);
+    // 每条旅程恰好完整展示一次
+    const shown = view.groups.flatMap((group) => group.journeys.map((journey) => journey.name));
+    expect(shown.sort()).toEqual(view.visibleJourneys.map((journey) => journey.name).sort());
+    // 只有链接的分组也算落点：总览能力卡链到 #capability-extra-1 时看得到途经它的场景
+    expect(view.groups.find((group) => group.name === "复盘分析")!.key).toBe("capability-extra-1");
     // 首版落库的单标签写法仍然读得出来
     const legacy = parsePresentationPayload({ journeys: [{ name: "旧数据", capabilityName: "复盘分析", steps: [{ featureName: "A", reference: "HP-1" }] }] });
     expect(legacy.journeys[0].capabilityNames).toEqual(["复盘分析"]);
+  });
+
+  it("keeps a capability group alive as a cross-reference when every journey through it is shown elsewhere", () => {
+    const view = buildProductPresentationView({
+      row: {
+        ...row([{ name: "从录音到复盘", tier: "headline", capabilityNames: ["采集与转写", "复盘分析"], steps: [{ featureName: "录音采集", reference: "HP-1" }, { featureName: "AI 复盘", reference: "HP-1" }] }]),
+        capabilities: [
+          { id: "capability-1", name: "采集与转写", summary: "", featureNames: ["录音采集", "转写"] },
+          { id: "capability-2", name: "复盘分析", summary: "", featureNames: ["AI 复盘"] },
+        ],
+      },
+      features,
+      scenarios,
+      productBase: base,
+    });
+    // 两张能力卡点进来都有落点：没有自己出发的场景时，列出途经的场景链接
+    expect(view.groups.map((group) => [group.key, group.journeys.length, group.related.map((journey) => journey.name)])).toEqual([
+      ["headline", 1, []],
+      ["capability-1", 0, ["从录音到复盘"]],
+      ["capability-2", 0, ["从录音到复盘"]],
+    ]);
+  });
+
+  it("folds journeys that repeat the feature combination of a shown one or only chain scenarios of one feature, and discloses them", () => {
+    const view = buildProductPresentationView({
+      row: row([
+        { name: "查词并得到结果", tier: "headline", capabilityNames: [], steps: [{ featureName: "录音采集", reference: "HP-1" }, { featureName: "转写", reference: "HP-1" }] },
+        // 换了场景编号、倒了顺序：读者眼里是同一条
+        { name: "换个编号的同一走法", tier: "capability", capabilityNames: [], steps: [{ featureName: "录音采集", reference: "HP-2" }, { featureName: "转写", reference: "HP-1" }] },
+        { name: "倒着走的同一走法", tier: "capability", capabilityNames: [], steps: [{ featureName: "转写", reference: "HP-1" }, { featureName: "录音采集", reference: "HP-1" }] },
+        // 罗列同一功能的多条场景（较早的生成规则留下的）：是在列变体，不是用户旅程的后续步骤
+        { name: "罗列同一功能的场景", tier: "capability", capabilityNames: [], steps: [{ featureName: "录音采集", reference: "HP-1" }, { featureName: "录音采集", reference: "HP-2" }, { featureName: "AI 复盘", reference: "HP-1" }] },
+        { name: "不重复的旅程", tier: "capability", capabilityNames: [], steps: [{ featureName: "录音采集", reference: "HP-2" }, { featureName: "AI 复盘", reference: "HP-1" }] },
+        // 只引用了别人的场景：引用失效的照旧进「待更新」，不参与判重
+        { name: "引用已失效", tier: "capability", capabilityNames: [], steps: [{ featureName: "录音采集", reference: "HP-1" }, { featureName: "已改名功能", reference: "HP-1" }] },
+      ]),
+      features,
+      scenarios,
+      productBase: base,
+    });
+    expect(view.visibleJourneys.map((journey) => journey.name)).toEqual(["查词并得到结果", "不重复的旅程"]);
+    // 未展示的按落库顺序排列
+    expect(view.foldedJourneys.map((journey) => journey.name)).toEqual(["换个编号的同一走法", "倒着走的同一走法", "罗列同一功能的场景"]);
+    // intact 仍只表示「引用完好」；展示、计数、覆盖率都用去重后的集合
+    expect(view.intactJourneys).toHaveLength(5);
+    expect(view.groups.flatMap((group) => group.journeys).map((journey) => journey.name)).toEqual(["查词并得到结果", "不重复的旅程"]);
+    expect(view.coverage).toEqual({ featuresTotal: 4, featuresInJourneys: 3, scenariosInJourneys: 4 });
+    expect(view.staleJourneys.map((journey) => journey.name)).toEqual(["引用已失效"]);
+  });
+
+  it("keeps journeys that chain scenarios of one feature when the product has only that one feature", () => {
+    // 单功能产品的旅程只能在同一个功能里串场景，不算罗列（与写侧校验的豁免一致）
+    const view = buildProductPresentationView({
+      row: row([{ name: "单功能产品里的流程", tier: "capability", capabilityNames: [], steps: [{ featureName: "录音采集", reference: "HP-1" }, { featureName: "录音采集", reference: "HP-2" }] }]),
+      features: features.filter((feature) => feature.id === 1),
+      scenarios,
+      productBase: base,
+    });
+    expect(view.visibleJourneys.map((journey) => journey.name)).toEqual(["单功能产品里的流程"]);
+    expect(view.foldedJourneys).toEqual([]);
   });
 });
 

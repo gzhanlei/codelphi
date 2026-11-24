@@ -96,16 +96,29 @@ describe("overview capability sourcing chain", () => {
 
 describe("overview journey highlights", () => {
   it("puts the headline journey first, caps at three and links each card to its full view", () => {
+    // 四种不同的功能组合需要第四个功能：只有三个功能时，任意两两组合都是三功能旅程的子集
+    const features: FeatureRow[] = [...leafFeatures, { id: 4, name: "导出", displayName: "", summary: "导出规格", parentId: null, source: "generated" }];
+    const scenarios: ScenarioRow[] = [...happyScenarios, { id: 41, featureId: 4, reference: "HP-1", context: "要带走规格", action: "点击导出", outcome: "得到文件", category: "happy", source: "generated", evidence: [] }];
     const journeys = [
       journey(1, "深挖旅程甲", "capability", [["登录", "HP-1"], ["发布", "HP-1"]], ["账户与规格"]),
       journey(2, "全局典型", "headline", [["登录", "HP-1"], ["规格", "HP-1"]]),
       journey(3, "深挖旅程乙", "capability", [["规格", "HP-1"], ["发布", "HP-1"]], ["账户与规格"]),
-      journey(4, "深挖旅程丙", "capability", [["登录", "HP-1"], ["发布", "HP-1"]], ["其他"]),
+      journey(4, "深挖旅程丙", "capability", [["导出", "HP-1"], ["发布", "HP-1"]], ["其他"]),
     ];
-    const overview = build({ presentation: presentationRow(journeys) });
+    const overview = build({ features, scenarios, presentation: presentationRow(journeys) });
     expect(overview.journeyHighlights.map((item) => [item.id, item.name])).toEqual([["journey-2", "全局典型"], ["journey-1", "深挖旅程甲"], ["journey-3", "深挖旅程乙"]]);
     expect(overview.journeyHighlights[0]).toMatchObject({ startingPoint: "访客打开登录页", finalOutcome: "看到功能清单", stepCount: 2, featureCount: 2, href: `${base}?view=journeys#journey-2` });
     expect(overview.journeyTotal).toBe(4);
+  });
+
+  it("never counts or highlights two journeys over the same features", () => {
+    // 落库数据里的重复条目（按旧规则「功能 + 场景编号」判重时漏掉的）：总览的计数与精简卡都只算一种走法
+    const overview = build({ presentation: presentationRow([
+      journey(1, "登录后查看规格", "headline", [["登录", "HP-1"], ["规格", "HP-1"]]),
+      journey(2, "先看规格再登录的同一走法", "capability", [["规格", "HP-1"], ["登录", "HP-1"]]),
+    ]) });
+    expect(overview.journeyHighlights.map((item) => item.name)).toEqual(["登录后查看规格"]);
+    expect(overview.journeyTotal).toBe(1);
   });
 
   it("never highlights a journey whose referenced scenarios changed", () => {

@@ -16,7 +16,7 @@ import { schedulePresentationRefresh, standalonePresentationBilling, type Presen
  *   npx tsx scripts/generate-product-presentations.ts --all
  * 任意组合追加 --dry-run 只列出目标，不调用模型。生产执行前先 --dry-run 核对清单与功能数。
  * 默认尊重规格指纹：规格没变的产品判定为「未变化」、零模型调用，所以脚本可以放心重复执行；
- * 追加 --force 才对已有理解层的产品重新生成（结果与上一版合并，只增不减）。
+ * 追加 --force 才对已有理解层的产品重新生成（按当前规则重来：全新结果的覆盖面不输上一版仍然成立的部分时直接替换，否则与上一版合并）。
  */
 
 interface Target { id: number; slug: string; name: string; features: number }

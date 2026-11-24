@@ -6,9 +6,11 @@ import { presentationMaxJourneys, presentationMaxPasses, presentationRefreshInte
 import type { StructuredCompletionClient, StructuredCompletionMessage } from "./llm-client";
 import { createSnapshotPresentation, JOURNEY_OUTPUT_SHAPE, journeyMiningPrompt, parseJourneyCandidates, type JourneyCandidate } from "./snapshot/presentation";
 import {
+  chainsScenariosOfOneFeature,
   parsePresentationPayload,
   presentationFingerprint,
   presentationLanguage,
+  sameJourneyFeatures,
   type PresentationCapability,
   type PresentationCoverage,
   type PresentationJourney,
@@ -48,7 +50,6 @@ const HEADLINE_FEATURES_PER_BUCKET = 8;
 const HEADLINE_UNGROUPED_FEATURES = 40;
 const HEADLINE_MAX_FEATURES = 80;
 const PASS_CONCURRENCY = 3;
-const JOURNEY_SIMILARITY_THRESHOLD = 0.6;
 /** 深挖的轮数上限：第一轮全覆盖，之后只针对仍未覆盖的功能再挖，至多三轮。 */
 const MINING_ROUNDS = 3;
 /**
@@ -178,29 +179,29 @@ function validJourney(journey: RawJourney, index: ReturnType<typeof buildJourney
   if (new Set(keys).size !== keys.length) return false;
   if (keys.some((key) => !index.happy.has(key))) return false;
   // 只有一个功能的产品不强求跨功能；否则旅程必须连接至少两个功能（同功能内部步骤不是跨功能场景）。
-  if (featureCount > 1 && new Set(keys.map((key) => index.featureOf.get(key))).size < 2) return false;
+  const featureIds = journey.steps.map((step) => index.featureOf.get(index.key(step.featureName, step.reference)));
+  if (featureCount > 1 && new Set(featureIds).size < 2) return false;
+  // 相邻两步不取自同一个功能（单功能产品除外）：同一功能的多条场景首尾相接是在罗列变体，不是用户旅程的后续步骤。
+  // 首轮生成没有这条校验时，模型给出的 60 条旅程里有 22 条如此（如「知识健康统计 HP-1 → HP-2 → HP-3 → 知识健康面板」）。
+  if (featureCount > 1 && chainsScenariosOfOneFeature(featureIds)) return false;
   return true;
-}
-
-function jaccard(a: Set<string>, b: Set<string>) {
-  if (a.size === 0 || b.size === 0) return 0;
-  let intersection = 0;
-  for (const item of a) if (b.has(item)) intersection += 1;
-  return intersection / (a.size + b.size - intersection);
 }
 
 /**
  * 旅程接纳器：逐条校验 + 去重的唯一实现（生成、合并、快照导入共用）。
- * 坏条目丢弃不连坐；步骤集合相同或 Jaccard ≥ 0.6 的旅程、重名的旅程只保留先到的一条；
- * 步骤被某条已接纳旅程完全包含的也丢弃——它只是更长场景的一个子片段，对读者没有增量
- * （生产实测：全局典型场景「从登录到添加产品并生成首版规格」之下会挖出它的前两步单独成条）。
- * 反过来，新旅程严格包含某条已接纳旅程时，更完整的那条胜出：原位替换，位置不变。
+ * 坏条目丢弃不连坐。判重口径是「经过的功能组合」（sameJourneyFeatures，与读侧投影同一份实现）——
+ * 生产实测（2026-11-24）：按「功能 + 场景编号」判重时，模型会给同一对功能换着编号写三四条，
+ * 11 个功能的产品挖出 20 条旅程只有 13 种走法。场景编号不同不算新场景；与已接纳旅程功能组合相同、
+ * 高度相似、或只是其中一段（功能被完全包含）的丢弃；重名的也只留先到的一条。
+ * 反过来，新旅程严格包含某条已接纳旅程（功能更多且涵盖其全部）时，更完整的那条胜出：原位替换，位置不变。
  * 接纳顺序即落库顺序，调用方必须按确定的顺序调用（与模型返回的先后无关）。
  */
 function createJourneyAcceptor(index: ReturnType<typeof buildJourneyIndex>, featureCount: number, maxJourneys = Number.POSITIVE_INFINITY) {
   const accepted: Array<RawJourney & { tier: PresentationJourney["tier"]; capabilityNames: string[] }> = [];
-  const seenStepSets: Array<Set<string>> = [];
+  const seenFeatureSets: Array<Set<string>> = [];
   const seenNames: Array<string> = [];
+  // 按功能 id 比较（validJourney 已保证每一步都解析得到）：功能名的写法差异不影响判重
+  const featuresOf = (journey: RawJourney) => new Set(journey.steps.map((step) => String(index.featureOf.get(index.key(step.featureName, step.reference)))));
   const contains = (outer: Set<string>, inner: Set<string>) => [...inner].every((key) => outer.has(key));
   return {
     accepted,
@@ -208,22 +209,21 @@ function createJourneyAcceptor(index: ReturnType<typeof buildJourneyIndex>, feat
     accept(journey: RawJourney, tier: PresentationJourney["tier"], capabilityNames: string[] = []): number {
       if (accepted.length >= maxJourneys) return -1;
       if (!validJourney(journey, index, featureCount)) return -1;
-      const keys = new Set(journey.steps.map((step) => index.key(step.featureName, step.reference)));
-      // 严格包含某条已接纳旅程（步骤更多且涵盖其全部）：更完整的这条胜出（原位替换），不因为「与它相似」被拒；
-      // 步骤集合完全相同的不算包含，仍按重复处理。
-      const replacedAt = seenStepSets.findIndex((set) => set.size < keys.size && contains(keys, set));
-      // 与其他已接纳旅程高度相似、或只是其中一条的子片段：丢弃
-      if (seenStepSets.some((set, position) => position !== replacedAt && (jaccard(set, keys) >= JOURNEY_SIMILARITY_THRESHOLD || contains(set, keys)))) return -1;
+      const features = featuresOf(journey);
+      // 严格包含某条已接纳旅程（功能更多且涵盖其全部）：更完整的这条胜出（原位替换），不因为「与它相似」被拒
+      const replacedAt = seenFeatureSets.findIndex((set) => set.size < features.size && contains(features, set));
+      // 与其他已接纳旅程是同一个场景（同功能组合 / 高度相似 / 只是其中一段）：丢弃
+      if (seenFeatureSets.some((set, position) => position !== replacedAt && sameJourneyFeatures(set, features))) return -1;
       const nameKey = normalize(journey.name);
       if (nameKey === "" || (seenNames.includes(nameKey) && seenNames[replacedAt] !== nameKey)) return -1;
       const entry = { ...journey, tier, capabilityNames };
       if (replacedAt >= 0) {
         accepted.splice(replacedAt, 1, entry);
-        seenStepSets.splice(replacedAt, 1, keys);
+        seenFeatureSets.splice(replacedAt, 1, features);
         seenNames.splice(replacedAt, 1, nameKey);
         return replacedAt;
       }
-      seenStepSets.push(keys);
+      seenFeatureSets.push(features);
       seenNames.push(nameKey);
       accepted.push(entry);
       return accepted.length - 1;
@@ -246,7 +246,7 @@ function createJourneyAcceptor(index: ReturnType<typeof buildJourneyIndex>, feat
 /**
  * 功能 → 所属能力分组名（人工业务域或 AI 归组；未归组的功能没有条目）。返回的函数给一条旅程算标签：
  * 它的步骤实际触及了哪些能力（按首次出现排序、去重）。标签在每次生成 / 合并时按当前分组重算，
- * 所以归组变化后旧旅程的标签自动跟上，跨能力的场景会同时出现在每个相关能力的分组下。
+ * 所以归组变化后旧旅程的标签自动跟上；第一个标签是旅程出发的能力，读侧据此决定它的完整卡片放在哪个分组。
  */
 function capabilityLabels(index: ReturnType<typeof buildJourneyIndex>, capabilities: PresentationCapability[]): (steps: PresentationScenarioRef[]) => string[] {
   const namesByFeatureId = new Map<number, string[]>();
@@ -275,9 +275,10 @@ function leafFeaturesOf(ledger: PresentationLedger): PresentationLedgerFeature[]
 /**
  * 与上一版合并（只增不减）。模型输出逐次有波动——生产实测同一个 122 功能的产品连续两次生成
  * 得到 45 条 / 35 条旅程、覆盖 80 / 62 个功能——直接覆盖会让「重新生成」越点越少。
- * 这里先保留上一版里引用在当前规格中仍然成立的旅程（规格变化后失效的会被校验自然剔除），
- * 再并入本次新产出的旅程，同名 / 高度相似 / 子片段按同一套规则去重，因此覆盖率不会下降。
- * 上一版最多占三分之二名额，给新功能留出进入空间；被某条新旅程完全包含的旧旅程让位给更完整的那条。
+ * 这里先保留上一版里在当前规则下仍然成立的旅程——规格变化后失效的、罗列同一功能多条场景的会被校验剔除——
+ * 再并入本次新产出的旅程，按同一套判重口径（功能组合）去重，因此覆盖率不会下降。
+ * 两版的全局典型场景先于能力场景接纳：同一走法若上一版是能力场景、这次挖成了典型场景，留下的是典型场景。
+ * 上一版最多占三分之二名额，给新旅程留出进入空间；被某条新旅程完全包含的旧旅程让位给更完整的那条。
  */
 export function mergePresentation(input: { previous: { capabilities: PresentationCapability[]; journeys: PresentationJourney[]; tagline?: string }; next: GeneratedPresentation; ledger: PresentationLedger; maxJourneys?: number }): GeneratedPresentation {
   const maxJourneys = input.maxJourneys ?? presentationMaxJourneys();
@@ -286,12 +287,24 @@ export function mergePresentation(input: { previous: { capabilities: Presentatio
   const index = buildJourneyIndex(input.ledger);
   const labelOf = capabilityLabels(index, capabilities);
   const acceptor = createJourneyAcceptor(index, leafFeatures.length, maxJourneys);
-  const take = (journeys: PresentationJourney[], budget: number) => {
-    // 标签按当前归组重算：上一版旅程带的是旧分组的名字
-    for (const journey of journeys.slice(0, budget)) acceptor.accept({ name: journey.name, steps: journey.steps }, journey.tier, labelOf(journey.steps));
+  // 标签按当前归组重算：上一版旅程带的是旧分组的名字
+  const take = (journeys: PresentationJourney[]) => {
+    for (const journey of journeys) acceptor.accept({ name: journey.name, steps: journey.steps }, journey.tier, labelOf(journey.steps));
   };
-  take(input.previous.journeys, Math.floor(maxJourneys * 2 / 3));
-  take(input.next.journeys, maxJourneys);
+  const isHeadline = (journey: PresentationJourney) => journey.tier === "headline";
+  const previousBudget = Math.floor(maxJourneys * 2 / 3);
+  let previousTaken = 0;
+  // 只有真正接纳的上一版旅程才占名额：被校验或判重剔除的不占
+  const takePrevious = (tier: PresentationJourney["tier"]) => {
+    for (const journey of input.previous.journeys.filter((item) => item.tier === tier)) {
+      if (previousTaken >= previousBudget) return;
+      if (acceptor.accept({ name: journey.name, steps: journey.steps }, journey.tier, labelOf(journey.steps)) >= 0) previousTaken += 1;
+    }
+  };
+  takePrevious("headline");
+  take(input.next.journeys.filter(isHeadline));
+  takePrevious("capability");
+  take(input.next.journeys.filter((journey) => !isHeadline(journey)));
   const journeys = acceptor.finalize();
   const tagline = input.next.tagline ?? input.previous.tagline;
   return {
@@ -710,12 +723,14 @@ export function standalonePresentationBilling(): LlmBillingContext {
 }
 
 /**
- * 执行一次生成并与上一版合并后落库。自身不抛错。
- * - 合并只增不减（见 mergePresentation）：重新生成不会让使用场景变少；规格变化后失效的旧旅程被剔除；
+ * 执行一次生成，与上一版合并（手动强制时可能直接替换）后落库。自身不抛错。
+ * - 自动刷新走合并，只增不减（见 mergePresentation）：使用场景不会变少；规格变化后失效的、罗列同一功能多条场景的旧旅程被剔除；
+ * - 手动强制（replace）时，全新结果的覆盖面不输「上一版在当前规则下仍然成立的部分」就直接替换上一版：
+ *   手动「重新生成」要的是按当前规则重来一遍，不是往旧内容上叠加；这次挖得更少时仍走合并；
  * - 本次什么都没产出（能力与旅程都为空）视为失败，不落库——已有内容原样保留；
  * - 失败时保留旧内容、释放租约并安排重试：从未成功过的产品前 3 次 1 小时后重试、之后每天一次；已有内容的每天至多一次。
  */
-export async function runPresentationGeneration(input: { ledger: PresentationLedger; specVersionId?: number | null; billing?: LlmBillingContext; client?: StructuredCompletionClient; execute?: Execute }): Promise<PresentationRefreshResult> {
+export async function runPresentationGeneration(input: { ledger: PresentationLedger; specVersionId?: number | null; billing?: LlmBillingContext; client?: StructuredCompletionClient; execute?: Execute; replace?: boolean }): Promise<PresentationRefreshResult> {
   const execute = input.execute ?? defaultExecute;
   const productId = input.ledger.productId;
   const fingerprint = presentationLedgerFingerprint(input.ledger);
@@ -742,7 +757,14 @@ export async function runPresentationGeneration(input: { ledger: PresentationLed
     const previous = stored
       ? parsePresentationPayload({ status: "generated", capabilities: parseJsonValue(stored.capabilities_json), journeys: parseJsonValue(stored.journeys_json), coverage: undefined })
       : { capabilities: [], journeys: [] };
-    const payload = mergePresentation({ previous: { ...previous, tagline: stored?.tagline ?? undefined }, next, ledger: input.ledger });
+    const previousInput = { ...previous, tagline: stored?.tagline ?? undefined };
+    // 全新结果的覆盖面不输「上一版在当前规则下仍然成立的部分」→ 不带入上一版（上一版只留能力分组与 tagline 作兜底）。
+    // 上一版里罗列同一功能多条场景、或互相重复的条目已被当前规则剔除，不会因为「曾经有过」而压住全新的结果。
+    const replaced = input.replace === true && next.journeys.length > 0
+      && next.coverage.featuresInJourneys >= mergePresentation({ previous: previousInput, next: { ...next, journeys: [] }, ledger: input.ledger }).coverage.featuresInJourneys;
+    const payload = replaced
+      ? mergePresentation({ previous: { ...previousInput, journeys: [] }, next, ledger: input.ledger })
+      : mergePresentation({ previous: previousInput, next, ledger: input.ledger });
     await saveProductPresentation(execute, {
       productId,
       specVersionId: input.specVersionId === undefined ? input.ledger.specVersionId : input.specVersionId,
@@ -751,7 +773,7 @@ export async function runPresentationGeneration(input: { ledger: PresentationLed
       payload,
       modelName: process.env.AI_MODEL ?? null,
     });
-    const detail = { status: payload.status, capabilities: payload.capabilities.length, journeys: payload.journeys.length, keptFromPrevious: previous.journeys.length, freshlyGenerated: next.journeys.length, passes: payload.passes, coveredFeatures: payload.coverage.featuresInJourneys, featuresTotal: payload.coverage.featuresTotal };
+    const detail = { status: payload.status, capabilities: payload.capabilities.length, journeys: payload.journeys.length, replaced, keptFromPrevious: previous.journeys.length, freshlyGenerated: next.journeys.length, passes: payload.passes, coveredFeatures: payload.coverage.featuresInJourneys, featuresTotal: payload.coverage.featuresTotal };
     console.log("[product-presentation] generated", { productId, ...detail });
     return { outcome: "generated", detail };
   } catch (error) {
@@ -790,7 +812,7 @@ export async function schedulePresentationRefresh(options: {
   ))[0];
   const specVersionId = options.specVersionId === undefined ? ledger.specVersionId : options.specVersionId;
   const launch = async (): Promise<PresentationRefreshResult> => {
-    const result = runPresentationGeneration({ ledger, specVersionId, billing: options.billing, client: options.client, execute });
+    const result = runPresentationGeneration({ ledger, specVersionId, billing: options.billing, client: options.client, execute, replace: options.force === true });
     if (options.background === false) return result;
     void result.catch((error) => console.error("[product-presentation] background refresh crashed", { productId: options.productId, message: errorMessage(error) }));
     return { outcome: "generating" };

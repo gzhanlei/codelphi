@@ -100,6 +100,48 @@ describe("use cases view", () => {
     expect(html).not.toContain("use-cases-nav");
   });
 
+  it("renders each journey once and cross-links it from the other groups instead of repeating the card", () => {
+    const html = render({ presentation: view([
+      // 典型场景经过「账户与规格」里的登录功能：只在全局组完整展示
+      journey(1, "登录后查看规格", "headline", [["登录", "HP-1"], ["规格", "HP-1"]], ["账户与规格"]),
+      journey(2, "从规格到发布", "capability", [["规格", "HP-1"], ["发布", "HP-1"]], ["账户与规格"]),
+    ]) });
+    // 生产实测（2026-11-24）：一条多标签旅程在每个相关分组各画一张完整卡，20 条旅程在页面上成了 32 张卡
+    expect(html.match(/<article class="journey" id="journey-1">/g)).toHaveLength(1);
+    expect(html.match(/<article class="journey" id="journey-2">/g)).toHaveLength(1);
+    expect(html).toContain("2 条使用场景");
+    // 途经的能力分组里给的是链接，落点就是那张卡；全局组排在能力组之前
+    expect(html).toContain('href="#journey-1"');
+    expect(html).toContain("途经这项能力、在别处展示的场景：");
+    expect(html.indexOf('id="headline"')).toBeLessThan(html.indexOf('id="capability-1"'));
+  });
+
+  it("keeps a capability group with only cross-linked journeys reachable from its anchor", () => {
+    // 没有任何场景从这项能力出发、只有典型场景途经它：总览能力卡链进来仍要看到落点
+    const html = render({ presentation: view([journey(1, "登录后查看规格", "headline", [["登录", "HP-1"], ["规格", "HP-1"]], ["账户与规格"])]) });
+    expect(html).toContain('id="capability-1"');
+    expect(html).toMatch(/<details[^>]*id="capability-1"[^>]*open/);
+    expect(html).toContain('href="#journey-1"');
+    // 没有完整卡片时不显示「0 条」
+    expect(html).not.toContain(">0<");
+  });
+
+  it("folds journeys that only repeat the feature combination of a shown journey and says why", () => {
+    const html = render({ presentation: view([
+      journey(1, "登录后查看规格", "headline", [["登录", "HP-1"], ["规格", "HP-1"]]),
+      // 同一对功能倒着走：读者眼里是同一条
+      journey(2, "倒着走的同一走法", "capability", [["规格", "HP-1"], ["登录", "HP-1"]]),
+    ]) });
+    expect(html).toContain("1 条使用场景");
+    expect(html).not.toContain('id="journey-2"');
+    // 不静默消失：折叠列出并说明原因
+    expect(html).toContain("未展示的场景（较早的生成规则）");
+    expect(html).toContain("倒着走的同一走法");
+    expect(html).toContain("把同一功能的多条场景首尾相接");
+    expect(html).toContain('<details class="overview-panel use-case-group use-case-group-folded">');
+    expect(html).not.toMatch(/use-case-group-folded" open/);
+  });
+
   it("keeps journeys whose scenarios changed in a collapsed refresh group and discloses the hidden ones", () => {
     const html = render({ presentation: view([
       journey(1, "登录后查看规格", "headline", [["登录", "HP-1"], ["规格", "HP-1"]]),
@@ -142,7 +184,8 @@ describe("use cases view", () => {
   });
 
   it("renders in English without leaking Chinese chrome in the en locale", () => {
-    // 全 ASCII 夹具：页面上出现的任何中文都只能来自界面文案
+    // 全 ASCII 夹具：页面上出现的任何中文都只能来自界面文案。带上一条途经能力的典型场景和一条落库数据里的重复条目，
+    // 让「链接引用」与「未重复展示」两种新文案的英文都走到。
     const englishFeatures: FeatureRow[] = [
       { id: 1, name: "Sign in", summary: "OAuth sign in", parentId: null, source: "generated" },
       { id: 2, name: "Spec", summary: "Feature spec", parentId: null, source: "manual" },
@@ -151,10 +194,16 @@ describe("use cases view", () => {
       { id: 11, featureId: 1, reference: "HP-1", context: "A visitor opens the sign-in page", action: "Scans the QR code", outcome: "Lands on the dashboard", category: "happy", source: "generated", evidence: [{ path: "app/login.ts", startLine: 20 }] },
       { id: 21, featureId: 2, reference: "HP-1", context: "On the dashboard", action: "Opens the spec", outcome: "Sees the feature list", category: "happy", source: "manual", evidence: [] },
     ];
-    const presentation = buildProductOverview({ productBase: base, product: { id: 1, slug: "radar", name: "Radar", description: "" }, features: englishFeatures, scenarios: englishScenarios, releases: [], behaviorChanges: [], presentation: row([journey(1, "Sign in and read the spec", "headline", [["Sign in", "HP-1"], ["Spec", "HP-1"]])], { capabilities: [] }) }, "en").presentation;
+    const presentation = buildProductOverview({ productBase: base, product: { id: 1, slug: "radar", name: "Radar", description: "" }, features: englishFeatures, scenarios: englishScenarios, releases: [], behaviorChanges: [], presentation: row([
+      journey(1, "Sign in and read the spec", "headline", [["Sign in", "HP-1"], ["Spec", "HP-1"]], ["Account"]),
+      journey(2, "Read the spec after signing in", "capability", [["Spec", "HP-1"], ["Sign in", "HP-1"]], ["Account"]),
+    ], { capabilities: [{ id: "capability-1", name: "Account", summary: "Sign in", featureNames: ["Sign in"] }] }) }, "en").presentation;
     const html = render({ presentation, locale: "en" });
     expect(html).toContain("Typical ways to use it");
     expect(html).toContain("Typical across the product");
+    expect(html).toContain("1 use case");
+    expect(html).toContain("Also passing through this capability (shown elsewhere):");
+    expect(html).toContain("Not shown (from an earlier rule)");
     expect(html).toContain("Starting point");
     expect(html).toContain("Final outcome");
     expect(html).toContain("Step 1");

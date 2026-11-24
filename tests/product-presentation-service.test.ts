@@ -162,16 +162,46 @@ describe("product presentation generation", () => {
           ]
         : [
             { name: "有效旅程乙", steps: [{ featureName: "C", reference: "HP-1" }, { featureName: "D", reference: "HP-1" }] },
-            // 与「乙」步骤集合的 Jaccard = 2/3 ≥ 0.6，按重复折叠
+            // 与「乙」是同一对功能（C、D），只多引用了 C 的另一条场景：读者眼里的同一个场景
             { name: "与乙高度相似", steps: [{ featureName: "C", reference: "HP-1" }, { featureName: "D", reference: "HP-1" }, { featureName: "C", reference: "HP-2" }] },
           ]);
     });
     const generated = await generateProductPresentation({ ledger: leafLedger(), client: complete });
-    // 「与乙高度相似」严格包含「有效旅程乙」且多出一步：更完整的那条原位胜出
-    expect(generated.journeys.map((journey) => journey.name)).toEqual(["从采集到复盘", "有效旅程甲", "与乙高度相似"]);
+    // 「与乙高度相似」没有带来新的功能，按重复折叠
+    expect(generated.journeys.map((journey) => journey.name)).toEqual(["从采集到复盘", "有效旅程甲", "有效旅程乙"]);
     expect(generated.journeys.map((journey) => journey.capabilityNames)).toEqual([["采集与转写", "复盘分析"], ["采集与转写"], ["复盘分析"]]);
     // 所有落库步骤都是规范引用
     expect(generated.journeys[1].steps).toEqual([{ featureName: "A", reference: "HP-2" }, { featureName: "B", reference: "HP-1" }]);
+  });
+
+  it("folds journeys that only swap scenario references of the same features, in either order", async () => {
+    // 生产实测（2026-11-24，11 个功能的产品）：同一对功能被换着场景编号写了 4 条，11 个功能挖出 20 条旅程只有 13 种走法。
+    // 判重口径是「经过的功能组合」——场景编号只是同一个功能的不同细节。
+    const complete = client((messages) => (isMining(messages)
+      ? miningAnswer([
+          { name: "访问时获得安全响应头", steps: [{ featureName: "A", reference: "HP-1" }, { featureName: "B", reference: "HP-1" }] },
+          { name: "限流内访问", steps: [{ featureName: "A", reference: "HP-1" }, { featureName: "B", reference: "HP-2" }] },
+          { name: "并发上限内访问", steps: [{ featureName: "A", reference: "HP-2" }, { featureName: "B", reference: "HP-2" }] },
+          { name: "倒着走同一对功能", steps: [{ featureName: "B", reference: "HP-1" }, { featureName: "A", reference: "HP-2" }] },
+          { name: "真正不同的一条", steps: [{ featureName: "A", reference: "HP-2" }, { featureName: "C", reference: "HP-1" }] },
+        ])
+      : groupingWithoutJourneys));
+    const generated = await generateProductPresentation({ ledger: leafLedger(), client: complete });
+    expect(generated.journeys.map((journey) => journey.name)).toEqual(["访问时获得安全响应头", "真正不同的一条"]);
+    expect(generated.coverage.featuresInJourneys).toBe(3);
+  });
+
+  it("drops journeys that chain consecutive steps of the same feature", async () => {
+    // 生产实测（2026-11-24）：首轮生成没有这条校验，60 条旅程里 22 条把同一功能的几条场景首尾相接
+    // （如「知识健康统计 HP-1 → HP-2 → HP-3 → 知识健康面板」），读起来是在罗列变体。
+    const complete = client((messages) => (isMining(messages)
+      ? miningAnswer([
+          { name: "罗列同一功能的变体", steps: [{ featureName: "A", reference: "HP-1" }, { featureName: "A", reference: "HP-2" }, { featureName: "B", reference: "HP-1" }] },
+          { name: "正常的跨功能场景", steps: [{ featureName: "A", reference: "HP-1" }, { featureName: "C", reference: "HP-1" }] },
+        ])
+      : groupingWithoutJourneys));
+    const generated = await generateProductPresentation({ ledger: leafLedger(), client: complete });
+    expect(generated.journeys.map((journey) => journey.name)).toEqual(["正常的跨功能场景"]);
   });
 
   it("lets the more complete journey win when it strictly contains an accepted one", async () => {
@@ -279,21 +309,23 @@ describe("product presentation generation", () => {
     expect(generated.journeys.map((journey) => [journey.name, journey.capabilityNames])).toEqual([["经过单功能域", ["单功能域"]]]);
   });
 
-  it("drops journeys that are only a sub-segment of an accepted one", async () => {
+  it("drops journeys that only walk part of an accepted journey's features, even with other scenario references", async () => {
     const longHeadline = JSON.stringify({ ...JSON.parse(grouping), journeys: [
       { name: "从采集到复盘", steps: [{ featureName: "A", reference: "HP-1" }, { featureName: "C", reference: "HP-1" }, { featureName: "D", reference: "HP-1" }] },
     ] });
     const complete = client((messages) => {
       if (!isMining(messages)) return longHeadline;
       return miningAnswer([
-        // 典型场景的前两步单独成条：步骤被完全包含，对读者没有增量
+        // 典型场景的前两步单独成条：功能组合被完全包含，对读者没有增量
         { name: "只是前两步", steps: [{ featureName: "A", reference: "HP-1" }, { featureName: "C", reference: "HP-1" }] },
-        // 带来了典型场景之外的步骤：保留
-        { name: "有自己的步骤", steps: [{ featureName: "A", reference: "HP-1" }, { featureName: "C", reference: "HP-2" }] },
+        // 同样只是 A、C 两个功能，换了 C 的场景编号：读者眼里仍是那段更长场景的一小段
+        { name: "换了编号的同一段", steps: [{ featureName: "A", reference: "HP-2" }, { featureName: "C", reference: "HP-2" }] },
+        // 带来了典型场景之外的功能：保留
+        { name: "有自己的功能", steps: [{ featureName: "A", reference: "HP-1" }, { featureName: "B", reference: "HP-1" }] },
       ]);
     });
     const generated = await generateProductPresentation({ ledger: leafLedger(), client: complete });
-    expect(generated.journeys.map((journey) => journey.name)).toEqual(["从采集到复盘", "有自己的步骤"]);
+    expect(generated.journeys.map((journey) => journey.name)).toEqual(["从采集到复盘", "有自己的功能"]);
   });
 
   it("falls back to flat capability cards when the Radar grouping fails but still mines journeys", async () => {
@@ -474,6 +506,27 @@ describe("merging with the previous presentation", () => {
     expect(merged.capabilities[0].name).toBe("旧分组");
     expect(merged.journeys.map((journey) => journey.name)).toEqual(["上一版旅程"]);
   });
+
+  it("keeps the headline version when both versions hold the same feature combination", () => {
+    // 典型场景先于能力场景接纳：同一走法若上一版是能力场景、这次成了典型场景，留下的是典型场景（它才会出现在「全局典型」里）
+    const previous = { ...previousOf([]), journeys: [{ id: "journey-1", name: "旧的能力场景", tier: "capability" as const, capabilityNames: [], steps: [step("A"), step("B")] }] };
+    const merged = mergePresentation({ previous, next: nextOf([{ name: "新的典型场景", steps: [step("A", "HP-2"), step("B")] }]), ledger: leafLedger() });
+    expect(merged.journeys.map((journey) => [journey.name, journey.tier])).toEqual([["新的典型场景", "headline"]]);
+  });
+
+  it("drops previous journeys that only chain scenarios of one feature when they are re-validated", () => {
+    // 首轮生成（还没有「相邻两步不同功能」校验时）留下的旧格式条目：合并时按当前规则重新校验，自动清掉，不需要单独的数据清理
+    const previous = previousOf([{ name: "旧格式：罗列同一功能的变体", steps: [step("A"), step("A", "HP-2"), step("B")] }]);
+    const merged = mergePresentation({ previous, next: nextOf([{ name: "这次的新旅程", steps: [step("C"), step("D")] }]), ledger: leafLedger() });
+    expect(merged.journeys.map((journey) => journey.name)).toEqual(["这次的新旅程"]);
+  });
+
+  it("keeps a journey that chains scenarios of one feature when the product has only that one feature", () => {
+    // 单功能产品的旅程只能在同一个功能里串场景，不算罗列
+    const single: PresentationLedger = { ...leafLedger(), features: [feature(1, "A")], scenarios: [scenario(1, "HP-1"), scenario(1, "HP-2")] };
+    const merged = mergePresentation({ previous: { capabilities: [], journeys: [] }, next: { ...nextOf([{ name: "单功能里的两步", steps: [step("A", "HP-1"), step("A", "HP-2")] }]), capabilities: [] }, ledger: single });
+    expect(merged.journeys.map((journey) => journey.name)).toEqual(["单功能里的两步"]);
+  });
 });
 
 describe("journey mining prompt", () => {
@@ -488,7 +541,11 @@ describe("journey mining prompt", () => {
     expect(prompt).toContain("逐字取自候选列表");
     expect(prompt).toContain("最多返回 6 条旅程");
     expect(prompt).toContain("所属能力：采集与转写");
-    expect(journeyMiningPrompt({ productDescription: "d", capabilityName: null, maxJourneys: 5, candidates: [] }, "en")).not.toContain("Capability:");
+    // 判重口径写进提示词：从源头少产重复，别拿同一组功能换着场景编号凑数
+    expect(prompt).toContain("同一组功能只写一条旅程");
+    const english = journeyMiningPrompt({ productDescription: "d", capabilityName: null, maxJourneys: 5, candidates: [] }, "en");
+    expect(english).not.toContain("Capability:");
+    expect(english).toContain("one journey per combination of features");
     expect(parseJourneyCandidates('```json\n{"journeys":[{"name":"x","steps":[{"featureName":"A","reference":"HP-1"}]}]}\n```')).toEqual([{ name: "x", steps: [{ featureName: "A", reference: "HP-1" }] }]);
   });
 });
@@ -601,6 +658,55 @@ describe("presentation refresh scheduling", () => {
     restore();
     expect(result.outcome).toBe("generated");
     expect(db.deferrals).toEqual([]);
+  });
+
+  /** 一条 A→B 的典型旅程：作为「上一版」落库内容。 */
+  const storedOneJourney = { capabilities: "[]", journeys: JSON.stringify([{ name: "上一版的甲", tier: "headline", capabilityNames: [], steps: [{ featureName: "A", reference: "HP-1" }, { featureName: "B", reference: "HP-1" }] }]) };
+
+  it("replaces the previous journeys on a forced regeneration when the fresh result covers at least the still-valid part", async () => {
+    // 手动「重新生成」要的是按当前规则重来一遍，不是往旧内容上叠加。
+    // 上一版里罗列同一功能多条场景的旧格式条目按当前规则已不成立，不算进「不输」的基准——
+    // 否则合并出来的并集几乎总是更宽，全新的结果永远替换不了，旧格式的条目会一直留着。
+    const db = fakeDb({ previous: { capabilities: "[]", journeys: JSON.stringify([
+      { name: "上一版的甲", tier: "headline", capabilityNames: [], steps: [{ featureName: "A", reference: "HP-1" }, { featureName: "B", reference: "HP-1" }] },
+      { name: "旧格式：罗列同一功能的场景", tier: "capability", capabilityNames: [], steps: [{ featureName: "A", reference: "HP-1" }, { featureName: "A", reference: "HP-2" }, { featureName: "C", reference: "HP-1" }] },
+    ]) } });
+    const restore = silenceConsole();
+    const result = await schedulePresentationRefresh({ productId: 1, force: true, background: false, execute: db.execute, client: client(() => miningAnswer([oneJourney])) });
+    restore();
+    expect(result.outcome).toBe("generated");
+    expect(result.detail).toMatchObject({ journeys: 1, replaced: true, coveredFeatures: 2 });
+    expect(JSON.parse(String(db.saved![7])).map((journey: { name: string }) => journey.name)).toEqual(["挖掘旅程"]);
+  });
+
+  it("falls back to merging on a forced regeneration when the fresh result covers less than before", async () => {
+    // 模型输出有波动：这次挖得更少时不能让「重新生成」把使用场景变少
+    const db = fakeDb({ previous: { capabilities: "[]", journeys: JSON.stringify([
+      { name: "上一版的甲", tier: "headline", capabilityNames: [], steps: [{ featureName: "A", reference: "HP-1" }, { featureName: "B", reference: "HP-1" }] },
+      { name: "上一版的乙", tier: "capability", capabilityNames: [], steps: [{ featureName: "C", reference: "HP-1" }, { featureName: "D", reference: "HP-1" }] },
+    ]) } });
+    const restore = silenceConsole();
+    const result = await schedulePresentationRefresh({ productId: 1, force: true, background: false, execute: db.execute, client: client(() => miningAnswer([oneJourney])) });
+    restore();
+    expect(result.outcome).toBe("generated");
+    expect(result.detail).toMatchObject({ journeys: 3, replaced: false, coveredFeatures: 4 });
+    // 合并时两版的全局典型场景排在能力场景之前
+    expect(JSON.parse(String(db.saved![7])).map((journey: { name: string }) => journey.name)).toEqual(["上一版的甲", "挖掘旅程", "上一版的乙"]);
+  });
+
+  it("merges with the previous journeys on an automatic refresh even when the fresh result covers as much", async () => {
+    // 自动刷新（分析钩子 / sweep）只增不减：模型输出有波动，合并保证覆盖率不下降
+    const db = fakeDb({ previous: storedOneJourney, state: { fingerprint: "old", pending: 1, interval_elapsed: 1, never_generated: 0 } });
+    const restore = silenceConsole();
+    const result = await schedulePresentationRefresh({ productId: 1, background: false, execute: db.execute, client: client(() => miningAnswer([
+      oneJourney,
+      { name: "换个编号的同一走法", steps: [{ featureName: "A", reference: "HP-2" }, { featureName: "B", reference: "HP-1" }] },
+    ])) });
+    restore();
+    expect(result.outcome).toBe("generated");
+    expect(result.detail).toMatchObject({ journeys: 2, replaced: false });
+    // 上一版的旅程留在前面；本次的「换个编号」与它经过同一组功能，按重复折叠
+    expect(JSON.parse(String(db.saved![7])).map((journey: { name: string }) => journey.name)).toEqual(["上一版的甲", "挖掘旅程"]);
   });
 
   it("defers without touching state when another generation holds the lease", async () => {

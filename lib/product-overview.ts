@@ -297,7 +297,8 @@ export function buildProductOverview(input: ProductOverviewInput, locale: "zh-CN
       members: capability.features,
     }))
     : [];
-  const journeyHighlights: JourneyHighlight[] = (presentation?.intactJourneys ?? [])
+  // 精简卡与计数只取页面上实际展示的旅程（完好且功能组合互不重复）
+  const journeyHighlights: JourneyHighlight[] = (presentation?.visibleJourneys ?? [])
     .map((journey, order) => ({ journey, order, tier: journey.tier === "headline" ? 0 : 1 }))
     .sort((a, b) => a.tier - b.tier || a.order - b.order)
     .slice(0, JOURNEY_HIGHLIGHTS)
@@ -317,7 +318,7 @@ export function buildProductOverview(input: ProductOverviewInput, locale: "zh-CN
     productBase: input.productBase,
     presentation,
     journeyHighlights,
-    journeyTotal: presentation?.intactJourneys.length ?? 0,
+    journeyTotal: presentation?.visibleJourneys.length ?? 0,
     description: input.product.description,
     headline: input.product.description.trim() || pick(locale, OVERVIEW_DATA.headlineFallback),
     headlineSource: input.product.descriptionSource === undefined ? "manual" : input.product.descriptionSource,

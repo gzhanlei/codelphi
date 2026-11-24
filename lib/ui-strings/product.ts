@@ -115,6 +115,13 @@ export const PRODUCT_JOURNEYS = {
   },
   missingScenario: { "zh-CN": "引用的场景已不存在", en: "Referenced scenario no longer exists" },
   brokenNote: { "zh-CN": "另有 {count} 条使用场景的引用已全部失效，暂不展示。", en: "{count} more use case(s) reference scenarios that no longer exist and are hidden." },
+  related: { "zh-CN": "途经这项能力、在别处展示的场景：", en: "Also passing through this capability (shown elsewhere): " },
+  relatedSeparator: { "zh-CN": "、", en: ", " },
+  foldedGroup: { "zh-CN": "未展示的场景（较早的生成规则）", en: "Not shown (from an earlier rule)" },
+  foldedNote: {
+    "zh-CN": "这些场景由较早的生成规则产出——与上面的场景经过相同的功能组合，或只是把同一功能的多条场景首尾相接；下次重新生成时会自动清理。",
+    en: "These came from an earlier generation rule: they cover the same features as a use case shown above, or only chain several scenarios of one feature. They are cleaned up on the next regeneration.",
+  },
   emptyNoSpec: { "zh-CN": "尚无功能规格。生成一次分析后，这里会给出产品的典型使用场景。", en: "No feature specs yet. After an analysis, typical ways to use the product will appear here." },
   emptyNotGenerated: { "zh-CN": "典型使用场景尚未生成：首次分析完成后会自动生成。", en: "Typical use cases have not been generated yet; they are created automatically after the first analysis." },
   emptyGenerating: { "zh-CN": "正在生成典型使用场景，稍后刷新页面即可看到。", en: "Typical use cases are being generated; refresh the page in a moment." },

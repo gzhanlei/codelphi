@@ -598,6 +598,8 @@ dialog.publish-dialog h3 { margin: 0 0 8px; font-size: 16px; }
 .journey-step-link { display: inline-block; margin-top: 8px; color: var(--green); font-size: 12px; }.journey-step-missing { display: inline-block; margin-top: 8px; color: var(--amber); font-size: 12px; }
 .journey-step-evidence { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin-top: 6px; font-size: 12px; }.journey-step-evidence > span { color: var(--muted); }.journey-step-evidence .evidence-list { margin-top: 0; }
 .use-case-group-stale .journey { opacity: .85; }
+.use-cases-related { margin: 14px 0 0; color: var(--muted); font-size: 13px; }.use-cases-related a { color: var(--green); text-decoration: none; }.use-cases-related a:hover { text-decoration: underline; }
+.use-cases-folded { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
 .use-cases-empty .overview-text-link { font-size: 13px; }
 /* 从使用场景深链到达时高亮目标场景：读者一眼看到落在哪一条 */
 .scenario:target { background: var(--green-light); box-shadow: inset 3px 0 0 var(--green); scroll-margin-top: 16px; }

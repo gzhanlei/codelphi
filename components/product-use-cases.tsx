@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import Link from "next/link";
 import type { UiLocale } from "@/lib/ui-locale";
 import { pick } from "@/lib/ui-locale";
@@ -84,9 +85,10 @@ function EmptyState({ presentation, hasFeatures, canEdit, locale }: { presentati
 }
 
 export function ProductUseCases({ presentation, hasFeatures, canEdit, locale = "zh-CN" }: { presentation: ProductPresentationView | null; hasFeatures: boolean; canEdit: boolean; locale?: UiLocale }) {
-  if (!presentation || presentation.intactJourneys.length === 0) return <EmptyState presentation={presentation} hasFeatures={hasFeatures} canEdit={canEdit} locale={locale} />;
-  const { row, groups, staleJourneys } = presentation;
-  const liveGroups = groups.map((group) => ({ ...group, journeys: group.journeys.filter((journey) => journey.intact) })).filter((group) => group.journeys.length > 0);
+  if (!presentation || presentation.visibleJourneys.length === 0) return <EmptyState presentation={presentation} hasFeatures={hasFeatures} canEdit={canEdit} locale={locale} />;
+  const { row, groups, staleJourneys, foldedJourneys } = presentation;
+  // 分组里的旅程都是完好且互不重复的；只有链接引用的分组也保留（总览能力卡链进来要有落点）
+  const liveGroups = groups.filter((group) => group.journeys.length > 0 || group.related.length > 0);
   return (
     <div className="use-cases">
       <section className="overview-panel">
@@ -94,7 +96,7 @@ export function ProductUseCases({ presentation, hasFeatures, canEdit, locale = "
         <p>{pick(locale, PRODUCT_JOURNEYS.note)}</p>
         <p className="use-cases-summary" data-use-cases-summary="">
           {pick(locale, PRODUCT_JOURNEYS.summary)
-            .replace("{journeys}", String(presentation.intactJourneys.length))
+            .replace("{journeys}", String(presentation.visibleJourneys.length))
             .replace("{covered}", String(presentation.coverage.featuresInJourneys))
             .replace("{total}", String(presentation.coverage.featuresTotal))
             .replace("{time}", formatDateIn(locale, row.generatedAt))}
@@ -112,9 +114,19 @@ export function ProductUseCases({ presentation, hasFeatures, canEdit, locale = "
         <details className="overview-panel use-case-group" id={group.key} open key={group.key}>
           <summary className="use-case-group-heading">
             <h3>{groupTitle(group, locale)}</h3>
-            <span>{pick(locale, PRODUCT_JOURNEYS.groupCount).replace("{count}", String(group.journeys.length))}</span>
+            {/* 没有完整卡片、只有链接引用的分组不显示「0 条」 */}
+            {group.journeys.length > 0 ? <span>{pick(locale, PRODUCT_JOURNEYS.groupCount).replace("{count}", String(group.journeys.length))}</span> : null}
           </summary>
           <div className="journey-list">{group.journeys.map((journey) => <JourneyCard journey={journey} locale={locale} key={journey.id} />)}</div>
+          {/* 每条旅程只完整展示一次：途经本能力、在别的分组展示的场景只给链接 */}
+          {group.related.length > 0 ? (
+            <p className="use-cases-related">
+              {pick(locale, PRODUCT_JOURNEYS.related)}
+              {group.related.map((journey, index) => (
+                <Fragment key={journey.id}>{index > 0 ? pick(locale, PRODUCT_JOURNEYS.relatedSeparator) : null}<a href={`#${journey.id}`}>{journey.name}</a></Fragment>
+              ))}
+            </p>
+          ) : null}
         </details>
       ))}
       {staleJourneys.length > 0 ? (
@@ -129,6 +141,17 @@ export function ProductUseCases({ presentation, hasFeatures, canEdit, locale = "
               <JourneyCard journey={journey} locale={locale} />
             </div>
           ))}
+        </details>
+      ) : null}
+      {/* 落库内容里按当前规则不再展示的条目（较早的生成规则或快照导入留下的：互相重复、罗列同一功能的多条场景）：不画卡，但如实列出 */}
+      {foldedJourneys.length > 0 ? (
+        <details className="overview-panel use-case-group use-case-group-folded">
+          <summary className="use-case-group-heading">
+            <h3>{pick(locale, PRODUCT_JOURNEYS.foldedGroup)}</h3>
+            <span>{pick(locale, PRODUCT_JOURNEYS.groupCount).replace("{count}", String(foldedJourneys.length))}</span>
+          </summary>
+          <p className="overview-note">{pick(locale, PRODUCT_JOURNEYS.foldedNote)}</p>
+          <ul className="use-cases-folded">{foldedJourneys.map((journey) => <li key={journey.id}>{journey.name}</li>)}</ul>
         </details>
       ) : null}
       {presentation.brokenJourneys > 0 ? <p className="overview-note use-cases-broken">{pick(locale, PRODUCT_JOURNEYS.brokenNote).replace("{count}", String(presentation.brokenJourneys))}</p> : null}
