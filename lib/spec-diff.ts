@@ -30,14 +30,40 @@ export interface SpecFeature {
   source?: "generated" | "manual";
 }
 
+export type RemovalEvidenceState = "removed" | "not_observed" | "evidence_stale" | "uncertain";
+
+export interface RemovalProof {
+  originalImplementationChecked: boolean;
+  alternativePathsChecked: boolean;
+  behaviorBoundaryVerified: boolean;
+  evidence: Evidence[];
+  evidenceValid?: boolean;
+}
+
 export interface SpecChange {
-  kind: "added" | "changed" | "removed";
+  kind: "added" | "changed" | "removed" | "uncertain";
   entityType: "feature" | "scenario";
   featureName: string;
   scenarioReference: string | null;
   summary: string;
   before: SpecFeature | SpecScenario | null;
   after: SpecFeature | SpecScenario | null;
+  judgment?: "confirmed" | "uncertain";
+  evidenceState?: RemovalEvidenceState;
+  reasonCodes?: string[];
+}
+
+export function evaluateRemovalProof(proof?: RemovalProof): { classification: RemovalEvidenceState; judgment: "confirmed" | "uncertain"; reasonCodes: string[] } {
+  if (!proof) return { classification: "not_observed", judgment: "uncertain", reasonCodes: ["not_observed"] };
+  if (proof.evidenceValid === false) return { classification: "evidence_stale", judgment: "uncertain", reasonCodes: ["evidence_stale"] };
+  const missing = [
+    !proof.originalImplementationChecked ? "original_implementation_unchecked" : null,
+    !proof.alternativePathsChecked ? "alternative_paths_unchecked" : null,
+    !proof.behaviorBoundaryVerified ? "behavior_boundary_unverified" : null,
+    proof.evidence.length === 0 ? "removal_evidence_missing" : null,
+  ].filter((code): code is string => code !== null);
+  if (missing.length > 0) return { classification: "uncertain", judgment: "uncertain", reasonCodes: missing };
+  return { classification: "removed", judgment: "confirmed", reasonCodes: ["original_implementation_checked", "alternative_paths_checked", "behavior_boundary_verified"] };
 }
 
 /** 被等价判定折叠的差异：wording=行为等价但原文不同；renumber=同功能内场景换编号；tests-only=新增功能的证据全部来自测试/文档（行为性证据不足）。仅供审计展示，不落库。 */
@@ -183,15 +209,15 @@ function mergedSortedKeys(left: Map<string, unknown>, right: Map<string, unknown
 
 function changeSummary(kind: SpecChange["kind"], entityType: SpecChange["entityType"], featureName: string, reference: string | null, language: "zh-CN" | "en" = "zh-CN") {
   if (language === "en") {
-    const action = { added: "Added", changed: "Updated", removed: "Removed" }[kind];
+    const action = { added: "Added", changed: "Updated", removed: "Removed", uncertain: "Uncertain" }[kind];
     return entityType === "feature" ? `${action} feature "${featureName}"` : `"${featureName}" ${action.toLowerCase()} scenario ${reference}`;
   }
-  const action = { added: "新增", changed: "更新", removed: "移除" }[kind];
+  const action = { added: "新增", changed: "更新", removed: "移除", uncertain: "未决" }[kind];
   return entityType === "feature" ? `${action}功能「${featureName}」` : `「${featureName}」${action}场景 ${reference}`;
 }
 
-function featureChange(kind: "added" | "removed" | "changed", feature: SpecFeature, before: SpecFeature | null, after: SpecFeature | null, language?: "zh-CN" | "en"): SpecChange {
-  return { kind, entityType: "feature", featureName: feature.name, scenarioReference: null, summary: changeSummary(kind, "feature", feature.name, null, language), before, after };
+function featureChange(kind: "added" | "removed" | "changed" | "uncertain", feature: SpecFeature, before: SpecFeature | null, after: SpecFeature | null, language?: "zh-CN" | "en", assessment?: ReturnType<typeof evaluateRemovalProof>): SpecChange {
+  return { kind, entityType: "feature", featureName: feature.name, scenarioReference: null, summary: changeSummary(kind, "feature", feature.name, null, language), before, after, judgment: assessment?.judgment, evidenceState: assessment?.classification, reasonCodes: assessment?.reasonCodes };
 }
 
 
@@ -471,9 +497,11 @@ interface DiffOutcome {
 export interface DiffSpecOptions {
   behavioralChangePaths?: ReadonlySet<string>;
   language?: "zh-CN" | "en";
+  removedProofs?: ReadonlyMap<string, RemovalProof>;
 }
 
-function scenarioChanges(before: SpecFeature, after: SpecFeature, outcome: DiffOutcome, language?: "zh-CN" | "en") {
+function scenarioChanges(before: SpecFeature, after: SpecFeature, outcome: DiffOutcome, options?: DiffSpecOptions) {
+  const language = options?.language;
   const beforeScenarios = scenarioMap(before);
   const afterScenarios = scenarioMap(after);
   const changes: SpecChange[] = [];
@@ -481,7 +509,9 @@ function scenarioChanges(before: SpecFeature, after: SpecFeature, outcome: DiffO
   for (const reference of mergedSortedKeys(beforeScenarios, afterScenarios)) {
     const previous = beforeScenarios.get(reference);
     const current = afterScenarios.get(reference);
-    const kind = previous ? current ? "changed" : "removed" : "added";
+    if (previous && !current && previous.source === "manual") continue;
+    const assessment = previous && !current ? evaluateRemovalProof(options?.removedProofs?.get(specScenarioKey(before.name, reference))) : undefined;
+    const kind = previous ? current ? "changed" : assessment?.classification === "removed" ? "removed" : "uncertain" : "added";
     if (previous && current && !scenarioBehaviorChanged(previous, current)) {
       // 行为等价不落变化行；若原文确有差异，记入折叠明细供审计（完全相同的文本没有审计价值）。
       if (previous.context !== current.context || previous.action !== current.action || previous.outcome !== current.outcome) {
@@ -497,6 +527,9 @@ function scenarioChanges(before: SpecFeature, after: SpecFeature, outcome: DiffO
       summary: changeSummary(kind, "scenario", after.name, reference, language),
       before: previous === undefined ? null : previous,
       after: current === undefined ? null : current,
+      judgment: assessment?.judgment,
+      evidenceState: assessment?.classification,
+      reasonCodes: assessment?.reasonCodes,
     });
   }
 
@@ -504,7 +537,7 @@ function scenarioChanges(before: SpecFeature, after: SpecFeature, outcome: DiffO
   // BM-6 变体通道：措辞近似（同义替换）的 removed↔added 对同样折叠，reason=variant 供审计。
   const droppedIndexes = new Set<number>();
   for (const [removedIndex, removed] of changes.entries()) {
-    if (removed.kind !== "removed") continue;
+    if (removed.kind !== "removed" && removed.kind !== "uncertain") continue;
     for (const [addedIndex, added] of changes.entries()) {
       if (added.kind !== "added" || droppedIndexes.has(addedIndex)) continue;
       const previous = removed.before as SpecScenario;
@@ -567,13 +600,15 @@ function diffFeature(previous: SpecFeature | undefined, current: SpecFeature | u
     return;
   }
   if (previous && !current) {
-    outcome.changes.push(featureChange("removed", previous, previous, null, language));
+    if (previous.source === "manual" || previous.scenarios.some((scenario) => scenario.source === "manual")) return;
+    const assessment = evaluateRemovalProof(options?.removedProofs?.get(specFeatureKey(previous.name)));
+    outcome.changes.push(featureChange(assessment.classification === "removed" ? "removed" : "uncertain", previous, previous, null, language, assessment));
     return;
   }
   if (!previous || !current) return;
 
   const scenarioOutcome: DiffOutcome = { changes: [], folded: [] };
-  scenarioChanges(previous, current, scenarioOutcome, language);
+  scenarioChanges(previous, current, scenarioOutcome, options);
 
   if (featureBehaviorChanged(previous, current)) {
     const identityChanged = previous.name !== current.name || (previous.parentKey ?? null) !== (current.parentKey ?? null);

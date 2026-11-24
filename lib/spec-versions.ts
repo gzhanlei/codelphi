@@ -219,8 +219,8 @@ async function insertChanges(connection: PoolConnection, versionId: number, base
     const [insertResult] = await connection.execute(
       `INSERT INTO spec_changes
         (spec_version_id, base_spec_version_id, entity_type, kind, feature_key, feature_name,
-         scenario_reference, summary, highlight_type, highlight_reason, before_json, after_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         scenario_reference, summary, highlight_type, highlight_reason, before_json, after_json, judgment, evidence_state, reason_codes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         versionId,
         baseVersionId,
@@ -234,6 +234,9 @@ async function insertChanges(connection: PoolConnection, versionId: number, base
         highlight?.reason ?? null,
         change.before ? JSON.stringify(change.before) : null,
         change.after ? JSON.stringify(change.after) : null,
+        change.judgment ?? null,
+        change.evidenceState ?? null,
+        change.reasonCodes ? JSON.stringify(change.reasonCodes) : null,
       ],
     );
     persisted.push({ ...change, id: Number((insertResult as { insertId: number }).insertId) });

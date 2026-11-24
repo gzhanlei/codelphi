@@ -70,23 +70,25 @@ function changeIsTestOnly(change: BehaviorChangeRow): boolean {
 
 /** 总览 02 面板的按功能聚合视图：大发布逐条列出会淹没在场景编号里，先给功能级摘要。 */
 function groupChangesByFeature(changes: Array<{ kind: string; featureName: string }>, locale: UiLocale = "zh-CN") {
-  const groups = new Map<string, { featureName: string; added: number; removed: number; changed: number }>();
+  const groups = new Map<string, { featureName: string; added: number; removed: number; changed: number; uncertain: number }>();
   for (const change of changes) {
     const featureName = change.featureName || pick(locale, OVERVIEW_DATA.unknownFeature);
-    const group = groups.get(featureName) ?? { featureName, added: 0, removed: 0, changed: 0 };
+    const group = groups.get(featureName) ?? { featureName, added: 0, removed: 0, changed: 0, uncertain: 0 };
     if (change.kind === "added") group.added += 1;
     else if (change.kind === "removed") group.removed += 1;
+    else if (change.kind === "uncertain") group.uncertain += 1;
     else group.changed += 1;
     groups.set(featureName, group);
   }
-  return [...groups.values()].sort((a, b) => (b.added + b.removed + b.changed) - (a.added + a.removed + a.changed) || a.featureName.localeCompare(b.featureName));
+  return [...groups.values()].sort((a, b) => (b.added + b.removed + b.changed + b.uncertain) - (a.added + a.removed + a.changed + a.uncertain) || a.featureName.localeCompare(b.featureName));
 }
 
-export function changeGroupLabel(group: { added: number; removed: number; changed: number }, locale: UiLocale = "zh-CN") {
+export function changeGroupLabel(group: { added: number; removed: number; changed: number; uncertain: number }, locale: UiLocale = "zh-CN") {
   const parts = [];
   if (group.added > 0) parts.push(pick(locale, OVERVIEW_DATA.groupAdded).replace("{count}", String(group.added)));
   if (group.removed > 0) parts.push(pick(locale, OVERVIEW_DATA.groupRemoved).replace("{count}", String(group.removed)));
   if (group.changed > 0) parts.push(pick(locale, OVERVIEW_DATA.groupChanged).replace("{count}", String(group.changed)));
+  if (group.uncertain > 0) parts.push(pick(locale, OVERVIEW_DATA.groupUncertain).replace("{count}", String(group.uncertain)));
   return parts.join(" · ") || pick(locale, OVERVIEW_DATA.groupNone);
 }
 
@@ -103,7 +105,7 @@ function buildUserImpact(
   input: ProductOverviewInput,
   latestRelease: ReleaseRow | undefined,
   latestChanges: BehaviorChangeRow[],
-  changeStats: { added: number; removed: number; changed: number },
+  changeStats: { added: number; removed: number; changed: number; uncertain: number },
   locale: "zh-CN" | "en" = "zh-CN",
 ) {
   const groups = new Map<string, { releaseId: number; featureName: string; userImpacts: string[]; moreCount: number }>();
@@ -186,7 +188,8 @@ export function buildProductOverview(input: ProductOverviewInput, locale: "zh-CN
   const changeStats = {
     added: latestChanges.filter((change) => change.kind === "added").length,
     removed: latestChanges.filter((change) => change.kind === "removed").length,
-    changed: latestChanges.filter((change) => change.kind !== "added" && change.kind !== "removed").length,
+    changed: latestChanges.filter((change) => change.kind !== "added" && change.kind !== "removed" && change.kind !== "uncertain").length,
+    uncertain: latestChanges.filter((change) => change.kind === "uncertain").length,
   };
   // BM-6/B2：发布稿勾选与影响投影用实现证据口径；changeStats/发布变化视图保持全量。
   const userVisibleChanges = latestChanges.filter((change) => !changeIsTestOnly(change));

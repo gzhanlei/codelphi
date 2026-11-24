@@ -80,6 +80,7 @@ export const OVERVIEW_DATA = {
   groupAdded: { "zh-CN": "新增 {count}", en: "{count} added" },
   groupRemoved: { "zh-CN": "移除 {count}", en: "{count} removed" },
   groupChanged: { "zh-CN": "更新 {count}", en: "{count} changed" },
+  groupUncertain: { "zh-CN": "未决 {count}", en: "{count} uncertain" },
   groupNone: { "zh-CN": "无行为变化", en: "No behavior changes" },
   taskCapabilityQuestion: { "zh-CN": "这个产品现在能做什么？", en: "What can this product do now?" },
   taskReleaseImpactQuestion: { "zh-CN": "这次发布改变了什么？", en: "What did this release change?" },

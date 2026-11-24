@@ -59,7 +59,7 @@ describe("spec version persistence", () => {
     expect(specChanges).toHaveLength(4);
     expect(specChanges.map((change) => change.id)).toEqual([500, 501, 502, 503]);
     expect(specChanges.map((change) => change.summary)).toEqual(db.changes.map((change) => change[7]));
-    expect(db.changes.map((change) => change[3])).toEqual(expect.arrayContaining(["added", "changed", "removed"]));
+    expect(db.changes.map((change) => change[3])).toEqual(expect.arrayContaining(["added", "changed", "uncertain"]));
     expect(db.changes.every((change) => change[1] === 11)).toBe(true);
     expect(db.changes.some((change) => change[8] === null)).toBe(true);
     expect(db.changes.some((change) => change[9] === null)).toBe(true);
@@ -136,6 +136,18 @@ describe("spec version persistence", () => {
     }, { behavioralChangePaths: new Set(["lib/behavior-unit-ai.ts"]) });
 
     expect(db.changes).toEqual([]);
+  });
+
+  it("persists uncertain removal judgment and evidence state", async () => {
+    const db = connection([{ id: 11 }], false, {}, [previousScenario("HP-1", "lib/behavior-unit-ai.ts")]);
+    await insertSpecVersion(db, run, { ...result, features: [{ name: "Legacy", summary: "Removed", scenarios: [] }] }, { behavioralChangePaths: new Set(["lib/behavior-unit-ai.ts"]) });
+
+    const change = db.changes.find((parameters) => parameters[2] === "feature");
+    expect(change?.[2]).toBe("feature");
+    expect(change?.[3]).toBe("uncertain");
+    expect(change?.[12]).toBe("uncertain");
+    expect(change?.[13]).toBe("not_observed");
+    expect(JSON.parse(String(change?.[14]))).toEqual(["not_observed"]);
   });
 
   it("records no changes for a first version", async () => {
