@@ -17,6 +17,13 @@ import { specFeatureKey } from "./spec-diff";
 
 export type SpecIdentityErrorCode = "identity_input_invalid" | "identity_registry_conflict" | "identity_conflict";
 
+/** 发布一个版本时算身份得到的全部东西：算出来的计划，和它依据的上一版身份与登记表。 */
+export interface VersionIdentityContext {
+  plan: VersionIdentityPlan;
+  previous: VersionIdentities;
+  registry: IdentityRegistry;
+}
+
 export class SpecIdentityError extends Error {
   constructor(public readonly code: SpecIdentityErrorCode, message: string) {
     super(message);
@@ -43,6 +50,11 @@ export interface IdentityMaps {
 }
 export type VersionIdentities = IdentityMaps;
 export type IdentityRegistry = IdentityMaps;
+
+/** 规格对象里和身份有关的三个字段。发布时把最终的功能清单这样交进来。 */
+export function identityInputOf(feature: { name: string; parentKey?: string | null; scenarios: ReadonlyArray<{ reference: string }> }): IdentityFeatureInput {
+  return { name: feature.name, parentKey: feature.parentKey ?? null, references: feature.scenarios.map((scenario) => scenario.reference) };
+}
 
 export interface ScenarioIdentityPlan {
   identityKey: string;
@@ -316,6 +328,42 @@ export function changeRowIdentity(
   registry: IdentityRegistry,
 ): { featureIdentityKey: string | null; scenarioIdentityKey: string | null } {
   return resolveChangeIdentity({ featureKey: change.featureKey, scenarioReference: change.scenarioReference === "" ? null : change.scenarioReference }, plan, previous, registry);
+}
+
+/**
+ * 下面几个是写入路径取“这一行接在哪两个身份值后面”的地方。抽出来是为了让拼 INSERT 的那几个函数
+ * 不必各自带一串可选链：它们的圈复杂度本来就不低。
+ */
+
+/** 这份上下文里的计划。身份层关着时没有上下文，也就没有计划。 */
+export function planOf(identity: VersionIdentityContext | null): VersionIdentityPlan | null {
+  return identity?.plan ?? null;
+}
+
+/** 写一行 spec_features 时接在参数末尾的两个值：功能身份、父功能身份。 */
+export function featureIdentityColumns(plan: VersionIdentityPlan | null, name: string): [string | null, string | null] {
+  const feature = plan?.features.get(specFeatureKey(name)) ?? null;
+  return [feature?.identityKey ?? null, feature?.parentIdentityKey ?? null];
+}
+
+/** 某个功能在这一版的身份键。工作台的 features 行只存这一个。 */
+export function featureIdentityColumn(plan: VersionIdentityPlan | null, name: string): string | null {
+  return plan?.features.get(specFeatureKey(name))?.identityKey ?? null;
+}
+
+/** 某个场景在这一版的身份键。写 spec_scenarios 行时接在参数末尾的就是它，工作台的 scenarios 行也只存这一个。 */
+export function scenarioIdentityColumn(plan: VersionIdentityPlan | null, featureName: string, reference: string): string | null {
+  return plan?.features.get(specFeatureKey(featureName))?.scenarios.get(reference)?.identityKey ?? null;
+}
+
+/** 写一行 spec_changes 时接在参数末尾的两个值：功能身份、场景身份。 */
+export function changeIdentityColumns(
+  identity: VersionIdentityContext | null,
+  change: { featureName: string; scenarioReference: string | null },
+): [string | null, string | null] {
+  if (identity === null) return [null, null];
+  const row = changeRowIdentity({ featureKey: change.featureName, scenarioReference: change.scenarioReference ?? "" }, identity.plan, identity.previous, identity.registry);
+  return [row.featureIdentityKey, row.scenarioIdentityKey];
 }
 
 /** 下一版从这份身份出发。 */

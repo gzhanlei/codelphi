@@ -29,7 +29,7 @@ import { assignVersionIdentities, identityInputsOf, resultRows, type IdentityRow
  *
  * 默认只演练：读全部版本、算出身份、出报告，一个字节都不写。确认报告里没有冲突之后再加 --apply。
  * 写入时每个仓库一个事务：遇到冲突（同一版里两个条目落到同一个身份等）整个仓库回滚，别的仓库照常。
- * 可以重复运行：登记表只追加，重复的身份不覆盖；行上的身份再写一遍是同一个值。
+ * 可以重复运行：已经登记过的身份不重建，行上的身份再写一遍是同一个值。
  */
 
 export interface BackfillRepository {

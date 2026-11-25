@@ -6,6 +6,16 @@ import { defaultExecute, type Execute } from "./db";
 import { evidenceItems } from "./evidence";
 import { nextReference } from "./extraction-merge";
 import type { ReleaseChangeFact } from "./release-change-projection";
+import {
+  changeIdentityColumns,
+  featureIdentityColumns,
+  identityInputOf,
+  planOf,
+  scenarioIdentityColumn,
+  type VersionIdentityContext,
+  type VersionIdentityPlan,
+} from "./spec-identity";
+import { planVersionIdentitiesForWrite, recordIdentityPlan } from "./spec-identity-store";
 import { buildRemovalProofs, dedupeExactScenarioProjections, diffSpec, featureScenarioPairMatch, featureVariantSimilar, mergeSpecSources, preserveExactScenarioIdentities, preserveUnchangedEvidence, preserveUncertainDisappearances, scenarioBehaviorEqual, specFeatureKey, specScenarioKey, unionScenarioOriginKeys, type PatchHunk, type SpecChange, type SpecFeature, type SpecScenario, type SpecTombstones } from "./spec-diff";
 import { classifySpecHighlight } from "./spec-highlights";
 import { detectVisibilityConflicts } from "./spec-consistency";
@@ -182,21 +192,23 @@ async function loadPreviousSpec(connection: PoolConnection, run: RunContext, bas
  * analysis_behavior_anchor_scenarios.final_scenario_id。同一 origin 映射到两行是账本
  * 不变量违例（去重/折叠丢来源），直接抛错让上层回滚，绝不静默取其一。
  */
-async function insertFeatures(connection: PoolConnection, versionId: number, features: SpecFeature[]): Promise<Map<string, number>> {
+async function insertFeatures(connection: PoolConnection, versionId: number, features: SpecFeature[], identities: VersionIdentityPlan | null): Promise<Map<string, number>> {
   const scenarioIdByLocalKey = new Map<string, number>();
   for (const [position, feature] of features.entries()) {
+    // 身份列接在列清单和参数的末尾，前面七个的位置不变。身份层关着或还没算出来时是 null。
+    const [identityKey, parentIdentityKey] = featureIdentityColumns(identities, feature.name);
     const [featureResult] = await connection.execute(
-      `INSERT INTO spec_features (spec_version_id, stable_key, name, summary, parent_key, source, position)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [versionId, specFeatureKey(feature.name), feature.name, feature.summary, feature.parentKey === undefined ? null : feature.parentKey, feature.source === undefined ? "generated" : feature.source, position],
+      `INSERT INTO spec_features (spec_version_id, stable_key, name, summary, parent_key, source, position, identity_key, parent_identity_key)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [versionId, specFeatureKey(feature.name), feature.name, feature.summary, feature.parentKey === undefined ? null : feature.parentKey, feature.source === undefined ? "generated" : feature.source, position, identityKey, parentIdentityKey],
     );
     const featureId = Number((featureResult as { insertId: number }).insertId);
     for (const scenario of feature.scenarios) {
       const [scenarioResult] = await connection.execute(
         `INSERT INTO spec_scenarios
-          (spec_feature_id, reference, context, action, outcome, category, step_order, source, evidence)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [featureId, scenario.reference, scenario.context, scenario.action, scenario.outcome, scenario.category, scenario.step ?? null, scenario.source === undefined ? "generated" : scenario.source, JSON.stringify(scenario.evidence)],
+          (spec_feature_id, reference, context, action, outcome, category, step_order, source, evidence, identity_key)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [featureId, scenario.reference, scenario.context, scenario.action, scenario.outcome, scenario.category, scenario.step ?? null, scenario.source === undefined ? "generated" : scenario.source, JSON.stringify(scenario.evidence), scenarioIdentityColumn(identities, feature.name, scenario.reference)],
       );
       if (!scenario.originKeys || scenario.originKeys.length === 0) continue;
       const scenarioId = Number((scenarioResult as { insertId: number }).insertId);
@@ -211,16 +223,19 @@ async function insertFeatures(connection: PoolConnection, versionId: number, fea
   return scenarioIdByLocalKey;
 }
 
-async function insertChanges(connection: PoolConnection, versionId: number, baseVersionId: number | null, changes: SpecChange[]): Promise<ReleaseChangeFact[]> {
+async function insertChanges(connection: PoolConnection, versionId: number, baseVersionId: number | null, changes: SpecChange[], identity: VersionIdentityContext | null): Promise<ReleaseChangeFact[]> {
   const persisted: ReleaseChangeFact[] = [];
   for (const change of changes) {
     // A3 Highlight：确定性规则打标（零 AI 成本），绝大多数 change 为 NULL 不强标
     const highlight = classifySpecHighlight(change);
+    // 身份接在参数末尾，前面十五个的位置不变。变化记录的身份是那个条目当时的身份，找不到就留空。
+    const [featureIdentityKey, scenarioIdentityKey] = changeIdentityColumns(identity, change);
     const [insertResult] = await connection.execute(
       `INSERT INTO spec_changes
         (spec_version_id, base_spec_version_id, entity_type, kind, feature_key, feature_name,
-         scenario_reference, summary, highlight_type, highlight_reason, before_json, after_json, judgment, evidence_state, reason_codes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         scenario_reference, summary, highlight_type, highlight_reason, before_json, after_json, judgment, evidence_state, reason_codes,
+         feature_identity_key, scenario_identity_key)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         versionId,
         baseVersionId,
@@ -237,6 +252,8 @@ async function insertChanges(connection: PoolConnection, versionId: number, base
         change.judgment ?? null,
         change.evidenceState ?? null,
         change.reasonCodes ? JSON.stringify(change.reasonCodes) : null,
+        featureIdentityKey,
+        scenarioIdentityKey,
       ],
     );
     persisted.push({ ...change, id: Number((insertResult as { insertId: number }).insertId) });
@@ -335,7 +352,7 @@ export function foldVariantFeatures(previousFeatures: SpecFeature[], features: S
   return { features: result, folds };
 }
 
-export async function insertSpecVersion(connection: PoolConnection, run: RunContext, result: AnalysisResult, options: { affectedKeys?: ReadonlySet<string>; behavioralChangePaths?: ReadonlySet<string>; changedHunksByPath?: ReadonlyMap<string, readonly PatchHunk[]>; base?: "latest" | "beforeRun"; baseVersionId?: number | null; changeFiles?: readonly { path: string; status: string; patch: string }[]; fullAnalysis?: boolean; coverageComplete?: boolean } = {}): Promise<{ specVersionId: number; specChanges: ReleaseChangeFact[]; baseline?: boolean; features: ReturnType<typeof mergeSpecSources>; collapse: SpecVersionCollapse | null; featureCollapses: FeatureCollapse[]; misplacedScenarios: MisplacedScenario[]; identityHijacksDropped: number; featureFolds: FeatureFold[]; scenarioIdByLocalKey: Map<string, number> }> {
+export async function insertSpecVersion(connection: PoolConnection, run: RunContext, result: AnalysisResult, options: { affectedKeys?: ReadonlySet<string>; behavioralChangePaths?: ReadonlySet<string>; changedHunksByPath?: ReadonlyMap<string, readonly PatchHunk[]>; base?: "latest" | "beforeRun"; baseVersionId?: number | null; changeFiles?: readonly { path: string; status: string; patch: string }[]; fullAnalysis?: boolean; coverageComplete?: boolean } = {}): Promise<{ specVersionId: number; specChanges: ReleaseChangeFact[]; baseline?: boolean; features: ReturnType<typeof mergeSpecSources>; collapse: SpecVersionCollapse | null; featureCollapses: FeatureCollapse[]; misplacedScenarios: MisplacedScenario[]; identityHijacksDropped: number; featureFolds: FeatureFold[]; scenarioIdByLocalKey: Map<string, number>; identities?: VersionIdentityPlan | null }> {
   const [previous, manual, tombstones] = await Promise.all([loadPreviousSpec(connection, run, options.base, options.baseVersionId), loadManualSpec(connection, run.productId), loadManualTombstones(connection, run.productId)]);
   // M9 增量模式：受影响集之外的 generated 条目原样沿用上一版（三分合并：carried 种子 < AI < manual）。
   const affectedKeys = options.affectedKeys;
@@ -406,15 +423,22 @@ export async function insertSpecVersion(connection: PoolConnection, run: RunCont
   const collapse = detectSpecCollapse(previousCanonical, activatedFeatures);
   const featureCollapses = detectFeatureCollapses(previousCanonical, activatedFeatures);
   const misplacedScenarios = detectMisplacedScenarios(previousCanonical, activatedFeatures);
+  // 身份先算后写。算不出来（同一版里两个条目落到同一个身份、上一版和登记表说法不一）就在这里失败，
+  // 这时还一个字节都没写。身份层关着时不算，身份列留空，比对退回按名称键。
+  // 身份层关着时算出来是 null：身份列留空，不写登记表，比对退回按名称键。
+  const baseVersionId = previous?.id ?? null;
+  const identity = await planVersionIdentitiesForWrite(run.productId, baseVersionId, activatedFeatures.map(identityInputOf), (statement, parameters) => connection.execute(statement, parameters));
   const [versionResult] = await connection.execute(
     "INSERT INTO spec_versions (product_id, repository_id, analysis_run_id, base_spec_version_id, sha, output_language) VALUES (?, ?, ?, ?, ?, ?)",
-    [run.productId, run.repositoryId, run.id, previous?.id ?? null, run.afterSha, run.outputLanguage === "en" ? "en" : "zh-CN"],
+    [run.productId, run.repositoryId, run.id, baseVersionId, run.afterSha, run.outputLanguage === "en" ? "en" : "zh-CN"],
   );
   const versionId = Number((versionResult as { insertId: number }).insertId);
-  const scenarioIdByLocalKey = await insertFeatures(connection, versionId, activatedFeatures);
-  const specChanges = await insertChanges(connection, versionId, previous === null ? null : previous.id, changes);
+  const scenarioIdByLocalKey = await insertFeatures(connection, versionId, activatedFeatures, planOf(identity));
+  const specChanges = await insertChanges(connection, versionId, baseVersionId, changes, identity);
+  if (identity) await recordIdentityPlan(run.productId, versionId, identity.plan, (statement, parameters) => connection.execute(statement, parameters));
   // 合并后的完整 spec 一并返回：M9 影子对比必须以 carry-forward 之后的规格为对象。
-  return { specVersionId: versionId, specChanges, baseline: previous === null, features: activatedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds, scenarioIdByLocalKey };
+  // identities 是这一版的身份计划：工作台投影要用同一份身份，不能自己再按名称算一遍。
+  return { specVersionId: versionId, specChanges, baseline: previous === null, features: activatedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds, scenarioIdByLocalKey, identities: planOf(identity) };
 }
 
 /** 规格坍缩（护栏）：新版场景数较上一版骤降超过阈值。生产 v95（2026-11-08）178→83 即此形态。 */

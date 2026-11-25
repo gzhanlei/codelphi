@@ -38,6 +38,14 @@ export function incrementalShadowEnabled() {
   return process.env.INCREMENTAL_SHADOW === "true";
 }
 
+/**
+ * 身份层开关（规格《客户端增量分析与 Delta Merge Contract 设计》§20），默认开。
+ * 设成 "false" 时发布照常进行：身份列留空、不写登记表，跨版本比对退回按名称键。
+ */
+export function specIdentityLayerEnabled() {
+  return process.env.SPEC_IDENTITY_LAYER !== "false";
+}
+
 /** AI 上下文窗口预算覆盖（字节）。一次性定向重分析用：塌缩恢复需要比日常 160KB 更大的窗口。 */
 export function analysisAiContextBudgetOverride() {
   const raw = Number(process.env.ANALYSIS_AI_CONTEXT_BUDGET_BYTES ?? "");

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Execute } from "../lib/db";
 import { planVersionIdentities, restoredFeatures, restoredScenarios, emptyIdentityMaps, foldRegistry, toVersionIdentities, type VersionIdentities } from "../lib/spec-identity";
-import { ASSIGN_CHUNK_SIZE, assignVersionIdentities, bulkAssignSql, loadIdentityRegistry, loadVersionIdentities, recordIdentityPlan } from "../lib/spec-identity-store";
+import { ASSIGN_CHUNK_SIZE, assignVersionIdentities, bulkAssignSql, loadIdentityRegistry, loadVersionIdentities, planVersionIdentitiesForWrite, recordIdentityPlan } from "../lib/spec-identity-store";
 
 type Call = [string, Array<string | number | null>];
 
@@ -119,15 +119,17 @@ describe("recordIdentityPlan", () => {
     return [a, b];
   })();
 
-  it("inserts the identities that were minted and leaves an existing row alone", async () => {
+  it("inserts the identities that were minted, and for one already registered only moves its first version earlier", async () => {
     const db = fakeDb();
     await recordIdentityPlan(4, 99, first, db.execute);
 
     const featureInsert = db.calls().find(([sql]) => sql.includes("INSERT INTO feature_identities"));
-    // 重复运行，或者同一产品下别的仓库先写下了同一个身份：保留原来那一行，首次出现的版本不被改写。
-    expect(featureInsert?.[0]).toContain("ON DUPLICATE KEY UPDATE identity_key = identity_key");
-    // 不用 INSERT IGNORE：那会把别的错误也降成警告吞掉。
+    // 同一个身份已经登记过时（重复运行，同一产品下别的仓库先写下它，或者部署之后、回填之前发布过）这一行不重建。
+    // 只把“首次出现的版本”往更早修：登记表里记下的那次发布，可能晚于它真正第一次出现的版本。
+    expect(featureInsert?.[0]).toContain("ON DUPLICATE KEY UPDATE first_spec_version_id = LEAST(first_spec_version_id, VALUES(first_spec_version_id))");
+    // 其余几列不被改写。也不用 INSERT IGNORE：那会把别的错误也降成警告吞掉。
     expect(featureInsert?.[0]).not.toContain("IGNORE");
+    expect(featureInsert?.[0]).not.toMatch(/UPDATE (?:identity_key|first_name|feature_identity_key|reference) =/);
     // 列清单和占位符要对得上：写错了数据库会直接报错。
     expect(featureInsert?.[0]).toContain("(product_id, identity_key, first_name, first_spec_version_id) VALUES (?, ?, ?, ?), (?, ?, ?, ?)");
     expect(featureInsert?.[1]).toEqual([4, "统一登录", "统一登录", 99, 4, "支付", "支付", 99]);
@@ -258,5 +260,51 @@ describe("assignVersionIdentities", () => {
     const many = Array.from({ length: ASSIGN_CHUNK_SIZE + 1 }, (_, index) => ({ id: 1000 + index, featureId: 10, reference: `HP-${index + 1}` }));
     await assignVersionIdentities(4, 99, { features: rows.features.slice(0, 1), scenarios: many, changes: [] }, emptyIdentityMaps(), db.execute);
     expect(db.calls().filter(([sql]) => sql.startsWith("UPDATE `spec_scenarios`")).map(([, parameters]) => parameters.length / 2)).toEqual([ASSIGN_CHUNK_SIZE, 1]);
+  });
+});
+
+describe("planVersionIdentitiesForWrite", () => {
+  it("plans against the registries and the base version, and hands both back with the plan", async () => {
+    const db = fakeDb((sql) => {
+      if (sql.includes("FROM feature_identities")) return [[{ nameKey: "sign-in", identity_key: "sign-in" }]];
+      if (sql.includes("FROM spec_features sf WHERE sf.spec_version_id")) return [[{ nameKey: "authentication", identity_key: "sign-in" }]];
+      return [{}];
+    });
+
+    const context = await planVersionIdentitiesForWrite(4, 11, [{ name: "Authentication", parentKey: null, references: [] }], db.execute);
+
+    expect(context?.plan.features.get("authentication")).toMatchObject({ identityKey: "sign-in", origin: "continued" });
+    expect(context?.registry.features.get("sign-in")).toBe("sign-in");
+    expect(context?.previous.features.get("authentication")).toBe("sign-in");
+    // 登记表两条、上一版两条，都带着各自的键。
+    expect(db.calls().map(([, parameters]) => parameters)).toEqual([[4], [4], [11], [11]]);
+  });
+
+  it("does not read a base version when the publication is the first version", async () => {
+    const db = fakeDb();
+    const context = await planVersionIdentitiesForWrite(4, null, [], db.execute);
+    expect(context?.previous).toEqual({ features: new Map(), scenarios: new Map() });
+    expect(db.calls().map(([, parameters]) => parameters)).toEqual([[4], [4]]);
+  });
+
+  it("returns null and reads nothing when the identity layer is switched off", async () => {
+    vi.stubEnv("SPEC_IDENTITY_LAYER", "false");
+    try {
+      const db = fakeDb();
+      expect(await planVersionIdentitiesForWrite(4, 11, [], db.execute)).toBeNull();
+      expect(db.execute).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("passes a conflict on instead of swallowing it", async () => {
+    const db = fakeDb((sql) => {
+      if (sql.includes("FROM feature_identities")) return [[{ nameKey: "authentication", identity_key: "authentication" }]];
+      if (sql.includes("FROM spec_features sf WHERE sf.spec_version_id")) return [[{ nameKey: "authentication", identity_key: "sign-in" }]];
+      return [{}];
+    });
+
+    await expect(planVersionIdentitiesForWrite(4, 11, [{ name: "Authentication", parentKey: null, references: [] }], db.execute)).rejects.toMatchObject({ code: "identity_registry_conflict" });
   });
 });

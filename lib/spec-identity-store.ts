@@ -1,15 +1,17 @@
 import type { Execute } from "./db";
+import { specIdentityLayerEnabled } from "./env";
 import { specFeatureKey } from "./spec-diff";
 import {
+  changeRowIdentity,
   emptyIdentityMaps,
   planVersionIdentities,
-  changeRowIdentity,
   restoredFeatures,
   restoredScenarios,
   type IdentityFeatureInput,
   type IdentityRegistry,
   type MutableIdentityMaps,
   type VersionIdentities,
+  type VersionIdentityContext,
   type VersionIdentityPlan,
 } from "./spec-identity";
 
@@ -78,6 +80,25 @@ export async function loadVersionIdentities(versionId: number, execute: Execute)
   return identityMapsOf(resultRows(featureResult), resultRows(scenarioResult));
 }
 
+/**
+ * 发布一个版本时算身份。首版没有上一版，传 null。
+ * 身份层开关（SPEC_IDENTITY_LAYER）关着时返回 null：调用方照常写版本，身份列留空。
+ * 算不出来的话这里直接抛错（SpecIdentityError），调用方要在这之前什么都还没写。
+ */
+export async function planVersionIdentitiesForWrite(
+  productId: number,
+  baseVersionId: number | null,
+  features: readonly IdentityFeatureInput[],
+  execute: Execute,
+): Promise<VersionIdentityContext | null> {
+  if (!specIdentityLayerEnabled()) return null;
+  const [registry, previous] = await Promise.all([
+    loadIdentityRegistry(productId, execute),
+    baseVersionId === null ? Promise.resolve(emptyIdentityMaps()) : loadVersionIdentities(baseVersionId, execute),
+  ]);
+  return { plan: planVersionIdentities({ features, previous, registry }), previous, registry };
+}
+
 export interface IdentityAssignment {
   id: number;
   /** 与 columns 一一对应。 */
@@ -130,9 +151,13 @@ async function insertMinted(table: IdentityTable, productId: number, specVersion
     const row = `(${columns.map(() => "?").join(", ")})`;
     const placeholders = chunk.map(() => row).join(", ");
     const parameters = chunk.flatMap((values) => [productId, ...values, specVersionId]);
-    // 同一个身份已经登记过时（重复运行，或者别的仓库先写下它）保留原来那一行，首次出现的版本不被改写。
+    // 同一个身份已经登记过时（重复运行，或者别的仓库先写下它）这一行不重建，只把“首次出现的版本”往前修：
+    // 部署之后、回填之前发布过几次的话，登记表里记的是那次发布的版本，回填走到更早的版本时把它改成真正最早的。
     // 用 ON DUPLICATE KEY 而不是 INSERT IGNORE：后者会把别的错误也降成警告吞掉。
-    await execute(`INSERT INTO ${table} (${columns.join(", ")}) VALUES ${placeholders} ON DUPLICATE KEY UPDATE identity_key = identity_key`, parameters);
+    await execute(
+      `INSERT INTO ${table} (${columns.join(", ")}) VALUES ${placeholders} ON DUPLICATE KEY UPDATE first_spec_version_id = LEAST(first_spec_version_id, VALUES(first_spec_version_id))`,
+      parameters,
+    );
   });
 }
 
@@ -145,7 +170,8 @@ async function insertLinks(table: "feature_identity_links" | "scenario_identity_
 
 /**
  * 把一个版本的身份计划记进登记表：新建的身份插入，退休和恢复各记一条关系。
- * 登记表只追加。某个身份现在在不在链上，看版本行的身份列，不看这里。
+ * 登记表只追加：已有的行不删、不记状态，最多把“首次出现的版本”往更早改。
+ * 某个身份现在在不在链上，看版本行的身份列，不看这里。
  * 必须在写入这个版本的同一个事务里调用。
  */
 export async function recordIdentityPlan(productId: number, specVersionId: number, plan: VersionIdentityPlan, execute: Execute): Promise<void> {

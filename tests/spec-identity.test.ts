@@ -1,17 +1,23 @@
 import { describe, expect, it } from "vitest";
 import {
   SpecIdentityError,
+  changeIdentityColumns,
   changeRowIdentity,
   emptyIdentityMaps,
+  featureIdentityColumn,
+  featureIdentityColumns,
   foldRegistry,
+  planOf,
   planVersionIdentities,
   resolveChangeIdentity,
   restoredFeatures,
   restoredScenarios,
   scenarioAssignments,
+  scenarioIdentityColumn,
   scenarioIdentityKey,
   toVersionIdentities,
   type IdentityRegistry,
+  type VersionIdentityContext,
   type VersionIdentities,
   type VersionIdentityPlan,
 } from "../lib/spec-identity";
@@ -287,5 +293,39 @@ describe("变化记录的身份", () => {
   it("takes a scenario this version dropped from the previous version, even though the feature is still here", () => {
     const third = planVersionIdentities({ features: [feature("统一登录", ["HP-1"])], previous: toVersionIdentities(second), registry });
     expect(resolveChangeIdentity({ featureKey: "统一登录", scenarioReference: "HP-2" }, third, toVersionIdentities(second), registry)).toEqual({ featureIdentityKey: "统一登录", scenarioIdentityKey: '["统一登录","HP-2"]' });
+  });
+});
+
+describe("写入路径取身份值的函数", () => {
+  const plan = planVersionIdentities({
+    features: [{ name: "统一登录", references: ["HP-1"] }, { name: "会话管理", parentKey: "统一登录", references: [] }],
+    previous: emptyIdentityMaps(),
+    registry: emptyIdentityMaps(),
+  });
+  const context: VersionIdentityContext = { plan, previous: emptyIdentityMaps(), registry: emptyIdentityMaps() };
+
+  it("returns the two values a feature row ends with, and the one a scenario row ends with", () => {
+    expect(featureIdentityColumns(plan, " 统一登录 ")).toEqual(["统一登录", null]);
+    expect(featureIdentityColumns(plan, "会话管理")).toEqual(["会话管理", "统一登录"]);
+    expect(featureIdentityColumns(plan, "没有的功能")).toEqual([null, null]);
+    expect(featureIdentityColumn(plan, "会话管理")).toBe("会话管理");
+    expect(featureIdentityColumn(plan, "没有的功能")).toBeNull();
+    expect(scenarioIdentityColumn(plan, "统一登录", "HP-1")).toBe('["统一登录","HP-1"]');
+    expect(scenarioIdentityColumn(plan, "统一登录", "HP-9")).toBeNull();
+    expect(scenarioIdentityColumn(plan, "没有的功能", "HP-1")).toBeNull();
+  });
+
+  it("returns null everywhere when there is no plan, which is what the identity layer being off means", () => {
+    expect(planOf(null)).toBeNull();
+    expect(featureIdentityColumns(null, "统一登录")).toEqual([null, null]);
+    expect(featureIdentityColumn(null, "统一登录")).toBeNull();
+    expect(scenarioIdentityColumn(null, "统一登录", "HP-1")).toBeNull();
+    expect(changeIdentityColumns(null, { featureName: "统一登录", scenarioReference: "HP-1" })).toEqual([null, null]);
+  });
+
+  it("returns the two values a change row ends with, reading a null reference as no reference", () => {
+    expect(changeIdentityColumns(context, { featureName: "统一登录", scenarioReference: "HP-1" })).toEqual(["统一登录", '["统一登录","HP-1"]']);
+    expect(changeIdentityColumns(context, { featureName: "统一登录", scenarioReference: null })).toEqual(["统一登录", null]);
+    expect(changeIdentityColumns(context, { featureName: "没见过的功能", scenarioReference: null })).toEqual([null, null]);
   });
 });
