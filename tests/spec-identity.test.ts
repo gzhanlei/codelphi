@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   SpecIdentityError,
+  changeRowIdentity,
   emptyIdentityMaps,
   foldRegistry,
   planVersionIdentities,
+  resolveChangeIdentity,
   restoredFeatures,
   restoredScenarios,
   scenarioAssignments,
@@ -246,5 +248,44 @@ describe("登记表与下一版的身份", () => {
   it("gives the same plan for the same input", () => {
     const input = { features: [feature("统一登录", ["HP-1"]), feature("支付", ["HP-1"], "统一登录")], previous: emptyIdentityMaps(), registry: emptyIdentityMaps() };
     expect(planVersionIdentities(input)).toEqual(planVersionIdentities(input));
+  });
+});
+
+describe("变化记录的身份", () => {
+  const [first, second] = walk([
+    [feature("统一登录", ["HP-1"]), feature("旧功能", ["HP-3"])],
+    [feature("统一登录", ["HP-1", "HP-2"])],
+  ]);
+  const registry = foldRegistry(foldRegistry(emptyIdentityMaps(), first), second);
+
+  it("takes the identity the entry has in this version", () => {
+    expect(resolveChangeIdentity({ featureKey: " 统一登录 ", scenarioReference: "HP-2" }, second, toVersionIdentities(first), registry)).toEqual({ featureIdentityKey: "统一登录", scenarioIdentityKey: '["统一登录","HP-2"]' });
+    expect(resolveChangeIdentity({ featureKey: "统一登录", scenarioReference: null }, second, toVersionIdentities(first), registry)).toEqual({ featureIdentityKey: "统一登录", scenarioIdentityKey: null });
+  });
+
+  it("falls back to the previous version for something this version removed", () => {
+    expect(resolveChangeIdentity({ featureKey: "旧功能", scenarioReference: "HP-3" }, second, toVersionIdentities(first), registry)).toEqual({ featureIdentityKey: "旧功能", scenarioIdentityKey: '["旧功能","HP-3"]' });
+  });
+
+  it("falls back to the registry when the previous version does not know it either", () => {
+    expect(resolveChangeIdentity({ featureKey: "旧功能", scenarioReference: "HP-3" }, second, emptyIdentityMaps(), registry)).toEqual({ featureIdentityKey: "旧功能", scenarioIdentityKey: '["旧功能","HP-3"]' });
+  });
+
+  it("leaves both empty when nowhere knows the entry, instead of inventing an identity", () => {
+    expect(resolveChangeIdentity({ featureKey: "没见过的功能", scenarioReference: "HP-1" }, second, toVersionIdentities(first), registry)).toEqual({ featureIdentityKey: null, scenarioIdentityKey: null });
+  });
+
+  it("keeps the feature's identity but leaves the scenario empty when this version has the feature and nowhere has that reference", () => {
+    expect(resolveChangeIdentity({ featureKey: "统一登录", scenarioReference: "HP-9" }, second, toVersionIdentities(first), registry)).toEqual({ featureIdentityKey: "统一登录", scenarioIdentityKey: null });
+  });
+
+  it("reads a change row the way spec_changes stores it: an empty reference means there is no reference", () => {
+    expect(changeRowIdentity({ featureKey: "统一登录", scenarioReference: "" }, second, toVersionIdentities(first), registry)).toEqual({ featureIdentityKey: "统一登录", scenarioIdentityKey: null });
+    expect(changeRowIdentity({ featureKey: "统一登录", scenarioReference: "HP-2" }, second, toVersionIdentities(first), registry)).toEqual({ featureIdentityKey: "统一登录", scenarioIdentityKey: '["统一登录","HP-2"]' });
+  });
+
+  it("takes a scenario this version dropped from the previous version, even though the feature is still here", () => {
+    const third = planVersionIdentities({ features: [feature("统一登录", ["HP-1"])], previous: toVersionIdentities(second), registry });
+    expect(resolveChangeIdentity({ featureKey: "统一登录", scenarioReference: "HP-2" }, third, toVersionIdentities(second), registry)).toEqual({ featureIdentityKey: "统一登录", scenarioIdentityKey: '["统一登录","HP-2"]' });
   });
 });

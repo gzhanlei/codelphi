@@ -265,6 +265,59 @@ export function restoredScenarios(plan: VersionIdentityPlan): string[] {
   return scenarioAssignments(plan).filter((scenario) => scenario.origin === "restored").map((scenario) => scenario.identityKey).sort();
 }
 
+/** 几个候选里第一个不是 null 的；都是 null 就是 null。 */
+function firstKnown(candidates: readonly (string | null)[]): string | null {
+  return candidates.find((candidate) => candidate !== null) ?? null;
+}
+
+/** 上一版或登记表认得的名称键对应的功能身份；不认得就是 null。 */
+function knownFeatureIdentity(maps: IdentityMaps, key: string): string | null {
+  return maps.features.get(key) ?? null;
+}
+
+/** 上一版或登记表里，某个功能身份下某个编号的场景身份；没有就是 null。 */
+function knownScenarioIdentity(maps: IdentityMaps, featureIdentityKey: string, reference: string): string | null {
+  return maps.scenarios.get(featureIdentityKey)?.get(reference) ?? null;
+}
+
+/**
+ * 一条变化记录的身份。以本版为准；本版没有的条目（被移除的）退到上一版，再退到登记表。
+ * 三处都找不到就留空。这里不按名称现造一个身份：变化记录要的是那个条目当时的身份。
+ */
+export function resolveChangeIdentity(
+  change: { featureKey: string; scenarioReference: string | null },
+  plan: VersionIdentityPlan,
+  previous: VersionIdentities,
+  registry: IdentityRegistry,
+): { featureIdentityKey: string | null; scenarioIdentityKey: string | null } {
+  const key = specFeatureKey(change.featureKey);
+  const inPlan = plan.features.get(key);
+  const featureIdentityKey = firstKnown([inPlan?.identityKey ?? null, knownFeatureIdentity(previous, key), knownFeatureIdentity(registry, key)]);
+  const reference = change.scenarioReference;
+  if (reference === null || featureIdentityKey === null) return { featureIdentityKey, scenarioIdentityKey: null };
+  return {
+    featureIdentityKey,
+    scenarioIdentityKey: firstKnown([
+      inPlan?.scenarios.get(reference)?.identityKey ?? null,
+      knownScenarioIdentity(previous, featureIdentityKey, reference),
+      knownScenarioIdentity(registry, featureIdentityKey, reference),
+    ]),
+  };
+}
+
+/**
+ * spec_changes 行上的写法：功能级记录的编号是空串，不是 null。这里把空串归一成“没有编号”，
+ * 其余与 resolveChangeIdentity 相同。回填的报告和写入路径都用它，两边数出来的才是同一批行。
+ */
+export function changeRowIdentity(
+  change: { featureKey: string; scenarioReference: string },
+  plan: VersionIdentityPlan,
+  previous: VersionIdentities,
+  registry: IdentityRegistry,
+): { featureIdentityKey: string | null; scenarioIdentityKey: string | null } {
+  return resolveChangeIdentity({ featureKey: change.featureKey, scenarioReference: change.scenarioReference === "" ? null : change.scenarioReference }, plan, previous, registry);
+}
+
 /** 下一版从这份身份出发。 */
 export function toVersionIdentities(plan: VersionIdentityPlan): VersionIdentities {
   return {
