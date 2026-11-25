@@ -72,15 +72,17 @@ describe("scratchDatabase", () => {
 });
 
 describe("parseArgs", () => {
-  it("takes the ledger path and the two switches", () => {
-    expect(parseArgs(["--ledger", "ledger.jsonl", "--keep", "--md5-stand-in"])).toEqual({ ledgerPath: "ledger.jsonl", keep: true, md5StandIn: true });
-    expect(parseArgs(["--ledger", "ledger.jsonl"])).toEqual({ ledgerPath: "ledger.jsonl", keep: false, md5StandIn: false });
+  it("takes the ledger path and the keep switch", () => {
+    expect(parseArgs(["--ledger", "ledger.jsonl", "--keep"])).toEqual({ ledgerPath: "ledger.jsonl", keep: true });
+    expect(parseArgs(["--ledger", "ledger.jsonl"])).toEqual({ ledgerPath: "ledger.jsonl", keep: false });
   });
 
   it("requires the ledger path and rejects unknown arguments", () => {
     expect(() => parseArgs([])).toThrow(/--ledger/);
     expect(() => parseArgs(["--ledger"])).toThrow(/--ledger/);
     expect(() => parseArgs(["--ledger", "a.jsonl", "--apply"])).toThrow(/不认识「--apply」/);
+    // 迁移 049 不再用 MD5() 之后，替身函数的开关去掉了。
+    expect(() => parseArgs(["--ledger", "a.jsonl", "--md5-stand-in"])).toThrow(/不认识「--md5-stand-in」/);
   });
 });
 

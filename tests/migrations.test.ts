@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 describe("database migrations", () => {
@@ -41,8 +41,16 @@ describe("database migrations", () => {
   it("replaces personal workspace slugs with non-identifying random slugs", () => {
     const sql = readFileSync(new URL("../migrations/049_personal_workspace_slug_randomize.sql", import.meta.url), "utf8");
     expect(sql).toContain("UPDATE organizations");
-    expect(sql).toContain("CONCAT('u-', SUBSTRING(MD5(RAND()), 1, 10))");
+    expect(sql).toContain("CONCAT('u-', SUBSTRING(SHA2(RAND(), 256), 1, 10))");
     expect(sql).toContain("WHERE slug LIKE 'u-%'");
+  });
+
+  it("never calls a function that MySQL 9 no longer has, so an empty database builds on 8 and 9 alike", () => {
+    // 049 原先写的是 MD5()：生产是 MySQL 8，早已执行过，但在 9 上从零建库会在这里失败。
+    const directory = new URL("../migrations/", import.meta.url);
+    const statements = (file: string) => readFileSync(new URL(file, directory), "utf8").split("\n").filter((line) => !line.trimStart().startsWith("--")).join("\n");
+    const offenders = readdirSync(directory).filter((file) => file.endsWith(".sql")).filter((file) => /\b(MD5|SHA1)\s*\(/i.test(statements(file)));
+    expect(offenders).toEqual([]);
   });
 
   it("adds the public demo flag to products with a closed default", () => {

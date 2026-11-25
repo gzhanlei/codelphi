@@ -19,10 +19,7 @@
  *
  * 用法（在仓库根目录）：
  *   SPEC_IDENTITY_VERIFY_DATABASE_URL="mysql://user:pass@127.0.0.1:3306/codelphi_test_spec_identity" \
- *     npx tsx scripts/verify-spec-identity-mysql.ts --ledger artifacts/spec-identity-verification/ledger-full.jsonl [--keep] [--md5-stand-in]
- *
- * --md5-stand-in：迁移 049 用了 MD5()，MySQL 9 起没有这个函数（生产是 MySQL 8）。加了这个开关，
- * 脚本在临时库里建一个同名的替身，只为让迁移链在这类版本上走完。
+ *     npx tsx scripts/verify-spec-identity-mysql.ts --ledger artifacts/spec-identity-verification/ledger-full.jsonl [--keep]
  */
 import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
@@ -73,7 +70,6 @@ export interface VerifyOptions {
   url: string;
   ledgerPath: string;
   keep: boolean;
-  md5StandIn: boolean;
 }
 
 type Row = Record<string, unknown>;
@@ -93,14 +89,13 @@ export function scratchDatabase(url: string): string {
   return name;
 }
 
-export function parseArgs(argv: readonly string[]): Pick<VerifyOptions, "ledgerPath" | "keep" | "md5StandIn"> {
-  const options = { ledgerPath: "", keep: false, md5StandIn: false };
-  const usage = "用法：--ledger <导出文件> [--keep] [--md5-stand-in]";
+export function parseArgs(argv: readonly string[]): Pick<VerifyOptions, "ledgerPath" | "keep"> {
+  const options = { ledgerPath: "", keep: false };
+  const usage = "用法：--ledger <导出文件> [--keep]";
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--ledger") options.ledgerPath = argv[++index];
     else if (argument === "--keep") options.keep = true;
-    else if (argument === "--md5-stand-in") options.md5StandIn = true;
     else throw new Error(`${usage}；不认识「${argument}」`);
   }
   if (!options.ledgerPath) throw new Error(`${usage}；--ledger 必须给`);
@@ -462,7 +457,6 @@ export async function run(options: VerifyOptions): Promise<string[]> {
   try {
     await admin.query(`DROP DATABASE IF EXISTS \`${database}\``);
     await admin.query(`CREATE DATABASE \`${database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`);
-    if (options.md5StandIn) await admin.query(`CREATE FUNCTION \`${database}\`.MD5(s TEXT) RETURNS CHAR(32) DETERMINISTIC RETURN SUBSTRING(SHA2(s, 256), 1, 32)`);
     const server = (await rowsOf(admin, "SELECT VERSION() AS version"))[0].version;
 
     const migration = mustSucceed(runScript("scripts/migrate.ts"), "迁移");
