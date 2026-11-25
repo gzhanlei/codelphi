@@ -8,6 +8,7 @@ import { insertSpecVersion } from "../lib/spec-versions";
 import { BillingError, enqueueRunWithReservation, hasActiveReservation, heartbeat, capture, release, reserveForNewRun } from "../lib/billing/core";
 import { specFeatureKey } from "../lib/spec-diff";
 import { rewriteReleaseChangeProjections } from "../lib/release-change-projection";
+import { emptyIdentityMaps, planVersionIdentities } from "../lib/spec-identity";
 
 const execute = vi.fn();
 const readLines = vi.fn();
@@ -909,6 +910,20 @@ describe("analysis orchestration", () => {
     expect(calledResult.changes).toEqual([]);
     // 结算照常（run 消耗了调度与账务链路；SAU 口径为产品决策）
     expect(vi.mocked(capture)).toHaveBeenCalled();
+  });
+
+  it("projects the version's identities onto the workbench rows in the same transaction", async () => {
+    // 工作台行用的是规格版本算出来的那份身份，不是自己按名称再算一遍。
+    const identities = planVersionIdentities({ features: [{ name: "统一登录", parentKey: null, references: [] }], previous: emptyIdentityMaps(), registry: emptyIdentityMaps() });
+    vi.mocked(insertSpecVersion).mockResolvedValue({
+      specVersionId: 44, specChanges: [], features: [{ name: "统一登录", summary: "s", scenarios: [] }], collapse: null, featureCollapses: [],
+      misplacedScenarios: [], identityHijacksDropped: 0, featureFolds: [], scenarioIdByLocalKey: new Map(), identities,
+    } as never);
+
+    await runAnalysis(8);
+
+    const upsert = (connection.execute as ReturnType<typeof vi.fn>).mock.calls.find(([sql]) => String(sql).includes("INSERT INTO features"));
+    expect(upsert?.[1]).toEqual([4, "统一登录", "s", "统一登录"]);
   });
 
   it("treats a migration-only window as no-behavioral: no AI call, previous spec carried verbatim", async () => {

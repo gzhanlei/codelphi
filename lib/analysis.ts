@@ -22,6 +22,7 @@ import { behavioralEnumerationEnabled, analysisConvergenceEpsilon, analysisConve
 import { runInventoryFullAnalysis } from "./full-analysis";
 import { behavioralChangePaths } from "./patch-scan";
 import { analyzedChangePaths, isSchemaArtifact } from "./evidence";
+import { featureIdentityColumn, scenarioIdentityColumn, type VersionIdentityPlan } from "./spec-identity";
 import { parsePatchHunks } from "./spec-diff";
 import { enumerateBehavioralChunks } from "./behavioral-enumeration";
 import { detectOutcomeConflicts } from "./spec-consistency";
@@ -74,24 +75,26 @@ export async function assertLatestRun(connection: PoolConnection, run: RunContex
   if (latestRunId !== run.id) throw new Error(`Analysis superseded by run ${latestRunId}`);
 }
 
-async function upsertFeature(connection: PoolConnection, run: RunContext, feature: AnalysisResult["features"][number]) {
+async function upsertFeature(connection: PoolConnection, run: RunContext, feature: AnalysisResult["features"][number], identities: VersionIdentityPlan | null) {
+  // 身份列接在列清单和参数的末尾，前面三个的位置不变。身份是规格版本算出来的那份，不在工作台另算。
   const [featureResult] = await connection.execute(
-    `INSERT INTO features (product_id, name, summary, source, active)
-     VALUES (?, ?, ?, 'generated', 1)
+    `INSERT INTO features (product_id, name, summary, source, active, identity_key)
+     VALUES (?, ?, ?, 'generated', 1, ?)
      ON DUPLICATE KEY UPDATE
        id = LAST_INSERT_ID(id),
        summary = IF(source = 'generated', VALUES(summary), summary),
        verified_at = IF(source = 'generated' AND summary <> VALUES(summary), NULL, verified_at),
        verified_by = IF(source = 'generated' AND summary <> VALUES(summary), NULL, verified_by),
-       active = IF(source = 'generated', 1, active)`,
-    [run.productId, feature.name, feature.summary],
+       active = IF(source = 'generated', 1, active),
+       identity_key = COALESCE(features.identity_key, VALUES(identity_key))`,
+    [run.productId, feature.name, feature.summary, featureIdentityColumn(identities, feature.name)],
   );
   const featureId = Number((featureResult as { insertId: number }).insertId);
   for (const scenario of feature.scenarios) {
     await connection.execute(
       `INSERT INTO scenarios
-         (feature_id, reference, context, action, outcome, category, step_order, source, active, evidence)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'generated', 1, ?)
+         (feature_id, reference, context, action, outcome, category, step_order, source, active, evidence, identity_key)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'generated', 1, ?, ?)
        ON DUPLICATE KEY UPDATE
          context = IF(source = 'generated', VALUES(context), context),
          action = IF(source = 'generated', VALUES(action), action),
@@ -101,13 +104,19 @@ async function upsertFeature(connection: PoolConnection, run: RunContext, featur
          evidence = IF(source = 'generated', VALUES(evidence), evidence),
          verified_at = IF(source = 'generated' AND (context <> VALUES(context) OR action <> VALUES(action) OR outcome <> VALUES(outcome) OR category <> VALUES(category)), NULL, verified_at),
          verified_by = IF(source = 'generated' AND (context <> VALUES(context) OR action <> VALUES(action) OR outcome <> VALUES(outcome) OR category <> VALUES(category)), NULL, verified_by),
-         active = IF(source = 'generated', 1, active)`,
-      [featureId, scenario.reference, scenario.context, scenario.action, scenario.outcome, scenario.category, scenario.step ?? null, JSON.stringify(scenario.evidence)],
+         active = IF(source = 'generated', 1, active),
+         identity_key = COALESCE(scenarios.identity_key, VALUES(identity_key))`,
+      [featureId, scenario.reference, scenario.context, scenario.action, scenario.outcome, scenario.category, scenario.step ?? null, JSON.stringify(scenario.evidence), scenarioIdentityColumn(identities, feature.name, scenario.reference)],
     );
   }
 }
 
-export async function upsertGeneratedSpec(connection: PoolConnection, run: RunContext, features: SpecFeature[]) {
+/**
+ * 把合并后的规格投影到工作台。identities 是这次发布给规格版本算出来的身份计划，和版本行用的是同一份；
+ * 不传时工作台行的身份留空（身份层关着，或者调用方还没有这份计划）。
+ * 行上已经有身份的保留（人工条目、快照导入先建的行），空的才补上。
+ */
+export async function upsertGeneratedSpec(connection: PoolConnection, run: RunContext, features: SpecFeature[], identities: VersionIdentityPlan | null = null) {
   await connection.execute(
     `UPDATE features f
      LEFT JOIN features child ON child.parent_id = f.id AND child.active = 1
@@ -122,7 +131,7 @@ export async function upsertGeneratedSpec(connection: PoolConnection, run: RunCo
      SET s.active = 0 WHERE f.product_id = ? AND s.source = 'generated'`,
     [run.productId],
   );
-  for (const feature of features) await upsertFeature(connection, run, feature);
+  for (const feature of features) await upsertFeature(connection, run, feature, identities);
 }
 
 export async function upsertRelease(connection: PoolConnection, run: RunContext, result: AnalysisResult, change: ChangeContext, specVersionId: number | null = null, specChanges: ReleaseChangeFact[] = [], baselineFeatures: SpecFeature[] | null = null, options: { activate?: boolean } = {}): Promise<{ releaseId: number; projections: ReleaseChangeProjection[] }> {
@@ -246,7 +255,7 @@ export async function saveResult(run: RunContext, result: AnalysisResult, change
         .filter((file) => behavioralPaths.has(file.path))
         .map((file) => [file.path, parsePatchHunks(file.patch)] as const),
     );
-    const { specVersionId, specChanges, baseline, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds, scenarioIdByLocalKey } = await insertSpecVersion(connection, run, result, { ...(affectedKeys ? { affectedKeys } : {}), behavioralChangePaths: behavioralPaths, changedHunksByPath, base: activate ? "latest" : "beforeRun", baseVersionId: run.baseCapturedAt ? run.baseSpecVersionId : undefined, changeFiles: change.files, fullAnalysis: affectedKeys === null, coverageComplete: affectedKeys === null && coverage?.coverageRatio === 1 && !coverage.partitionsCapped && coverage.diffOmittedPaths === 0 });
+    const { specVersionId, specChanges, baseline, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds, scenarioIdByLocalKey, identities = null } = await insertSpecVersion(connection, run, result, { ...(affectedKeys ? { affectedKeys } : {}), behavioralChangePaths: behavioralPaths, changedHunksByPath, base: activate ? "latest" : "beforeRun", baseVersionId: run.baseCapturedAt ? run.baseSpecVersionId : undefined, changeFiles: change.files, fullAnalysis: affectedKeys === null, coverageComplete: affectedKeys === null && coverage?.coverageRatio === 1 && !coverage.partitionsCapped && coverage.diffOmittedPaths === 0 });
     if (activate) {
       // BM-11 别名登记：变体名 → canonical 旧键，走 feature_aliases 显式归并通道
       // （migrations/030；progress-summary 的历史 spec_changes 归并已消费该表）。幂等 INSERT IGNORE。
@@ -272,7 +281,7 @@ export async function saveResult(run: RunContext, result: AnalysisResult, change
     if (activate) {
       // P0(I1):下线基准必须是 carry-forward 合并后的完整规格——用 AI 原始输出会让
       // 增量模式把未受影响的 generated 功能全部下线,工作台坍缩为本次触及的功能。
-      await upsertGeneratedSpec(connection, run, mergedFeatures);
+      await upsertGeneratedSpec(connection, run, mergedFeatures, identities);
     }
     const { releaseId, projections: releaseChangeProjections } = await upsertRelease(connection, run, result, change, specVersionId, specChanges, baseline ? mergedFeatures : null, { activate });
     if (activate) {
