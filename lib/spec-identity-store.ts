@@ -66,18 +66,42 @@ export async function loadIdentityRegistry(productId: number, execute: Execute):
 }
 
 /**
- * 一个版本已经落库的身份。身份层之前写入的版本、或者开关关着时写入的版本，身份列是空的，
- * 这样的版本读出来是空映射。
+ * 批量读取多个版本的身份，key 是版本号。每个版本两条查询，不分版本逐个读。
+ * 身份层之前写入的版本、或者开关关着时写入的版本，身份列是空的，这样的版本读出来是空映射。
  */
-export async function loadVersionIdentities(versionId: number, execute: Execute): Promise<VersionIdentities> {
+export async function loadVersionIdentityMaps(execute: Execute, versionIds: readonly number[]): Promise<Map<number, VersionIdentities>> {
+  const maps = new Map<number, VersionIdentities>();
+  if (versionIds.length === 0) return maps;
+  const placeholders = versionIds.map(() => "?").join(",");
   const [featureResult, scenarioResult] = await Promise.all([
-    execute("SELECT sf.stable_key AS nameKey, sf.identity_key FROM spec_features sf WHERE sf.spec_version_id = ?", [versionId]),
+    execute(`SELECT spec_version_id AS versionId, stable_key AS nameKey, identity_key FROM spec_features WHERE spec_version_id IN (${placeholders})`, [...versionIds]),
     execute(
-      "SELECT sf.identity_key AS featureIdentityKey, ss.reference, ss.identity_key FROM spec_scenarios ss JOIN spec_features sf ON sf.id = ss.spec_feature_id WHERE sf.spec_version_id = ?",
-      [versionId],
+      `SELECT sf.spec_version_id AS versionId, sf.identity_key AS featureIdentityKey, ss.reference, ss.identity_key
+       FROM spec_scenarios ss JOIN spec_features sf ON sf.id = ss.spec_feature_id WHERE sf.spec_version_id IN (${placeholders})`,
+      [...versionIds],
     ),
   ]);
-  return identityMapsOf(resultRows(featureResult), resultRows(scenarioResult));
+  const featuresByVersion = groupRowsByVersion(resultRows(featureResult));
+  const scenariosByVersion = groupRowsByVersion(resultRows(scenarioResult));
+  for (const versionId of versionIds) {
+    maps.set(versionId, identityMapsOf(featuresByVersion.get(versionId) ?? [], scenariosByVersion.get(versionId) ?? []));
+  }
+  return maps;
+}
+
+function groupRowsByVersion(rows: readonly Row[]): Map<number, Row[]> {
+  const grouped = new Map<number, Row[]>();
+  for (const row of rows) {
+    const list = grouped.get(Number(row.versionId));
+    if (list) list.push(row);
+    else grouped.set(Number(row.versionId), [row]);
+  }
+  return grouped;
+}
+
+/** 一个版本已经落库的身份。 */
+export async function loadVersionIdentities(versionId: number, execute: Execute): Promise<VersionIdentities> {
+  return (await loadVersionIdentityMaps(execute, [versionId])).get(versionId) ?? emptyIdentityMaps();
 }
 
 /**

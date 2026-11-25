@@ -646,8 +646,8 @@ describe("identity layer in the write path", () => {
 
   /** 这条版本链的过去：功能曾经叫别的名字，所以它的身份不是它现在的名称键。 */
   const renamedPast = {
-    previousFeatures: [{ nameKey: "authentication", identity_key: "sign-in" }, { nameKey: "legacy", identity_key: "old-legacy" }],
-    previousScenarios: [{ featureIdentityKey: "sign-in", reference: "HP-1", identity_key: '["sign-in","HP-1"]' }],
+    previousFeatures: [{ versionId: 11, nameKey: "authentication", identity_key: "sign-in" }, { versionId: 11, nameKey: "legacy", identity_key: "old-legacy" }],
+    previousScenarios: [{ versionId: 11, featureIdentityKey: "sign-in", reference: "HP-1", identity_key: '["sign-in","HP-1"]' }],
   };
 
   /** 在既有替身上补身份相关语句的回数据。 */
@@ -655,7 +655,8 @@ describe("identity layer in the write path", () => {
     const db = connection([{ id: 11 }], false, {}, input.specScenarios);
     const fallback = mockOf(db).getMockImplementation() as (sql: string, parameters: unknown[]) => Promise<unknown>;
     mockOf(db).mockImplementation(async (sql: string, parameters: unknown[] = []) => {
-      if (sql.includes("FROM spec_features sf WHERE sf.spec_version_id")) return [input.previousFeatures ?? []];
+      // 身份查询和规格读取都落在 spec_features 上，靠“查的是 identity_key”把它们分开。
+      if (sql.includes("identity_key FROM spec_features WHERE spec_version_id")) return [input.previousFeatures ?? []];
       if (sql.includes("FROM spec_scenarios ss JOIN")) return [input.previousScenarios ?? []];
       if (sql.includes("FROM feature_identities")) return [(input.knownFeatures ?? []).map((identityKey) => ({ nameKey: identityKey, identity_key: identityKey }))];
       if (sql.includes("FROM scenario_identities")) return [[]];
@@ -726,7 +727,7 @@ describe("identity layer in the write path", () => {
     expect(callsOf(db, "INSERT INTO scenario_identities")).toEqual([]);
     const order = mockOf(db).mock.calls.map(([sql]) => {
       const text = String(sql);
-      if (text.includes("FROM spec_features sf WHERE sf.spec_version_id")) return "plan";
+      if (text.includes("identity_key FROM spec_features WHERE spec_version_id")) return "plan";
       if (text.includes("INSERT INTO spec_versions")) return "version";
       if (text.includes("INSERT INTO feature_identities")) return "registry";
       return "other";

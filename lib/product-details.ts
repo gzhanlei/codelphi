@@ -7,8 +7,10 @@ import { loadProductPresentation, type ProductPresentationRow } from "./product-
 import { RELEASE_PAGE_SIZE, type ReleasePagePayload } from "./release-client";
 import { loadRegressionTasks } from "./regression-tasks";
 import { annotateSuspectedRenames } from "./spec-rename";
-import { diffSpecWithFolded, type FoldedSpecChange, type SpecFeature, type SpecScenario } from "./spec-diff";
+import { diffSpecWithFolded, type DiffSpecOptions, type FoldedSpecChange, type SpecFeature, type SpecScenario } from "./spec-diff";
 import { loadBaseVersionMap, loadVersionFeatureMap } from "./spec-versions";
+import type { VersionIdentities } from "./spec-identity";
+import { loadVersionIdentityMaps } from "./spec-identity-store";
 import { loadCoverageReceipt, type CoverageReceiptRow } from "./analysis-coverage";
 import { loadCompletenessLedgerBySpecVersion } from "./completeness-ledger";
 import type { BehaviorChangeRow, ChangeRow, FeatureRow, FoldedBehaviorChangeRow, ReleaseRow, ScenarioRow } from "./types";
@@ -118,13 +120,23 @@ async function loadBehavioralPathsByRelease(releaseIds: number[]): Promise<Map<n
   return map;
 }
 
+/** 比对的可选上下文：有行为变更文件集就带上，有基线版本就带上两边的身份。什么都没有时不传，和以前一样。 */
+function foldedDiffOptions(behavioral: Set<string> | undefined, before: VersionIdentities | undefined, after: VersionIdentities | undefined): DiffSpecOptions | undefined {
+  const options: DiffSpecOptions = {};
+  if (behavioral) options.behavioralChangePaths = behavioral;
+  // 身份列是空的版本读出来是空映射，比对会退回按名称键配对。
+  if (before && after) options.identities = { before: before.features, after: after.features };
+  return Object.keys(options).length === 0 ? undefined : options;
+}
+
 /** 逐发布重算被等价判定折叠的差异（落库行只有变化，折叠项不落库，现算是唯一完整口径）。 */
 async function loadFoldedChanges(releases: ReleaseRow[]): Promise<FoldedBehaviorChangeRow[]> {
   const versionIds = [...new Set(releases.map((release) => release.specVersionId).filter((id): id is number => id !== null))];
   if (versionIds.length === 0) return [];
-  const baseMap = await loadBaseVersionMap(getDb().execute.bind(getDb()), versionIds);
+  const execute = getDb().execute.bind(getDb());
+  const baseMap = await loadBaseVersionMap(execute, versionIds);
   const needed = [...new Set([...versionIds, ...[...baseMap.values()].filter((id): id is number => id !== null)])];
-  const featureMap = await loadVersionFeatureMap(getDb().execute.bind(getDb()), needed);
+  const [featureMap, identityMap] = await Promise.all([loadVersionFeatureMap(execute, needed), loadVersionIdentityMaps(execute, needed)]);
   const behavioralByRelease = await loadBehavioralPathsByRelease(releases.map((release) => release.id));
   const folded: FoldedBehaviorChangeRow[] = [];
   let syntheticId = 0;
@@ -132,10 +144,11 @@ async function loadFoldedChanges(releases: ReleaseRow[]): Promise<FoldedBehavior
     if (release.specVersionId === null) continue;
     const base = baseMap.get(release.specVersionId);
     const behavioral = behavioralByRelease.get(release.id);
+    const baseFeatures = base === null || base === undefined ? null : featureMap.get(base) ?? null;
     const outcome = diffSpecWithFolded(
-      base === null || base === undefined ? null : featureMap.get(base) ?? null,
+      baseFeatures,
       featureMap.get(release.specVersionId) ?? [],
-      behavioral ? { behavioralChangePaths: behavioral } : undefined,
+      foldedDiffOptions(behavioral, base === null || base === undefined ? undefined : identityMap.get(base), identityMap.get(release.specVersionId)),
     );
     for (const item of outcome.folded) {
       folded.push({
