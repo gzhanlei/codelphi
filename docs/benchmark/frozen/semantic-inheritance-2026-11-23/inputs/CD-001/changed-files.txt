@@ -1,0 +1,4 @@
+lib/analysis.ts
+lib/spec-diff.ts
+lib/spec-versions.ts
+tests/spec-diff.test.ts

@@ -1,0 +1,29 @@
+{
+  "windowId": "SB-003",
+  "project": "SalesBuddy",
+  "repository": "https://github.com/gzhanlei/SalesBuddy.git",
+  "baseSha": "a2ab507739e7b8a747776c253facf8c5c3cb9952",
+  "targetSha": "a786ef9c32313e8cf62f918328884de1ab1d2420",
+  "baseTree": "097ac4018c8b2a2deaffe916a9abdae48b7ea3d6",
+  "targetTree": "8f5abe3cdd1e019d136cc58a5a9bc0512bfe791a",
+  "targetCommittedAt": "2026-11-07T15:53:07+08:00",
+  "changedFiles": [
+    "shared/src/commonMain/kotlin/com/airecord/presentation/home/chat/AssistantChatBubbles.kt",
+    "shared/src/commonMain/kotlin/com/airecord/presentation/home/chat/AssistantChatLinks.kt",
+    "shared/src/commonTest/kotlin/com/airecord/presentation/home/chat/AssistantChatLinksTest.kt"
+  ],
+  "patchSha256": "4ecfda94400f612ed919cf940379ed56964b94c2a0ac7dae306ad783c96f9601",
+  "patchBytes": 9619,
+  "sourceReady": true,
+  "baselineSpec": {
+    "status": "not_recovered",
+    "requiredAction": "supply_base_spec_version_or_rebuild_from_base_sha"
+  },
+  "threeArmRunner": {
+    "status": "not_ready",
+    "missing": [
+      "historical_or_rebuilt_base_spec",
+      "diff_only_arm"
+    ]
+  }
+}

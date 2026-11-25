@@ -1,0 +1,33 @@
+{
+  "windowId": "SB-002",
+  "project": "SalesBuddy",
+  "repository": "https://github.com/gzhanlei/SalesBuddy.git",
+  "baseSha": "ca4045c5325ab9a0e6868845b720ffea2d1656b3",
+  "targetSha": "a2ab507739e7b8a747776c253facf8c5c3cb9952",
+  "baseTree": "765fe728d6a297fdab5c692569d8ed1a563089d2",
+  "targetTree": "097ac4018c8b2a2deaffe916a9abdae48b7ea3d6",
+  "targetCommittedAt": "2026-11-07T15:53:07+08:00",
+  "changedFiles": [
+    "server/static/assets/index-CCNvbyjY.js",
+    "server/static/assets/index-dWmU3EPw.css",
+    "server/static/index.html",
+    "server/web/src/components/AssistantAnswerText.vue",
+    "server/web/src/components/AssistantChatDrawer.vue",
+    "server/web/src/components/__tests__/AssistantChatDrawer.spec.ts",
+    "server/web/src/utils/linkify.ts"
+  ],
+  "patchSha256": "4174a9371e061c2f51c717d8af84d32ba22fb046727f7ef54f2b9bf67695aa52",
+  "patchBytes": 2725719,
+  "sourceReady": true,
+  "baselineSpec": {
+    "status": "not_recovered",
+    "requiredAction": "supply_base_spec_version_or_rebuild_from_base_sha"
+  },
+  "threeArmRunner": {
+    "status": "not_ready",
+    "missing": [
+      "historical_or_rebuilt_base_spec",
+      "diff_only_arm"
+    ]
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "windowId": "TF-002",
+  "project": "Tingfeng",
+  "repository": "https://github.com/gzhanlei/tingfeng.git",
+  "baseSha": "360be707682bf71cbb2ebfa4012b6c53a43aea51",
+  "targetSha": "ee20692ff54b9c029c4b4d1e56d89b33f3b4f246",
+  "baseTree": "b3398b626d01f211f34b406424244b7326fc6076",
+  "targetTree": "cefa32b053adf271f0ccfc4196e6b5539199746b",
+  "targetCommittedAt": "2026-11-02T23:08:31+08:00",
+  "changedFiles": [
+    "ios/Tests/README.md"
+  ],
+  "patchSha256": "f1d33d9e58eb148e94400f6d9ef922d56af0b645547f3e3538a4f599e2c6611b",
+  "patchBytes": 3172,
+  "sourceReady": true,
+  "baselineSpec": {
+    "status": "not_recovered",
+    "requiredAction": "supply_base_spec_version_or_rebuild_from_base_sha"
+  },
+  "threeArmRunner": {
+    "status": "not_ready",
+    "missing": [
+      "historical_or_rebuilt_base_spec",
+      "diff_only_arm"
+    ]
+  }
+}

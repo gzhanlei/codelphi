@@ -1,0 +1,31 @@
+{
+  "windowId": "SB-001",
+  "project": "SalesBuddy",
+  "repository": "https://github.com/gzhanlei/SalesBuddy.git",
+  "baseSha": "7518f0a20530130e1f8981767b96d8049c4549fb",
+  "targetSha": "ca4045c5325ab9a0e6868845b720ffea2d1656b3",
+  "baseTree": "da5468e8f29c094a84fea133c99b4d57805c7a4d",
+  "targetTree": "765fe728d6a297fdab5c692569d8ed1a563089d2",
+  "targetCommittedAt": "2026-11-07T15:52:55+08:00",
+  "changedFiles": [
+    "server/app/assistant/service.py",
+    "server/app/license/constants.py",
+    "server/tests/test_assistant_intent.py",
+    "server/tests/test_assistant_query.py",
+    "server/tests/test_assistant_service_safety.py"
+  ],
+  "patchSha256": "591f0efcf2e75dd99a37c04fbe0e21ab0168c77a59dc7acdaedc0047846b384c",
+  "patchBytes": 21608,
+  "sourceReady": true,
+  "baselineSpec": {
+    "status": "not_recovered",
+    "requiredAction": "supply_base_spec_version_or_rebuild_from_base_sha"
+  },
+  "threeArmRunner": {
+    "status": "not_ready",
+    "missing": [
+      "historical_or_rebuilt_base_spec",
+      "diff_only_arm"
+    ]
+  }
+}

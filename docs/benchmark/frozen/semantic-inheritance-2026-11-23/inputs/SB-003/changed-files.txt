@@ -1,0 +1,3 @@
+shared/src/commonMain/kotlin/com/airecord/presentation/home/chat/AssistantChatBubbles.kt
+shared/src/commonMain/kotlin/com/airecord/presentation/home/chat/AssistantChatLinks.kt
+shared/src/commonTest/kotlin/com/airecord/presentation/home/chat/AssistantChatLinksTest.kt

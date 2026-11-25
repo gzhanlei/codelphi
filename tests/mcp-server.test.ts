@@ -44,7 +44,7 @@ describe("mcp server (A1)", () => {
   it("lists the read-only tool surface with JSON schemas", async () => {
     const response = await handleMcpRpc(runtime, rpc("tools/list"));
     const tools = (response?.result as { tools: Array<{ name: string }> }).tools;
-    expect(tools.map((tool) => tool.name)).toEqual(["list_projects", "get_project_summary", "get_feature", "get_scenario", "search_scenarios", "lookup_by_files", "list_releases", "get_release", "reconcile_release", "get_feedback", "wait_for_release", "get_knowledge_health", "get_feature_connections", "get_release_notes", "get_digest", "send_feedback"]);
+    expect(tools.map((tool) => tool.name)).toEqual(["list_projects", "get_project_summary", "ask_behavior", "get_feature", "get_scenario", "search_scenarios", "lookup_by_files", "list_releases", "get_release", "reconcile_release", "get_feedback", "wait_for_release", "get_knowledge_health", "get_feature_connections", "get_release_notes", "get_digest", "send_feedback"]);
   });
 
   it("declares canonical and risk view parameters in tool schemas", () => {

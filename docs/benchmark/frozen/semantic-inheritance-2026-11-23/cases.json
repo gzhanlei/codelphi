@@ -1,0 +1,448 @@
+{
+  "schemaVersion": "semantic-inheritance-labels-v1",
+  "frozenAt": "2026-11-23T12:33:32Z",
+  "status": "frozen_prelabels_before_three_arm_outputs",
+  "labeler": {
+    "kind": "ai_static_code_review",
+    "name": "Kimi Code",
+    "domainReview": "pending"
+  },
+  "labelScope": {
+    "completeBehaviorTruth": false,
+    "targetedAssertionsOnly": true,
+    "supportsGeneralRecallDenominator": false,
+    "source": "local_git_commits_and_tests",
+    "runtimeVerified": false,
+    "productionVerificationStateRecovered": false
+  },
+  "windows": [
+    {
+      "id": "CD-001",
+      "project": "CoDelphi",
+      "repository": "https://github.com/gzhanlei/codelphi.git",
+      "stack": ["TypeScript", "Next.js"],
+      "datasetRole": "development",
+      "baseSha": "7c7c86b37afe2e9826506677c1112ccaa9fcdc5c",
+      "targetSha": "2088d9f0724139300c4f4b29024ef3668c0c093e",
+      "declaredIntent": "增量规格合并按证据锚点保真，并在未触及 hunk 时确定性重映射行号。",
+      "hardCaseTags": ["evidence_remap", "unchanged_behavior_preservation", "conservative_inheritance"],
+      "evidence": [
+        {"path": "lib/spec-diff.ts", "symbols": ["preserveUnchangedEvidence", "parsePatchHunks"]},
+        {"path": "lib/analysis.ts", "symbols": ["saveResult"]},
+        {"path": "lib/spec-versions.ts", "symbols": ["insertSpecVersion"]},
+        {"path": "tests/spec-diff.test.ts", "symbols": ["preserveUnchangedEvidence", "parsePatchHunks"]}
+      ],
+      "expected": {
+        "behaviorDelta": [
+          {
+            "labelId": "CD-CARRY-ANCHOR",
+            "change": "modified",
+            "context": "增量分析合并上一版 generated 场景，且场景证据所在文件进入本次行为变更集。",
+            "action": "系统逐条评估旧证据锚点与 old-side diff hunks 的关系。",
+            "outcome": "锚点不与任何非空 old-side hunk 相交时保留场景并重映射行号；锚点相交、缺少 hunk 或缺少行号时不自动保真，交由 AI 重提取裁决。",
+            "identityRelation": "same_behavior_modified_implementation"
+          },
+          {
+            "labelId": "CD-HUNK-INPUT",
+            "change": "added",
+            "context": "保存一次包含行为文件 patch 的分析结果。",
+            "action": "分析入口解析 behavioral paths 对应的 patch hunks 并传入规格版本持久化。",
+            "outcome": "规格合并获得逐文件 hunk 坐标，不再只依赖路径是否被触碰。",
+            "identityRelation": "supporting_behavior_added"
+          }
+        ],
+        "unchanged": [
+          "manual 场景不经过 preserveUnchangedEvidence 自动保真通道。",
+          "AI 已重新发出的同 reference 场景优先，不与 carried 副本并列。",
+          "未提供 hunk 数据时保持旧的全路径保守语义。",
+          "证据行号变化本身不构成新的业务行为身份。"
+        ],
+        "identity": [
+          "安全保真的 carried 场景保留原 feature key、scenario reference 和行为描述，只更新证据坐标。",
+          "锚点落入变更 hunk 不等于行为已删除，只能表示不能自动继承，需要重新分析。"
+        ],
+        "verification": [
+          "本窗口修改了规格保真实现，相关产品行为需要重新核实；无关产品行为不因此失效。",
+          "证据重映射可以继承历史证据关系，但不能单独证明当前运行时行为已验证。"
+        ],
+        "unknowns": [
+          "本预标不包含 baseSha 对应生产规格版本，也不断言当时哪些具体场景处于已核实状态。"
+        ]
+      }
+    },
+    {
+      "id": "SB-001",
+      "project": "SalesBuddy",
+      "repository": "https://github.com/gzhanlei/SalesBuddy.git",
+      "stack": ["Python", "FastAPI"],
+      "datasetRole": "confirmation_after_freeze",
+      "baseSha": "7518f0a20530130e1f8981767b96d8049c4549fb",
+      "targetSha": "ca4045c5325ab9a0e6868845b720ffea2d1656b3",
+      "declaredIntent": "助手定价与升级问句使用运行时价格和商城链接作确定性答复，并限制 LLM 自由文本 URL。",
+      "hardCaseTags": ["new_behavior", "conditional_behavior", "shared_evidence", "security_boundary"],
+      "evidence": [
+        {"path": "server/app/assistant/service.py", "symbols": ["_pricing_upgrade_answer", "_allowlist_urls", "route_intent"]},
+        {"path": "server/app/license/constants.py", "symbols": ["LICENSE_MALL_URL"]},
+        {"path": "server/tests/test_assistant_intent.py", "symbols": ["test_out_of_scope_pricing_question_returns_mall_answer", "test_out_of_scope_pricing_for_org_covered_member_mentions_provider"]},
+        {"path": "server/tests/test_assistant_query.py", "symbols": ["test_assist_direct_answer_strips_foreign_urls", "test_assist_direct_answer_keeps_allowlisted_url"]}
+      ],
+      "expected": {
+        "behaviorDelta": [
+          {
+            "labelId": "SB-PRICING-ANSWER",
+            "change": "added",
+            "context": "路由器返回 OUT_OF_SCOPE，且用户文本含定价、升级或购买关键词。",
+            "action": "助手生成确定性定价答复。",
+            "outcome": "普通用户获得与 pricing_config 同源的价格及 LICENSE_MALL_URL；企业付费成员得到由所在企业提供服务的说明且不获得个人购买链接；query_basis.scope=pricing_upgrade。",
+            "identityRelation": "new_assistant_scenario"
+          },
+          {
+            "labelId": "SB-ASSIST-URL-FILTER",
+            "change": "added",
+            "context": "ASSIST 自由文本成功返回并包含 http(s) URL。",
+            "action": "服务端按 hostname 整体匹配 app.salesbuddy.top 白名单。",
+            "outcome": "白名单 URL 原样保留，其他 URL 本体被剥离并保留后续标点；该过滤不作用于代码模板答复。",
+            "identityRelation": "new_safety_constraint"
+          }
+        ],
+        "unchanged": [
+          "不含定价关键词的 OUT_OF_SCOPE 请求仍返回原固定文案。",
+          "ASSIST 计算或文字协助不因定价关键词被劫持为定价答复。",
+          "无 URL 的 ASSIST 文本保持原样。"
+        ],
+        "identity": [
+          "定价答复是助手的新场景，不得与通用 OUT_OF_SCOPE 固定答复合并为同一结果。",
+          "URL 白名单与客户端链接化是不同行为层，不得把服务端过滤描述成客户端可点击。"
+        ],
+        "verification": [
+          "新增定价与 URL 安全场景初始应为未核实，不能继承通用助手答复的当前核实状态。",
+          "无关助手行为的核实状态不因本窗口自动失效。"
+        ],
+        "unknowns": [
+          "静态代码与测试预标不证明真实生产 pricing_config 的具体价格，也不证明外部商城当前可访问。"
+        ]
+      }
+    },
+    {
+      "id": "SB-002",
+      "project": "SalesBuddy",
+      "repository": "https://github.com/gzhanlei/SalesBuddy.git",
+      "stack": ["Vue 3", "TypeScript"],
+      "datasetRole": "confirmation_after_freeze",
+      "baseSha": "ca4045c5325ab9a0e6868845b720ffea2d1656b3",
+      "targetSha": "a2ab507739e7b8a747776c253facf8c5c3cb9952",
+      "declaredIntent": "Web 聊天抽屉把助手答复与范围外文案中的 http(s) URL 渲染为安全可点链接。",
+      "hardCaseTags": ["cross_platform_semantics", "generated_assets", "new_behavior"],
+      "evidence": [
+        {"path": "server/web/src/components/AssistantAnswerText.vue", "symbols": ["AssistantAnswerText"]},
+        {"path": "server/web/src/components/AssistantChatDrawer.vue", "symbols": ["AssistantChatDrawer"]},
+        {"path": "server/web/src/utils/linkify.ts", "symbols": ["splitLinkSegments"]},
+        {"path": "server/web/src/__tests__/AssistantChatDrawer.spec.ts", "symbols": []}
+      ],
+      "expected": {
+        "behaviorDelta": [
+          {
+            "labelId": "SB-WEB-LINKIFY",
+            "change": "added",
+            "context": "Web 助手显示 query 答复或 out_of_scope 文案，文本含合法 http(s) URL。",
+            "action": "AssistantAnswerText 将 URL 分段渲染为链接。",
+            "outcome": "链接在新标签打开并带 noopener noreferrer；非法协议候选保持纯文本；渲染不使用 v-html。",
+            "identityRelation": "new_web_platform_scenario"
+          }
+        ],
+        "unchanged": [
+          "action 草稿等其他助手响应类型不因本窗口改变。",
+          "server/static 的构建产物变化是同一 Web 行为的发布结果，不是独立产品行为。"
+        ],
+        "identity": [
+          "该场景属于 Web 平台，不得据此推断 Mobile 已支持链接化。",
+          "它与后续 Mobile 场景可共享 assistant-link-presentation 产品规则，但平台场景身份保持可分。"
+        ],
+        "verification": [
+          "Web 链接化作为新场景初始未核实；服务端 URL 白名单的既有核实记录不能替代 Web 渲染核实。"
+        ],
+        "unknowns": [
+          "本预标不证明各浏览器实际打开行为，也不把构建产物中的压缩代码单独计为场景。"
+        ]
+      }
+    },
+    {
+      "id": "SB-003",
+      "project": "SalesBuddy",
+      "repository": "https://github.com/gzhanlei/SalesBuddy.git",
+      "stack": ["Kotlin Multiplatform", "Compose Multiplatform"],
+      "datasetRole": "confirmation_after_freeze",
+      "baseSha": "a2ab507739e7b8a747776c253facf8c5c3cb9952",
+      "targetSha": "a786ef9c32313e8cf62f918328884de1ab1d2420",
+      "declaredIntent": "移动端助手气泡把 http(s) URL 渲染为可点击链接并通过 UrlLauncher 打开。",
+      "hardCaseTags": ["cross_platform_semantics", "identity_split", "new_behavior"],
+      "evidence": [
+        {"path": "shared/src/commonMain/kotlin/com/airecord/presentation/home/chat/AssistantChatBubbles.kt", "symbols": ["ImAssistantBubble"]},
+        {"path": "shared/src/commonMain/kotlin/com/airecord/presentation/home/chat/AssistantChatLinks.kt", "symbols": ["findHttpsUrlRanges", "linkifiedAssistantText"]},
+        {"path": "shared/src/commonTest/kotlin/com/airecord/presentation/home/chat/AssistantChatLinksTest.kt", "symbols": ["AssistantChatLinksTest"]}
+      ],
+      "expected": {
+        "behaviorDelta": [
+          {
+            "labelId": "SB-MOBILE-LINKIFY",
+            "change": "added",
+            "context": "移动端显示助手问答、范围外或降级文本气泡，文本含 http(s) URL。",
+            "action": "助手文本构建带 LinkAnnotation.Url 的 AnnotatedString。",
+            "outcome": "URL 着主色并可点击，通过 UrlLauncher 打开；非 URL 文本与换行保留，非 http(s) 候选不生成链接。",
+            "identityRelation": "new_mobile_platform_scenario"
+          }
+        ],
+        "unchanged": [
+          "用户气泡不应用助手链接化行为。",
+          "Android 与 iOS 壳工程无独立行为改动。"
+        ],
+        "identity": [
+          "Mobile 与 Web 链接化共享产品规则但保留平台场景区分，不应折叠为一个已实现证据覆盖所有平台的场景。",
+          "Mobile 场景可关联 SB-WEB-LINKIFY 为 same_product_rule_different_platform，而非 predecessor replacement。"
+        ],
+        "verification": [
+          "Web 场景的核实或测试不能自动迁移为 Mobile 当前已验证。",
+          "Mobile 新场景需要独立的平台证据与验证记录。"
+        ],
+        "unknowns": [
+          "commonTest 与编译证据不证明所有真实 Android/iOS 设备的 URL 打开表现。"
+        ]
+      }
+    },
+    {
+      "id": "TF-001",
+      "project": "Tingfeng",
+      "repository": "https://github.com/gzhanlei/tingfeng.git",
+      "stack": ["Swift", "iOS"],
+      "datasetRole": "holdout",
+      "baseSha": "87bb7928066eae6e20cf1435f3bfd6000c01b2a4",
+      "targetSha": "360be707682bf71cbb2ebfa4012b6c53a43aea51",
+      "declaredIntent": "后台目标命中通知从逐条提醒改为突发首条即时、段内静默、收口汇总。",
+      "hardCaseTags": ["behavior_replacement", "temporal_boundary", "notification_semantics"],
+      "evidence": [
+        {"path": "ios/Tingfeng/DSP/TargetWatchTrigger.swift", "symbols": ["TargetNotificationAggregator", "TargetNoticeBurst"]},
+        {"path": "ios/Tingfeng/MeterModel.swift", "symbols": ["handleTargetNotice", "postTargetNoticeSummary"]},
+        {"path": "ios/Tests/target-watch/main.swift", "symbols": ["CASE6", "CASE7", "CASE8", "CASE9"]}
+      ],
+      "expected": {
+        "behaviorDelta": [
+          {
+            "labelId": "TF-TARGET-BURST",
+            "change": "modified",
+            "context": "App 在后台值守并连续捕获已确认目标。",
+            "action": "系统按默认 1800 秒突发窗口聚合目标命中通知。",
+            "outcome": "突发首条立即通知，段内后续命中静默；窗口到期或值守结束时发出含起止与次数的一条汇总，跨段命中先收口旧段再开启新段。",
+            "identityRelation": "same_target_notification_behavior_modified_delivery"
+          }
+        ],
+        "unchanged": [
+          "非目标的新音源基线通知保持逐条提醒语义。",
+          "目标命中自动录音取证行为不因通知聚合而删除。"
+        ],
+        "identity": [
+          "目标通知的交付方式改变，不等于目标检测或目标取证功能被替换。",
+          "30 分钟边界与汇总计数是同一通知行为的语义变化，不是仅文案调整。"
+        ],
+        "verification": [
+          "目标通知行为及其边界需要重新核实；未变化的基线通知不自动失效。",
+          "纯逻辑测试证据不等于真实设备后台通知已验证。"
+        ],
+        "unknowns": [
+          "本预标不证明 iOS 后台任务在真实设备上的定时精确性。"
+        ]
+      }
+    },
+    {
+      "id": "TF-002",
+      "project": "Tingfeng",
+      "repository": "https://github.com/gzhanlei/tingfeng.git",
+      "stack": ["Swift", "iOS"],
+      "datasetRole": "holdout",
+      "baseSha": "360be707682bf71cbb2ebfa4012b6c53a43aea51",
+      "targetSha": "ee20692ff54b9c029c4b4d1e56d89b33f3b4f246",
+      "declaredIntent": "去除测试 README 编译命令中的重复 EvidenceKind.swift。",
+      "hardCaseTags": ["docs_only", "test_command_only", "zero_behavior"],
+      "evidence": [
+        {"path": "ios/Tests/README.md", "symbols": ["swiftc"]}
+      ],
+      "expected": {
+        "behaviorDelta": [],
+        "unchanged": [
+          "本窗口只修改测试文档中的编译清单，不改变 App 产品行为。",
+          "目标通知聚合、取证、分析与设置等现有行为应全部保持当前身份与语义。"
+        ],
+        "identity": [
+          "不得因测试文件清单变化生成新增、修改或删除产品行为。",
+          "测试命令修复与产品行为变化必须分开记录。"
+        ],
+        "verification": [
+          "产品行为的当前核实状态应保留；测试命令是否可执行属于验证基础设施事实，不冒充产品行为变化。"
+        ],
+        "unknowns": [
+          "本预标未实际执行修改后的 swiftc 命令，只确认 diff 不涉及产品实现。"
+        ]
+      }
+    },
+    {
+      "id": "TF-003",
+      "project": "Tingfeng",
+      "repository": "https://github.com/gzhanlei/tingfeng.git",
+      "stack": ["Swift", "iOS"],
+      "datasetRole": "holdout",
+      "baseSha": "ee20692ff54b9c029c4b4d1e56d89b33f3b4f246",
+      "targetSha": "4e487026778da49e91c646e55449f09599762daf",
+      "declaredIntent": "持久化未收口通知突发，并在 App 重启后按条件补发汇总。",
+      "hardCaseTags": ["behavior_extension", "persistence", "restart_recovery", "duplicate_prevention"],
+      "evidence": [
+        {"path": "ios/Tingfeng/DSP/TargetWatchTrigger.swift", "symbols": ["TargetNoticeBurst.meritsSummary", "TargetNotificationAggregator.onStateChange"]},
+        {"path": "ios/Tingfeng/MeterModel.swift", "symbols": ["targetNoticeStoreKey", "storeTargetNoticeBurst"]},
+        {"path": "ios/Tests/target-watch/main.swift", "symbols": ["CASE10"]}
+      ],
+      "expected": {
+        "behaviorDelta": [
+          {
+            "labelId": "TF-BURST-RECOVERY",
+            "change": "added",
+            "context": "目标通知突发尚未收口时 App 进程结束并重新启动。",
+            "action": "系统持久化突发快照，启动时读取并清除该快照。",
+            "outcome": "count>1 的未收口突发补发一条汇总；count==1 不补发以避免首条即时通知后的重复打扰。",
+            "identityRelation": "same_burst_behavior_added_recovery_scenario"
+          },
+          {
+            "labelId": "TF-BURST-PERSISTENCE",
+            "change": "added",
+            "context": "聚合器记录、滚动、收口或重置突发状态。",
+            "action": "onStateChange 同步最新快照，收口后写入 nil。",
+            "outcome": "宿主可持续保存未收口状态，已收口状态不残留。",
+            "identityRelation": "supporting_persistence_behavior_added"
+          }
+        ],
+        "unchanged": [
+          "非目标基线通知仍各自独立，通知出口重构不构成新的业务行为。",
+          "原有突发首条即时、段内静默和收口汇总规则保持。"
+        ],
+        "identity": [
+          "重启补发是既有目标突发通知的扩展场景，不是无关的新通知功能。",
+          "通知 ID 与出口重构属于实现证据变化，不应单独生成新产品行为。"
+        ],
+        "verification": [
+          "新增持久化与重启恢复场景初始未核实。",
+          "共享实现发生变化时，原突发行为需要按影响重新评估，不能仅因核心规则描述未变就自动保持当前已核实。"
+        ],
+        "unknowns": [
+          "本预标不证明真实进程被杀、UserDefaults 持久化与系统通知投递的端到端结果。"
+        ]
+      }
+    },
+    {
+      "id": "CH-001",
+      "project": "Chandler",
+      "repository": "https://github.com/gzhanlei/Chandler.git",
+      "stack": ["Go", "React", "Next.js"],
+      "datasetRole": "holdout",
+      "baseSha": "2aedfba100b5305afcb3dc1b0fdd2226dd9a8cd2",
+      "targetSha": "8b33b31da8c28e54eb1bf63bba5f439b6dc731be",
+      "declaredIntent": "登录与公开注册按配置接入 Cloudflare Turnstile，并提供迁移缓冲期。",
+      "hardCaseTags": ["feature_addition", "configuration_matrix", "security_boundary", "external_dependency"],
+      "evidence": [
+        {"path": "internal/config/config.go", "symbols": ["Load", "TurnstileGraceDeadline"]},
+        {"path": "internal/handlers/auth.go", "symbols": ["verifyTurnstile", "Register", "Login"]},
+        {"path": "internal/turnstile/turnstile.go", "symbols": ["Client.Check"]},
+        {"path": "internal/handlers/otp.go", "symbols": ["Capabilities"]},
+        {"path": "web/app/components/Turnstile.tsx", "symbols": ["Turnstile"]},
+        {"path": "web/app/user/login/page.tsx", "symbols": ["handleSubmit"]},
+        {"path": "web/app/user/register/page.tsx", "symbols": ["RegisterForm"]}
+      ],
+      "expected": {
+        "behaviorDelta": [
+          {
+            "labelId": "CH-TURNSTILE-CONFIG",
+            "change": "added",
+            "context": "服务加载 TURNSTILE_SITE_KEY 与 TURNSTILE_SECRET_KEY 配置。",
+            "action": "系统检查双配置是否成对。",
+            "outcome": "两者均为空时门禁关闭并保持历史行为；只配置其一时拒绝启动；成对配置时启用登录与公开注册人机验证。",
+            "identityRelation": "new_conditional_auth_gate"
+          },
+          {
+            "labelId": "CH-TURNSTILE-GATE",
+            "change": "added",
+            "context": "门禁启用后的密码登录或浏览器公开注册请求。",
+            "action": "服务端向 siteverify 校验一次性 token，前端从 capabilities 获取 site key 并渲染 widget。",
+            "outcome": "缺失、无效或重放 token 返回 403 auth.turnstile_failed；siteverify 不可达或响应异常返回 503 auth.turnstile_unavailable；partner 代注册豁免。",
+            "identityRelation": "new_auth_scenarios"
+          },
+          {
+            "labelId": "CH-TURNSTILE-GRACE",
+            "change": "added",
+            "context": "配置了仍在有效期内的 TURNSTILE_GRACE_UNTIL。",
+            "action": "系统区分未携带 token 与携带 token 的请求。",
+            "outcome": "缓冲期内仅未携带 token 的旧方式请求放行并记录日志；携带 token 的请求仍严格校验，到期后自动转为强制。",
+            "identityRelation": "new_migration_boundary_scenario"
+          }
+        ],
+        "unchanged": [
+          "OTP 与微信登录不增加 Turnstile 门禁。",
+          "partner 代注册继续使用 client 凭证并维持其邮箱验证流程。",
+          "门禁未启用时登录与公开注册不需要 cf_turnstile_response。"
+        ],
+        "identity": [
+          "Turnstile 是登录与公开注册的条件性新约束，不得概括为所有认证方式都被人机验证改变。",
+          "配置关闭、缓冲期缺 token、无效 token、服务不可用和 partner 豁免是独立场景，不应合并成一个“必须验证码”场景。"
+        ],
+        "verification": [
+          "新增门禁与边界场景初始未核实，不能继承原登录注册的当前已核实状态。",
+          "OTP、微信与 partner 代注册等未触及行为不应被批量标为失效。"
+        ],
+        "unknowns": [
+          "静态预标不证明 Cloudflare 在生产网络中的可达性，也不证明真实 token 的当前运行结果。"
+        ]
+      }
+    },
+    {
+      "id": "CH-002",
+      "project": "Chandler",
+      "repository": "https://github.com/gzhanlei/Chandler.git",
+      "stack": ["Go", "React", "Next.js"],
+      "datasetRole": "holdout",
+      "baseSha": "8b33b31da8c28e54eb1bf63bba5f439b6dc731be",
+      "targetSha": "805abfa2da7537d486e04416cec3d441e971f0a7",
+      "declaredIntent": "因大陆访问不可靠，完整移除 Turnstile 并恢复此前登录注册行为。",
+      "hardCaseTags": ["feature_removal", "full_revert", "identity_restoration", "verification_scope"],
+      "evidence": [
+        {"path": "internal/config/config.go", "symbols": ["Load"]},
+        {"path": "internal/handlers/auth.go", "symbols": ["Register", "Login"]},
+        {"path": "internal/handlers/otp.go", "symbols": ["Capabilities"]},
+        {"path": "web/app/lib/auth.tsx", "symbols": ["login", "register"]},
+        {"path": "git-tree", "symbols": ["2aedfba100b5305afcb3dc1b0fdd2226dd9a8cd2^{tree}=805abfa2da7537d486e04416cec3d441e971f0a7^{tree}"]}
+      ],
+      "expected": {
+        "behaviorDelta": [
+          {
+            "labelId": "CH-TURNSTILE-REMOVAL",
+            "change": "removed",
+            "context": "回滚 CH-001 引入的 Turnstile 配置、服务端门禁、capabilities 字段和前端 widget。",
+            "action": "系统删除 Turnstile 实现并恢复先前认证路径。",
+            "outcome": "密码登录与公开注册不再要求 cf_turnstile_response，capabilities 不再下发 Turnstile 配置；OTP、微信和 partner 代注册保持原行为。",
+            "identityRelation": "behavior_removed_and_pre_revert_behavior_restored"
+          }
+        ],
+        "unchanged": [
+          "OTP、微信和 partner 代注册行为不受回滚影响。",
+          "目标 tree 与 CH-001 之前 base tree 完全一致，因此当前代码所支持的产品行为应回到同一状态。",
+          "发布历史必须保留 Turnstile 曾新增后被移除的事实，不能把两个连续窗口压缩成从未发生。"
+        ],
+        "identity": [
+          "终点当前行为应与 CH-001 之前的对应行为重新建立 same_behavior 关系，而不是制造无关联的新身份。",
+          "CH-001 的 Turnstile 场景在终点为 removed/inactive，不得与恢复后的无 Turnstile 场景并列成当前有效行为。"
+        ],
+        "verification": [
+          "旧核实记录作为历史保留，但不能仅因 tree 恢复就自动把旧 commit 的核实状态恢复为当前已核实。",
+          "终点可以引用相同 tree 作为强证据，仍需按当前 specVersion 与 commit 坐标重新推导或确认当前核实状态。"
+        ],
+        "unknowns": [
+          "tree 相同证明代码内容一致，不证明外部部署配置、运行时数据或当前生产核实记录一致。"
+        ]
+      }
+    }
+  ]
+}

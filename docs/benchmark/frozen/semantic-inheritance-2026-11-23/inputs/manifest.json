@@ -1,0 +1,63 @@
+{
+  "schemaVersion": "semantic-inheritance-inputs-v1",
+  "preparedAt": "2026-11-23T12:38:53.080Z",
+  "source": "local_git_read_only",
+  "modelCalls": 0,
+  "productionWrites": 0,
+  "windows": [
+    {
+      "id": "CD-001",
+      "files": 4,
+      "patchBytes": 17280,
+      "patchSha256": "3890183285617e4e8afd28c39119fb7721542b30cf3d5d3c4f11242f90835ef4"
+    },
+    {
+      "id": "SB-001",
+      "files": 5,
+      "patchBytes": 21608,
+      "patchSha256": "591f0efcf2e75dd99a37c04fbe0e21ab0168c77a59dc7acdaedc0047846b384c"
+    },
+    {
+      "id": "SB-002",
+      "files": 7,
+      "patchBytes": 2725719,
+      "patchSha256": "4174a9371e061c2f51c717d8af84d32ba22fb046727f7ef54f2b9bf67695aa52"
+    },
+    {
+      "id": "SB-003",
+      "files": 3,
+      "patchBytes": 9619,
+      "patchSha256": "4ecfda94400f612ed919cf940379ed56964b94c2a0ac7dae306ad783c96f9601"
+    },
+    {
+      "id": "TF-001",
+      "files": 6,
+      "patchBytes": 16886,
+      "patchSha256": "e5f8f02c0fa8b6dbba3388049a46d78d954052e963cbf6fbb89521ad47d6b110"
+    },
+    {
+      "id": "TF-002",
+      "files": 1,
+      "patchBytes": 3172,
+      "patchSha256": "f1d33d9e58eb148e94400f6d9ef922d56af0b645547f3e3538a4f599e2c6611b"
+    },
+    {
+      "id": "TF-003",
+      "files": 6,
+      "patchBytes": 15912,
+      "patchSha256": "9ad78ed1c8881d352adfbd30af54836078f9ba71cb20dcdf3555644069c8a58d"
+    },
+    {
+      "id": "CH-001",
+      "files": 20,
+      "patchBytes": 344547,
+      "patchSha256": "f72220467f9099d77ad81bb42d879f6ee8eb0effb06d4852db82d190cc1499d6"
+    },
+    {
+      "id": "CH-002",
+      "files": 20,
+      "patchBytes": 344567,
+      "patchSha256": "c1c33786f6f41a9e3e88d9e1b90ddb6d5a6ea95acde19fbf3908e51dec0800d3"
+    }
+  ]
+}

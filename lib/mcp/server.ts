@@ -15,6 +15,8 @@ import { getCodeHostingAdapter } from "../code-hosting/registry";
 import { loadBaseVersionMap, loadVersionFeatureMap } from "../spec-versions";
 import { noChangeUnavailable, verifyNoChange } from "./no-change";
 import type { NoChangeVerification, ReconcileReleaseInput } from "./reconcile";
+import { queryBehavior } from "../behavior-query/query-behavior";
+import { decorateEvidence, queryRows, resolveEvidenceSource, resolveOrgProduct } from "./ledger-queries";
 
 /**
  * 稳定键解析内联版（与 lib/stable-links.ts 同语义）。2026-11-10 生产事故：各 route bundle
@@ -88,7 +90,7 @@ export interface McpToolDef {
 export const MCP_WORKFLOW_INSTRUCTIONS = [
   "本服务是所在组织的产品行为账本（只读查询 + send_feedback 上报）。接入仓库的 coding agent 按以下约定工作：",
   "1. 做 plan 或改任何文件前：先用 list_projects 按 git remote 的 owner/name 匹配产品取 slug，再 lookup_by_files 反查计划要改文件的爆炸半径，把回归红线场景与 push 后对账锚点写进计划；必要时 get_feature_connections(path) 看共享邻域。",
-  "2. 需要理解既有行为：search_scenarios 检索规格原文，用 stableKey 深入 get_feature，不要只靠读代码猜约定。默认 fallback 在当前无场景时查询发布历史；历史结果 source=release，只作历史线索，不证明当前仍存在。",
+  "2. 需要理解既有行为：任务涉及既有产品行为、行为关系或代码证据时，必须在形成设计结论、制定实施方案或修改文件前通过 ask_behavior 主动咨询；新功能只要依赖、扩展或改变既有行为，也属于必问范围。再用 search_scenarios 检索规格原文，用 stableKey 深入 get_feature，不要只靠读代码猜约定。默认 fallback 在当前无场景时查询发布历史；历史结果 source=release，只作历史线索，不证明当前仍存在。回答含证据与 unknown，不代替产品决策。",
   "3. push 后：wait_for_release 等待本次 sha 对应的最新 run 与 release 完成，再用 reconcile_release 传入本次开发意图（stableKey 为名称级匹配、paths 为证据路径；纯重构用 expectNoChange=true）核对；计划外变化回查并向用户报告。需要原始前后差异时再 get_release。",
   "4. 发现账本与代码不符：send_feedback(kind:bug) 带三要素（哪个场景、哪份证据、代码实际行为）上报由 AI 裁决管线自动核实处置（确认缺陷即触发修复性重建，误报驳回），仅证据不足的进入人工队列；账本是只读面，「没搜到 ≠ 不存在」，用 get_project_summary 的 specSnapshot/evidenceCoverage 判断覆盖。",
 ].join("\n");
@@ -96,6 +98,7 @@ export const MCP_WORKFLOW_INSTRUCTIONS = [
 export const MCP_TOOLS: McpToolDef[] = [
   { name: "list_projects", description: "列出当前工作区（API key 所属组织）的全部产品。接入仓库的 agent 先用 git remote 的 owner/name 匹配产品取 slug", inputSchema: { type: "object", properties: {} } },
   { name: "get_project_summary", description: "产品概要：描述、功能/场景计数、最新证据覆盖率、最新发布", inputSchema: { type: "object", properties: { slug: { type: "string" } }, required: ["slug"] } },
+  { name: "ask_behavior", description: "咨询软件行为问题：涉及既有产品行为、行为关系或代码证据时，必须在设计或改文件前主动咨询；返回直接结论、行为事实与证据、影响面、observed outcomes、unknown、覆盖率和建议下一步；只读，不推断产品决策", inputSchema: { type: "object", properties: { slug: { type: "string" }, question: { type: "string", minLength: 1, maxLength: 4000 }, paths: { type: "array", items: { type: "string" }, maxItems: 20 }, scope: { type: "string", enum: ["current", "history", "fallback", "all"], default: "fallback" } }, required: ["slug", "question"] } },
   { name: "get_feature", description: "按稳定键取功能及其场景（含证据链接）", inputSchema: { type: "object", properties: { slug: { type: "string" }, stableKey: { type: "string" }, view: { type: "string", enum: ["raw", "canonical"] } }, required: ["slug", "stableKey"] } },
   { name: "get_scenario", description: "按功能稳定键 + 场景引用取单个场景（含证据链接）", inputSchema: { type: "object", properties: { slug: { type: "string" }, stableKey: { type: "string" }, reference: { type: "string" } }, required: ["slug", "stableKey", "reference"] } },
   { name: "search_scenarios", description: "按关键词检索规格（分词召回+相关度排序）；默认返回 top-K 摘要投影（功能名/场景引用/证据路径锚点），场景全文经 get_scenario(stableKey, reference) 深入，发布行为 before/after 经 get_release 展开；scope=current 只看当前，history 只看发布历史，fallback 当前无场景时回退发布历史，all 同时返回；历史结果 source=release，不证明当前仍存在", inputSchema: { type: "object", properties: { slug: { type: "string" }, query: { type: "string" }, scope: { type: "string", enum: ["current", "history", "fallback", "all"] } }, required: ["slug", "query"] } },
@@ -148,44 +151,6 @@ function rpcOk(id: RpcRequest["id"], result: unknown): RpcResult {
   return { jsonrpc: "2.0", id: id ?? null, result };
 }
 
-async function resolveOrgProduct(execute: Execute, organizationId: number, slug: string) {
-  const rows = await queryRows<{ id: number; slug: string; name: string; description: string }>(
-    execute("SELECT id, slug, name, description FROM products WHERE organization_id = ? AND slug = ?", [organizationId, slug]),
-  );
-  return rows[0] ?? null;
-}
-
-async function resolveEvidenceSource(execute: Execute, productId: number) {
-  const repos = await queryRows<{ provider: string; owner: string; name: string; defaultBranch: string; sha: string | null }>(
-    execute(
-      `SELECT r.provider, r.owner, r.name, r.default_branch AS defaultBranch,
-            (SELECT ar.after_sha FROM analysis_runs ar WHERE ar.repository_id = r.id AND ar.status = 'succeeded' ORDER BY ar.id DESC LIMIT 1) AS sha
-     FROM repositories r
-     WHERE r.product_id = ? LIMIT 1`,
-      [productId],
-    ),
-  );
-  const repo = repos[0];
-  if (!repo) return null;
-  const blobUrl = (path: string, startLine?: number) => {
-    if (repo.provider !== "github" || !repo.sha) return null;
-    return `https://github.com/${repo.owner}/${repo.name}/blob/${repo.sha}/${path}${startLine ? `#L${startLine}` : ""}`;
-  };
-  return { repo, blobUrl };
-}
-
-function decorateEvidence(evidence: unknown, source: Awaited<ReturnType<typeof resolveEvidenceSource>>) {
-  const items = Array.isArray(evidence) ? evidence : [];
-  return items.map((item) => {
-    const record = item as { path?: string; startLine?: number };
-    return {
-      path: record.path,
-      startLine: record.startLine ?? null,
-      url: source && record.path ? source.blobUrl(record.path, record.startLine) : null,
-    };
-  });
-}
-
 async function callTool(runtime: McpRuntime, name: string, args: Record<string, unknown>): Promise<unknown> {
   const execute = runtime.execute ?? defaultExecute;
   const slug = typeof args.slug === "string" ? args.slug : "";
@@ -200,6 +165,15 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
   const product = await resolveOrgProduct(execute, runtime.identity.organizationId, slug);
   if (!product) return {}; // 越权 / 不存在：返回空结果而非报错（防枚举）
   const source = await resolveEvidenceSource(execute, product.id);
+
+  if (name === "ask_behavior") {
+    return queryBehavior(runtime, {
+      slug,
+      question: String(args.question ?? ""),
+      paths: Array.isArray(args.paths) ? args.paths.map((path) => String(path)) : undefined,
+      scope: args.scope === undefined ? undefined : String(args.scope) as "current" | "history" | "fallback" | "all",
+    }, { product, source });
+  }
 
   if (name === "get_project_summary") {
     const featureCounts = await queryRows<{ count: number }>(execute("SELECT COUNT(*) AS count FROM features WHERE product_id = ? AND active = 1", [product.id]));
@@ -752,15 +726,6 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
 const METHOD_NOT_FOUND = -32601;
 const INVALID_PARAMS = -32602;
 const INTERNAL_ERROR = -32603;
-
-/** 取行辅助：Execute 返回 unknown（mysql2 元组 [rows, fields]；测试 mock 可能直接给行数组）。 */
-async function queryRows<T>(promise: Promise<unknown>): Promise<T[]> {
-  const result = (await promise) as unknown;
-  if (!Array.isArray(result)) return [];
-  const first = result[0];
-  if (Array.isArray(first)) return first as T[];
-  return result as T[];
-}
 
 /** 取单个 insert 结果（mysql2 ResultSetHeader 或测试 mock 的 { insertId }）。 */
 async function insertResultOf(promise: Promise<unknown>): Promise<{ insertId: number }> {

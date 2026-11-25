@@ -1,0 +1,47 @@
+{
+  "schemaVersion": "semantic-inheritance-run-readiness-v1",
+  "status": "blocked_before_model_runs",
+  "modelCalls": 0,
+  "experimentOutputsGenerated": 0,
+  "productionWrites": 0,
+  "ready": {
+    "frozenPrelabels": true,
+    "windowCount": 9,
+    "reproducibleGitPatches": true,
+    "patchHashVerification": true,
+    "parentShaVerification": true,
+    "multiProjectLocalGitAccess": true
+  },
+  "notReady": {
+    "domainExpertReview": {
+      "status": "pending",
+      "note": "当前答案键是 AI 静态代码预标；继续使用时必须明确标注为该口径。"
+    },
+    "historicalBaseSpecs": {
+      "status": "not_recovered",
+      "recoveredWindowCount": 0,
+      "requiredWindowCount": 9,
+      "note": "当前配置数据库没有冻结 SHA 对应的历史规格；不能把当前 active spec 或其他 SHA 当作基线。"
+    },
+    "diffOnlyArm": {
+      "status": "not_implemented",
+      "note": "现有执行批次与全量分析工具不提供本实验定义的 B（Git Diff）臂。"
+    },
+    "threeArmRunConfiguration": {
+      "status": "not_frozen",
+      "note": "在基线与三臂运行器就绪前，不冻结模型、Prompt、预算和缓存配置，也不触发全量重建。"
+    }
+  },
+  "requiredNextSteps": [
+    "复核预标，或明确接受 AI 静态预标口径。",
+    "为每个 baseSha 提供历史 specVersion，或在隔离环境中重建基线并记录真实成本。",
+    "实现并校验 B（Git Diff）臂，确保 A/B/C 的模型、Prompt、预算与输入坐标一致。",
+    "冻结三臂运行配置后再开始模型调用；不得用两臂结果冒充完整三臂实验。"
+  ],
+  "artifacts": {
+    "labels": "cases.json",
+    "protocol": "catalog.md",
+    "inputManifest": "inputs/manifest.json",
+    "perWindowInputs": "inputs/<WINDOW_ID>/{source.json,change.patch,changed-files.txt}"
+  }
+}

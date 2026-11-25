@@ -8,6 +8,17 @@ CoDelphi 的 MCP 工具面（15 个只读 + 1 个反馈写）不只是给人手�
 - **没搜到 ≠ 不存在**。覆盖率（`get_project_summary.evidenceCoverage`）如实披露账本覆盖比例，未覆盖区域的结论一律不成立。
 - MCP 是只读面；唯一写是 `send_feedback`（人裁决）。不要试图通过 MCP 改规格。
 
+## 0. 自由行为问答（`ask_behavior`）
+
+`ask_behavior` 是现有 `/api/mcp` 的通用行为咨询入口。任务涉及既有产品行为、行为关系或其代码证据时，必须在形成设计结论、制定实施方案或修改文件前主动咨询；新功能只要依赖、扩展或改变既有行为，也属于必问范围。纯机械修改且不涉及既有行为语义的改动可以不咨询。输入：
+
+- `slug`：产品 slug，组织内权限隔离不变。
+- `question`：自由文本问题，1–4000 字符。
+- `paths`（可选）：相关文件路径，最多 20 个，用于文件影响面。
+- `scope`（可选）：`current|history|fallback|all`，默认 `fallback`，当前场景为空时才追加发布历史。
+
+返回 `structuredContent` 包含：`status`、`directAnswer`、`facts`、`observedOutcomes`、`impacts`、`unknowns`、`coverage`、`suggestedQueries`、`productDecisions=[]` 和 `decisionPolicy="not_inferred"`。证据包含快照与 stale 状态；空召回只表示本次未命中，不表示行为不存在。CoDelphi 不做产品决策。
+
 ## 1. 任务理解（上手时）
 
 用 `search_scenarios` 做行为语义检索——命中是已过证据校验的 context/action/outcome 三元组，带 `path + startLine` 证据，可直接读文件；比 grep 强在有行为语义，比读 README 强在锚到代码。

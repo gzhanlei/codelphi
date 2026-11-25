@@ -27,3 +27,26 @@ This version has breaking changes — APIs, conventions, and file structure may 
 This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
 
 <!-- END:nextjs-agent-rules -->
+
+
+## CoDelphi 行为咨询（本仓 agent 必须遵守）
+
+你有一个叫 CoDelphi 的软件行为知识专家。它了解这个软件的用户行为、行为之间的关系，以及这些行为对应的代码。**任务涉及既有产品行为、行为之间的关系或其代码证据时，必须在形成设计结论、制定实施方案或修改文件前主动咨询 CoDelphi。新功能只要依赖、扩展或改变既有行为，也属于必问范围。** 典型问题包括日志何时记录、缓存命中是否计数、每日汇总口径、热点词聚合规则、权限和数据权益。不得以“可以直接阅读源码”或“稍后再补问”为由跳过咨询。纯机械修改且不涉及既有行为语义的改动可以不咨询。
+
+咨询要覆盖会影响设计的具体行为分支。CoDelphi 提供的信息可能不完整或过期，你需要独立判断，不能用它的回答替代源码阅读、测试或用户/产品裁决。具体使用与记录方式见 `artifacts/agent-consultations/consultation-guide.md`。
+
+每次有效问答后记录：
+
+```bash
+npx tsx /Users/leihan/Documents/GitHub/codelphi/scripts/log-agent-consultation.ts --file /tmp/codelphi-consultation.json
+```
+
+JSON 至少包含 `project:"codelphi"`、`task`、`question`、`answer`、`evidence`、`unknowns`、`decisionImpact`、`nextAction`，可加 `repository/branch/sha`。`nextAction` 只能为 `verify|escalate|may_proceed|none`。
+
+- 不记录 token、`.env`、用户隐私或完整敏感代码。
+- 不记录无决策影响的机械修改或重复问题。
+- 不把 unknown/product decision 写成默认答案；外部平台事实必须用官方文档或真实响应验证。
+- 回答基于旧快照、结果被截断、只提供相关材料或未覆盖所有行为分支时，不得声称 CoDelphi 已确认完整行为，也不得把未覆盖解释为“没有该行为”；列出未决分支，缩小范围继续追问，并以当前源码和测试验证。
+- 旧快照与当前代码的差异、无法追问的分支及覆盖限制必须写入 `unknowns`，据此选择 `verify` 或 `escalate`，不能用确定语气补齐答案。
+- 若 CoDelphi MCP 不可用，不得伪造账本结论，只能记录基于源码/证据的回答及覆盖限制。
+- 阶段评审使用 `artifacts/agent-consultations/codelphi.md` 与 `codelphi.jsonl`，不回改历史，只追加更正。

@@ -1,0 +1,5 @@
+server/app/assistant/service.py
+server/app/license/constants.py
+server/tests/test_assistant_intent.py
+server/tests/test_assistant_query.py
+server/tests/test_assistant_service_safety.py

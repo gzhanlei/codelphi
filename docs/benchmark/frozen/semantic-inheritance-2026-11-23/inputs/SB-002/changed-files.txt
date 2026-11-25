@@ -1,0 +1,7 @@
+server/static/assets/index-CCNvbyjY.js
+server/static/assets/index-dWmU3EPw.css
+server/static/index.html
+server/web/src/components/AssistantAnswerText.vue
+server/web/src/components/AssistantChatDrawer.vue
+server/web/src/components/__tests__/AssistantChatDrawer.spec.ts
+server/web/src/utils/linkify.ts

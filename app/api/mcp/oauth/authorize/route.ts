@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
   if (!user) return NextResponse.json(apiErrorBody("unauthorized"), { status: 401 });
   if (!clientId || !redirectUri || !codeChallenge) return NextResponse.json({ error: "缺少 PKCE 参数" }, { status: 400 });
   if (decision !== "approve") {
-    return NextResponse.redirect(new URL(`${redirectUri}${redirectUri.includes("?") ? "&" : "?"}error=access_denied${state ? `&state=${encodeURIComponent(state)}` : ""}`, request.url));
+    return NextResponse.redirect(new URL(`${redirectUri}${redirectUri.includes("?") ? "&" : "?"}error=access_denied${state ? `&state=${encodeURIComponent(state)}` : ""}`, request.url), 303);
   }
   const db = getDb();
   const execute = db.execute.bind(db) as unknown as (statement: string, parameters: Array<string | number | null>) => Promise<unknown>;
@@ -65,5 +65,5 @@ export async function POST(request: NextRequest) {
   if (!organization || userId === null) return NextResponse.json({ error: "工作区解析失败" }, { status: 403 });
   const { approveGrant } = await import("@/lib/mcp/oauth");
   const grant = await approveGrant({ execute }, { organizationId: organization.id, userId, clientId: client.clientId, clientName: client.clientName, redirectUri, codeChallenge });
-  return NextResponse.redirect(new URL(`${redirectUri}${redirectUri.includes("?") ? "&" : "?"}code=${grant.code}${state ? `&state=${encodeURIComponent(state)}` : ""}`, request.url));
+  return NextResponse.redirect(new URL(`${redirectUri}${redirectUri.includes("?") ? "&" : "?"}code=${grant.code}${state ? `&state=${encodeURIComponent(state)}` : ""}`, request.url), 303);
 }

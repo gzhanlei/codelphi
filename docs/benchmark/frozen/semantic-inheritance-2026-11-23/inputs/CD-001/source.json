@@ -1,0 +1,30 @@
+{
+  "windowId": "CD-001",
+  "project": "CoDelphi",
+  "repository": "https://github.com/gzhanlei/codelphi.git",
+  "baseSha": "7c7c86b37afe2e9826506677c1112ccaa9fcdc5c",
+  "targetSha": "2088d9f0724139300c4f4b29024ef3668c0c093e",
+  "baseTree": "4ef12326a11d94857fcd49cf3d1b1b7f9d98367f",
+  "targetTree": "2d2f3f9176caf84e06214440d45748b3d6d7d42b",
+  "targetCommittedAt": "2026-11-19T01:26:24+08:00",
+  "changedFiles": [
+    "lib/analysis.ts",
+    "lib/spec-diff.ts",
+    "lib/spec-versions.ts",
+    "tests/spec-diff.test.ts"
+  ],
+  "patchSha256": "3890183285617e4e8afd28c39119fb7721542b30cf3d5d3c4f11242f90835ef4",
+  "patchBytes": 17280,
+  "sourceReady": true,
+  "baselineSpec": {
+    "status": "not_recovered",
+    "requiredAction": "supply_base_spec_version_or_rebuild_from_base_sha"
+  },
+  "threeArmRunner": {
+    "status": "not_ready",
+    "missing": [
+      "historical_or_rebuilt_base_spec",
+      "diff_only_arm"
+    ]
+  }
+}

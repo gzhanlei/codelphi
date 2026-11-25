@@ -1,0 +1,32 @@
+{
+  "windowId": "TF-001",
+  "project": "Tingfeng",
+  "repository": "https://github.com/gzhanlei/tingfeng.git",
+  "baseSha": "87bb7928066eae6e20cf1435f3bfd6000c01b2a4",
+  "targetSha": "360be707682bf71cbb2ebfa4012b6c53a43aea51",
+  "baseTree": "84ec275ee0e18e4b1824500617ca814f805aa931",
+  "targetTree": "b3398b626d01f211f34b406424244b7326fc6076",
+  "targetCommittedAt": "2026-11-02T23:02:09+08:00",
+  "changedFiles": [
+    "ios/DEVELOPMENT-LOG.md",
+    "ios/README.md",
+    "ios/Tests/README.md",
+    "ios/Tests/target-watch/main.swift",
+    "ios/Tingfeng/DSP/TargetWatchTrigger.swift",
+    "ios/Tingfeng/MeterModel.swift"
+  ],
+  "patchSha256": "e5f8f02c0fa8b6dbba3388049a46d78d954052e963cbf6fbb89521ad47d6b110",
+  "patchBytes": 16886,
+  "sourceReady": true,
+  "baselineSpec": {
+    "status": "not_recovered",
+    "requiredAction": "supply_base_spec_version_or_rebuild_from_base_sha"
+  },
+  "threeArmRunner": {
+    "status": "not_ready",
+    "missing": [
+      "historical_or_rebuilt_base_spec",
+      "diff_only_arm"
+    ]
+  }
+}

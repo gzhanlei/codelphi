@@ -1,0 +1,46 @@
+{
+  "windowId": "CH-002",
+  "project": "Chandler",
+  "repository": "https://github.com/gzhanlei/Chandler.git",
+  "baseSha": "8b33b31da8c28e54eb1bf63bba5f439b6dc731be",
+  "targetSha": "805abfa2da7537d486e04416cec3d441e971f0a7",
+  "baseTree": "d6f0a8d7f432f6c4deea4f94502cff67083bc42f",
+  "targetTree": "a29c30d1cc1faf98a0f2e24fe8b98125660f0e5d",
+  "targetCommittedAt": "2026-11-22T21:47:31+08:00",
+  "changedFiles": [
+    "cmd/server/main.go",
+    "deploy/.env.production.example",
+    "deploy/PRODUCTION.md",
+    "docs/partners/partner-getting-started.md",
+    "internal/config/config.go",
+    "internal/config/config_test.go",
+    "internal/handlers/auth.go",
+    "internal/handlers/auth_turnstile_test.go",
+    "internal/handlers/otp.go",
+    "internal/turnstile/turnstile.go",
+    "internal/turnstile/turnstile_test.go",
+    "openapi/openapi.yaml",
+    "web/app/components/Turnstile.test.tsx",
+    "web/app/components/Turnstile.tsx",
+    "web/app/docs/guide-content.ts",
+    "web/app/lib/api.ts",
+    "web/app/lib/auth.tsx",
+    "web/app/user/login/page.tsx",
+    "web/app/user/register/page.test.tsx",
+    "web/app/user/register/page.tsx"
+  ],
+  "patchSha256": "c1c33786f6f41a9e3e88d9e1b90ddb6d5a6ea95acde19fbf3908e51dec0800d3",
+  "patchBytes": 344567,
+  "sourceReady": true,
+  "baselineSpec": {
+    "status": "not_recovered",
+    "requiredAction": "supply_base_spec_version_or_rebuild_from_base_sha"
+  },
+  "threeArmRunner": {
+    "status": "not_ready",
+    "missing": [
+      "historical_or_rebuilt_base_spec",
+      "diff_only_arm"
+    ]
+  }
+}
