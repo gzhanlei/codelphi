@@ -85,6 +85,35 @@ describe("runPrPreview", () => {
     expect(getPullRequestFiles).toHaveBeenCalled();
   });
 
+  it("does not look up migration scripts in the spec index", async () => {
+    // 迁移脚本已移出分析目标：索引里即使还留着旧的迁移证据（历史，不批量清理），也不拿它反查。
+    getPullRequestFiles.mockResolvedValue([
+      { path: "migrations/090_add_gift_wallet.sql", status: "added", patch: "" },
+      { path: "lib/auth.ts", status: "modified", patch: "" },
+    ]);
+    await runPrPreview(job);
+    const lookup = execute.mock.calls.find(([sql]) => String(sql).includes("FROM spec_file_index"));
+    expect(lookup?.[1]).toEqual([9, "lib/auth.ts"]);
+    // PR 实际触碰的文件数照实说。
+    expect(upsertIssueComment).toHaveBeenCalledWith(expect.anything(), 7, expect.stringContaining("此 PR 触碰 2 个文件，涉及 1 个功能"), 2, access);
+  });
+
+  it("reports no known spec hit for a PR that only touches migration scripts", async () => {
+    getPullRequestFiles.mockResolvedValue([{ path: "migrations/090_add_gift_wallet.sql", status: "added", patch: "" }]);
+    await runPrPreview(job);
+    expect(execute.mock.calls.some(([sql]) => String(sql).includes("FROM spec_file_index"))).toBe(false);
+    expect(upsertIssueComment).not.toHaveBeenCalled();
+    expect(createCheckRun).toHaveBeenCalledWith(
+      expect.anything(),
+      "pr-sha",
+      prPreviewCheckName,
+      "success",
+      "行为预演：未命中已知规格",
+      expect.stringContaining("未命中规格索引"),
+      access,
+    );
+  });
+
   it("still completes the check without commenting when nothing intersects", async () => {
     getPullRequestFiles.mockResolvedValue([{ path: "README.md", status: "modified", patch: "" }]);
     await runPrPreview(job);

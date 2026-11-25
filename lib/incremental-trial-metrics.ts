@@ -1,4 +1,4 @@
-import { evidenceKind } from "./evidence";
+import { evidenceKind, isSchemaArtifact } from "./evidence";
 import type { FileImpact, GlobalReason, WindowImpact, WindowOutcome } from "./impact-classification";
 
 /**
@@ -44,13 +44,20 @@ function needsAnalysis(entry: FileImpact): entry is AnalysisEntry {
   return entry.classification === "direct" || entry.classification === "expanded_closed";
 }
 
-/** 增量要读的源码：本次变更的实现文件（删除的除外），加上必须重分析的功能的证据文件。 */
+/**
+ * 增量要读的源码：本次变更的实现文件（删除的除外），加上必须重分析的功能的证据文件。
+ * 旧功能引用的迁移脚本不读：它已移出分析目标，读了也不能当证据。
+ */
 export function incrementalReadPaths(baseline: BaselineIndex, impact: WindowImpact): string[] {
   if (impact.outcome !== "direct") return [];
   const paths = new Set<string>();
   for (const entry of impact.files) if (needsAnalysis(entry) && entry.status !== "deleted") paths.add(entry.path);
-  for (const key of impact.requiredFeatureKeys) for (const path of baseline.featurePaths.get(key) ?? []) paths.add(path);
+  for (const key of impact.requiredFeatureKeys) for (const path of readableEvidence(baseline, key)) paths.add(path);
   return [...paths].sort();
+}
+
+function readableEvidence(baseline: BaselineIndex, featureKey: string): readonly string[] {
+  return (baseline.featurePaths.get(featureKey) ?? []).filter((path) => !isSchemaArtifact(path));
 }
 
 export function reanalysisLoad(baseline: BaselineIndex, impact: WindowImpact): { reanalyzedFeatures: number; featureShare: number; newImplementationFiles: number } {
@@ -77,11 +84,13 @@ function changeFor(path: string, impact: WindowImpact): FileImpact | undefined {
 /**
  * 锚点在一个快速路径窗口里的去向（§12.5）：不相交则重映射，相交或无行号则 stale。
  * 实现文件上的锚点不在此列：落在上面的注释或格式改动记 content_changed_nonbehavioral，证据状态保留。
+ * 迁移脚本上的锚点是历史遗留，按文档锚点的规矩算：那个文件不在分析目标里，改了也不会触发重分析，
+ * 被改的行落在锚点上，证据就已经对不上了。
  */
 function fateOf(anchor: Anchor, entry: FileImpact | undefined, removedLines: LineRanges): AnchorFate {
   if (!entry) return "untouched";
   if (entry.reason === "pure_rename") return "reanchored";
-  if (evidenceKind(anchor.path) === "implementation") return "nonbehavioral";
+  if (evidenceKind(anchor.path) === "implementation" && !isSchemaArtifact(anchor.path)) return "nonbehavioral";
   if (entry.status === "deleted") return "stale";
   const ranges = removedLines.get(anchor.path) ?? [];
   return ranges.length === 0 ? "remapped" : lineFate(anchor, ranges);
@@ -96,7 +105,7 @@ function lineFate(anchor: Anchor, ranges: readonly (readonly [number, number])[]
 
 export interface StaleCount {
   stale: number;
-  /** 落在本窗口改动过的非实现文件上的锚点数，含 stale 的。 */
+  /** 落在本窗口改动过的非实现文件上的锚点数，含 stale 的。已移出分析目标的迁移脚本也算非实现文件。 */
   touched: number;
   /** 落在本窗口改动过的实现文件上的锚点数。 */
   nonBehavioralTouched: number;

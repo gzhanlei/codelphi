@@ -71,6 +71,11 @@ describe("哪些文件算实现源码", () => {
     [".github/workflows/ci.yml", false],
     ["package-lock.json", false],
     ["yarn.lock", false],
+    // 迁移脚本已移出分析目标，全量分析不再读它；ORM 模型代码仍在目标内。
+    ["migrations/001_init.sql", false],
+    ["db/schema.sql", false],
+    ["prisma/schema.prisma", true],
+    ["app/models.py", true],
   ])("%s → %s", (path, expected) => {
     expect(isImplementationSource(path)).toBe(expected);
   });
@@ -101,7 +106,11 @@ describe("挑选 Golden Repository 的冻结窗口", () => {
 
   it("takes the first window in release order for every category it can recognise", () => {
     const readmeFirst = row({ files: [fileRow("README.md", { classification: "no_behavior", reason: "document" })], outcome: "no_behavior", reanalyzedFeatures: 0 });
-    const migration = row({ files: [fileRow("migrations/1.sql", { classification: "global_unbounded", reason: "schema_migration" })], outcome: "global_unbounded" });
+    const migration = row({
+      files: [fileRow("migrations/1.sql", { classification: "no_detected_behavior_change", reason: "schema_artifact" })],
+      outcome: "no_detected_behavior_change",
+      reanalyzedFeatures: 0,
+    });
     const rename = row({
       files: [fileRow("lib/new.ts", { oldPath: "lib/old.ts", status: "renamed", classification: "no_detected_behavior_change", reason: "pure_rename" })],
       outcome: "no_detected_behavior_change",
@@ -109,10 +118,19 @@ describe("挑选 Golden Repository 的冻结窗口", () => {
     });
     const selected = selectGoldenWindows([readmeFirst, migration, rename]);
     expect(selected.readme_only).toBe(readmeFirst);
-    expect(selected.schema_migration).toBe(migration);
+    expect(selected.migration_script).toBe(migration);
     expect(selected.pure_rename).toBe(rename);
     expect(selected.tests_only).toBeNull();
     expect(selected.assembly_point).toBeNull();
+    expect(selected.orm_schema).toBeNull();
+  });
+
+  it("does not take a migration-script window for the ORM schema category, or the other way round", () => {
+    const orm = row({ files: [fileRow("app/models.py", { classification: "global_unbounded", reason: "schema_migration" })], outcome: "global_unbounded", reanalyzedFeatures: 0 });
+    const artifact = row({ files: [fileRow("migrations/1.sql", { classification: "no_detected_behavior_change", reason: "schema_artifact" })], outcome: "no_detected_behavior_change", reanalyzedFeatures: 0 });
+    expect(selectGoldenWindows([orm]).migration_script).toBeNull();
+    expect(selectGoldenWindows([artifact]).orm_schema).toBeNull();
+    expect(selectGoldenWindows([orm]).orm_schema).toBe(orm);
   });
 
   it("does not mistake a window with other changes for a tests-only or README-only window", () => {
@@ -133,7 +151,7 @@ describe("挑选 Golden Repository 的冻结窗口", () => {
   it("names every category that has to be covered", () => {
     const ids = GOLDEN_CATEGORIES.map((category) => category.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids).toEqual(expect.arrayContaining(["shared_utility", "assembly_point", "schema_migration", "rename_with_content", "unindexed_implementation"]));
+    expect(ids).toEqual(expect.arrayContaining(["shared_utility", "assembly_point", "migration_script", "orm_schema", "rename_with_content", "unindexed_implementation"]));
     expect(Object.keys(selectGoldenWindows([]))).toEqual(ids);
   });
 });

@@ -21,6 +21,7 @@ import type { AnchorScenarioLink } from "./behavior-unit-state";
 import { behavioralEnumerationEnabled, analysisConvergenceEpsilon, analysisConvergenceRounds, fullAnalysisMode } from "./env";
 import { runInventoryFullAnalysis } from "./full-analysis";
 import { behavioralChangePaths } from "./patch-scan";
+import { analyzedChangePaths, isSchemaArtifact } from "./evidence";
 import { parsePatchHunks } from "./spec-diff";
 import { enumerateBehavioralChunks } from "./behavioral-enumeration";
 import { detectOutcomeConflicts } from "./spec-consistency";
@@ -410,8 +411,9 @@ async function runAnalysisBody(run: RunContext) {
     provider: target.adapter.provider,
     scopeRoots,
     backend: sourceBackend,
-    // W0-7：窗口 diff 文件必选装配（行为证据一手面，保证分区覆盖 diff 面）
-    diffPaths: change.files.map((file) => file.path),
+    // W0-7：窗口 diff 文件必选装配（行为证据一手面，保证分区覆盖 diff 面）。
+    // 迁移脚本已移出分析目标：不装配，也不进覆盖率的 diff 口径。
+    diffPaths: analyzedChangePaths(change.files),
   };
   const executeWrapper = (statement: string, parameters: Array<string | number | null>) => getDb().execute(statement, parameters);
   // W0-8 行为面枚举：patch-scan 行为文件清单（跨模式共享，RC2 与定向枚举共用）
@@ -436,7 +438,8 @@ async function runAnalysisBody(run: RunContext) {
   // W0-10：未归属的行为变更文件 = 行为 diff 文件中未命中索引者——显式交给增量 prompt 核对
   let unassignedBehavioralPaths: string[] | undefined;
   if (!noBehavioralWindow && !languageSwitched && run.analyzeMode === "incremental") {
-    const affected = await loadAffectedFeatureKeys(run.repositoryId, change.files.map((file) => file.path), executeWrapper);
+    // 受影响功能只按分析目标内的改动文件反查：索引里留着旧的迁移证据，迁移文件改了也不算碰到它们。
+    const affected = await loadAffectedFeatureKeys(run.repositoryId, analyzedChangePaths(change.files), executeWrapper);
     const resolved = resolveAnalysisMode({
       mode: "incremental",
       hasPreviousSpec: previousFeatureNames.length > 0,
@@ -529,7 +532,8 @@ async function runAnalysisBody(run: RunContext) {
     } else {
       // 整链无回执（首次接入 / migration 054 之前）：按零装配如实披露，并留下诊断日志
       console.warn("[analysis] no effective coverage receipt found up the version chain; writing honest zero receipt", { runId: run.id, previousSpecVersionId: previousSpec.specVersionId, diffFiles: change.files.length });
-      coverage = { implFilesAssembled: 0, implFilesTotal: 0, implBytesAssembled: 0, implBytesTotal: 0, coverageRatio: 0, partitionsUsed: 0, partitionsCapped: false, diffTotalPaths: change.files.length, diffSelectedPaths: 0, diffOmittedPaths: change.files.length };
+      const analyzedDiffPaths = analyzedChangePaths(change.files).length;
+      coverage = { implFilesAssembled: 0, implFilesTotal: 0, implBytesAssembled: 0, implBytesTotal: 0, coverageRatio: 0, partitionsUsed: 0, partitionsCapped: false, diffTotalPaths: analyzedDiffPaths, diffSelectedPaths: 0, diffOmittedPaths: analyzedDiffPaths };
     }
     console.log("[analysis] no-behavioral-change window; previous spec carried verbatim", { runId: run.id, diffFiles: change.files.length, carriedFeatures: result.features.length, specVersionId: previousSpec?.specVersionId ?? null });
   } else if (inventoryEligible && analysisMode === "inventory") {
@@ -553,9 +557,10 @@ async function runAnalysisBody(run: RunContext) {
     behaviorLinks = outcome.behaviorLinks;
     console.log("[analysis] inventory full analysis activated", { runId: run.id, tasks: outcome.tasks, units: outcome.unitStatuses.length, productDescriptionStatus: outcome.productDescriptionStatus });
   } else {
+  // 迁移脚本不进必选路径：既不装配，也不进定向覆盖面的分母（否则每次带迁移的提交都会显示有遗漏）。
   const requiredPaths = affectedKeys === null ? null : [...new Set([
-    ...change.files.map((file) => file.path),
-    ...await loadAffectedEvidencePaths(run.repositoryId, affectedKeys, executeWrapper),
+    ...analyzedChangePaths(change.files),
+    ...(await loadAffectedEvidencePaths(run.repositoryId, affectedKeys, executeWrapper)).filter((path) => !isSchemaArtifact(path)),
   ])].sort();
   const analysisRequest = requiredPaths === null ? remoteAnalysisRequest : {
     ...remoteAnalysisRequest,

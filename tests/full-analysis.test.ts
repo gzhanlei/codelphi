@@ -15,7 +15,7 @@ import { analyzeBehavioralGroup, analyzeWithAI } from "../lib/ai";
 import { getPartitionedAnalysisSources } from "../lib/remote-analysis";
 import { insertSpecVersion, loadLatestSpecVersionLanguage } from "../lib/spec-versions";
 import { behaviorAnalysisBudget, behaviorAnalysisConcurrency, fullAnalysisMode } from "../lib/env";
-import { runInventoryFullAnalysis } from "../lib/full-analysis";
+import { diffPathCoverage, runInventoryFullAnalysis } from "../lib/full-analysis";
 import type { InventoryFullAnalysisOutcome } from "../lib/full-analysis";
 import type { BehaviorTaskExtractionResult } from "../lib/behavior-unit-extraction";
 import type { BehaviorExecutionTask } from "../lib/behavior-inventory/types";
@@ -550,6 +550,16 @@ function inventoryOutcome(overrides: Partial<InventoryFullAnalysisOutcome> = {})
 }
 
 // ---------- Part 1：env readers ----------
+describe("diffPathCoverage", () => {
+  it("counts only the changed files inside the analysis target", () => {
+    const files = [{ path: "src/orders.ts" }, { path: "README.md" }, { path: "migrations/001_init.sql" }, { path: "db/schema.sql" }, { path: "src/extra.ts" }];
+    // 进了单元的算覆盖；文档本来就不需要覆盖；没进单元的实现文件才是遗漏。
+    expect(diffPathCoverage(files, ["src/orders.ts"])).toEqual({ diffTotalPaths: 3, diffSelectedPaths: 2, diffOmittedPaths: 1 });
+    // 窗口里只有迁移脚本：分析目标内没有任何改动。
+    expect(diffPathCoverage([{ path: "migrations/001_init.sql" }], [])).toEqual({ diffTotalPaths: 0, diffSelectedPaths: 0, diffOmittedPaths: 0 });
+  });
+});
+
 describe("full-analysis env readers", () => {
   beforeEach(() => {
     vi.unstubAllEnvs();
@@ -775,6 +785,21 @@ describe("runInventoryFullAnalysis orchestration", () => {
     expect(outcome.passInfos.length).toBe(manifest.tasks.length);
     expect(outcome.mergeStats).toEqual({ changesTruncated: 0, scenariosDeduped: 0, featuresFolded: 0 });
     expect(outcome.unitStatuses.every((unit) => unit.status === "extracted")).toBe(true);
+  });
+
+  it("keeps migration scripts off the inventory surface: never scanned, never counted as an omitted diff path", async () => {
+    const migration = "migrations/001_init.sql";
+    repoFiles[migration] = ["CREATE TABLE orders (id BIGINT PRIMARY KEY);"];
+    index.listRoot.mockResolvedValueOnce({ status: "indexed", truncated: false, entries: [{ path: "src", type: "tree" }, { path: "migrations", type: "tree" }] });
+    const input = baseInput();
+    input.change = { ...change, files: [...change.files, { path: migration, status: "modified", patch: "+ALTER TABLE orders ADD COLUMN note VARCHAR(255);" }] };
+
+    const outcome = await actualFullAnalysis.runInventoryFullAnalysis(input, { activate: true });
+
+    expect(outcome.activated).toBe(true);
+    expect(index.listDir).toHaveBeenCalledWith("migrations");
+    expect(vi.mocked(index.readLines).mock.calls.some(([request]) => request.path === migration)).toBe(false);
+    expect(outcome.coverage).toMatchObject({ diffTotalPaths: 1, diffSelectedPaths: 1, diffOmittedPaths: 0 });
   });
 
   it("resume loads and verifies the manifest, reuses successful result_json and never rescans", async () => {

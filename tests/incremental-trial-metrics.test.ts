@@ -65,6 +65,13 @@ describe("增量读取范围与重分析占比", () => {
     expect(incrementalReadPaths(index, impactOf([{ path: "package.json" }], "global_unbounded"))).toEqual([]);
   });
 
+  it("does not read migration scripts that an older feature still cites as evidence", () => {
+    // 迁移脚本已移出分析目标：旧功能引用它的锚点留作历史，增量时不再为它读文件。
+    const legacy = baseline({ a: ["lib/a.ts", "migrations/030_feature_aliases.sql"], b: ["lib/b.ts", "db/schema.sql"] });
+    expect(incrementalReadPaths(legacy, impactOf([{ path: "lib/a.ts" }], "direct", ["a"]))).toEqual(["lib/a.ts"]);
+    expect(incrementalReadPaths(legacy, impactOf([{ path: "lib/b.ts" }], "direct", ["b"]))).toEqual(["lib/b.ts"]);
+  });
+
   it("reports a zero share when the baseline has no automatic features", () => {
     expect(reanalysisLoad(baseline({}), impactOf([{ path: "lib/a.ts" }], "direct", ["a"]))).toMatchObject({ reanalyzedFeatures: 1, featureShare: 0 });
   });
@@ -133,6 +140,27 @@ describe("快速路径的 stale 锚点", () => {
     expect(fastPathStale(index, deleted, lines([["tests/gone.test.ts", [[1, 20]]]]))).toEqual({ stale: 1, touched: 1, nonBehavioralTouched: 0 });
     const renamed = impactOf([{ path: "tests/new.test.ts", oldPath: "tests/old.test.ts", status: "renamed" }], "no_detected_behavior_change");
     expect(fastPathStale(index, renamed, new Map())).toEqual({ stale: 0, touched: 0, nonBehavioralTouched: 0 });
+  });
+
+  it("treats anchors on migration scripts like document anchors: stale when a replaced line lands on them", () => {
+    // 迁移脚本上的锚点是历史遗留。它所在的文件不在分析目标里，改动不会触发重分析，所以不能像实现
+    // 文件那样记「证据状态保留」——按文档锚点的规矩：被改的行落在锚点上，或者根本没有行号，就是 stale。
+    const index = baseline({}, [
+      anchor("a", "migrations/030_feature_aliases.sql", 9, 12),
+      anchor("b", "migrations/030_feature_aliases.sql", 40),
+      anchor("c", "db/schema.sql", null, null),
+      anchor("d", "migrations/gone.sql", 3),
+    ]);
+    const impact = impactOf(
+      [{ path: "migrations/030_feature_aliases.sql" }, { path: "db/schema.sql" }, { path: "migrations/gone.sql", status: "deleted" }],
+      "no_detected_behavior_change",
+    );
+    const removedLines = lines([
+      ["migrations/030_feature_aliases.sql", [[10, 10]]],
+      ["db/schema.sql", [[1, 1]]],
+    ]);
+    expect(anchorFates(index, impact, removedLines)).toEqual(["stale", "remapped", "stale", "stale"]);
+    expect(fastPathStale(index, impact, removedLines)).toEqual({ stale: 3, touched: 4, nonBehavioralTouched: 0 });
   });
 
   it("does not apply to windows that are not fast paths", () => {

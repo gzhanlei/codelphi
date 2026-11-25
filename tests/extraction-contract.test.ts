@@ -27,6 +27,14 @@ describe("extraction work-order contract", () => {
     expect(workOrder.allowPaths).toEqual(["lib/feature.ts"]);
   });
 
+  it("keeps migration scripts out of the allow paths and out of the prompt", () => {
+    const withMigration = { ...change, files: [...change.files, { path: "migrations/001_init.sql", status: "modified", patch: "+ALTER TABLE features ADD COLUMN note VARCHAR(255);" }] };
+    const workOrder = buildExtractionWorkOrder({ id: "partition-002", sources, change: withMigration, context });
+    expect(workOrder.allowPaths).toEqual(["lib/feature.ts"]);
+    // 迁移脚本对提示词没有贡献：带不带它，消息逐字节相同。
+    expect(workOrder.messages).toEqual(buildAnalysisMessages(sources, change, context));
+  });
+
   it("rejects missing required release fields", () => {
     const result = JSON.parse(validResult);
     result.release.title = "";

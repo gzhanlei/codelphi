@@ -63,6 +63,7 @@ export interface BehaviorInventoryDiagnostics {
   detectorUnsupported: string[];
   detectorParseFailure: string[];
   dynamicRegistrationFallback: string[];
+  /** 不在实现面里的文件：测试、文档，以及已移出分析目标的迁移脚本。 */
   excludedNonImplementation: string[];
   /** 读取失败的实现面文件（生成零区间占位单元，激活被阻断直到可读）。 */
   unreadablePaths: string[];

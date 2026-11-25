@@ -1,8 +1,35 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { evidenceKind, isSchemaArtifact } from "../lib/evidence";
+import { analyzedChangeFiles, analyzedChangePaths, evidenceKind, isImplementationSurfaceFile, isSchemaArtifact } from "../lib/evidence";
 import { EvidenceLinks } from "../components/evidence-links";
+
+describe("isImplementationSurfaceFile", () => {
+  it("is the implementation tier minus migration scripts", () => {
+    expect(isImplementationSurfaceFile("lib/auth.ts")).toBe(true);
+    expect(isImplementationSurfaceFile("prisma/schema.prisma")).toBe(true);
+    expect(isImplementationSurfaceFile("migrations/001_init.sql")).toBe(false);
+    expect(isImplementationSurfaceFile("tests/a.test.ts")).toBe(false);
+    expect(isImplementationSurfaceFile("README.md")).toBe(false);
+  });
+});
+
+describe("analyzedChangeFiles / analyzedChangePaths", () => {
+  const path = (file: { path: string }) => file.path;
+
+  it("keeps the changed files that are still in the analysis target and drops migration scripts", () => {
+    const files = [{ path: "lib/auth.ts", status: "modified", patch: "+auth" }, { path: "migrations/090_add_gift_wallet.sql", status: "added", patch: "+CREATE TABLE" }, { path: "db/schema.sql" }, { path: "lib/models.ts" }];
+    expect(analyzedChangeFiles(files).map(path)).toEqual(["lib/auth.ts", "lib/models.ts"]);
+    // 原对象原样返回：补丁等内容不丢。
+    expect(analyzedChangeFiles(files)[0]).toBe(files[0]);
+    expect(analyzedChangePaths(files)).toEqual(["lib/auth.ts", "lib/models.ts"]);
+  });
+
+  it("keeps order and repetition, so every caller deduplicates exactly as it did before", () => {
+    expect(analyzedChangePaths([{ path: "lib/a.ts" }, { path: "lib/a.ts" }, { path: "lib/b.ts" }])).toEqual(["lib/a.ts", "lib/a.ts", "lib/b.ts"]);
+    expect(analyzedChangePaths([])).toEqual([]);
+  });
+});
 
 describe("isSchemaArtifact", () => {
   it("recognises migration scripts and SQL files", () => {

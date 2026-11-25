@@ -1,8 +1,48 @@
-import { describe, expect, it } from "vitest";
-import { allocateHunkReads } from "../lib/behavioral-enumeration";
+import { describe, expect, it, vi } from "vitest";
+import { allocateHunkReads, enumerateBehavioralChunks } from "../lib/behavioral-enumeration";
 import { behavioralChangePaths } from "../lib/patch-scan";
 import { changeFileHunkRanges, groupBehavioralTargets, hunkReadRanges, parsePatchHunks } from "../lib/behavioral-enumeration";
 import type { ChangeFile } from "../lib/code-hosting/types";
+
+const { analyzeBehavioralGroup } = vi.hoisted(() => ({ analyzeBehavioralGroup: vi.fn() }));
+// 只替换出网通道：真实模块还要从 ../lib/ai 取 analysisSchema。
+vi.mock("../lib/ai", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/ai")>(), analyzeBehavioralGroup }));
+
+describe("enumerateBehavioralChunks 的证据允许集", () => {
+  const files = [
+    { path: "lib/auth.ts", status: "modified", patch: "@@ -1,2 +1,2 @@\n-old\n+new" },
+    { path: "migrations/090_add_gift_wallet.sql", status: "added", patch: "+CREATE TABLE gift_wallets (id BIGINT PRIMARY KEY);" },
+  ] as ChangeFile[];
+
+  it("does not let a group keep a scenario that is only proven by a migration script the window changed", async () => {
+    analyzeBehavioralGroup.mockResolvedValue({
+      product: { description: "", evidence: [] },
+      release: { title: "t", summary: "s" },
+      changes: [],
+      features: [{
+        name: "统一登录",
+        summary: "s",
+        scenarios: [
+          { reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy", evidence: [{ path: "lib/auth.ts", startLine: 1 }] },
+          { reference: "HP-2", context: "c", action: "a", outcome: "o", category: "happy", evidence: [{ path: "migrations/090_add_gift_wallet.sql", startLine: 1 }] },
+        ],
+      }],
+    });
+    const readLines = vi.fn(async () => ({ startLine: 1, endLine: 1, lineCount: 1, lines: ["new"] }));
+
+    const outcome = await enumerateBehavioralChunks({
+      behavioralPaths: ["lib/auth.ts"],
+      files,
+      index: { readLines } as never,
+      change: { message: "feat: gift wallet", files },
+      knownFeatureNames: [],
+      billing: { runId: 1, accountId: 1, chargeComponent: "main" },
+    });
+
+    expect(outcome.chunks).toHaveLength(1);
+    expect(outcome.chunks[0].result.features[0].scenarios.map((scenario) => scenario.reference)).toEqual(["HP-1"]);
+  });
+});
 
 describe("parsePatchHunks", () => {
   it("parses new-file ranges from @@ headers", () => {

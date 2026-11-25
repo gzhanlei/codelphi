@@ -1,4 +1,4 @@
-import { evidenceKind, isInfrastructureEvidence } from "./evidence";
+import { evidenceKind, isInfrastructureEvidence, isSchemaArtifact } from "./evidence";
 import { behavioralChangePaths } from "./patch-scan";
 
 /**
@@ -9,6 +9,8 @@ import { behavioralChangePaths } from "./patch-scan";
  *
  * 保守方向：拿不准就往重的一档靠。global_unbounded 与 unknown 的窗口只能全量重同步，
  * 扩大声明集不能解除；只有确定性证据（patch-scan、blob 相等）才能把文件降到无行为。
+ * 唯一例外是分析目标之外的文件（迁移脚本、测试、文档、CI）：服务端不读它们，它们改了也不会
+ * 改变账本，所以不需要任何证据就可以判为无行为变更。
  */
 
 /** 分类结论与原因码的取值集合随这个版本变化。 */
@@ -39,7 +41,7 @@ export type FileIndex = ReadonlyMap<string, readonly string[]>;
 export type GlobalReason = "assembly_point" | "schema_migration" | "runtime_config" | "dependency_manifest" | "shared_module" | "symlink" | "submodule";
 export type UnknownReason = "binary_content";
 export type NoBehaviorReason = "document" | "comment_or_format_only" | "content_unchanged";
-export type NoDetectedReason = "test_code" | "ci_config" | "editor_or_vcs_config" | "static_asset" | "mode_change";
+export type NoDetectedReason = "test_code" | "ci_config" | "editor_or_vcs_config" | "static_asset" | "mode_change" | "schema_artifact";
 export type DirectReason = "indexed_implementation" | "unindexed_implementation_file";
 
 interface ChangedPaths {
@@ -95,16 +97,16 @@ const GLOBAL_RULES: ReadonlyArray<{ reason: GlobalReason; patterns: readonly Reg
     ],
   },
   {
+    // 只剩 ORM 模型与 schema 定义。迁移脚本（migrations/ 目录、.sql）已移出分析目标，
+    // 2026-11-25 起按「已检测到、无行为变更」处理，见 classifyByNature。
     reason: "schema_migration",
     patterns: [
-      /(?:^|\/)migrations?\//,
-      /\.sql$/,
       /(?:^|\/)models?\//,
       /(?:^|\/)models?\.py$/,
       /(?:^|\/)(?:alembic|drizzle)\//,
       /\.prisma$/,
       /(?:^|\/)[^/]*\.entity\.ts$/,
-      /(?:^|\/)(?:schema|schemas)\.(?:sql|prisma|graphql|gql)$/,
+      /(?:^|\/)(?:schema|schemas)\.(?:prisma|graphql|gql)$/,
     ],
   },
   {
@@ -206,9 +208,14 @@ const PATH_TIERS: ReadonlyArray<{ matches: (path: string) => boolean; impact: (b
 /** 不依赖索引与补丁内容的归类；返回 null 表示要按实现文件处理。 */
 function classifyByNature(file: ChangedFile): FileImpact | null {
   const base = pathsOf(file);
-  if (file.binary) return binaryImpact(file, base);
+  // 迁移脚本已移出分析目标（2026-11-25）：服务端不读它、不拿它当证据，它里面发生什么都不会
+  // 改变账本，不需要任何证据就可以判为无行为变更。所以先于二进制判定。唯一的例外是纯重命名，
+  // 仍走下面的通用分支，带上重锚信息，引用它的旧锚点才能跟着文件走。ORM 模型代码不在此列。
+  const schemaArtifact = isSchemaArtifact(file.path);
+  if (file.binary && !schemaArtifact) return binaryImpact(file, base);
   const unchanged = unchangedContentImpact(file, base);
   if (unchanged) return unchanged;
+  if (schemaArtifact) return noDetected(base, "schema_artifact");
   const tier = PATH_TIERS.find((candidate) => candidate.matches(file.path));
   return tier ? tier.impact(base) : null;
 }

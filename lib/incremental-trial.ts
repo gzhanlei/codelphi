@@ -1,4 +1,4 @@
-import { evidenceKind, isInfrastructureEvidence } from "./evidence";
+import { isImplementationSurfaceFile, isInfrastructureEvidence } from "./evidence";
 import type { FileImpact, FileStatus, WindowOutcome } from "./impact-classification";
 import type { Anchor, BaselineIndex, StaleCount } from "./incremental-trial-metrics";
 
@@ -72,9 +72,9 @@ export function parseLedger(jsonl: string): Map<number, LedgerRelease[]> {
   return byRepository;
 }
 
-/** 全量分析要读的源码：实现层级的文件，不含 CI 与锁文件这类基础设施路径。 */
+/** 全量分析要读的源码：实现面文件，不含 CI 与锁文件这类基础设施路径（迁移脚本已在实现面之外）。 */
 export function isImplementationSource(path: string): boolean {
-  return evidenceKind(path) === "implementation" && !isInfrastructureEvidence(path);
+  return isImplementationSurfaceFile(path) && !isInfrastructureEvidence(path);
 }
 
 /** 报告里每个窗口一行的文件记录：只留分类与定位需要的字段。 */
@@ -110,11 +110,13 @@ const everyFile = (test: (file: TrialFileRow) => boolean) => (row: GoldenCandida
  * 规格 §19.2 要求 Golden Repository 覆盖的情形。这里只列能从真实历史的分类结果里认出来的；
  * 认不出来的（force push、manual 冲突、相似度落在阈值附近、textconv 配置、功能合并、动态注册）
  * 要靠专门合成的夹具，不在真实历史里凑。
+ * schema/migration 拆成两条：迁移脚本已移出分析目标（走快速路径），ORM 模型与 schema 定义仍强制全量。
  */
 export const GOLDEN_CATEGORIES: ReadonlyArray<{ id: string; covers: string; matches: (row: GoldenCandidate) => boolean }> = [
   { id: "shared_utility", covers: "跨文件共享工具", matches: hasReason("shared_module") },
   { id: "assembly_point", covers: "middleware/auth 与权限策略这类装配点", matches: hasReason("assembly_point") },
-  { id: "schema_migration", covers: "schema/migration", matches: hasReason("schema_migration") },
+  { id: "migration_script", covers: "迁移脚本（已移出分析目标，不触发重分析）", matches: hasReason("schema_artifact") },
+  { id: "orm_schema", covers: "ORM 模型与 schema 定义", matches: hasReason("schema_migration") },
   {
     id: "global_types_or_barrel",
     covers: "公共类型和 barrel export",

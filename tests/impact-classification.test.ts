@@ -39,9 +39,14 @@ describe("impact-v1 逐文件分类", () => {
     ["package-lock.json", "global_unbounded", "dependency_manifest"],
     ["app/package.json", "global_unbounded", "dependency_manifest"],
     ["services/api/go.mod", "global_unbounded", "dependency_manifest"],
-    ["migrations/090_add_gift_wallet.sql", "global_unbounded", "schema_migration"],
-    ["superset/migrations/versions/2026_11_01.py", "global_unbounded", "schema_migration"],
+    ["migrations/090_add_gift_wallet.sql", "no_detected_behavior_change", "schema_artifact"],
+    ["superset/migrations/versions/2026_11_01.py", "no_detected_behavior_change", "schema_artifact"],
+    ["db/schema.sql", "no_detected_behavior_change", "schema_artifact"],
     ["prisma/schema.prisma", "global_unbounded", "schema_migration"],
+    ["app/models.py", "global_unbounded", "schema_migration"],
+    ["src/user.entity.ts", "global_unbounded", "schema_migration"],
+    ["alembic/versions/001_initial.py", "global_unbounded", "schema_migration"],
+    ["db/schema.graphql", "global_unbounded", "schema_migration"],
     [".env.production", "global_unbounded", "runtime_config"],
     ["Dockerfile", "global_unbounded", "runtime_config"],
     ["docker-compose.prod.yml", "global_unbounded", "runtime_config"],
@@ -74,9 +79,48 @@ describe("impact-v1 逐文件分类", () => {
       classification: "global_unbounded",
       reason: "shared_module",
     });
-    expect(classifyFile(file({ path: "migrations/README.md" }), index)).toMatchObject({
+    // 迁移脚本落在别的全局规则目录下时，全局规则仍然优先。
+    expect(classifyFile(file({ path: "config/migrations/001.sql" }), index)).toMatchObject({
       classification: "global_unbounded",
-      reason: "schema_migration",
+      reason: "runtime_config",
+    });
+  });
+
+  describe("migration scripts are outside the analysis target", () => {
+    const artifact = { classification: "no_detected_behavior_change", reason: "schema_artifact" };
+
+    it("treats anything that happens to one as detected but not behavioral", () => {
+      // 新增、修改、删除都一样：它不在分析目标里，内容是什么、有没有补丁都不影响账本。
+      expect(classifyFile(file({ path: "migrations/001_init.sql", status: "added", oldMode: null, oldBlobSha: null, patch: null }), index)).toMatchObject(artifact);
+      expect(classifyFile(file({ path: "migrations/001_init.sql", patch: null }), index)).toMatchObject(artifact);
+      expect(classifyFile(file({ path: "migrations/001_init.sql", status: "deleted", newMode: null, newBlobSha: null }), index)).toMatchObject(artifact);
+      expect(classifyFile(file({ path: "migrations/seed.bin", binary: true }), index)).toMatchObject(artifact);
+      expect(classifyFile(file({ path: "db/schema.sql", oldMode: "100644", newMode: "100755", patch: "" }), index)).toMatchObject(artifact);
+    });
+
+    it("still reports a pure rename of one, so anchors that cite it can follow the file", () => {
+      const sameBlob = "c".repeat(40);
+      expect(classifyFile(file({ path: "migrations/002_renamed.sql", oldPath: "migrations/001_init.sql", status: "renamed", oldBlobSha: sameBlob, newBlobSha: sameBlob, patch: null }), index)).toMatchObject({
+        classification: "no_detected_behavior_change",
+        reason: "pure_rename",
+        reanchorsTo: "migrations/001_init.sql",
+      });
+    });
+
+    it("lets a window that only touches migration scripts take the fast path", () => {
+      const window = classifyWindow([file({ path: "migrations/090_add_gift_wallet.sql", status: "added", oldMode: null, oldBlobSha: null })], index);
+      expect(window.outcome).toBe("no_detected_behavior_change");
+      expect(window.globalReasons).toEqual([]);
+      expect(window.requiredFeatureKeys).toEqual([]);
+    });
+
+    it("re-analyzes only the features proved by the other files when a window mixes both", () => {
+      // 索引里仍有功能引用旧的迁移证据：迁移文件改了也不因此重分析它们。
+      const legacyIndex = new Map<string, readonly string[]>([...index, ["migrations/030_feature_aliases.sql", ["features:fold"]]]);
+      const window = classifyWindow([file({ path: "lib/analysis.ts" }), file({ path: "migrations/030_feature_aliases.sql" })], legacyIndex);
+      expect(window.outcome).toBe("direct");
+      expect(window.requiredFeatureKeys).toEqual(["analysis:run", "analysis:save"]);
+      expect(window.files.map((entry) => entry.classification)).toEqual(["direct", "no_detected_behavior_change"]);
     });
   });
 
@@ -226,10 +270,20 @@ describe("impact-v1 窗口归宿", () => {
   });
 
   it("lets one global file force the whole window to full resync and names every reason", () => {
-    const window = classifyWindow([file({ path: "lib/analysis.ts" }), file({ path: "package-lock.json" }), file({ path: "migrations/1.sql" }), file({ path: "Dockerfile" })], index);
+    const window = classifyWindow([file({ path: "lib/analysis.ts" }), file({ path: "package-lock.json" }), file({ path: "prisma/schema.prisma" }), file({ path: "Dockerfile" })], index);
     expect(window.outcome).toBe("global_unbounded");
     expect(window.globalReasons).toEqual(["dependency_manifest", "runtime_config", "schema_migration"]);
     expect(window.files.map((entry) => entry.classification)).toEqual(["direct", "global_unbounded", "global_unbounded", "global_unbounded"]);
+  });
+
+  it("does not let a migration script add a global reason to a window that is forced full for other reasons", () => {
+    const window = classifyWindow([file({ path: "Dockerfile" }), file({ path: "migrations/1.sql" })], index);
+    expect(window.outcome).toBe("global_unbounded");
+    expect(window.globalReasons).toEqual(["runtime_config"]);
+    expect(window.files.map((entry) => [entry.classification, entry.reason])).toEqual([
+      ["global_unbounded", "runtime_config"],
+      ["no_detected_behavior_change", "schema_artifact"],
+    ]);
   });
 
   it("ranks unknown above direct but below global", () => {

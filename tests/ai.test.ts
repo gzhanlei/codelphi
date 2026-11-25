@@ -1,6 +1,6 @@
 import type { StructuredCompletionMessage } from "../lib/llm-client";
 import { describe, expect, it, vi } from "vitest";
-import { analyzeBehavioralGroup, analyzeWithAI, behavioralDescribePrompt, behavioralJudgmentPrompt, capEvidence, featureContinuitySection, incrementalScopeSection, capScenariosPerFeature, parseAnalysisContent, parseBehavioralDescriptions, specAnchoringSection } from "../lib/ai";
+import { analyzeBehavioralGroup, analyzeWithAI, behavioralDescribePrompt, behavioralJudgmentPrompt, buildAnalysisMessages, capEvidence, featureContinuitySection, incrementalScopeSection, capScenariosPerFeature, parseAnalysisContent, parseBehavioralDescriptions, specAnchoringSection } from "../lib/ai";
 
 const result = {
   product: { description: "统一认证与产品知识中心。", evidence: [{ path: "app/auth/login/route.ts", startLine: 1 }] },
@@ -351,5 +351,30 @@ describe("capScenariosPerFeature (BM-5 变体累积防线)", () => {
     expect(capped.features[0].scenarios[0].reference).toBe("HP-1");
     expect(capped.features[0].scenarios[39].reference).toBe("HP-40");
     expect(capped.features[1].scenarios).toHaveLength(1);
+  });
+});
+
+describe("buildAnalysisMessages 的文件变化一节", () => {
+  const sources = [{ path: "lib/auth.ts", content: "1: export const auth = true;" }];
+  const files = [
+    { path: "lib/auth.ts", status: "modified", patch: "+export const auth = true;" },
+    { path: "migrations/090_add_gift_wallet.sql", status: "added", patch: "+CREATE TABLE gift_wallets (id BIGINT PRIMARY KEY);" },
+  ];
+
+  it.each([
+    ["zh-CN", "【文件变化】", "\n【当前代码，带行号】", "[Changed files]"],
+    ["en", "[Changed files]", "\n[Current code, with line numbers]", "【文件变化】"],
+  ] as const)("leaves migration scripts out of the %s prompt", (outputLanguage, marker, endMarker, otherMarker) => {
+    const user = buildAnalysisMessages(sources, { message: "feat: gift wallet", files }, { outputLanguage })[1].content;
+    const section = user.slice(user.indexOf(marker), user.indexOf(endMarker));
+    expect(section).toContain('"path":"lib/auth.ts"');
+    expect(section).not.toContain("migrations/090_add_gift_wallet.sql");
+    expect(section).not.toContain("CREATE TABLE");
+    expect(user).not.toContain(otherMarker);
+  });
+
+  it("changes nothing when the window has no migration script", () => {
+    const plain = { message: "feat", files: [files[0]] };
+    expect(buildAnalysisMessages(sources, plain)[1].content).toContain(JSON.stringify(plain.files));
   });
 });

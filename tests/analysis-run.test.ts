@@ -482,6 +482,88 @@ describe("analysis orchestration", () => {
     expect(listDir).not.toHaveBeenCalled();
   });
 
+  it("keeps migration scripts out of incremental planning: the window diff, the affected lookup and the required paths", async () => {
+    // 迁移脚本已移出分析目标（2026-11-25）。索引里留着旧的迁移证据：功能不因迁移文件改动而被查出来，
+    // 它们引用的迁移证据也不再被装进窗口、不再进覆盖面的分母。
+    runRows = [{ ...run, analyzeMode: "incremental" }];
+    const statPath = vi.fn(async (path: string) => ({ path, blobSha: `blob-${path}`, treeEntrySha: `tree-${path}`, byteSize: 100, cacheState: "cached" }));
+    partitionedSourcesMock.mockResolvedValue({
+      partitions: [{ slice: { files: [{ path: "lib/auth.ts" }] }, sources: [{ path: "lib/auth.ts", content: "1: auth" }] }],
+      index: { readLines, listDir, listRoot, statPath },
+    });
+    execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("SET status = 'running'")) return [{ affectedRows: 1 }];
+      if (sql.includes("SET status = 'failed'")) return [{ affectedRows: 1 }];
+      if (sql.includes("JOIN repositories repo")) return [runRows];
+      if (sql.includes("source_roots")) return [[]];
+      if (sql.includes("SELECT id FROM analysis_runs WHERE repository_id = ? AND after_sha = ?")) return [existingRunRows];
+      if (sql.includes("INSERT INTO analysis_runs")) return [{ insertId: 55 }];
+      if (sql.includes("SELECT sf.name FROM spec_features")) return [[{ name: "统一登录" }]];
+      if (sql.includes("SELECT DISTINCT i.path")) return [[{ path: "lib/shared.ts" }, { path: "migrations/030_feature_aliases.sql" }]];
+      if (sql.includes("FROM spec_file_index i")) return [[{ stableKey: "统一登录", name: "统一登录", path: "lib/auth.ts" }]];
+      return [{}];
+    });
+    adapter.getChangeContext.mockResolvedValue({
+      message: "feat: gift wallet",
+      committedAt: "2026-11-01T00:00:00Z",
+      url: "",
+      files: [
+        { path: "migrations/090_add_gift_wallet.sql", status: "added", patch: "+CREATE TABLE gift_wallets (id BIGINT PRIMARY KEY);" },
+        { path: "lib/auth.ts", status: "modified", patch: "+ const token = sign(payload);" },
+      ],
+    });
+
+    await runAnalysis(8);
+
+    const request = partitionedSourcesMock.mock.calls[0][0];
+    expect(request.diffPaths).toEqual(["lib/auth.ts"]);
+    expect(request.requiredPaths).toEqual(["lib/auth.ts", "lib/shared.ts"]);
+    expect(statPath).not.toHaveBeenCalledWith("migrations/030_feature_aliases.sql");
+    expect(statPath).not.toHaveBeenCalledWith("migrations/090_add_gift_wallet.sql");
+    // 受影响功能反查只带分析目标内的改动文件。
+    const lookup = execute.mock.calls.find(([sql]) => String(sql).includes("FROM spec_file_index i"));
+    expect(lookup?.[1]).toEqual([3, "lib/auth.ts"]);
+  });
+
+  it("keeps migration scripts out of a full analysis: the window diff, the prompt's evidence and the spec", async () => {
+    partitionedSourcesMock.mockResolvedValue({
+      partitions: [{ slice: { files: [{ path: "lib/auth.ts" }] }, sources: [{ path: "lib/auth.ts", content: "1: auth" }] }],
+      index: { readLines, listDir, listRoot, statPath },
+    });
+    adapter.getChangeContext.mockResolvedValue({
+      message: "feat: gift wallet",
+      committedAt: "2026-11-01T00:00:00Z",
+      url: "",
+      files: [
+        { path: "migrations/090_add_gift_wallet.sql", status: "added", patch: "+CREATE TABLE gift_wallets (id BIGINT PRIMARY KEY);" },
+        { path: "lib/auth.ts", status: "modified", patch: "+ const token = sign(payload);" },
+      ],
+    });
+    // 模型仍然拿迁移脚本当了证据（训练记忆里这个仓库的迁移很显眼）。
+    vi.mocked(analyzeWithAI).mockResolvedValue({
+      product: { description: "d", evidence: [{ path: "lib/auth.ts", startLine: 1 }] },
+      release: { title: "v1", summary: "s" },
+      changes: [],
+      features: [{
+        name: "统一登录",
+        summary: "s1",
+        scenarios: [
+          { reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy", evidence: [{ path: "lib/auth.ts", startLine: 1 }] },
+          { reference: "HP-2", context: "c", action: "a", outcome: "o", category: "happy", evidence: [{ path: "migrations/090_add_gift_wallet.sql", startLine: 1 }] },
+        ],
+      }],
+    } as never);
+
+    await runAnalysis(8);
+
+    const request = partitionedSourcesMock.mock.calls[0][0];
+    expect(request.diffPaths).toEqual(["lib/auth.ts"]);
+    expect(request.requiredPaths).toBeUndefined();
+    // 只有迁移证据的那条场景进不了规格。
+    const calledResult = vi.mocked(insertSpecVersion).mock.calls[0][2];
+    expect(calledResult.features[0].scenarios.map((scenario) => scenario.reference)).toEqual(["HP-1"]);
+  });
+
   it("retries a failed extraction pass once before failing the run (model-drift resilience)", async () => {
     // 模型侧偶发（证据路径幻觉、JSON 键漂移）按趟重试一次；重试调用的 receipt 照常落库
     partitionedSourcesMock.mockResolvedValue({
@@ -873,6 +955,32 @@ describe("analysis orchestration", () => {
     expect(params[1]).toBe(12);
     expect(params[2]).toBe(28);
     expect(params[5]).toBe(0.4);
+  });
+
+  it("writes an honest zero receipt when a no-behavioral window has nothing to inherit, counting only files inside the analysis target", async () => {
+    // 整条版本链都没有回执（首次接入）。合成零回执的 diff 三列只数分析目标内的改动文件：
+    // 这里是一个文档和一个迁移脚本，文档算进 diff 总数，迁移脚本不算。
+    adapter.getChangeContext.mockResolvedValue({
+      message: "docs: clarify the pipeline contract\n\nbody",
+      committedAt: "2026-11-01T00:00:00Z",
+      url: "https://github.com/commit/docs",
+      files: [
+        { path: "docs/analysis-pipeline.md", status: "modified", patch: "+文档内容不是行为。" },
+        { path: "migrations/090_add_gift_wallet.sql", status: "added", patch: "+CREATE TABLE gift_wallets (id BIGINT PRIMARY KEY);" },
+      ],
+    });
+    execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("SET status = 'running'")) return [{ affectedRows: 1 }];
+      if (sql.includes("SET status = 'failed'")) return [{ affectedRows: 1 }];
+      if (sql.includes("JOIN repositories repo")) return [runRows];
+      if (sql.includes("FROM spec_versions WHERE repository_id = ? AND id <")) return [[]];
+      return [{}];
+    });
+
+    await runAnalysis(8);
+
+    const saved = connection.execute.mock.calls.find(([sql]) => String(sql).includes("INSERT INTO analysis_coverage_receipts"));
+    expect(saved?.[1]).toEqual([44, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1]);
   });
 
   it("records a readable failure when loading the run fails", async () => {

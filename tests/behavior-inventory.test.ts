@@ -437,6 +437,13 @@ describe("buildBehaviorInventory invariants", () => {
     expect(result.units.some((unit) => unit.primaryPath === "tests/money.test.ts")).toBe(false);
   });
 
+  it("keeps migration scripts off the inventory surface even when a caller hands them in", () => {
+    // 迁移脚本已移出分析目标。首跑扫描按实现面枚举，本来就不会把它们交进来；这里是第二道拦。
+    const result = buildBehaviorInventory({ afterSha: "sha-all", sources: [...allSources, source("migrations/001_init.sql", "CREATE TABLE gifts (id BIGINT PRIMARY KEY);\n")] });
+    expect(result.diagnostics.excludedNonImplementation).toContain("migrations/001_init.sql");
+    expect(result.units.some((unit) => unit.primaryPath === "migrations/001_init.sql")).toBe(false);
+  });
+
   it("is deterministic for the same revision, scope and registry", () => {
     const first = build();
     const second = build();

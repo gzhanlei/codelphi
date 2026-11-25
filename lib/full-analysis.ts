@@ -47,7 +47,7 @@ import {
   type UnitTaskState,
 } from "./behavior-unit-state";
 import { behaviorAnalysisBudget, behaviorAnalysisConcurrency } from "./env";
-import { evidenceKind } from "./evidence";
+import { analyzedChangePaths, evidenceKind } from "./evidence";
 import type { EvidenceSanitizeSummary } from "./completeness-ledger";
 import { getDb } from "./db";
 import type { ChangeContext, CodeHostingProvider, RepositoryAccess } from "./code-hosting";
@@ -177,6 +177,17 @@ const zeroSanitize = (empty: boolean): EvidenceSanitizeSummary => ({
   empty,
   keptClaims: 0,
 });
+
+/**
+ * 窗口 diff 的覆盖口径，与分区路径的 computeCoverageReceipt 用同一个判定：只数分析目标内的改动文件，
+ * 迁移脚本不算遗漏。进了单元的算覆盖；本来就不在实现面的（测试、文档）不需要覆盖，也算覆盖。
+ */
+export function diffPathCoverage(changeFiles: ReadonlyArray<{ path: string }>, unitPaths: readonly string[]) {
+  const diffPaths = analyzedChangePaths(changeFiles);
+  const unitPathSet = new Set(unitPaths);
+  const diffSelectedPaths = diffPaths.filter((path) => unitPathSet.has(path) || evidenceKind(path) !== "implementation").length;
+  return { diffTotalPaths: diffPaths.length, diffSelectedPaths, diffOmittedPaths: diffPaths.length - diffSelectedPaths };
+}
 
 interface PersistedTaskRow {
   status: BehaviorUnitStatus | "running";
@@ -909,9 +920,7 @@ export async function runInventoryFullAnalysis(
     const terminalTaskCount = [...rowsAfter.values()].filter(
       (row) => row.status === "extracted" || row.status === "no_behavior" || row.status === "unresolved",
     ).length;
-    const diffPaths = input.change.files.map((file) => file.path);
-    const unitPathSet = new Set(unitPaths);
-    const diffSelectedPaths = diffPaths.filter((path) => unitPathSet.has(path) || evidenceKind(path) !== "implementation").length;
+    const { diffTotalPaths, diffSelectedPaths, diffOmittedPaths } = diffPathCoverage(input.change.files, unitPaths);
     const coverage: AnalysisCoverageReceipt = {
       implFilesAssembled: unitPaths.length,
       implFilesTotal: unitPaths.length,
@@ -920,9 +929,9 @@ export async function runInventoryFullAnalysis(
       coverageRatio: 1,
       partitionsUsed: terminalTaskCount,
       partitionsCapped: false,
-      diffTotalPaths: diffPaths.length,
+      diffTotalPaths,
       diffSelectedPaths,
-      diffOmittedPaths: diffPaths.length - diffSelectedPaths,
+      diffOmittedPaths,
       // Task 14：新路径回执必须带主覆盖区间遗漏——完整性账本的 sourceCoverage complete
       // 要求该值为零，不能仅凭「装配数大于零且未触分区帽」推导（设计 §6.3）。
       primaryRangesOmitted: inventoryCoverage.primaryCoverage.uniqueLinesOmitted,

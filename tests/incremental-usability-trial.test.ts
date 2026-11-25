@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { WindowOutcome } from "../lib/impact-classification";
 import type { TrialSummary } from "../lib/incremental-trial-metrics";
@@ -187,8 +187,13 @@ describe("如果某条全局规则可以封闭", () => {
 describe("Golden Repository 窗口", () => {
   it("keeps only the coordinates of each picked window", () => {
     const readme = row(3, { metrics: metrics("no_behavior"), files: [{ path: "README.md", oldPath: null, status: "modified", classification: "no_behavior", reason: "document", directFeatureKeys: [] }] });
-    const picks = pickGolden([row(0), readme]);
+    const migration = row(5, {
+      metrics: metrics("no_detected_behavior_change"),
+      files: [{ path: "migrations/1.sql", oldPath: null, status: "added", classification: "no_detected_behavior_change", reason: "schema_artifact", directFeatureKeys: [] }],
+    });
+    const picks = pickGolden([row(0), readme, migration]);
     expect(picks.readme_only).toEqual({ index: 3, baseSha: "base-3", headSha: "head-3" });
+    expect(picks.migration_script).toEqual({ index: 5, baseSha: "base-5", headSha: "head-5" });
     expect(picks.tests_only).toBeNull();
     expect(Object.keys(picks).sort()).toEqual(GOLDEN_CATEGORIES.map((category) => category.id).sort());
   });
@@ -264,38 +269,47 @@ describe("试验脚本端到端", () => {
 
   // 在进程内直接调用编排函数。不把脚本当子进程跑：`npm test` 把临时目录设在项目里的长路径下，
   // tsx 在那里建不起通信用的 socket。
-  it("runs from the ledger export to the report on a repository with three releases", async () => {
+  /** 建一个临时仓库，每个快照提交一次（只写快照里列出的文件），返回仓库路径和各次提交的哈希。 */
+  async function history(snapshots: ReadonlyArray<ReadonlyArray<readonly [string, string]>>) {
     const root = await mkdtemp(join(tmpdir(), "codelphi-trial-e2e-"));
     roots.push(root);
     const repo = join(root, "repo");
-    await mkdir(join(repo, "lib"), { recursive: true });
-    await mkdir(join(repo, "tests"));
     const git = (...args: string[]) =>
       execFileSync("git", ["-C", repo, "-c", "commit.gpgsign=false", ...args], {
         encoding: "utf8",
         env: { ...process.env, GIT_AUTHOR_NAME: "trial", GIT_AUTHOR_EMAIL: "trial@example.com", GIT_COMMITTER_NAME: "trial", GIT_COMMITTER_EMAIL: "trial@example.com" },
       }).trim();
-    const commit = (message: string) => {
-      git("add", "-A");
-      git("commit", "-q", "-m", message);
-      return git("rev-parse", "HEAD");
-    };
+    await mkdir(repo, { recursive: true });
     git("init", "-q", "-b", "main");
-    await writeFile(join(repo, "lib/a.ts"), "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\n");
-    await writeFile(join(repo, "tests/a.test.ts"), "t1\nt2\nt3\nt4\nt5\nt6\nt7\nt8\nt9\nt10\n");
-    await writeFile(join(repo, "README.md"), "hello\n");
-    const base = commit("base");
-    await writeFile(join(repo, "lib/a.ts"), "l1\nl2\nL3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\n");
-    await writeFile(join(repo, "tests/a.test.ts"), "t1\nt2\nT3\nt4\nt5\nt6\nt7\nt8\nt9\nt10\n");
-    const middle = commit("middle");
-    await writeFile(join(repo, "README.md"), "hello world\n");
-    const head = commit("head");
+    const shas: string[] = [];
+    for (const snapshot of snapshots) {
+      for (const [path, content] of snapshot) {
+        await mkdir(dirname(join(repo, path)), { recursive: true });
+        await writeFile(join(repo, path), content);
+      }
+      git("add", "-A");
+      git("commit", "-q", "-m", `snapshot ${shas.length}`);
+      shas.push(git("rev-parse", "HEAD"));
+    }
+    return { root, repo, shas };
+  }
 
-    // 功能 a 的证据在 lib/a.ts 第 3 行和 tests/a.test.ts 第 5 行。三个发布版本的锚点相同。
-    const release = (sha: string) =>
-      JSON.stringify({ repositoryId: 8, sha, versionId: 1, features: [[1, "a"]], anchors: [["a", "lib/a.ts", 3, 3], ["a", "tests/a.test.ts", 5, 5]] });
+  /** 同一组自动功能和锚点，每个发布版本都一样。 */
+  async function ledgerOf(root: string, shas: readonly string[], features: unknown, anchors: unknown) {
     const ledger = join(root, "ledger.jsonl");
-    await writeFile(ledger, [base, middle, head].map(release).join("\n") + "\n");
+    await writeFile(ledger, shas.map((sha) => JSON.stringify({ repositoryId: 8, sha, versionId: 1, features, anchors })).join("\n") + "\n");
+    return ledger;
+  }
+
+  it("runs from the ledger export to the report on a repository with three releases", async () => {
+    const { root, repo, shas } = await history([
+      [["lib/a.ts", "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\n"], ["tests/a.test.ts", "t1\nt2\nt3\nt4\nt5\nt6\nt7\nt8\nt9\nt10\n"], ["README.md", "hello\n"]],
+      [["lib/a.ts", "l1\nl2\nL3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\n"], ["tests/a.test.ts", "t1\nt2\nT3\nt4\nt5\nt6\nt7\nt8\nt9\nt10\n"]],
+      [["README.md", "hello world\n"]],
+    ]);
+    const [base, middle, head] = shas;
+    // 功能 a 的证据在 lib/a.ts 第 3 行和 tests/a.test.ts 第 5 行。三个发布版本的锚点相同。
+    const ledger = await ledgerOf(root, shas, [[1, "a"]], [["a", "lib/a.ts", 3, 3], ["a", "tests/a.test.ts", 5, 5]]);
     const out = join(root, "out");
 
     const report = await run({ ledgerPath: ledger, primaryRepositoryId: 8, repositories: [{ repositoryId: 8, repoRoot: repo }], outDir: out });
@@ -335,5 +349,33 @@ describe("试验脚本端到端", () => {
     const ledger = join(root, "ledger.jsonl");
     await writeFile(ledger, "");
     await expect(run({ ledgerPath: ledger, primaryRepositoryId: 8, repositories: [{ repositoryId: 8, repoRoot: root }], outDir: join(root, "out") })).rejects.toThrow(/没有仓库 8/);
+  });
+
+  it("takes the fast path on a migration-only window and counts an anchor on the changed migration as stale", async () => {
+    const script = (fifth: string) => Array.from({ length: 20 }, (_, index) => (index === 4 ? fifth : `-- line ${index + 1}`)).join("\n") + "\n";
+    const { root, repo, shas } = await history([
+      [["lib/a.ts", "l1\nl2\nl3\nl4\nl5\n"], ["migrations/030_feature_aliases.sql", script("CREATE TABLE aliases (id INT);")]],
+      [["lib/a.ts", "l1\nl2\nL3\nl4\nl5\n"]],
+      [["migrations/030_feature_aliases.sql", script("CREATE TABLE feature_aliases (id INT);")]],
+    ]);
+    const [, middle, head] = shas;
+    // 功能 a 的一条证据在实现文件上，另一条是历史遗留的迁移证据，落在这次被改掉的第 5 行上。
+    const ledger = await ledgerOf(root, shas, [[1, "a"]], [["a", "lib/a.ts", 3, 3], ["a", "migrations/030_feature_aliases.sql", 5, 5]]);
+
+    const report = await run({ ledgerPath: ledger, primaryRepositoryId: 8, repositories: [{ repositoryId: 8, repoRoot: repo }], outDir: join(root, "out") });
+
+    const [result] = report.repositories;
+    // 第一个窗口是 direct（改了 lib/a.ts）。第二个窗口只改了迁移脚本：快速路径，不触发全量重同步。
+    expect(report.verdict).toMatchObject({ incrementalShare: 1, tokenSavings: 0.5, passes: true });
+    expect(result.summary.outcomeCounts).toMatchObject({ direct: 1, no_detected_behavior_change: 1, global_unbounded: 0 });
+    // 全量口径不再读迁移脚本：第一个窗口增量要读的正好等于全量要读的，按全量计。
+    expect(result.summary.exceedsFullWindows).toBe(1);
+    expect(result.stale).toMatchObject({ fastPathWindows: 1, meanNewlyStale: 1, finalStaleShare: 0.5 });
+    expect(report.golden.migration_script).toEqual({ index: 1, baseSha: middle, headSha: head });
+    const rows = (await readFile(join(root, "out", "windows.jsonl"), "utf8")).split("\n").filter(Boolean).map((line) => JSON.parse(line));
+    expect(rows.map((row) => [row.files.map((file: { path: string; classification: string; reason: string }) => [file.path, file.classification, file.reason]), row.commitOutcomes])).toEqual([
+      [[["lib/a.ts", "direct", "indexed_implementation"]], ["direct"]],
+      [[["migrations/030_feature_aliases.sql", "no_detected_behavior_change", "schema_artifact"]], ["no_detected_behavior_change"]],
+    ]);
   });
 });
