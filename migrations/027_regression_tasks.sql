@@ -60,7 +60,7 @@ SELECT r.id, ss.id, NULL,
        COALESCE(CASE ri.status WHEN 'verified' THEN 'passed' ELSE ri.status END, 'pending'),
        ri.checked_by, ri.checked_at
 FROM releases r
-JOIN spec_changes c ON c.spec_version_id = r.spec_version_id AND c.entity_type = 'scenario' AND c.kind <> 'removed'
+JOIN spec_changes c ON c.spec_version_id = r.spec_version_id AND c.entity_type = 'scenario' AND c.kind IN ('added', 'changed')
 JOIN spec_features sf ON sf.spec_version_id = c.spec_version_id AND sf.stable_key = c.feature_key
 JOIN spec_scenarios ss ON ss.spec_feature_id = sf.id AND ss.reference = c.scenario_reference
 LEFT JOIN regression_items ri ON ri.release_id = r.id AND ri.spec_change_id = c.id;
@@ -73,7 +73,7 @@ FROM releases r
 JOIN spec_changes c ON c.spec_version_id = r.spec_version_id
 LEFT JOIN spec_features sf ON sf.spec_version_id = c.spec_version_id AND sf.stable_key = c.feature_key
 LEFT JOIN spec_scenarios ss ON ss.spec_feature_id = sf.id AND ss.reference = c.scenario_reference
-     AND c.entity_type = 'scenario' AND c.kind <> 'removed'
+     AND c.entity_type = 'scenario' AND c.kind IN ('added', 'changed')
 LEFT JOIN regression_items ri ON ri.release_id = r.id AND ri.spec_change_id = c.id
 WHERE ss.id IS NULL;
 
@@ -85,7 +85,7 @@ INSERT INTO regression_task_sources (task_id, spec_change_id)
 SELECT t.id, c.id
 FROM regression_tasks t
 JOIN releases r ON r.id = t.release_id
-JOIN spec_changes c ON c.spec_version_id = r.spec_version_id AND c.entity_type = 'scenario' AND c.kind <> 'removed'
+JOIN spec_changes c ON c.spec_version_id = r.spec_version_id AND c.entity_type = 'scenario' AND c.kind IN ('added', 'changed')
 JOIN spec_features sf ON sf.spec_version_id = c.spec_version_id AND sf.stable_key = c.feature_key
 JOIN spec_scenarios ss ON ss.spec_feature_id = sf.id AND ss.reference = c.scenario_reference
 WHERE t.spec_scenario_id = ss.id;

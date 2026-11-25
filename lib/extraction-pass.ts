@@ -2,6 +2,7 @@ import type { analyzeWithAI, AnalysisResult } from "./ai";
 import { AiOutputTruncatedError } from "./ai";
 import type { ChangeContext } from "./code-hosting";
 import type { EvidenceSanitizeSummary } from "./completeness-ledger";
+import { analyzedChangePaths } from "./evidence";
 import type { AnalysisPartition } from "./remote-analysis";
 
 /**
@@ -52,11 +53,11 @@ export function sanitizeEvidence(result: AnalysisResult, sources: Set<string>, l
   };
 }
 
-/** 分区局部证据允许集：AI 只能引用本分区窗口与 diff 文件（逐趟口径校验）。 */
+/** 分区局部证据允许集：AI 只能引用本分区窗口与 diff 文件（逐趟口径校验）。迁移脚本已移出分析目标，不在其中。 */
 export function evidenceAllowSet(partition: AnalysisPartition, change: ChangeContext) {
   return new Set([
     ...partition.slice.files.map((file) => file.path),
-    ...change.files.map((file) => file.path),
+    ...analyzedChangePaths(change.files),
   ]);
 }
 

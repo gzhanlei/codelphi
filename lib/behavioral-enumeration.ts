@@ -4,6 +4,7 @@ import { analyzeBehavioralGroup, type LlmBillingContext } from "./ai";
 import type { AnalysisResult } from "./ai";
 import { sanitizeEvidence } from "./analysis";
 import { behavioralEnumerationGroupSize, behavioralEnumerationMaxGroups } from "./env";
+import { analyzedChangePaths } from "./evidence";
 import type { ChangeContext } from "./ai";
 
 /**
@@ -250,7 +251,8 @@ export async function enumerateBehavioralChunks(options: BehavioralEnumerationOp
         continue;
       }
     }
-    const allowSet = new Set([...group, ...options.files.map((file) => file.path)]);
+    // 允许集 = 组文件 ∪ 分析目标内的 diff 文件。迁移脚本已移出分析目标，窗口改了它也不能被引用。
+    const allowSet = new Set([...group, ...analyzedChangePaths(options.files)]);
     sanitizeEvidence(chunk, allowSet, label);
     groupsCompleted += 1;
     for (const target of targets) pathsEnumerated.add(target.path);

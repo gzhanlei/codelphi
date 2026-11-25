@@ -149,7 +149,7 @@ export async function loadRegressionTasks(productId: number, execute: Execute = 
             COALESCE(sf.name, c.feature_name) AS featureName,
             ss.context AS scenarioContext, ss.action AS scenarioAction,
             (SELECT s.spec_change_id FROM regression_task_sources s
-             JOIN spec_changes pc ON pc.id = s.spec_change_id AND pc.entity_type = 'scenario' AND pc.kind <> 'removed' AND pc.wording_only = 0
+             JOIN spec_changes pc ON pc.id = s.spec_change_id AND pc.entity_type = 'scenario' AND pc.kind IN ('added', 'changed') AND pc.wording_only = 0
              WHERE s.task_id = t.id LIMIT 1) AS primaryChangeId
      FROM regression_tasks t
      JOIN releases r ON r.id = t.release_id

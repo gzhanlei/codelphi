@@ -1,4 +1,4 @@
-import { evidenceKind, isInfrastructureEvidence } from "./evidence";
+import { evidenceKind, isInfrastructureEvidence, isSchemaArtifact } from "./evidence";
 import type { ChangeFile } from "./code-hosting/types";
 
 /**
@@ -98,26 +98,30 @@ export function patchOnlyCommentsOrBlank(patch: string): boolean {
   return lines.added.length === 0 && lines.removed.length === 0;
 }
 
-/** 本发布中包含行为性行变更的 implementation 级文件路径集合；未入集合 = 仅注释/空白/格式重排变动、无 patch 佐证、非实现证据或 CI/基础设施路径（BM-8：工作流/锁文件不承载产品行为）。 */
+/**
+ * 本发布中包含行为性行变更的 implementation 级文件路径集合；未入集合 = 仅注释/空白/格式重排变动、无 patch 佐证、非实现证据、
+ * 数据库迁移脚本或 CI/基础设施路径（BM-8：工作流/锁文件不承载产品行为；迁移脚本已移出分析目标）。
+ */
 export function behavioralChangePaths(files: ReadonlyArray<ChangeFile>): Set<string> {
   const behavioral = new Set<string>();
   for (const file of files) {
-    if (evidenceKind(file.path) !== "implementation") continue;
-    if (isInfrastructureEvidence(file.path)) continue;
-    const pythonOnly = /\.py$/i.test(file.path);
-    const commentAware = COMMENT_STYLE_LANGUAGES.test(file.path);
-    if (!file.patch || !commentAware || file.patch.length > TRUNCATION_GUARD_LENGTH) {
-      behavioral.add(file.path);
-      continue;
-    }
-    const lines = collectCodeLines(file.patch, pythonOnly);
-    if (lines === null) {
-      behavioral.add(file.path);
-      continue;
-    }
-    if (lines.added.length === 0 && lines.removed.length === 0) continue; // 纯注释/空白
-    if (isFormattingOnly(lines.added, lines.removed)) continue; // BM-9：formatter 重排
-    behavioral.add(file.path);
+    if (carriesBehavior(file.path) && patchIsBehavioral(file)) behavioral.add(file.path);
   }
   return behavioral;
+}
+
+/** 路径层级：只有实现证据才进入行为判定。测试、文档、CI/基础设施与迁移脚本在此排除。 */
+function carriesBehavior(path: string): boolean {
+  return evidenceKind(path) === "implementation" && !isInfrastructureEvidence(path) && !isSchemaArtifact(path);
+}
+
+/** 内容层级：补丁里有注释、空白与格式重排以外的代码变动，才算行为变更。 */
+function patchIsBehavioral(file: ChangeFile): boolean {
+  const pythonOnly = /\.py$/i.test(file.path);
+  const commentAware = COMMENT_STYLE_LANGUAGES.test(file.path);
+  if (!file.patch || !commentAware || file.patch.length > TRUNCATION_GUARD_LENGTH) return true;
+  const lines = collectCodeLines(file.patch, pythonOnly);
+  if (lines === null) return true;
+  if (lines.added.length === 0 && lines.removed.length === 0) return false;
+  return !isFormattingOnly(lines.added, lines.removed);
 }

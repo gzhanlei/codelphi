@@ -10,6 +10,7 @@ import * as analysis from "../lib/analysis";
 import type { MergeResult } from "../lib/extraction-merge";
 import { loadPreviousSpecText } from "../lib/spec-versions";
 import type { ReleaseChangeFact } from "../lib/release-change-projection";
+import { emptyIdentityMaps, planVersionIdentities } from "../lib/spec-identity";
 
 // saveResult 经 getDb().getConnection() 自取事务连接：mock db 模块注入 stub 连接。
 // 既有用例全走显式 connection，不经 getDb，不受影响。
@@ -380,5 +381,57 @@ describe("saveResult 行为来源最终映射 (Task 12)", () => {
     expect(stub.execute).not.toHaveBeenCalledWith(expect.stringContaining("INSERT INTO features (product_id"), expect.anything());
     expect(stub.execute).not.toHaveBeenCalledWith(expect.stringContaining("DELETE FROM spec_file_index"), expect.anything());
     expect(stub.execute).not.toHaveBeenCalledWith(expect.stringContaining("UPDATE analysis_runs SET status = 'succeeded'"), expect.anything());
+  });
+});
+
+describe("workbench identity projection", () => {
+  type Mock = ReturnType<typeof vi.fn>;
+  const mockOf = (connection: { execute: unknown }) => connection.execute as Mock;
+  const authScenario = { reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy" as const, evidence: [] };
+  const spec = [
+    { name: "Auth", summary: "Auth", scenarios: [authScenario] },
+    { name: "Legacy", summary: "Legacy", scenarios: [] },
+  ];
+  const plan = () => planVersionIdentities({ features: [{ name: "Auth", parentKey: null, references: ["HP-1"] }, { name: "Legacy", parentKey: "Auth", references: [] }], previous: emptyIdentityMaps(), registry: emptyIdentityMaps() });
+  /** 每条语句发出时核对占位符个数等于参数个数，和规格写入路径的替身一样。 */
+  const connection = () =>
+    ({
+      execute: vi.fn(async (sql: string, parameters: unknown[] = []) => {
+        expect(parameters, sql).toHaveLength((sql.match(/\?/g) ?? []).length);
+        return [{ insertId: 7 }];
+      }),
+    }) as unknown as PoolConnection;
+  const rowsOf = (db: PoolConnection, fragment: string) => mockOf(db).mock.calls.filter(([sql]) => String(sql).includes(fragment)).map(([, parameters]) => parameters as unknown[]);
+
+  it("writes the feature's and the scenario's identity after the existing parameters", async () => {
+    const db = connection();
+    await upsertGeneratedSpec(db, run, spec, plan());
+
+    expect(rowsOf(db, "INSERT INTO features").map((parameters) => parameters.slice(0, 3))).toEqual([[4, "Auth", "Auth"], [4, "Legacy", "Legacy"]]);
+    expect(rowsOf(db, "INSERT INTO features").map((parameters) => parameters.slice(3))).toEqual([["auth"], ["legacy"]]);
+    const scenarios = rowsOf(db, "INSERT INTO scenarios");
+    expect(scenarios.map((parameters) => parameters.slice(0, 8))).toEqual([[7, "HP-1", "c", "a", "o", "happy", null, "[]"]]);
+    expect(scenarios.map((parameters) => parameters.slice(8))).toEqual([['["auth","HP-1"]']]);
+  });
+
+  it("keeps the identity a workbench row already has and only fills an empty one", async () => {
+    const db = connection();
+    await upsertGeneratedSpec(db, run, spec, plan());
+
+    // 人工条目和别的写入方（快照导入）先建的行可能已经有身份，或者还没有：已有的不动，空的补上。
+    expect(String(mockOf(db).mock.calls.find(([sql]) => String(sql).includes("INSERT INTO features"))?.[0])).toContain(
+      "identity_key = COALESCE(features.identity_key, VALUES(identity_key))",
+    );
+    expect(String(mockOf(db).mock.calls.find(([sql]) => String(sql).includes("INSERT INTO scenarios"))?.[0])).toContain(
+      "identity_key = COALESCE(scenarios.identity_key, VALUES(identity_key))",
+    );
+  });
+
+  it("writes null identities when no plan is given", async () => {
+    const db = connection();
+    await upsertGeneratedSpec(db, run, spec);
+
+    expect(rowsOf(db, "INSERT INTO features").map((parameters) => parameters.slice(3))).toEqual([[null], [null]]);
+    expect(rowsOf(db, "INSERT INTO scenarios").map((parameters) => parameters.slice(8))).toEqual([[null]]);
   });
 });

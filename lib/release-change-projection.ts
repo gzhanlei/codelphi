@@ -13,7 +13,7 @@ export interface ReleaseChangeProjection {
   changeId: number | null;
   featureKey: string;
   featureName: string;
-  kind: "added" | "changed" | "removed";
+  kind: "added" | "changed" | "removed" | "uncertain";
   description: string;
   userImpact: string;
   evidence: Evidence[];

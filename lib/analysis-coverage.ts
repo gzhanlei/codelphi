@@ -1,5 +1,5 @@
 import type { PoolConnection } from "mysql2/promise";
-import { evidenceKind } from "./evidence";
+import { isImplementationSurfaceFile, isSchemaArtifact } from "./evidence";
 import type { AnalysisPartition } from "./remote-analysis";
 import type { OpenedRemoteSourceRevision } from "./remote-source-index";
 
@@ -7,6 +7,7 @@ import type { OpenedRemoteSourceRevision } from "./remote-source-index";
  * B1 覆盖披露（docs/specsight-gap-improvement-plan.md §5.1）。
  * 口径与 scripts/measure-first-analysis.ts 一致，且只有一个口径：
  * 本规格版本对应的完整实现面（evidenceKind 分级的 implementation 文件）。
+ * 2026-11-25 起另外排除迁移脚本（它已移出分析目标）；那个脚本量的是当时的历史口径，没有跟着改。
  * run 类型（首分析 / 增量 / RC2-carry）只作诊断元数据，不参与门槛解释。
  */
 
@@ -66,7 +67,7 @@ export async function enumerateImplementationSurface(index: OpenedRemoteSourceRe
         }
         continue;
       }
-      if (isFileWithinScope(item.path, scopeRoots) && evidenceKind(item.path) === "implementation") impl.push({ path: item.path, size: item.size ?? 0 });
+      if (isFileWithinScope(item.path, scopeRoots) && isImplementationSurfaceFile(item.path)) impl.push({ path: item.path, size: item.size ?? 0 });
     }
   }
   return impl;
@@ -75,7 +76,7 @@ export async function enumerateImplementationSurface(index: OpenedRemoteSourceRe
 export async function enumerateRequiredImplementationSurface(index: OpenedRemoteSourceRevision, paths: readonly string[]): Promise<Array<{ path: string; size: number }>> {
   const surface: Array<{ path: string; size: number }> = [];
   for (const path of [...new Set(paths)].sort()) {
-    if (evidenceKind(path) !== "implementation") continue;
+    if (!isImplementationSurfaceFile(path)) continue;
     const stat = await index.statPath(path);
     if (stat) surface.push({ path, size: stat.byteSize });
   }
@@ -108,7 +109,7 @@ export function computeCoverageReceipt(input: {
     for (const file of partition.slice.files) assembledPaths.add(file.path);
   }
   const assembledAll = assembledPaths;
-  const assembled = [...assembledPaths].filter((path) => evidenceKind(path) === "implementation");
+  const assembled = [...assembledPaths].filter(isImplementationSurfaceFile);
   const bytesByPath = new Map<string, number>();
   for (const partition of input.partitions) {
     for (const source of partition.sources) bytesByPath.set(source.path, rawSourceBytes(source.content));
@@ -120,7 +121,8 @@ export function computeCoverageReceipt(input: {
   const implBytesTotal = surface.reduce((total, file) => total + file.size, 0);
   // W0-9 评审采纳：diff 必选 ≠ diff 全覆盖——diff 面自身的入选/遗漏单独计数，
   // 6 分区帽或不可读导致的遗漏必须可见（「优先选择」不等于「实际覆盖」）。
-  const diffPaths = input.diffPaths ?? [];
+  // 迁移脚本已移出分析目标：它既不会被装配，也不该被算成遗漏。
+  const diffPaths = (input.diffPaths ?? []).filter((path) => !isSchemaArtifact(path));
   const diffSelectedPaths = new Set<string>();
   for (const path of new Set(diffPaths)) {
     if (assembledAll.has(path)) diffSelectedPaths.add(path);

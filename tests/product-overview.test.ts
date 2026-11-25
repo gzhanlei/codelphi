@@ -69,8 +69,8 @@ describe("product overview", () => {
       latestRun: { status: "succeeded" },
     });
     expect(overview.changeGroups).toEqual([
-      { featureName: "规格", added: 2, removed: 1, changed: 0 },
-      { featureName: "登录", added: 0, removed: 0, changed: 1 },
+      { featureName: "规格", added: 2, removed: 1, changed: 0, uncertain: 0 },
+      { featureName: "登录", added: 0, removed: 0, changed: 1, uncertain: 0 },
     ]);
   });
 
@@ -167,7 +167,7 @@ describe("product overview user impact projection", () => {
     });
     expect(overview.userImpact.state).toBe("changes");
     expect(overview.userImpact.items).toEqual([]);
-    expect(overview.userImpact.changeStats).toEqual({ added: 1, removed: 0, changed: 1 });
+    expect(overview.userImpact.changeStats).toEqual({ added: 1, removed: 0, changed: 1, uncertain: 0 });
     expect(overview.userImpact.releaseId).toBe(12);
   });
 
@@ -330,7 +330,7 @@ describe("product overview quiet-release grouping", () => {
       expect(entry.dateLabel).toBeTruthy();
     }
     // 分组不改变统计口径：零变化不计入行为变化数量
-    expect(overview.changeStats).toEqual({ added: 0, removed: 0, changed: 0 });
+    expect(overview.changeStats).toEqual({ added: 0, removed: 0, changed: 0, uncertain: 0 });
   });
 
   it("keeps empty timelines empty", () => {
@@ -413,9 +413,9 @@ describe("product overview task entries", () => {
       latestRun: { status: "succeeded" },
     });
     // 发布稿勾选计数只含实现证据变化（登录的 test-only 场景变化被排除）
-    expect(overview.changeGroups).toEqual([{ featureName: "规格", added: 0, removed: 0, changed: 1 }]);
+    expect(overview.changeGroups).toEqual([{ featureName: "规格", added: 0, removed: 0, changed: 1, uncertain: 0 }]);
     // 时间线 stats 保持全量口径
-    expect(overview.changeStats).toEqual({ added: 1, removed: 0, changed: 1 });
+    expect(overview.changeStats).toEqual({ added: 1, removed: 0, changed: 1, uncertain: 0 });
     // 影响文本实现证据优先：规格组（实现证据）排前，登录组（纯测试佐证）靠后仍在
     expect(overview.userImpact.items[0]?.featureName).toBe("规格");
     expect(overview.userImpact.items[0]?.userImpacts).toEqual(["实现证据的影响说明"]);

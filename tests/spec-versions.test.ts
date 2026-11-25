@@ -3,7 +3,9 @@ import type { PoolConnection } from "mysql2/promise";
 import type { AnalysisResult } from "../lib/ai";
 import type { RunContext } from "../lib/analysis";
 import type { MergeResult } from "../lib/extraction-merge";
-import { detectFeatureCollapses, detectMisplacedScenarios, detectSpecCollapse, featureParentKey, foldVariantFeatures, insertSpecVersion, loadBaseVersionMap, loadLatestSpecVersionLanguage, loadPreviousFeatureNames } from "../lib/spec-versions";
+import { detectFeatureCollapses, detectMisplacedScenarios, detectSpecCollapse, featureParentKey, foldVariantFeatures, insertSpecVersion, loadBaseVersionMap, loadLatestSpecVersionLanguage, loadPreviousFeatureNames, widenTombstonesByIdentity } from "../lib/spec-versions";
+import { scenarioIdentityKey } from "../lib/spec-identity";
+import { specScenarioKey } from "../lib/spec-diff";
 const run: RunContext = { id: 8, repositoryId: 3, productId: 4, owner: "gzhanlei", name: "radar", beforeSha: "a", afterSha: "b", connectionId: null, provider: "github", organizationId: 1, productSlug: "radar", productName: "Radar" };
 const scenario = { reference: "HP-1", context: "Visitor", action: "Signs in", outcome: "Dashboard", category: "happy" as const, evidence: [] };
 const previousScenario = (reference: string, path: string) => ({ featureId: 1, reference, context: "User", action: "Uses links", outcome: "Links work", category: "happy", source: "generated", evidence: JSON.stringify([{ path, startLine: 1 }]) });
@@ -24,6 +26,8 @@ function connection(previousVersions: Array<{ id: number }>, manual = false, tom
   let scenarioId = 700;
   const connection = {
     execute: vi.fn(async (sql: string, parameters: unknown[] = []) => {
+      // 这里没有真数据库来报错。占位符个数不等于参数个数的语句，发出去就是一条“列数与值数不一致”，当场拦住。
+      expect(parameters, sql).toHaveLength((sql.match(/\?/g) ?? []).length);
       if (sql.includes("SELECT id FROM spec_versions")) return [previousVersions];
       if (sql.includes("FROM spec_features WHERE spec_version_id")) {
         return [[
@@ -59,7 +63,7 @@ describe("spec version persistence", () => {
     expect(specChanges).toHaveLength(4);
     expect(specChanges.map((change) => change.id)).toEqual([500, 501, 502, 503]);
     expect(specChanges.map((change) => change.summary)).toEqual(db.changes.map((change) => change[7]));
-    expect(db.changes.map((change) => change[3])).toEqual(expect.arrayContaining(["added", "changed", "removed"]));
+    expect(db.changes.map((change) => change[3])).toEqual(expect.arrayContaining(["added", "changed", "uncertain"]));
     expect(db.changes.every((change) => change[1] === 11)).toBe(true);
     expect(db.changes.some((change) => change[8] === null)).toBe(true);
     expect(db.changes.some((change) => change[9] === null)).toBe(true);
@@ -91,6 +95,76 @@ describe("spec version persistence", () => {
     const db = connection([{ id: 11 }]);
     await insertSpecVersion(db, run, result, { baseVersionId: 11 });
     expect(db.execute).toHaveBeenCalledWith("SELECT id FROM spec_versions WHERE repository_id = ? AND id = ?", [3, 11]);
+  });
+
+  it("dedupes exact projections on both versions before writing release changes", async () => {
+    const previous = [
+      previousScenario("HP-1", "lib/github-repositories.ts"),
+      { ...previousScenario("HP-1", "lib/github-repositories.ts"), featureId: 2 },
+    ];
+    const db = connection([{ id: 11 }], false, {}, previous);
+    const currentScenario = {
+      ...scenario,
+      context: "User",
+      action: "Uses links",
+      outcome: "Links work",
+      evidence: [{ path: "lib/github-repositories.ts", startLine: 1 }],
+    };
+    await insertSpecVersion(db, run, {
+      ...result,
+      features: [
+        { name: "Authentication", summary: "Old", scenarios: [currentScenario] },
+        { name: "GitHub repositories", summary: "Duplicate", scenarios: [{ ...currentScenario, reference: "ER-1" }] },
+      ],
+    });
+
+    expect(db.changes).toEqual([]);
+  });
+
+  it("restores an exact scenario identity across a feature rename before computing changes", async () => {
+    const db = connection([{ id: 11 }], false, {}, [previousScenario("HP-1", "lib/behavior-unit-ai.ts")]);
+    const currentScenario = {
+      ...scenario,
+      reference: "ER-2",
+      context: "User",
+      action: "Uses links",
+      outcome: "Links work",
+      evidence: [{ path: "lib/behavior-unit-ai.ts", startLine: 1 }],
+    };
+    await insertSpecVersion(db, run, {
+      ...result,
+      features: [
+        { name: "行为清单单元提取与状态推导", summary: "Different", scenarios: [currentScenario] },
+        { name: "Legacy", summary: "Removed", scenarios: [] },
+      ],
+    }, { behavioralChangePaths: new Set(["lib/behavior-unit-ai.ts"]) });
+
+    expect(db.changes).toEqual([]);
+  });
+
+  it("persists uncertain removal judgment and evidence state", async () => {
+    const db = connection([{ id: 11 }], false, {}, [previousScenario("HP-1", "lib/behavior-unit-ai.ts")]);
+    const { features } = await insertSpecVersion(db, run, { ...result, features: [{ name: "Legacy", summary: "Removed", scenarios: [] }] }, { behavioralChangePaths: new Set(["lib/behavior-unit-ai.ts"]) });
+
+    expect(features.find((feature) => feature.name === "Authentication")?.scenarios.map((scenario) => scenario.reference)).toContain("HP-1");
+    const change = db.changes.find((parameters) => parameters[2] === "feature");
+    expect(change?.[2]).toBe("feature");
+    expect(change?.[3]).toBe("uncertain");
+    expect(change?.[12]).toBe("uncertain");
+    expect(change?.[13]).toBe("not_observed");
+    expect(JSON.parse(String(change?.[14]))).toEqual(["not_observed"]);
+  });
+
+  it("uses production deletion evidence to retire a fully proven removed feature", async () => {
+    const db = connection([{ id: 11 }], false, {}, [previousScenario("HP-1", "components/publish.tsx")]);
+    await insertSpecVersion(db, run, { ...result, features: [{ name: "Legacy", summary: "Removed", scenarios: [] }] }, {
+      behavioralChangePaths: new Set(["components/publish.tsx"]),
+      changeFiles: [{ path: "components/publish.tsx", status: "removed", patch: "" }],
+      fullAnalysis: true,
+      coverageComplete: true,
+    });
+
+    expect(db.changes.some((parameters) => parameters[2] === "feature" && parameters[3] === "removed")).toBe(true);
   });
 
   it("records no changes for a first version", async () => {
@@ -140,7 +214,7 @@ describe("spec version persistence", () => {
     expect(features.find((feature) => feature.name === "Authentication")?.scenarios.map((scenario) => scenario.reference)).toContain("HP-1");
   });
 
-  it("allows an omitted scenario to be removed when its evidence changed", async () => {
+  it("keeps an omitted scenario uncertain without positive removal proof", async () => {
     const db = connection([{ id: 11 }], false, {}, [previousScenario("HP-1", "server/web/src/utils/linkify.ts")]);
     const { features } = await insertSpecVersion(
       db,
@@ -148,7 +222,7 @@ describe("spec version persistence", () => {
       { ...result, features: [{ name: "Authentication", summary: "Fresh", scenarios: [] }] },
       { affectedKeys: new Set(["authentication"]), behavioralChangePaths: new Set(["server/web/src/utils/linkify.ts"]) },
     );
-    expect(features.find((feature) => feature.name === "Authentication")?.scenarios.map((scenario) => scenario.reference)).not.toContain("HP-1");
+    expect(features.find((feature) => feature.name === "Authentication")?.scenarios.map((scenario) => scenario.reference)).toContain("HP-1");
   });
 
   it("preserves a completely omitted feature when all of its evidence is unchanged", async () => {
@@ -165,7 +239,7 @@ describe("spec version persistence", () => {
   it("keeps full-mode semantics when no affected keys are given", async () => {
     const db = connection([{ id: 11 }]);
     await insertSpecVersion(db, run, { ...result, features: [result.features[0]] });
-    expect(db.execute).not.toHaveBeenCalledWith(expect.stringContaining("INSERT INTO spec_features"), expect.arrayContaining(["Legacy"]));
+    expect(db.execute).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO spec_features"), expect.arrayContaining(["Legacy"]));
   });
 
   it("records feature additions in full mode even when their evidence is outside the behavioral window (生产 v201 事故形态)", async () => {
@@ -563,5 +637,307 @@ describe("visibility conflict activation guard", () => {
 
     await expect(insertSpecVersion(db, run, conflicting)).rejects.toThrow("spec_conflict_rejected");
     expect(db.execute).not.toHaveBeenCalledWith(expect.stringContaining("INSERT INTO spec_versions"), expect.anything());
+  });
+});
+
+describe("identity layer in the write path", () => {
+  type Mock = ReturnType<typeof vi.fn>;
+  const mockOf = (db: { execute: unknown }) => db.execute as Mock;
+  const callsOf = (db: { execute: unknown }, fragment: string) => mockOf(db).mock.calls.filter(([sql]) => String(sql).includes(fragment));
+  const writesOf = (db: { execute: unknown }) => mockOf(db).mock.calls.filter(([sql]) => /^(INSERT|UPDATE|DELETE)/i.test(String(sql)));
+
+  /** 这条版本链的过去：功能曾经叫别的名字，所以它的身份不是它现在的名称键。 */
+  const renamedPast = {
+    previousFeatures: [{ versionId: 11, nameKey: "authentication", identity_key: "sign-in" }, { versionId: 11, nameKey: "legacy", identity_key: "old-legacy" }],
+    previousScenarios: [{ versionId: 11, featureIdentityKey: "sign-in", reference: "HP-1", identity_key: '["sign-in","HP-1"]' }],
+  };
+
+  /** 在既有替身上补身份相关语句的回数据。 */
+  function identityDb(input: {
+    previousFeatures?: typeof renamedPast.previousFeatures;
+    previousScenarios?: typeof renamedPast.previousScenarios;
+    /** 登记表里认得的名称键。写成字符串就是“名称键即身份”；写成一对就是改过名的。 */
+    registry?: Array<string | readonly [string, string]>;
+    /** 登记表里“名称键即身份”的那些功能。 */
+    knownFeatures?: string[];
+    /** 被人工下线的功能当时拥有的身份。 */
+    switchedOffFeatureIdentities?: string[];
+    /** 被人工下线的场景当时的身份键。 */
+    switchedOffScenarioIdentities?: string[];
+    specScenarios?: Array<Record<string, unknown>>;
+  } = {}) {
+    const db = connection([{ id: 11 }], false, {}, input.specScenarios);
+    const fallback = mockOf(db).getMockImplementation() as (sql: string, parameters: unknown[]) => Promise<unknown>;
+    mockOf(db).mockImplementation(async (sql: string, parameters: unknown[] = []) => {
+      // 身份查询和规格读取都落在 spec_features 上，靠“查的是 identity_key”把它们分开。
+      if (sql.includes("identity_key FROM spec_features WHERE spec_version_id")) return [input.previousFeatures ?? []];
+      if (sql.includes("FROM spec_scenarios ss JOIN")) return [input.previousScenarios ?? []];
+      if (sql.includes("SELECT identity_key FROM features WHERE")) return [(input.switchedOffFeatureIdentities ?? []).map((identityKey) => ({ identity_key: identityKey }))];
+      if (sql.includes("SELECT s.identity_key FROM scenarios")) return [(input.switchedOffScenarioIdentities ?? []).map((identityKey) => ({ identity_key: identityKey }))];
+      if (sql.includes("FROM feature_identities")) return [(input.registry ?? input.knownFeatures ?? []).map((entry) => (typeof entry === "string" ? { nameKey: entry, identity_key: entry } : { nameKey: entry[0], identity_key: entry[1] }))];
+      if (sql.includes("FROM scenario_identities")) return [[]];
+      return fallback(sql, parameters);
+    });
+    return db;
+  }
+  const withLegacy = { ...result, features: [...result.features, { name: "Legacy", summary: "Removed", scenarios: [] }] };
+
+  it("writes each row's identity after the existing columns and parameters", async () => {
+    const db = identityDb(renamedPast);
+    await insertSpecVersion(db, run, withLegacy);
+
+    // 原有的七个参数原样在前，身份接在后面：按下标做的断言不受影响。
+    const featureRows = callsOf(db, "INSERT INTO spec_features").map(([, parameters]) => parameters);
+    // 最终清单按名称排序（mergeSpecSources），所以 Legacy 排在 New feature 前面。
+    expect(featureRows.map((parameters) => parameters.slice(0, 7))).toEqual([
+      [99, "authentication", "Authentication", "OAuth", null, "generated", 0],
+      [99, "legacy", "Legacy", "Removed", null, "generated", 1],
+      [99, "new feature", "New feature", "Added", null, "generated", 2],
+    ]);
+    expect(featureRows.map((parameters) => parameters.slice(7))).toEqual([["sign-in", null], ["old-legacy", null], ["new feature", null]]);
+
+    const scenarioRows = callsOf(db, "INSERT INTO spec_scenarios").map(([, parameters]) => parameters);
+    expect(scenarioRows.map((parameters) => parameters.slice(0, 9))).toEqual([[100, "HP-1", "Visitor", "Signs in", "Onboarding", "happy", null, "generated", "[]"]]);
+    expect(scenarioRows.map((parameters) => parameters.slice(9))).toEqual([['["sign-in","HP-1"]']]);
+  });
+
+  it("puts the identity of each change row after the existing fifteen parameters", async () => {
+    const db = identityDb(renamedPast);
+    await insertSpecVersion(db, run, withLegacy);
+
+    // [功能键, 编号, 功能身份, 场景身份]
+    expect(db.changes.map((parameters) => [parameters[4], parameters[6], ...parameters.slice(15)])).toEqual(
+      expect.arrayContaining([
+        ["authentication", "HP-1", "sign-in", '["sign-in","HP-1"]'],
+        ["new feature", "", "new feature", null],
+      ]),
+    );
+    expect(db.changes.every((parameters) => parameters.length === 17)).toBe(true);
+  });
+
+  it("gives a proven-removed feature the identity it had in the previous version", async () => {
+    const db = identityDb({ ...renamedPast, specScenarios: [previousScenario("HP-1", "components/publish.tsx")] });
+    // Authentication 的实现文件被删了，证据齐全：这一版里它是确定移除的。
+    await insertSpecVersion(db, run, { ...result, features: [{ name: "Legacy", summary: "Removed", scenarios: [] }] }, {
+      behavioralChangePaths: new Set(["components/publish.tsx"]),
+      changeFiles: [{ path: "components/publish.tsx", status: "removed", patch: "" }],
+      fullAnalysis: true,
+      coverageComplete: true,
+    });
+
+    // 本版里已经没有 Authentication，变化记录的身份只能来自上一版。
+    // 功能移除只记一条功能级的变化：[功能键, 编号, 功能身份, 场景身份]。
+    expect(db.changes.map((parameters) => [parameters[3], parameters[4], parameters[6], ...parameters.slice(15)])).toEqual([["removed", "authentication", "", "sign-in", null]]);
+    // 功能和它的场景一起退休，各记一条关系。登记表本身不动。
+    expect(callsOf(db, "INSERT IGNORE INTO feature_identity_links").map(([, parameters]) => parameters)).toEqual([[4, 99, "retire", "sign-in"]]);
+    expect(callsOf(db, "INSERT IGNORE INTO scenario_identity_links").map(([, parameters]) => parameters)).toEqual([[4, 99, "retire", '["sign-in","HP-1"]']]);
+    expect(callsOf(db, "UPDATE feature_identities")).toEqual([]);
+  });
+
+  it("records only what was minted in the registries, after the rows and in the same connection", async () => {
+    const db = identityDb(renamedPast);
+    await insertSpecVersion(db, run, withLegacy);
+
+    expect(callsOf(db, "INSERT INTO feature_identities").map(([, parameters]) => parameters)).toEqual([[4, "new feature", "New feature", 99]]);
+    // 沿用的身份登记表里早就有，不重复插入。
+    expect(callsOf(db, "INSERT INTO scenario_identities")).toEqual([]);
+    const order = mockOf(db).mock.calls.map(([sql]) => {
+      const text = String(sql);
+      if (text.includes("identity_key FROM spec_features WHERE spec_version_id")) return "plan";
+      if (text.includes("INSERT INTO spec_versions")) return "version";
+      if (text.includes("INSERT INTO feature_identities")) return "registry";
+      return "other";
+    });
+    expect(order.indexOf("plan")).toBeLessThan(order.indexOf("version"));
+    expect(order.indexOf("version")).toBeLessThan(order.indexOf("registry"));
+  });
+
+  it("continues identities the registries never saw when the previous version carries them", async () => {
+    // 部署之后、回填之前的那几次发布：登记表是空的，上一版已经有身份。沿用上一版的，不按名称另造。
+    const db = identityDb({ previousFeatures: renamedPast.previousFeatures, previousScenarios: renamedPast.previousScenarios });
+    await insertSpecVersion(db, run, withLegacy);
+    expect(callsOf(db, "INSERT INTO spec_features").map(([, parameters]) => parameters.slice(7, 8))).toEqual([["sign-in"], ["old-legacy"], ["new feature"]]);
+  });
+
+  it("mints from the name key when neither the previous version nor the registries know anything", async () => {
+    const db = identityDb();
+    const { identities } = await insertSpecVersion(db, run, withLegacy);
+
+    expect(callsOf(db, "INSERT INTO spec_features").map(([, parameters]) => parameters.slice(7, 8))).toEqual([["authentication"], ["legacy"], ["new feature"]]);
+    expect(identities?.features.get("authentication")).toMatchObject({ identityKey: "authentication", origin: "minted" });
+  });
+
+  it("leaves the identity columns null and stays away from the registries when the layer is switched off", async () => {
+    vi.stubEnv("SPEC_IDENTITY_LAYER", "false");
+    try {
+      const db = identityDb(renamedPast);
+      const { identities } = await insertSpecVersion(db, run, withLegacy);
+
+      expect(callsOf(db, "INSERT INTO spec_features").map(([, parameters]) => parameters.slice(7))).toEqual([[null, null], [null, null], [null, null]]);
+      expect(db.changes.every((parameters) => parameters.slice(15).every((value) => value === null))).toBe(true);
+      expect(mockOf(db).mock.calls.some(([sql]) => /(?:FROM|INTO|UPDATE) (?:feature_identit|scenario_identit)/.test(String(sql)))).toBe(false);
+      expect(identities).toBeNull();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("reports a first version as the baseline and gives it identities minted from the name keys", async () => {
+    // 没有上一版：身份全部新建，登记表的查询落到替身的默认回答上，也就是空的。
+    const db = connection([]);
+    const { baseline, identities } = await insertSpecVersion(db, run, withLegacy);
+
+    expect(baseline).toBe(true);
+    expect(identities?.minted.features.map((feature) => feature.identityKey)).toEqual(["authentication", "legacy", "new feature"]);
+  });
+
+  it("refuses the version before writing anything when identities cannot be assigned", async () => {
+    // 上一版说 authentication 的身份是 sign-in，登记表说是 authentication。两边说法不一，不猜。
+    const db = identityDb({ previousFeatures: renamedPast.previousFeatures, knownFeatures: ["authentication"] });
+
+    await expect(insertSpecVersion(db, run, withLegacy)).rejects.toMatchObject({ code: "identity_registry_conflict" });
+    expect(writesOf(db)).toEqual([]);
+  });
+
+  it("blocks by identity a renamed feature whose identity a person switched off, under any name it goes by", async () => {
+    // 用户下线过一个人工功能，它当时的身份是 f1。模型这次换了个名字“乙”输出同一个功能：
+    // 按名称键查墓碑查不到，按身份查得到。
+    const renamedOutput = { ...withLegacy, features: [...withLegacy.features, { name: "乙", summary: "换个名字的同一个功能", scenarios: [] }] };
+    const db = identityDb({ ...renamedPast, registry: [["乙", "f1"]], switchedOffFeatureIdentities: ["f1"] });
+
+    const { features } = await insertSpecVersion(db, run, renamedOutput);
+
+    expect(features.map((feature) => feature.name)).not.toContain("乙");
+  });
+
+  it("blocks by identity a scenario of a renamed feature that a person switched off, and keeps the feature's other scenarios", async () => {
+    // 用户只下线过那个功能的 HP-1。模型换个名字重新输出这个功能时，HP-1 不该回来，HP-2 照常保留。
+    const renamedOutput = {
+      ...withLegacy,
+      features: [...withLegacy.features, { name: "乙", summary: "换个名字的同一个功能", scenarios: [{ ...scenario, reference: "HP-1" }, { ...scenario, reference: "HP-2" }] }],
+    };
+    const db = identityDb({ ...renamedPast, registry: [["乙", "f1"]], switchedOffScenarioIdentities: [scenarioIdentityKey("f1", "HP-1")] });
+
+    const { features } = await insertSpecVersion(db, run, renamedOutput);
+
+    expect(features.find((feature) => feature.name === "乙")?.scenarios.map((item) => item.reference)).toEqual(["HP-2"]);
+  });
+
+  it("does not block it when the identity layer is switched off, because only names are checked then", async () => {
+    vi.stubEnv("SPEC_IDENTITY_LAYER", "false");
+    try {
+      const renamedOutput = { ...withLegacy, features: [...withLegacy.features, { name: "乙", summary: "换个名字的同一个功能", scenarios: [] }] };
+      const db = identityDb({ ...renamedPast, registry: [["乙", "f1"]], switchedOffFeatureIdentities: ["f1"] });
+
+      const { features } = await insertSpecVersion(db, run, renamedOutput);
+
+      expect(features.map((feature) => feature.name)).toContain("乙");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("reads which identities were switched off by hand, next to the names it already read", async () => {
+    const db = identityDb({ ...renamedPast, registry: [["乙", "f1"]], switchedOffFeatureIdentities: ["f1"] });
+    await insertSpecVersion(db, run, withLegacy);
+
+    const identityQueries = mockOf(db).mock.calls.filter(([sql]) => String(sql).includes("identity_key IS NOT NULL"));
+    // 人工下线的功能一条、人工下线的场景一条，都只读。
+    expect(identityQueries.map(([sql]) => [String(sql).includes("FROM features WHERE") ? "features" : "scenarios", String(sql).startsWith("SELECT")])).toEqual([["features", true], ["scenarios", true]]);
+  });
+
+  it("returns the plan so the workbench rows can carry the same identities", async () => {
+    const db = identityDb(renamedPast);
+    const { identities, baseline } = await insertSpecVersion(db, run, withLegacy);
+    // 有上一版，所以这一版不是基线。
+    expect(baseline).toBe(false);
+
+    expect(identities?.features.get("authentication")).toMatchObject({ identityKey: "sign-in", origin: "continued" });
+    expect(identities?.features.get("authentication")?.scenarios.get("HP-1")?.identityKey).toBe('["sign-in","HP-1"]');
+    expect(identities?.features.get("new feature")).toMatchObject({ identityKey: "new feature", origin: "minted" });
+  });
+
+  it("keeps an identity a person switched off out of the version when the previous version still carries it", async () => {
+    // 上一版就有这个功能（身份 f1），用户把它下线了；登记表里它的另一个名字是“乙”。模型这次用“乙”把它输出回来。
+    const db = identityDb({
+      previousFeatures: [{ versionId: 11, nameKey: "authentication", identity_key: "f1" }],
+      previousScenarios: [{ versionId: 11, featureIdentityKey: "f1", reference: "HP-1", identity_key: scenarioIdentityKey("f1", "HP-1") }],
+      registry: [["乙", "f1"]],
+      switchedOffFeatureIdentities: ["f1"],
+    });
+    const renamedOutput = { ...result, features: [{ name: "乙", summary: "同一个功能，换了名字", scenarios: [{ ...scenario }] }] };
+
+    const { features, identities } = await insertSpecVersion(db, run, renamedOutput);
+
+    // 不只是新名字不在：这个身份本身不能以任何名字回到版本里。
+    expect(features.map((feature) => feature.name)).not.toContain("乙");
+    expect([...(identities?.features.values() ?? [])].map((feature) => feature.identityKey)).not.toContain("f1");
+  });
+
+  it("keeps a name a person switched off out of the version when the previous version still carries it", async () => {
+    const db = connection([{ id: 11 }], false, { feature: "Authentication" });
+
+    const { features } = await insertSpecVersion(db, run, result);
+
+    expect(features.map((feature) => feature.name)).not.toContain("Authentication");
+  });
+
+  it("keeps a scenario a person switched off out of the version when the previous version still carries it", async () => {
+    // 用户下线过 HP-1，那时功能叫“乙”（身份 f1）。上一版和这次的输出里它都叫 Authentication：按名字的墓碑查不到。
+    const db = identityDb({
+      previousFeatures: [{ versionId: 11, nameKey: "authentication", identity_key: "f1" }],
+      previousScenarios: [{ versionId: 11, featureIdentityKey: "f1", reference: "HP-1", identity_key: scenarioIdentityKey("f1", "HP-1") }],
+      registry: [["乙", "f1"]],
+      switchedOffScenarioIdentities: [scenarioIdentityKey("f1", "HP-1")],
+    });
+
+    const { features } = await insertSpecVersion(db, run, result);
+
+    expect(features.find((feature) => feature.name === "Authentication")?.scenarios.map((item) => item.reference)).not.toContain("HP-1");
+  });
+
+  it("keeps a scenario a person switched off by name out of the version when the previous version still carries it", async () => {
+    const db = connection([{ id: 11 }], false, { scenario: "HP-1" });
+
+    const { features } = await insertSpecVersion(db, run, result);
+
+    expect(features.find((feature) => feature.name === "Authentication")?.scenarios.map((item) => item.reference)).not.toContain("HP-1");
+  });
+});
+
+describe("墓碑按身份加宽 (widenTombstonesByIdentity)", () => {
+  const loaded = {
+    featureKeys: new Set(["甲"]),
+    scenarioKeys: new Set([specScenarioKey("甲", "HP-1")]),
+    featureIdentities: ["f1"],
+    scenarioIdentities: [scenarioIdentityKey("f1", "HP-1"), "不是我们的编码"],
+  };
+  /** 每个名称键现在解析到哪个身份：甲和乙是同一个功能（改过名），丙是另一个。 */
+  const names: Array<readonly [string, string]> = [["甲", "f1"], ["乙", "f1"], ["丙", "f2"]];
+
+  it("adds every name that resolves to a switched-off identity, for features and for scenarios", () => {
+    expect(widenTombstonesByIdentity(loaded, names)).toEqual({
+      featureKeys: new Set(["甲", "乙"]),
+      scenarioKeys: new Set([specScenarioKey("甲", "HP-1"), specScenarioKey("乙", "HP-1")]),
+    });
+  });
+
+  it("does not reach a different feature that merely shares a name prefix or a reference", () => {
+    const widened = widenTombstonesByIdentity(loaded, names);
+    expect(widened.featureKeys.has("丙")).toBe(false);
+    expect(widened.scenarioKeys.has(specScenarioKey("丙", "HP-1"))).toBe(false);
+    expect(widened.scenarioKeys.has(specScenarioKey("乙", "HP-2"))).toBe(false);
+  });
+
+  it("returns the name keys as they are when nothing was recorded by identity", () => {
+    const plain = { featureKeys: new Set(["甲"]), scenarioKeys: new Set<string>(), featureIdentities: [], scenarioIdentities: [] };
+    expect(widenTombstonesByIdentity(plain, names)).toEqual({ featureKeys: new Set(["甲"]), scenarioKeys: new Set() });
+  });
+
+  it("never narrows: a name key that was blocked stays blocked even if it now resolves elsewhere", () => {
+    const widened = widenTombstonesByIdentity(loaded, [["甲", "f9"]]);
+    expect(widened.featureKeys.has("甲")).toBe(true);
+    expect(widened.scenarioKeys.has(specScenarioKey("甲", "HP-1"))).toBe(true);
+    expect(widened.featureKeys.has("乙")).toBe(false);
   });
 });

@@ -142,4 +142,16 @@ describe("patch-scan 行为性行判定", () => {
     const behavioral = behavioralChangePaths(files);
     expect(behavioral.size).toBe(4);
   });
+
+  it("leaves migration scripts out of the behavioral set: they are not an analysis target", () => {
+    const files = [
+      { path: "migrations/090_add_gift_wallet.sql", status: "added", patch: "+CREATE TABLE gift_wallets (id BIGINT PRIMARY KEY);" },
+      { path: "migrations/091_backfill.sql", status: "modified", patch: "-INSERT INTO a VALUES (1);\n+INSERT INTO a VALUES (2);" },
+      { path: "superset/migrations/versions/2026_11_01.py", status: "added", patch: "+def upgrade():\n+    pass" },
+      { path: "lib/billing/gift-wallet.ts", status: "modified", patch: "-return grant(old);\n+return grant(fresh);" },
+      { path: "lib/models.py", status: "modified", patch: "-class A(Model):\n+class B(Model):" },
+    ];
+    const behavioral = behavioralChangePaths(files);
+    expect([...behavioral].sort()).toEqual(["lib/billing/gift-wallet.ts", "lib/models.py"]);
+  });
 });

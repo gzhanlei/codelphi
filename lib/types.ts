@@ -80,7 +80,7 @@ export interface ReleaseRow {
 export interface BehaviorChangeRow {
   id: number;
   releaseId: number;
-  kind: "added" | "changed" | "removed";
+  kind: "added" | "changed" | "removed" | "uncertain";
   entityType: "feature" | "scenario";
   featureName: string;
   scenarioReference: string;

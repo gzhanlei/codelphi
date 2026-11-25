@@ -27,6 +27,18 @@ describe("shared extraction pass", () => {
     expect(evidenceAllowSet(partition, change)).toEqual(new Set(["lib/feature.ts", "lib/change.ts"]));
   });
 
+  it("leaves migration scripts out of the allow set even when the window changed them", () => {
+    const withMigration = { ...change, files: [...change.files, { path: "migrations/090_add_gift_wallet.sql", status: "added", patch: "+CREATE TABLE gift_wallets (id BIGINT PRIMARY KEY);" }] };
+    expect(evidenceAllowSet(partition, withMigration)).toEqual(new Set(["lib/feature.ts", "lib/change.ts"]));
+
+    // 模型仍然引用了迁移脚本：这条场景没有可溯源的证据，整条剔除，不带着迁移证据进规格。
+    const sanitized = structuredClone(result);
+    sanitized.features[0].scenarios[0].evidence = [{ path: "migrations/090_add_gift_wallet.sql", startLine: 1 }];
+    const summary = sanitizeEvidence(sanitized, evidenceAllowSet(partition, withMigration), "test");
+    expect(sanitized.features).toEqual([]);
+    expect(summary.droppedScenarios).toBe(1);
+  });
+
   it("marks a pass whose candidates were all rejected without throwing", () => {
     const sanitized = structuredClone(result);
     sanitized.product.evidence = [{ path: "missing-product.ts" }];

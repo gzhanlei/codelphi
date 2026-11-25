@@ -19,7 +19,7 @@ export function buildProductFocus(input: Input) {
   const changeGroups = new Map<string, {
     releaseId: number;
     featureName: string;
-    counts: { added: number; removed: number; changed: number };
+    counts: { added: number; removed: number; changed: number; uncertain: number };
     userImpacts: string[];
     fallbackSummaries: string[];
     evidencePaths: string[];
@@ -28,7 +28,7 @@ export function buildProductFocus(input: Input) {
     const group = changeGroups.get(change.featureName) ?? {
       releaseId: change.releaseId,
       featureName: change.featureName,
-      counts: { added: 0, removed: 0, changed: 0 },
+      counts: { added: 0, removed: 0, changed: 0, uncertain: 0 },
       userImpacts: [],
       fallbackSummaries: [],
       evidencePaths: [],
@@ -37,7 +37,7 @@ export function buildProductFocus(input: Input) {
     const userImpact = (input.changes ?? []).find((item) => item.releaseId === change.releaseId && item.featureName === change.featureName && item.userImpact.trim())?.userImpact.trim();
     if (userImpact) group.userImpacts.push(userImpact);
     else if (change.summary.trim()) group.fallbackSummaries.push(change.summary);
-    group.evidencePaths.push(...evidenceFromSubject(change.kind === "removed" ? change.before : change.after));
+    group.evidencePaths.push(...evidenceFromSubject(change.kind === "removed" || change.kind === "uncertain" ? change.before : change.after));
     changeGroups.set(change.featureName, group);
   }
   const releaseChanges = [...changeGroups.values()].map((group) => {

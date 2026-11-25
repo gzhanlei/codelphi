@@ -1,4 +1,4 @@
-import { evidenceKind, isInfrastructureEvidence } from "../evidence";
+import { isImplementationSurfaceFile, isInfrastructureEvidence } from "../evidence";
 import type { AnalysisPartition } from "../remote-analysis";
 
 const DIRECT_DATA_EXTENSIONS = new Set([".geojson", ".topojson", ".csv", ".tsv", ".ndjson", ".jsonl", ".parquet", ".avro", ".sqlite", ".db"]);
@@ -17,9 +17,9 @@ export function isSnapshotDataFile(path: string) {
   return DATA_DIRECTORY.test(path) && STRUCTURED_DATA_EXTENSIONS.has(ext);
 }
 
-/** Files that can materially explain current product behavior or how to run/configure it. */
+/** Files that can materially explain current product behavior or how to run/configure it. Migration scripts are out of the analysis target. */
 export function isSnapshotEffectiveImplementationPath(path: string) {
-  if (evidenceKind(path) !== "implementation") return false;
+  if (!isImplementationSurfaceFile(path)) return false;
   if (isInfrastructureEvidence(path)) return false;
   return !isSnapshotDataFile(path);
 }

@@ -420,10 +420,10 @@ async function callTool(runtime: McpRuntime, name: string, args: Record<string, 
     );
     const release = releases[0];
     if (!release) return {};
-    const changes = await queryRows<{ id: number; kind: string; entityType: string; featureName: string; scenarioReference: string; summary: string; highlightType: string | null; beforeJson: unknown; afterJson: unknown }>(
+    const changes = await queryRows<{ id: number; kind: string; entityType: string; featureName: string; scenarioReference: string; summary: string; highlightType: string | null; judgment: string | null; evidenceState: string | null; reasonCodes: unknown; beforeJson: unknown; afterJson: unknown }>(
       execute(
         `SELECT c.id, c.kind, c.entity_type AS entityType, c.feature_name AS featureName, c.scenario_reference AS scenarioReference,
-              c.summary, c.highlight_type AS highlightType, c.before_json AS beforeJson, c.after_json AS afterJson
+              c.summary, c.highlight_type AS highlightType, c.judgment, c.evidence_state AS evidenceState, c.reason_codes AS reasonCodes, c.before_json AS beforeJson, c.after_json AS afterJson
        FROM spec_changes c JOIN releases r ON r.spec_version_id = c.spec_version_id
        WHERE r.id = ? AND c.wording_only = 0 ORDER BY c.id`,
         [release.id],

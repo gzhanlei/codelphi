@@ -123,7 +123,7 @@ export function planRegressionTasks(input: { changes: PlannedChange[]; fileHits:
   };
 
   for (const change of [...changes].sort((a, b) => a.id - b.id)) {
-    if (change.entityType === "scenario" && change.kind !== "removed" && change.scenarioId !== null) {
+    if (change.entityType === "scenario" && change.kind !== "removed" && change.kind !== "uncertain" && change.scenarioId !== null) {
       const subject: TaskSubject = { kind: "scenario", scenarioId: change.scenarioId };
       const value = task(subject);
       if (!value.sources.includes(change.id)) value.sources.push(change.id);
@@ -149,7 +149,7 @@ export function planRegressionTasks(input: { changes: PlannedChange[]; fileHits:
   return [...tasks.values()];
 }
 
-const kindLabels: Record<string, string> = { added: "新增", changed: "变化", removed: "移除" };
+const kindLabels: Record<string, string> = { added: "新增", changed: "变化", removed: "移除", uncertain: "未决" };
 
 function flatten(text: string) {
   return text.replace(/\s*\n\s*/g, " ").trim();

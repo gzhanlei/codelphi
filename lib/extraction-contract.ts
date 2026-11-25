@@ -1,5 +1,6 @@
 import { buildAnalysisMessages, type analyzeWithAI } from "./ai";
 import type { ChangeContext, SourceFile } from "./code-hosting/types";
+import { analyzedChangePaths } from "./evidence";
 
 export const CONTRACT_VERSION = "1.0.0";
 
@@ -26,7 +27,7 @@ export function buildExtractionWorkOrder(input: {
     sources: input.sources,
     change: input.change,
     context: input.context,
-    allowPaths: [...new Set([...input.sources.map((source) => source.path), ...input.change.files.map((file) => file.path)])].sort(),
+    allowPaths: [...new Set([...input.sources.map((source) => source.path), ...analyzedChangePaths(input.change.files)])].sort(),
   };
 }
 

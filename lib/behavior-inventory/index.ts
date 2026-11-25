@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { evidenceKind } from "../evidence";
+import { isImplementationSurfaceFile } from "../evidence";
 import { genericDetector, findDynamicRegistrationLines, matchesGenericPath } from "./detectors/generic";
 import { matchesNextPath, nextDetector } from "./detectors/next";
 import type { BehaviorDetector, BehaviorUnitDraft, InventorySource } from "./detectors/types";
@@ -365,8 +365,10 @@ export function buildBehaviorInventoryWithRegistry(
 ): BehaviorInventoryResult {
   const eligible: InventorySource[] = [];
   const excludedNonImplementation: string[] = [];
+  // 迁移脚本已移出分析目标：首跑扫描按实现面枚举，本来就不会把它交进来；这里是第二道拦。
+  // 它和测试、文档一样记进 excludedNonImplementation——这个字段的意思是「不在实现面里」。
   for (const source of input.sources) {
-    if (evidenceKind(source.path) === "implementation") eligible.push(source);
+    if (isImplementationSurfaceFile(source.path)) eligible.push(source);
     else excludedNonImplementation.push(source.path);
   }
 

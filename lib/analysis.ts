@@ -21,6 +21,8 @@ import type { AnchorScenarioLink } from "./behavior-unit-state";
 import { behavioralEnumerationEnabled, analysisConvergenceEpsilon, analysisConvergenceRounds, fullAnalysisMode } from "./env";
 import { runInventoryFullAnalysis } from "./full-analysis";
 import { behavioralChangePaths } from "./patch-scan";
+import { analyzedChangePaths, isSchemaArtifact } from "./evidence";
+import { featureIdentityColumn, scenarioIdentityColumn, type VersionIdentityPlan } from "./spec-identity";
 import { parsePatchHunks } from "./spec-diff";
 import { enumerateBehavioralChunks } from "./behavioral-enumeration";
 import { detectOutcomeConflicts } from "./spec-consistency";
@@ -73,24 +75,26 @@ export async function assertLatestRun(connection: PoolConnection, run: RunContex
   if (latestRunId !== run.id) throw new Error(`Analysis superseded by run ${latestRunId}`);
 }
 
-async function upsertFeature(connection: PoolConnection, run: RunContext, feature: AnalysisResult["features"][number]) {
+async function upsertFeature(connection: PoolConnection, run: RunContext, feature: AnalysisResult["features"][number], identities: VersionIdentityPlan | null) {
+  // 身份列接在列清单和参数的末尾，前面三个的位置不变。身份是规格版本算出来的那份，不在工作台另算。
   const [featureResult] = await connection.execute(
-    `INSERT INTO features (product_id, name, summary, source, active)
-     VALUES (?, ?, ?, 'generated', 1)
+    `INSERT INTO features (product_id, name, summary, source, active, identity_key)
+     VALUES (?, ?, ?, 'generated', 1, ?)
      ON DUPLICATE KEY UPDATE
        id = LAST_INSERT_ID(id),
        summary = IF(source = 'generated', VALUES(summary), summary),
        verified_at = IF(source = 'generated' AND summary <> VALUES(summary), NULL, verified_at),
        verified_by = IF(source = 'generated' AND summary <> VALUES(summary), NULL, verified_by),
-       active = IF(source = 'generated', 1, active)`,
-    [run.productId, feature.name, feature.summary],
+       active = IF(source = 'generated', 1, active),
+       identity_key = COALESCE(features.identity_key, VALUES(identity_key))`,
+    [run.productId, feature.name, feature.summary, featureIdentityColumn(identities, feature.name)],
   );
   const featureId = Number((featureResult as { insertId: number }).insertId);
   for (const scenario of feature.scenarios) {
     await connection.execute(
       `INSERT INTO scenarios
-         (feature_id, reference, context, action, outcome, category, step_order, source, active, evidence)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'generated', 1, ?)
+         (feature_id, reference, context, action, outcome, category, step_order, source, active, evidence, identity_key)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'generated', 1, ?, ?)
        ON DUPLICATE KEY UPDATE
          context = IF(source = 'generated', VALUES(context), context),
          action = IF(source = 'generated', VALUES(action), action),
@@ -100,13 +104,19 @@ async function upsertFeature(connection: PoolConnection, run: RunContext, featur
          evidence = IF(source = 'generated', VALUES(evidence), evidence),
          verified_at = IF(source = 'generated' AND (context <> VALUES(context) OR action <> VALUES(action) OR outcome <> VALUES(outcome) OR category <> VALUES(category)), NULL, verified_at),
          verified_by = IF(source = 'generated' AND (context <> VALUES(context) OR action <> VALUES(action) OR outcome <> VALUES(outcome) OR category <> VALUES(category)), NULL, verified_by),
-         active = IF(source = 'generated', 1, active)`,
-      [featureId, scenario.reference, scenario.context, scenario.action, scenario.outcome, scenario.category, scenario.step ?? null, JSON.stringify(scenario.evidence)],
+         active = IF(source = 'generated', 1, active),
+         identity_key = COALESCE(scenarios.identity_key, VALUES(identity_key))`,
+      [featureId, scenario.reference, scenario.context, scenario.action, scenario.outcome, scenario.category, scenario.step ?? null, JSON.stringify(scenario.evidence), scenarioIdentityColumn(identities, feature.name, scenario.reference)],
     );
   }
 }
 
-export async function upsertGeneratedSpec(connection: PoolConnection, run: RunContext, features: SpecFeature[]) {
+/**
+ * 把合并后的规格投影到工作台。identities 是这次发布给规格版本算出来的身份计划，和版本行用的是同一份；
+ * 不传时工作台行的身份留空（身份层关着，或者调用方还没有这份计划）。
+ * 行上已经有身份的保留（人工条目、快照导入先建的行），空的才补上。
+ */
+export async function upsertGeneratedSpec(connection: PoolConnection, run: RunContext, features: SpecFeature[], identities: VersionIdentityPlan | null = null) {
   await connection.execute(
     `UPDATE features f
      LEFT JOIN features child ON child.parent_id = f.id AND child.active = 1
@@ -121,7 +131,7 @@ export async function upsertGeneratedSpec(connection: PoolConnection, run: RunCo
      SET s.active = 0 WHERE f.product_id = ? AND s.source = 'generated'`,
     [run.productId],
   );
-  for (const feature of features) await upsertFeature(connection, run, feature);
+  for (const feature of features) await upsertFeature(connection, run, feature, identities);
 }
 
 export async function upsertRelease(connection: PoolConnection, run: RunContext, result: AnalysisResult, change: ChangeContext, specVersionId: number | null = null, specChanges: ReleaseChangeFact[] = [], baselineFeatures: SpecFeature[] | null = null, options: { activate?: boolean } = {}): Promise<{ releaseId: number; projections: ReleaseChangeProjection[] }> {
@@ -245,7 +255,7 @@ export async function saveResult(run: RunContext, result: AnalysisResult, change
         .filter((file) => behavioralPaths.has(file.path))
         .map((file) => [file.path, parsePatchHunks(file.patch)] as const),
     );
-    const { specVersionId, specChanges, baseline, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds, scenarioIdByLocalKey } = await insertSpecVersion(connection, run, result, { ...(affectedKeys ? { affectedKeys } : {}), behavioralChangePaths: behavioralPaths, changedHunksByPath, base: activate ? "latest" : "beforeRun", baseVersionId: run.baseCapturedAt ? run.baseSpecVersionId : undefined });
+    const { specVersionId, specChanges, baseline, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds, scenarioIdByLocalKey, identities = null } = await insertSpecVersion(connection, run, result, { ...(affectedKeys ? { affectedKeys } : {}), behavioralChangePaths: behavioralPaths, changedHunksByPath, base: activate ? "latest" : "beforeRun", baseVersionId: run.baseCapturedAt ? run.baseSpecVersionId : undefined, changeFiles: change.files, fullAnalysis: affectedKeys === null, coverageComplete: affectedKeys === null && coverage?.coverageRatio === 1 && !coverage.partitionsCapped && coverage.diffOmittedPaths === 0 });
     if (activate) {
       // BM-11 别名登记：变体名 → canonical 旧键，走 feature_aliases 显式归并通道
       // （migrations/030；progress-summary 的历史 spec_changes 归并已消费该表）。幂等 INSERT IGNORE。
@@ -271,7 +281,7 @@ export async function saveResult(run: RunContext, result: AnalysisResult, change
     if (activate) {
       // P0(I1):下线基准必须是 carry-forward 合并后的完整规格——用 AI 原始输出会让
       // 增量模式把未受影响的 generated 功能全部下线,工作台坍缩为本次触及的功能。
-      await upsertGeneratedSpec(connection, run, mergedFeatures);
+      await upsertGeneratedSpec(connection, run, mergedFeatures, identities);
     }
     const { releaseId, projections: releaseChangeProjections } = await upsertRelease(connection, run, result, change, specVersionId, specChanges, baseline ? mergedFeatures : null, { activate });
     if (activate) {
@@ -410,8 +420,9 @@ async function runAnalysisBody(run: RunContext) {
     provider: target.adapter.provider,
     scopeRoots,
     backend: sourceBackend,
-    // W0-7：窗口 diff 文件必选装配（行为证据一手面，保证分区覆盖 diff 面）
-    diffPaths: change.files.map((file) => file.path),
+    // W0-7：窗口 diff 文件必选装配（行为证据一手面，保证分区覆盖 diff 面）。
+    // 迁移脚本已移出分析目标：不装配，也不进覆盖率的 diff 口径。
+    diffPaths: analyzedChangePaths(change.files),
   };
   const executeWrapper = (statement: string, parameters: Array<string | number | null>) => getDb().execute(statement, parameters);
   // W0-8 行为面枚举：patch-scan 行为文件清单（跨模式共享，RC2 与定向枚举共用）
@@ -436,7 +447,8 @@ async function runAnalysisBody(run: RunContext) {
   // W0-10：未归属的行为变更文件 = 行为 diff 文件中未命中索引者——显式交给增量 prompt 核对
   let unassignedBehavioralPaths: string[] | undefined;
   if (!noBehavioralWindow && !languageSwitched && run.analyzeMode === "incremental") {
-    const affected = await loadAffectedFeatureKeys(run.repositoryId, change.files.map((file) => file.path), executeWrapper);
+    // 受影响功能只按分析目标内的改动文件反查：索引里留着旧的迁移证据，迁移文件改了也不算碰到它们。
+    const affected = await loadAffectedFeatureKeys(run.repositoryId, analyzedChangePaths(change.files), executeWrapper);
     const resolved = resolveAnalysisMode({
       mode: "incremental",
       hasPreviousSpec: previousFeatureNames.length > 0,
@@ -529,7 +541,8 @@ async function runAnalysisBody(run: RunContext) {
     } else {
       // 整链无回执（首次接入 / migration 054 之前）：按零装配如实披露，并留下诊断日志
       console.warn("[analysis] no effective coverage receipt found up the version chain; writing honest zero receipt", { runId: run.id, previousSpecVersionId: previousSpec.specVersionId, diffFiles: change.files.length });
-      coverage = { implFilesAssembled: 0, implFilesTotal: 0, implBytesAssembled: 0, implBytesTotal: 0, coverageRatio: 0, partitionsUsed: 0, partitionsCapped: false, diffTotalPaths: change.files.length, diffSelectedPaths: 0, diffOmittedPaths: change.files.length };
+      const analyzedDiffPaths = analyzedChangePaths(change.files).length;
+      coverage = { implFilesAssembled: 0, implFilesTotal: 0, implBytesAssembled: 0, implBytesTotal: 0, coverageRatio: 0, partitionsUsed: 0, partitionsCapped: false, diffTotalPaths: analyzedDiffPaths, diffSelectedPaths: 0, diffOmittedPaths: analyzedDiffPaths };
     }
     console.log("[analysis] no-behavioral-change window; previous spec carried verbatim", { runId: run.id, diffFiles: change.files.length, carriedFeatures: result.features.length, specVersionId: previousSpec?.specVersionId ?? null });
   } else if (inventoryEligible && analysisMode === "inventory") {
@@ -553,9 +566,10 @@ async function runAnalysisBody(run: RunContext) {
     behaviorLinks = outcome.behaviorLinks;
     console.log("[analysis] inventory full analysis activated", { runId: run.id, tasks: outcome.tasks, units: outcome.unitStatuses.length, productDescriptionStatus: outcome.productDescriptionStatus });
   } else {
+  // 迁移脚本不进必选路径：既不装配，也不进定向覆盖面的分母（否则每次带迁移的提交都会显示有遗漏）。
   const requiredPaths = affectedKeys === null ? null : [...new Set([
-    ...change.files.map((file) => file.path),
-    ...await loadAffectedEvidencePaths(run.repositoryId, affectedKeys, executeWrapper),
+    ...analyzedChangePaths(change.files),
+    ...(await loadAffectedEvidencePaths(run.repositoryId, affectedKeys, executeWrapper)).filter((path) => !isSchemaArtifact(path)),
   ])].sort();
   const analysisRequest = requiredPaths === null ? remoteAnalysisRequest : {
     ...remoteAnalysisRequest,

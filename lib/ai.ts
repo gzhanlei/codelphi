@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { requiredEnv } from "./env";
+import { analyzedChangeFiles } from "./evidence";
 import type { StructuredCompletionClient } from "./llm-client";
 import type { SourceFile } from "./github";
 import { recordLlmCallReceipt, recordRequestScopedReceipt, type ChargeComponent, type LlmCallStage } from "./billing/cost-receipt";
@@ -459,9 +460,11 @@ export function buildAnalysisMessages(sources: SourceFile[], change: ChangeConte
     : (partition
       ? "当前产品功能规格必须覆盖本窗口代码里的全部主要用户功能。逐个检查输入中的页面、API、组件和业务模块；输入包含多个独立模块时，只返回一个功能属于不完整结果。"
       : "当前产品功能规格必须覆盖输入代码里的全部主要用户功能，不得只总结本次提交。逐个检查输入中的页面、API、组件和业务模块；输入包含多个独立模块时，只返回一个功能属于不完整结果。");
+  // 迁移脚本已移出分析目标：补丁不进提示词，模型也就无从引用它（证据允许集同样不含它）。
+  const analyzedFiles = analyzedChangeFiles(change.files);
   const commitSection = language === "en"
-    ? `\n[Commit]\n${change.message}\n\n[Changed files]\n${JSON.stringify(change.files)}`
-    : `\n【本次提交】\n${change.message}\n\n【文件变化】\n${JSON.stringify(change.files)}`;
+    ? `\n[Commit]\n${change.message}\n\n[Changed files]\n${JSON.stringify(analyzedFiles)}`
+    : `\n【本次提交】\n${change.message}\n\n【文件变化】\n${JSON.stringify(analyzedFiles)}`;
   const codeSection = language === "en"
     ? `\n[Current code, with line numbers]\n${sources.map((file) => `\n--- ${file.path} ---\n${file.content}`).join("\n")}`
     : `\n【当前代码，带行号】\n${sources.map((file) => `\n--- ${file.path} ---\n${file.content}`).join("\n")}`;

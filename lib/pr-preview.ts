@@ -5,6 +5,7 @@ import type { RepositoryRef } from "./code-hosting/types";
 import { listIssueComments, getPullRequestFiles, upsertIssueComment } from "./github";
 import type { GitHubAccess } from "./github-access";
 import type { PrPreviewJob } from "./github-webhook";
+import { isSchemaArtifact } from "./evidence";
 
 export interface AffectedSpecEntry {
   featureName: string;
@@ -75,7 +76,9 @@ async function loadPreviewTarget(repositoryId: number): Promise<PreviewTarget | 
   return ((rows as PreviewTarget[])[0]);
 }
 
+/** 没有可查的路径时直接返回：`IN ()` 不是合法 SQL。 */
 async function loadAffectedEntries(repositoryId: number, paths: string[]): Promise<AffectedSpecEntry[]> {
+  if (paths.length === 0) return [];
   const placeholders = paths.map(() => "?").join(",");
   const [rows] = await getDb().execute(
     `SELECT sf.name AS featureName, ss.reference AS scenarioReference, i.path
@@ -112,7 +115,8 @@ export async function runPrPreview(job: PrPreviewJob) {
     const paths = [...new Set(files.map((file) => file.path))];
     if (paths.length === 0) return;
 
-    const affected = await loadAffectedEntries(job.repositoryId, paths);
+    // 迁移脚本已移出分析目标：索引里即使还留着旧的迁移证据（历史，不批量清理），也不拿它反查。
+    const affected = await loadAffectedEntries(job.repositoryId, paths.filter((path) => !isSchemaArtifact(path)));
 
     if (affected.length === 0) {
       await adapter.createCheckRun?.(

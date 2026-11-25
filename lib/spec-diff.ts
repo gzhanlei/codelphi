@@ -30,14 +30,40 @@ export interface SpecFeature {
   source?: "generated" | "manual";
 }
 
+export type RemovalEvidenceState = "removed" | "not_observed" | "evidence_stale" | "uncertain";
+
+export interface RemovalProof {
+  originalImplementationChecked: boolean;
+  alternativePathsChecked: boolean;
+  behaviorBoundaryVerified: boolean;
+  evidence: Evidence[];
+  evidenceValid?: boolean;
+}
+
 export interface SpecChange {
-  kind: "added" | "changed" | "removed";
+  kind: "added" | "changed" | "removed" | "uncertain";
   entityType: "feature" | "scenario";
   featureName: string;
   scenarioReference: string | null;
   summary: string;
   before: SpecFeature | SpecScenario | null;
   after: SpecFeature | SpecScenario | null;
+  judgment?: "confirmed" | "uncertain";
+  evidenceState?: RemovalEvidenceState;
+  reasonCodes?: string[];
+}
+
+export function evaluateRemovalProof(proof?: RemovalProof): { classification: RemovalEvidenceState; judgment: "confirmed" | "uncertain"; reasonCodes: string[] } {
+  if (!proof) return { classification: "not_observed", judgment: "uncertain", reasonCodes: ["not_observed"] };
+  if (proof.evidenceValid === false) return { classification: "evidence_stale", judgment: "uncertain", reasonCodes: ["evidence_stale"] };
+  const missing = [
+    !proof.originalImplementationChecked ? "original_implementation_unchecked" : null,
+    !proof.alternativePathsChecked ? "alternative_paths_unchecked" : null,
+    !proof.behaviorBoundaryVerified ? "behavior_boundary_unverified" : null,
+    proof.evidence.length === 0 ? "removal_evidence_missing" : null,
+  ].filter((code): code is string => code !== null);
+  if (missing.length > 0) return { classification: "uncertain", judgment: "uncertain", reasonCodes: missing };
+  return { classification: "removed", judgment: "confirmed", reasonCodes: ["original_implementation_checked", "alternative_paths_checked", "behavior_boundary_verified"] };
 }
 
 /** 被等价判定折叠的差异：wording=行为等价但原文不同；renumber=同功能内场景换编号；tests-only=新增功能的证据全部来自测试/文档（行为性证据不足）。仅供审计展示，不落库。 */
@@ -183,15 +209,15 @@ function mergedSortedKeys(left: Map<string, unknown>, right: Map<string, unknown
 
 function changeSummary(kind: SpecChange["kind"], entityType: SpecChange["entityType"], featureName: string, reference: string | null, language: "zh-CN" | "en" = "zh-CN") {
   if (language === "en") {
-    const action = { added: "Added", changed: "Updated", removed: "Removed" }[kind];
+    const action = { added: "Added", changed: "Updated", removed: "Removed", uncertain: "Uncertain" }[kind];
     return entityType === "feature" ? `${action} feature "${featureName}"` : `"${featureName}" ${action.toLowerCase()} scenario ${reference}`;
   }
-  const action = { added: "新增", changed: "更新", removed: "移除" }[kind];
+  const action = { added: "新增", changed: "更新", removed: "移除", uncertain: "未决" }[kind];
   return entityType === "feature" ? `${action}功能「${featureName}」` : `「${featureName}」${action}场景 ${reference}`;
 }
 
-function featureChange(kind: "added" | "removed" | "changed", feature: SpecFeature, before: SpecFeature | null, after: SpecFeature | null, language?: "zh-CN" | "en"): SpecChange {
-  return { kind, entityType: "feature", featureName: feature.name, scenarioReference: null, summary: changeSummary(kind, "feature", feature.name, null, language), before, after };
+function featureChange(kind: "added" | "removed" | "changed" | "uncertain", feature: SpecFeature, before: SpecFeature | null, after: SpecFeature | null, language?: "zh-CN" | "en", assessment?: ReturnType<typeof evaluateRemovalProof>): SpecChange {
+  return { kind, entityType: "feature", featureName: feature.name, scenarioReference: null, summary: changeSummary(kind, "feature", feature.name, null, language), before, after, judgment: assessment?.judgment, evidenceState: assessment?.classification, reasonCodes: assessment?.reasonCodes };
 }
 
 
@@ -471,9 +497,28 @@ interface DiffOutcome {
 export interface DiffSpecOptions {
   behavioralChangePaths?: ReadonlySet<string>;
   language?: "zh-CN" | "en";
+  removedProofs?: ReadonlyMap<string, RemovalProof>;
+  /** 两边各自的功能身份。给了才按身份配对功能，见 DiffIdentities。 */
+  identities?: DiffIdentities;
 }
 
-function scenarioChanges(before: SpecFeature, after: SpecFeature, outcome: DiffOutcome, language?: "zh-CN" | "en") {
+/**
+ * 跨版本比对时两边的功能身份：名称键 → 身份键。
+ *
+ * 给了它，功能先按身份配对；没配上的（有一侧没有身份，或者两边身份不同）再按名称键配对。
+ * 不给就是原来的做法，一律按名称键。身份和名称连续一致时，两种配对的结果逐项相同、顺序也相同。
+ * 托管模式下模型的改名会折叠回旧名，所以按身份配对今天只在读侧的比对重算里用；
+ * 客户端增量协议上线后，真正的改名也从这里走：改名记一条 changed，不是一个移除加一个新增。
+ * 场景在配对好的功能里照旧按编号配对。按现在的身份规则（功能身份，编号），这和按场景身份配对是一回事；
+ * 编号变了的情形由原有的重编号折叠处理。
+ */
+export interface DiffIdentities {
+  before: ReadonlyMap<string, string>;
+  after: ReadonlyMap<string, string>;
+}
+
+function scenarioChanges(before: SpecFeature, after: SpecFeature, outcome: DiffOutcome, options?: DiffSpecOptions) {
+  const language = options?.language;
   const beforeScenarios = scenarioMap(before);
   const afterScenarios = scenarioMap(after);
   const changes: SpecChange[] = [];
@@ -481,7 +526,9 @@ function scenarioChanges(before: SpecFeature, after: SpecFeature, outcome: DiffO
   for (const reference of mergedSortedKeys(beforeScenarios, afterScenarios)) {
     const previous = beforeScenarios.get(reference);
     const current = afterScenarios.get(reference);
-    const kind = previous ? current ? "changed" : "removed" : "added";
+    if (previous && !current && previous.source === "manual") continue;
+    const assessment = previous && !current ? evaluateRemovalProof(options?.removedProofs?.get(specScenarioKey(before.name, reference))) : undefined;
+    const kind = previous ? current ? "changed" : assessment?.classification === "removed" ? "removed" : "uncertain" : "added";
     if (previous && current && !scenarioBehaviorChanged(previous, current)) {
       // 行为等价不落变化行；若原文确有差异，记入折叠明细供审计（完全相同的文本没有审计价值）。
       if (previous.context !== current.context || previous.action !== current.action || previous.outcome !== current.outcome) {
@@ -497,6 +544,9 @@ function scenarioChanges(before: SpecFeature, after: SpecFeature, outcome: DiffO
       summary: changeSummary(kind, "scenario", after.name, reference, language),
       before: previous === undefined ? null : previous,
       after: current === undefined ? null : current,
+      judgment: assessment?.judgment,
+      evidenceState: assessment?.classification,
+      reasonCodes: assessment?.reasonCodes,
     });
   }
 
@@ -504,7 +554,7 @@ function scenarioChanges(before: SpecFeature, after: SpecFeature, outcome: DiffO
   // BM-6 变体通道：措辞近似（同义替换）的 removed↔added 对同样折叠，reason=variant 供审计。
   const droppedIndexes = new Set<number>();
   for (const [removedIndex, removed] of changes.entries()) {
-    if (removed.kind !== "removed") continue;
+    if (removed.kind !== "removed" && removed.kind !== "uncertain") continue;
     for (const [addedIndex, added] of changes.entries()) {
       if (added.kind !== "added" || droppedIndexes.has(addedIndex)) continue;
       const previous = removed.before as SpecScenario;
@@ -567,13 +617,15 @@ function diffFeature(previous: SpecFeature | undefined, current: SpecFeature | u
     return;
   }
   if (previous && !current) {
-    outcome.changes.push(featureChange("removed", previous, previous, null, language));
+    if (previous.source === "manual" || previous.scenarios.some((scenario) => scenario.source === "manual")) return;
+    const assessment = evaluateRemovalProof(options?.removedProofs?.get(specFeatureKey(previous.name)));
+    outcome.changes.push(featureChange(assessment.classification === "removed" ? "removed" : "uncertain", previous, previous, null, language, assessment));
     return;
   }
   if (!previous || !current) return;
 
   const scenarioOutcome: DiffOutcome = { changes: [], folded: [] };
-  scenarioChanges(previous, current, scenarioOutcome, language);
+  scenarioChanges(previous, current, scenarioOutcome, options);
 
   if (featureBehaviorChanged(previous, current)) {
     const identityChanged = previous.name !== current.name || (previous.parentKey ?? null) !== (current.parentKey ?? null);
@@ -596,15 +648,81 @@ export function diffSpec(before: SpecFeature[] | null, after: SpecFeature[], opt
   return diffSpecWithFolded(before, after, options).changes;
 }
 
+/** 一对要比对的功能。两侧都有就是同一个功能；只有一侧就是新增或移除。 */
+interface FeaturePair {
+  /** 排序位置：变更前的名称键；没有变更前的功能时是变更后的名称键。 */
+  orderKey: string;
+  previous: SpecFeature | undefined;
+  current: SpecFeature | undefined;
+}
+
+/** 按名称键配对。输出顺序是名称键的码点序。 */
+function pairsByName(before: SpecFeature[], after: SpecFeature[]): FeaturePair[] {
+  const beforeFeatures = new Map(before.map((feature) => [specFeatureKey(feature.name), feature]));
+  const afterFeatures = new Map(after.map((feature) => [specFeatureKey(feature.name), feature]));
+  return mergedSortedKeys(beforeFeatures, afterFeatures).map((key) => ({ orderKey: key, previous: beforeFeatures.get(key), current: afterFeatures.get(key) }));
+}
+
+/** 按身份给一侧的功能建索引。同一个身份出现两次时取第一个，另一个留给名称键配对。没有身份的功能不在索引里。 */
+function indexByIdentity(features: SpecFeature[], identities: ReadonlyMap<string, string>): Map<string, SpecFeature> {
+  const byIdentity = new Map<string, SpecFeature>();
+  for (const feature of features) {
+    const identity = identities.get(specFeatureKey(feature.name));
+    if (identity !== undefined && !byIdentity.has(identity)) byIdentity.set(identity, feature);
+  }
+  return byIdentity;
+}
+
+const compareCodeUnits = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+
+/**
+ * 先按身份配对，剩下的再按名称键配对。配成对的一对按变更前的名称键排序，
+ * 所以身份和名称连续一致时，这里的输出和 pairsByName 逐项相同。
+ *
+ * 排序位置相同的两对（改名改成了一个同时被腾出来的名字）靠稳定排序分先后：数组排序是稳定的，
+ * 按身份配成对的那一对先插入，所以排在前面。比较器只比排序位置，不另写先后规则。
+ */
+function pairsByIdentity(before: SpecFeature[], after: SpecFeature[], identities: DiffIdentities): FeaturePair[] {
+  const beforeByIdentity = indexByIdentity(before, identities.before);
+  const remainingBefore = new Map(before.map((feature) => [specFeatureKey(feature.name), feature]));
+  const remainingAfter = new Map<string, SpecFeature>();
+  const pairs: FeaturePair[] = [];
+  for (const current of after) {
+    const identity = identities.after.get(specFeatureKey(current.name));
+    const previous = identity === undefined ? undefined : beforeByIdentity.get(identity);
+    // 变更前的这个功能已经被配走了：眼前这个只能留给名称键配对。
+    if (previous === undefined || !remainingBefore.delete(specFeatureKey(previous.name))) {
+      remainingAfter.set(specFeatureKey(current.name), current);
+      continue;
+    }
+    pairs.push({ orderKey: specFeatureKey(previous.name), previous, current });
+  }
+  for (const key of mergedSortedKeys(remainingBefore, remainingAfter)) pairs.push({ orderKey: key, previous: remainingBefore.get(key), current: remainingAfter.get(key) });
+  return pairs.sort((a, b) => compareCodeUnits(a.orderKey, b.orderKey));
+}
+
 /** 与 diffSpec 同判定的折叠报告版：changes 之外同时返回被等价判定吞掉的差异明细。 */
 export function diffSpecWithFolded(before: SpecFeature[] | null, after: SpecFeature[], options?: DiffSpecOptions): DiffOutcome {
   const outcome: DiffOutcome = { changes: [], folded: [] };
   if (!before) return outcome;
-  const beforeFeatures = new Map(before.map((feature) => [specFeatureKey(feature.name), feature]));
-  const afterFeatures = new Map(after.map((feature) => [specFeatureKey(feature.name), feature]));
-
-  for (const key of mergedSortedKeys(beforeFeatures, afterFeatures)) diffFeature(beforeFeatures.get(key), afterFeatures.get(key), outcome, options);
+  const pairs = options?.identities ? pairsByIdentity(before, after, options.identities) : pairsByName(before, after);
+  for (const { previous, current } of pairs) diffFeature(previous, current, outcome, options);
   return outcome;
+}
+
+export interface DiffPairingComparison {
+  /** 两种配对的结果是否逐项相同。 */
+  same: boolean;
+  byName: DiffOutcome;
+  byIdentity: DiffOutcome;
+}
+
+/** 按名称键和按身份各比对一遍，放在一起对照。回放工具和验收用：身份和名称连续一致时 same 必须为 true。 */
+export function compareDiffPairing(before: SpecFeature[] | null, after: SpecFeature[], options?: DiffSpecOptions): DiffPairingComparison {
+  const { identities, ...rest } = options ?? {};
+  const byName = diffSpecWithFolded(before, after, rest);
+  const byIdentity = identities ? diffSpecWithFolded(before, after, options) : byName;
+  return { same: byName === byIdentity || JSON.stringify(byName) === JSON.stringify(byIdentity), byName, byIdentity };
 }
 
 export interface SpecTombstones {
@@ -622,6 +740,208 @@ export function unionScenarioOriginKeys(kept: SpecScenario, incoming: SpecScenar
 
 export function specScenarioKey(featureName: string, reference: string) {
   return `${specFeatureKey(featureName)}:${reference}`;
+}
+
+function exactScenarioProjectionKey(scenario: SpecScenario): string | null {
+  const paths = [...new Set(scenario.evidence.map((item) => item.path).filter(Boolean))].sort();
+  if (paths.length === 0) return null;
+  return JSON.stringify([
+    normalizeSpecText(scenario.context),
+    normalizeSpecText(scenario.action),
+    normalizeSpecText(scenario.outcome),
+    paths,
+  ]);
+}
+
+export function dedupeExactScenarioProjections(features: SpecFeature[]): SpecFeature[] {
+  const seen = new Map<string, SpecScenario>();
+  const result: SpecFeature[] = [];
+  for (const feature of features) {
+    if (feature.source === "manual") {
+      result.push(feature);
+      continue;
+    }
+    const scenarios: SpecScenario[] = [];
+    for (const scenario of feature.scenarios) {
+      if (scenario.source === "manual") {
+        scenarios.push(scenario);
+        continue;
+      }
+      const key = exactScenarioProjectionKey(scenario);
+      if (key === null) {
+        scenarios.push(scenario);
+        continue;
+      }
+      const existing = seen.get(key);
+      if (existing) {
+        unionScenarioOriginKeys(existing, scenario);
+        continue;
+      }
+      const kept = { ...scenario };
+      seen.set(key, kept);
+      scenarios.push(kept);
+    }
+    if (scenarios.length > 0 || feature.scenarios.length === 0) result.push({ ...feature, scenarios });
+  }
+  return result;
+}
+
+export function preserveExactScenarioIdentities(
+  previousFeatures: SpecFeature[],
+  currentFeatures: SpecFeature[],
+  tombstones: SpecTombstones = { featureKeys: new Set<string>(), scenarioKeys: new Set<string>() },
+): SpecFeature[] {
+  const previous = dedupeExactScenarioProjections(previousFeatures);
+  const previousByProjection = new Map<string, { feature: SpecFeature; scenario: SpecScenario }>();
+  for (const feature of previous) {
+    if (feature.source === "manual" || tombstones.featureKeys.has(specFeatureKey(feature.name))) continue;
+    for (const scenario of feature.scenarios) {
+      if (scenario.source === "manual" || tombstones.scenarioKeys.has(specScenarioKey(feature.name, scenario.reference))) continue;
+      const key = exactScenarioProjectionKey(scenario);
+      if (key && !previousByProjection.has(key)) previousByProjection.set(key, { feature, scenario });
+    }
+  }
+
+  const result = currentFeatures.map((feature) => ({ ...feature, scenarios: [] as SpecScenario[] }));
+  const originalCounts = new Map(result.map((feature, index) => [feature, currentFeatures[index].scenarios.length]));
+  const byName = new Map(result.map((feature) => [specFeatureKey(feature.name), feature]));
+  const matchedScenarios = new Set<SpecScenario>();
+  for (const [featureIndex, currentFeature] of currentFeatures.entries()) {
+    const target = result[featureIndex];
+    for (const scenario of currentFeature.scenarios) {
+      const key = exactScenarioProjectionKey(scenario);
+      const match = currentFeature.source === "manual" || scenario.source === "manual" || !key ? undefined : previousByProjection.get(key);
+      if (!match) {
+        target.scenarios.push(scenario);
+        continue;
+      }
+      const previousName = match.feature.name;
+      const previousReference = match.scenario.reference;
+      if (currentFeature.name === previousName && scenario.reference === previousReference) {
+        target.scenarios.push(scenario);
+        matchedScenarios.add(scenario);
+        continue;
+      }
+      let destination = byName.get(specFeatureKey(previousName));
+      if (!destination) {
+        destination = { ...match.feature, scenarios: [] };
+        result.push(destination);
+        byName.set(specFeatureKey(previousName), destination);
+      }
+      const moved = { ...scenario, reference: previousReference };
+      destination.scenarios.push(moved);
+      matchedScenarios.add(moved);
+    }
+  }
+  for (const feature of result) {
+    const usedReferences = new Set<string>();
+    const ordered = [...feature.scenarios.filter((scenario) => matchedScenarios.has(scenario)), ...feature.scenarios.filter((scenario) => !matchedScenarios.has(scenario))];
+    feature.scenarios = ordered.map((scenario) => {
+      if (matchedScenarios.has(scenario)) {
+        usedReferences.add(scenario.reference);
+        return scenario;
+      }
+      const match = /^([A-Z]+)-(\d+)$/.exec(scenario.reference);
+      const prefix = match?.[1] ?? "HP";
+      let index = Number(match?.[2] ?? 1);
+      let reference = scenario.reference;
+      while (usedReferences.has(reference)) {
+        reference = `${prefix}-${index}`;
+        index += 1;
+      }
+      usedReferences.add(reference);
+      return reference === scenario.reference ? scenario : { ...scenario, reference };
+    });
+  }
+  return result.filter((feature) => feature.source === "manual" || feature.scenarios.length > 0 || originalCounts.get(feature) === 0);
+}
+
+interface Restoration {
+  result: SpecFeature[];
+  byKey: Map<string, SpecFeature>;
+  tombstones: SpecTombstones;
+}
+
+/** 把上一版的一个功能放回这一版。人工下线的功能不放；它名下人工下线的场景一并去掉。 */
+function restoreFeature(state: Restoration, feature: SpecFeature): void {
+  if (state.tombstones.featureKeys.has(specFeatureKey(feature.name))) return;
+  const restored: SpecFeature = { ...feature, scenarios: feature.scenarios.filter((scenario) => !state.tombstones.scenarioKeys.has(specScenarioKey(feature.name, scenario.reference))) };
+  state.byKey.set(specFeatureKey(restored.name), restored);
+  state.result.push(restored);
+}
+
+/** 场景级的不确定消失：功能还在就把场景补回去，功能自己也没了就带着这一个场景把功能带回来。人工下线的场景不补。 */
+function restoreScenario(state: Restoration, previousFeature: SpecFeature, previousScenario: SpecScenario): void {
+  if (state.tombstones.scenarioKeys.has(specScenarioKey(previousFeature.name, previousScenario.reference))) return;
+  const currentFeature = state.byKey.get(specFeatureKey(previousFeature.name));
+  if (!currentFeature) {
+    restoreFeature(state, { ...previousFeature, scenarios: [previousScenario] });
+    return;
+  }
+  if (!currentFeature.scenarios.some((scenario) => scenario.reference === previousScenario.reference)) {
+    currentFeature.scenarios.push(previousScenario);
+  }
+}
+
+/**
+ * 没有移除证据的消失不算数：上一版的功能和场景保留回这一版。
+ * 人工下线的条目（tombstones）除外：它们是被故意去掉的，不是没覆盖到。不挡的话，前面按墓碑去掉的条目会在这里以旧名字回来。
+ */
+export function preserveUncertainDisappearances(
+  previousFeatures: SpecFeature[],
+  currentFeatures: SpecFeature[],
+  changes: SpecChange[],
+  tombstones: SpecTombstones = { featureKeys: new Set<string>(), scenarioKeys: new Set<string>() },
+): SpecFeature[] {
+  const result = currentFeatures.map((feature) => ({ ...feature, scenarios: [...feature.scenarios] }));
+  const state: Restoration = { result, byKey: new Map(result.map((feature) => [specFeatureKey(feature.name), feature])), tombstones };
+  for (const change of changes) {
+    if (change.kind !== "uncertain") continue;
+    const previousFeature = previousFeatures.find((feature) => specFeatureKey(feature.name) === specFeatureKey(change.featureName));
+    if (!previousFeature) continue;
+    const key = specFeatureKey(previousFeature.name);
+    if (change.entityType === "feature" && !state.byKey.has(key)) {
+      restoreFeature(state, previousFeature);
+      continue;
+    }
+    if (change.entityType !== "scenario") continue;
+    restoreScenario(state, previousFeature, change.before as SpecScenario);
+  }
+  return result;
+}
+
+export function buildRemovalProofs(
+  previousFeatures: SpecFeature[],
+  currentFeatures: SpecFeature[],
+  options: { changeFiles: readonly { path: string; status: string; patch: string }[]; fullAnalysis: boolean; coverageComplete: boolean },
+): Map<string, RemovalProof> {
+  const removedPaths = new Set(options.changeFiles.filter((file) => file.status === "removed").map((file) => file.path));
+  const proofs = new Map<string, RemovalProof>();
+  if (!options.fullAnalysis || !options.coverageComplete || removedPaths.size === 0) return proofs;
+  for (const feature of previousFeatures) {
+    const current = currentFeatures.find((candidate) => specFeatureKey(candidate.name) === specFeatureKey(feature.name));
+    if (!current && feature.scenarios.every((scenario) => scenario.evidence.length === 1 && removedPaths.has(scenario.evidence[0].path))) {
+      proofs.set(specFeatureKey(feature.name), {
+        originalImplementationChecked: true,
+        alternativePathsChecked: true,
+        behaviorBoundaryVerified: true,
+        evidence: feature.scenarios.flatMap((scenario) => scenario.evidence),
+        evidenceValid: true,
+      });
+    }
+    for (const scenario of feature.scenarios) {
+      if (current?.scenarios.some((candidate) => candidate.reference === scenario.reference)) continue;
+      if (scenario.evidence.length !== 1 || !removedPaths.has(scenario.evidence[0].path)) continue;
+      proofs.set(specScenarioKey(feature.name, scenario.reference), {
+        originalImplementationChecked: true,
+        alternativePathsChecked: true,
+        behaviorBoundaryVerified: true,
+        evidence: scenario.evidence,
+        evidenceValid: true,
+      });
+    }
+  }
+  return proofs;
 }
 
 export function mergeSpecSources(generated: SpecFeature[], manual: SpecFeature[], tombstones: SpecTombstones = { featureKeys: new Set<string>(), scenarioKeys: new Set<string>() }, carried: SpecFeature[] = []) {
