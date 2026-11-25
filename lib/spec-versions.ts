@@ -10,12 +10,15 @@ import {
   changeIdentityColumns,
   featureIdentityColumns,
   identityInputOf,
+  parseScenarioIdentityKey,
   planOf,
+  planVersionIdentities,
   scenarioIdentityColumn,
+  type IdentitySources,
   type VersionIdentityContext,
   type VersionIdentityPlan,
 } from "./spec-identity";
-import { planVersionIdentitiesForWrite, recordIdentityPlan } from "./spec-identity-store";
+import { loadIdentitySources, recordIdentityPlan, resultRows } from "./spec-identity-store";
 import { buildRemovalProofs, dedupeExactScenarioProjections, diffSpec, featureScenarioPairMatch, featureVariantSimilar, mergeSpecSources, preserveExactScenarioIdentities, preserveUnchangedEvidence, preserveUncertainDisappearances, scenarioBehaviorEqual, specFeatureKey, specScenarioKey, unionScenarioOriginKeys, type PatchHunk, type SpecChange, type SpecFeature, type SpecScenario, type SpecTombstones } from "./spec-diff";
 import { classifySpecHighlight } from "./spec-highlights";
 import { detectVisibilityConflicts } from "./spec-consistency";
@@ -105,17 +108,79 @@ async function loadManualSpec(connection: PoolConnection, productId: number) {
   );
 }
 
-async function loadManualTombstones(connection: PoolConnection, productId: number): Promise<SpecTombstones> {
-  const [featureResult, scenarioResult] = await Promise.all([
+/**
+ * 人工下线留下的墓碑，照库里的样子：按名称键记的两份，和当时那些行的身份。
+ * 身份层之前下线的条目没有身份，那两部分就是空的，只按名称键查。
+ */
+export interface ManualTombstones {
+  featureKeys: ReadonlySet<string>;
+  scenarioKeys: ReadonlySet<string>;
+  /** 被人工下线的功能当时的身份键。 */
+  featureIdentities: readonly string[];
+  /** 被人工下线的场景当时的身份键。 */
+  scenarioIdentities: readonly string[];
+}
+
+async function loadManualTombstones(connection: PoolConnection, productId: number): Promise<ManualTombstones> {
+  const [featureResult, scenarioResult, featureIdentityResult, scenarioIdentityResult] = await Promise.all([
     connection.execute("SELECT name FROM features WHERE product_id = ? AND active = 0 AND source = 'manual'", [productId]),
     connection.execute("SELECT f.name AS featureName, s.reference FROM scenarios s JOIN features f ON f.id = s.feature_id WHERE f.product_id = ? AND s.active = 0 AND s.source = 'manual'", [productId]),
+    connection.execute("SELECT identity_key FROM features WHERE product_id = ? AND active = 0 AND source = 'manual' AND identity_key IS NOT NULL", [productId]),
+    connection.execute("SELECT s.identity_key FROM scenarios s JOIN features f ON f.id = s.feature_id WHERE f.product_id = ? AND s.active = 0 AND s.source = 'manual' AND s.identity_key IS NOT NULL", [productId]),
   ]);
   const featureRows = featureResult[0] as Array<{ name: string }>;
   const scenarioRows = scenarioResult[0] as Array<{ featureName: string; reference: string }>;
   return {
     featureKeys: new Set(featureRows.map((feature) => specFeatureKey(feature.name))),
     scenarioKeys: new Set(scenarioRows.map((scenario) => specScenarioKey(scenario.featureName, scenario.reference))),
+    featureIdentities: identityKeysOf(featureIdentityResult),
+    scenarioIdentities: identityKeysOf(scenarioIdentityResult),
   };
+}
+
+/** 查询结果里的一列身份键。没有身份字符串的行跳过，所以替身回 [{}] 也不要紧。 */
+function identityKeysOf(result: unknown): string[] {
+  return resultRows(result).flatMap((row) => (typeof row.identity_key === "string" ? [row.identity_key] : []));
+}
+
+/** 加宽墓碑要用的“名称键 → 身份”：上一版里有的，和登记表里有的。身份层关着时是空的。 */
+function tombstoneNames(sources: IdentitySources | null): Array<readonly [string, string]> {
+  if (sources === null) return [];
+  return [...sources.previous.features, ...sources.registry.features];
+}
+
+/**
+ * 把按身份记的墓碑翻译成名称键：凡是名字解析到“被人工下线的身份”的名称键，都加进墓碑。
+ * 功能改过名时，下线时记的是旧名字，模型换一个新名字输出同一个功能，靠这一步照样拦得住。
+ *
+ * 只加不减：原来按名称键拦下的，不因为名字现在解析到别处就放行。
+ * 检查墓碑的地方因此不用改，还是按名称键查。
+ *
+ * @param names 每个名称键现在解析到哪个身份，来自上一版的身份和登记表
+ */
+export function widenTombstonesByIdentity(loaded: ManualTombstones, names: Iterable<readonly [string, string]>): SpecTombstones {
+  const namesOfIdentity = namesByIdentity(names);
+  const featureKeys = new Set(loaded.featureKeys);
+  for (const identityKey of loaded.featureIdentities) for (const nameKey of namesOfIdentity.get(identityKey) ?? []) featureKeys.add(nameKey);
+  const scenarioKeys = new Set(loaded.scenarioKeys);
+  addScenarioNames(scenarioKeys, loaded.scenarioIdentities, namesOfIdentity);
+  return { featureKeys, scenarioKeys };
+}
+
+/** 身份 → 解析到它的全部名称键。改过名的功能在这里有两个名字。 */
+function namesByIdentity(names: Iterable<readonly [string, string]>): Map<string, string[]> {
+  const byIdentity = new Map<string, string[]>();
+  for (const [nameKey, identityKey] of names) byIdentity.set(identityKey, [...(byIdentity.get(identityKey) ?? []), nameKey]);
+  return byIdentity;
+}
+
+/** 被人工下线的场景：它所属功能的每一个名字，配上它的编号，都进场景墓碑。读不出身份键的跳过。 */
+function addScenarioNames(scenarioKeys: Set<string>, scenarioIdentities: readonly string[], namesOfIdentity: ReadonlyMap<string, readonly string[]>): void {
+  for (const identityKey of scenarioIdentities) {
+    const scenario = parseScenarioIdentityKey(identityKey);
+    if (scenario === null) continue;
+    for (const nameKey of namesOfIdentity.get(scenario.featureIdentityKey) ?? []) scenarioKeys.add(specScenarioKey(nameKey, scenario.reference));
+  }
 }
 
 async function loadVersionFeatures(connection: PoolConnection, versionId: number) {
@@ -353,7 +418,13 @@ export function foldVariantFeatures(previousFeatures: SpecFeature[], features: S
 }
 
 export async function insertSpecVersion(connection: PoolConnection, run: RunContext, result: AnalysisResult, options: { affectedKeys?: ReadonlySet<string>; behavioralChangePaths?: ReadonlySet<string>; changedHunksByPath?: ReadonlyMap<string, readonly PatchHunk[]>; base?: "latest" | "beforeRun"; baseVersionId?: number | null; changeFiles?: readonly { path: string; status: string; patch: string }[]; fullAnalysis?: boolean; coverageComplete?: boolean } = {}): Promise<{ specVersionId: number; specChanges: ReleaseChangeFact[]; baseline?: boolean; features: ReturnType<typeof mergeSpecSources>; collapse: SpecVersionCollapse | null; featureCollapses: FeatureCollapse[]; misplacedScenarios: MisplacedScenario[]; identityHijacksDropped: number; featureFolds: FeatureFold[]; scenarioIdByLocalKey: Map<string, number>; identities?: VersionIdentityPlan | null }> {
-  const [previous, manual, tombstones] = await Promise.all([loadPreviousSpec(connection, run, options.base, options.baseVersionId), loadManualSpec(connection, run.productId), loadManualTombstones(connection, run.productId)]);
+  const execute: Execute = (statement, parameters) => connection.execute(statement, parameters);
+  const [previous, manual, loadedTombstones] = await Promise.all([loadPreviousSpec(connection, run, options.base, options.baseVersionId), loadManualSpec(connection, run.productId), loadManualTombstones(connection, run.productId)]);
+  // 身份要先读好：墓碑要按身份加宽，合并时就得知道每个名字对应哪个身份。后面给这一版算身份，用的也是这两份。
+  // 身份层关着时读出来是 null，墓碑只按名称键查。
+  const baseVersionId = previous?.id ?? null;
+  const identitySources = await loadIdentitySources(run.productId, baseVersionId, execute);
+  const tombstones = widenTombstonesByIdentity(loadedTombstones, tombstoneNames(identitySources));
   // M9 增量模式：受影响集之外的 generated 条目原样沿用上一版（三分合并：carried 种子 < AI < manual）。
   const affectedKeys = options.affectedKeys;
   const carried = affectedKeys && previous
@@ -424,10 +495,10 @@ export async function insertSpecVersion(connection: PoolConnection, run: RunCont
   const featureCollapses = detectFeatureCollapses(previousCanonical, activatedFeatures);
   const misplacedScenarios = detectMisplacedScenarios(previousCanonical, activatedFeatures);
   // 身份先算后写。算不出来（同一版里两个条目落到同一个身份、上一版和登记表说法不一）就在这里失败，
-  // 这时还一个字节都没写。身份层关着时不算，身份列留空，比对退回按名称键。
-  // 身份层关着时算出来是 null：身份列留空，不写登记表，比对退回按名称键。
-  const baseVersionId = previous?.id ?? null;
-  const identity = await planVersionIdentitiesForWrite(run.productId, baseVersionId, activatedFeatures.map(identityInputOf), (statement, parameters) => connection.execute(statement, parameters));
+  // 这时还一个字节都没写。身份层关着时是 null：身份列留空，不写登记表，比对退回按名称键。
+  const identity = identitySources
+    ? { ...identitySources, plan: planVersionIdentities({ features: activatedFeatures.map(identityInputOf), previous: identitySources.previous, registry: identitySources.registry }) }
+    : null;
   const [versionResult] = await connection.execute(
     "INSERT INTO spec_versions (product_id, repository_id, analysis_run_id, base_spec_version_id, sha, output_language) VALUES (?, ?, ?, ?, ?, ?)",
     [run.productId, run.repositoryId, run.id, baseVersionId, run.afterSha, run.outputLanguage === "en" ? "en" : "zh-CN"],
@@ -435,7 +506,7 @@ export async function insertSpecVersion(connection: PoolConnection, run: RunCont
   const versionId = Number((versionResult as { insertId: number }).insertId);
   const scenarioIdByLocalKey = await insertFeatures(connection, versionId, activatedFeatures, planOf(identity));
   const specChanges = await insertChanges(connection, versionId, baseVersionId, changes, identity);
-  if (identity) await recordIdentityPlan(run.productId, versionId, identity.plan, (statement, parameters) => connection.execute(statement, parameters));
+  if (identity) await recordIdentityPlan(run.productId, versionId, identity.plan, execute);
   // 合并后的完整 spec 一并返回：M9 影子对比必须以 carry-forward 之后的规格为对象。
   // identities 是这一版的身份计划：工作台投影要用同一份身份，不能自己再按名称算一遍。
   return { specVersionId: versionId, specChanges, baseline: previous === null, features: activatedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds, scenarioIdByLocalKey, identities: planOf(identity) };

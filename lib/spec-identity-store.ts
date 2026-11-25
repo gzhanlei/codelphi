@@ -9,9 +9,9 @@ import {
   restoredScenarios,
   type IdentityFeatureInput,
   type IdentityRegistry,
+  type IdentitySources,
   type MutableIdentityMaps,
   type VersionIdentities,
-  type VersionIdentityContext,
   type VersionIdentityPlan,
 } from "./spec-identity";
 
@@ -105,22 +105,16 @@ export async function loadVersionIdentities(versionId: number, execute: Execute)
 }
 
 /**
- * 发布一个版本时算身份。首版没有上一版，传 null。
- * 身份层开关（SPEC_IDENTITY_LAYER）关着时返回 null：调用方照常写版本，身份列留空。
- * 算不出来的话这里直接抛错（SpecIdentityError），调用方要在这之前什么都还没写。
+ * 给一个版本算身份之前要对照的两份身份：产品级的登记表，和上一版的身份（首版没有上一版，传 null）。
+ * 身份层开关（SPEC_IDENTITY_LAYER）关着时返回 null，什么都不读：调用方照常写版本，身份列留空。
  */
-export async function planVersionIdentitiesForWrite(
-  productId: number,
-  baseVersionId: number | null,
-  features: readonly IdentityFeatureInput[],
-  execute: Execute,
-): Promise<VersionIdentityContext | null> {
+export async function loadIdentitySources(productId: number, baseVersionId: number | null, execute: Execute): Promise<IdentitySources | null> {
   if (!specIdentityLayerEnabled()) return null;
   const [registry, previous] = await Promise.all([
     loadIdentityRegistry(productId, execute),
     baseVersionId === null ? Promise.resolve(emptyIdentityMaps()) : loadVersionIdentities(baseVersionId, execute),
   ]);
-  return { plan: planVersionIdentities({ features, previous, registry }), previous, registry };
+  return { previous, registry };
 }
 
 export interface IdentityAssignment {

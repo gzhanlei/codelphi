@@ -17,12 +17,14 @@ import { specFeatureKey } from "./spec-diff";
 
 export type SpecIdentityErrorCode = "identity_input_invalid" | "identity_registry_conflict" | "identity_conflict";
 
-/** 发布一个版本时算身份得到的全部东西：算出来的计划，和它依据的上一版身份与登记表。 */
-export interface VersionIdentityContext {
-  plan: VersionIdentityPlan;
+/** 给一个版本算身份时要对照的两份身份：上一版的身份，和产品级的登记表。 */
+export interface IdentitySources {
   previous: VersionIdentities;
   registry: IdentityRegistry;
 }
+
+/** 发布一个版本时算身份得到的全部东西：算出来的计划，和它依据的两份身份。 */
+export type VersionIdentityContext = IdentitySources & { plan: VersionIdentityPlan };
 
 export class SpecIdentityError extends Error {
   constructor(public readonly code: SpecIdentityErrorCode, message: string) {
@@ -105,6 +107,18 @@ export interface VersionIdentityPlan {
  */
 export function scenarioIdentityKey(featureIdentityKey: string, reference: string): string {
   return JSON.stringify([featureIdentityKey, reference]);
+}
+
+/** 从场景身份键里读回功能身份和编号。读不回来的（不是这里的编码）返回 null，不猜。 */
+export function parseScenarioIdentityKey(identityKey: string): { featureIdentityKey: string; reference: string } | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(identityKey);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed) || parsed.length !== 2 || typeof parsed[0] !== "string" || typeof parsed[1] !== "string") return null;
+  return { featureIdentityKey: parsed[0], reference: parsed[1] };
 }
 
 /** 可写的空映射。调用方可以往里填，再把它当作只读的上一版或登记表传进来。 */

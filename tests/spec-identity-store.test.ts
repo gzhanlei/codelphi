@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Execute } from "../lib/db";
 import { planVersionIdentities, restoredFeatures, restoredScenarios, emptyIdentityMaps, foldRegistry, toVersionIdentities, type VersionIdentities } from "../lib/spec-identity";
-import { ASSIGN_CHUNK_SIZE, assignVersionIdentities, bulkAssignSql, loadIdentityRegistry, loadVersionIdentityMaps, loadVersionIdentities, planVersionIdentitiesForWrite, recordIdentityPlan } from "../lib/spec-identity-store";
+import { ASSIGN_CHUNK_SIZE, assignVersionIdentities, bulkAssignSql, loadIdentityRegistry, loadIdentitySources, loadVersionIdentityMaps, loadVersionIdentities, recordIdentityPlan } from "../lib/spec-identity-store";
 
 type Call = [string, Array<string | number | null>];
 
@@ -263,27 +263,26 @@ describe("assignVersionIdentities", () => {
   });
 });
 
-describe("planVersionIdentitiesForWrite", () => {
-  it("plans against the registries and the base version, and hands both back with the plan", async () => {
+describe("loadIdentitySources", () => {
+  it("loads the registries and the base version's identities, and hands both back", async () => {
     const db = fakeDb((sql) => {
       if (sql.includes("FROM feature_identities")) return [[{ nameKey: "sign-in", identity_key: "sign-in" }]];
       if (sql.includes("identity_key FROM spec_features WHERE spec_version_id")) return [[{ versionId: 11, nameKey: "authentication", identity_key: "sign-in" }]];
       return [{}];
     });
 
-    const context = await planVersionIdentitiesForWrite(4, 11, [{ name: "Authentication", parentKey: null, references: [] }], db.execute);
+    const sources = await loadIdentitySources(4, 11, db.execute);
 
-    expect(context?.plan.features.get("authentication")).toMatchObject({ identityKey: "sign-in", origin: "continued" });
-    expect(context?.registry.features.get("sign-in")).toBe("sign-in");
-    expect(context?.previous.features.get("authentication")).toBe("sign-in");
+    expect(sources?.registry.features.get("sign-in")).toBe("sign-in");
+    expect(sources?.previous.features.get("authentication")).toBe("sign-in");
     // 登记表两条、上一版两条，都带着各自的键。
     expect(db.calls().map(([, parameters]) => parameters)).toEqual([[4], [4], [11], [11]]);
   });
 
   it("does not read a base version when the publication is the first version", async () => {
     const db = fakeDb();
-    const context = await planVersionIdentitiesForWrite(4, null, [], db.execute);
-    expect(context?.previous).toEqual({ features: new Map(), scenarios: new Map() });
+    const sources = await loadIdentitySources(4, null, db.execute);
+    expect(sources?.previous).toEqual({ features: new Map(), scenarios: new Map() });
     expect(db.calls().map(([, parameters]) => parameters)).toEqual([[4], [4]]);
   });
 
@@ -291,50 +290,10 @@ describe("planVersionIdentitiesForWrite", () => {
     vi.stubEnv("SPEC_IDENTITY_LAYER", "false");
     try {
       const db = fakeDb();
-      expect(await planVersionIdentitiesForWrite(4, 11, [], db.execute)).toBeNull();
+      expect(await loadIdentitySources(4, 11, db.execute)).toBeNull();
       expect(db.execute).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllEnvs();
     }
-  });
-
-  it("passes a conflict on instead of swallowing it", async () => {
-    const db = fakeDb((sql) => {
-      if (sql.includes("FROM feature_identities")) return [[{ nameKey: "authentication", identity_key: "authentication" }]];
-      if (sql.includes("identity_key FROM spec_features WHERE spec_version_id")) return [[{ versionId: 11, nameKey: "authentication", identity_key: "sign-in" }]];
-      return [{}];
-    });
-
-    await expect(planVersionIdentitiesForWrite(4, 11, [{ name: "Authentication", parentKey: null, references: [] }], db.execute)).rejects.toMatchObject({ code: "identity_registry_conflict" });
-  });
-});
-
-describe("loadVersionIdentityMaps", () => {
-  it("reads several versions in two queries and hands each version back its own identities", async () => {
-    const db = fakeDb((sql) => {
-      if (sql.includes("identity_key FROM spec_features WHERE spec_version_id")) {
-        return [[{ versionId: 10, nameKey: "a", identity_key: "sign-in" }, { versionId: 12, nameKey: "a", identity_key: "sign-in" }]];
-      }
-      if (sql.includes("FROM spec_scenarios ss JOIN")) {
-        return [[{ versionId: 10, featureIdentityKey: "sign-in", reference: "HP-1", identity_key: '["sign-in","HP-1"]' }]];
-      }
-      return [{}];
-    });
-
-    const maps = await loadVersionIdentityMaps(db.execute, [10, 11, 12]);
-
-    expect([...maps.keys()]).toEqual([10, 11, 12]);
-    expect(maps.get(10)?.scenarios.get("sign-in")).toEqual(new Map([["HP-1", '["sign-in","HP-1"]']]));
-    // 第 12 版有功能身份但没有场景身份；第 11 版是身份层之前写的，什么都没有。
-    expect([...(maps.get(12)?.features ?? [])]).toEqual([["a", "sign-in"]]);
-    expect(maps.get(12)?.scenarios.size).toBe(0);
-    expect(maps.get(11)).toEqual({ features: new Map(), scenarios: new Map() });
-    expect(db.calls().map(([, parameters]) => parameters)).toEqual([[10, 11, 12], [10, 11, 12]]);
-  });
-
-  it("asks nothing when there is no version to read", async () => {
-    const db = fakeDb();
-    expect(await loadVersionIdentityMaps(db.execute, [])).toEqual(new Map());
-    expect(db.execute).not.toHaveBeenCalled();
   });
 });

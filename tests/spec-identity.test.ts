@@ -7,6 +7,7 @@ import {
   featureIdentityColumn,
   featureIdentityColumns,
   foldRegistry,
+  parseScenarioIdentityKey,
   planOf,
   planVersionIdentities,
   resolveChangeIdentity,
@@ -53,6 +54,18 @@ describe("scenarioIdentityKey", () => {
     expect(scenarioIdentityKey("统一登录", "HP-1")).toBe('["统一登录","HP-1"]');
     // 直接拼接会撞车的两对，编码之后仍然分得开。
     expect(scenarioIdentityKey("a::HP-1", "EC-2")).not.toBe(scenarioIdentityKey("a", "HP-1::EC-2"));
+  });
+
+  it("reads the feature identity and the reference back out of a scenario identity key", () => {
+    expect(parseScenarioIdentityKey(scenarioIdentityKey("统一登录", "HP-1"))).toEqual({ featureIdentityKey: "统一登录", reference: "HP-1" });
+    // 分隔符落在名字或编号里，读回来还是原来那两段。
+    expect(parseScenarioIdentityKey(scenarioIdentityKey("a::HP-1", "EC-2"))).toEqual({ featureIdentityKey: "a::HP-1", reference: "EC-2" });
+  });
+
+  it("returns null for anything that is not such a key, instead of guessing", () => {
+    for (const bad of ["", "HP-1", "not json", "[]", '["a"]', '["a","HP-1","extra"]', '[1,"HP-1"]', '["a",1]', '{"featureIdentityKey":"a","reference":"HP-1"}', "null"]) {
+      expect(parseScenarioIdentityKey(bad), bad).toBeNull();
+    }
   });
 });
 

@@ -3,7 +3,9 @@ import type { PoolConnection } from "mysql2/promise";
 import type { AnalysisResult } from "../lib/ai";
 import type { RunContext } from "../lib/analysis";
 import type { MergeResult } from "../lib/extraction-merge";
-import { detectFeatureCollapses, detectMisplacedScenarios, detectSpecCollapse, featureParentKey, foldVariantFeatures, insertSpecVersion, loadBaseVersionMap, loadLatestSpecVersionLanguage, loadPreviousFeatureNames } from "../lib/spec-versions";
+import { detectFeatureCollapses, detectMisplacedScenarios, detectSpecCollapse, featureParentKey, foldVariantFeatures, insertSpecVersion, loadBaseVersionMap, loadLatestSpecVersionLanguage, loadPreviousFeatureNames, widenTombstonesByIdentity } from "../lib/spec-versions";
+import { scenarioIdentityKey } from "../lib/spec-identity";
+import { specScenarioKey } from "../lib/spec-diff";
 const run: RunContext = { id: 8, repositoryId: 3, productId: 4, owner: "gzhanlei", name: "radar", beforeSha: "a", afterSha: "b", connectionId: null, provider: "github", organizationId: 1, productSlug: "radar", productName: "Radar" };
 const scenario = { reference: "HP-1", context: "Visitor", action: "Signs in", outcome: "Dashboard", category: "happy" as const, evidence: [] };
 const previousScenario = (reference: string, path: string) => ({ featureId: 1, reference, context: "User", action: "Uses links", outcome: "Links work", category: "happy", source: "generated", evidence: JSON.stringify([{ path, startLine: 1 }]) });
@@ -651,14 +653,28 @@ describe("identity layer in the write path", () => {
   };
 
   /** 在既有替身上补身份相关语句的回数据。 */
-  function identityDb(input: { previousFeatures?: typeof renamedPast.previousFeatures; previousScenarios?: typeof renamedPast.previousScenarios; knownFeatures?: string[]; specScenarios?: Array<Record<string, unknown>> } = {}) {
+  function identityDb(input: {
+    previousFeatures?: typeof renamedPast.previousFeatures;
+    previousScenarios?: typeof renamedPast.previousScenarios;
+    /** 登记表里认得的名称键。写成字符串就是“名称键即身份”；写成一对就是改过名的。 */
+    registry?: Array<string | readonly [string, string]>;
+    /** 登记表里“名称键即身份”的那些功能。 */
+    knownFeatures?: string[];
+    /** 被人工下线的功能当时拥有的身份。 */
+    switchedOffFeatureIdentities?: string[];
+    /** 被人工下线的场景当时的身份键。 */
+    switchedOffScenarioIdentities?: string[];
+    specScenarios?: Array<Record<string, unknown>>;
+  } = {}) {
     const db = connection([{ id: 11 }], false, {}, input.specScenarios);
     const fallback = mockOf(db).getMockImplementation() as (sql: string, parameters: unknown[]) => Promise<unknown>;
     mockOf(db).mockImplementation(async (sql: string, parameters: unknown[] = []) => {
       // 身份查询和规格读取都落在 spec_features 上，靠“查的是 identity_key”把它们分开。
       if (sql.includes("identity_key FROM spec_features WHERE spec_version_id")) return [input.previousFeatures ?? []];
       if (sql.includes("FROM spec_scenarios ss JOIN")) return [input.previousScenarios ?? []];
-      if (sql.includes("FROM feature_identities")) return [(input.knownFeatures ?? []).map((identityKey) => ({ nameKey: identityKey, identity_key: identityKey }))];
+      if (sql.includes("SELECT identity_key FROM features WHERE")) return [(input.switchedOffFeatureIdentities ?? []).map((identityKey) => ({ identity_key: identityKey }))];
+      if (sql.includes("SELECT s.identity_key FROM scenarios")) return [(input.switchedOffScenarioIdentities ?? []).map((identityKey) => ({ identity_key: identityKey }))];
+      if (sql.includes("FROM feature_identities")) return [(input.registry ?? input.knownFeatures ?? []).map((entry) => (typeof entry === "string" ? { nameKey: entry, identity_key: entry } : { nameKey: entry[0], identity_key: entry[1] }))];
       if (sql.includes("FROM scenario_identities")) return [[]];
       return fallback(sql, parameters);
     });
@@ -783,6 +799,53 @@ describe("identity layer in the write path", () => {
     expect(writesOf(db)).toEqual([]);
   });
 
+  it("blocks by identity a renamed feature whose identity a person switched off, under any name it goes by", async () => {
+    // 用户下线过一个人工功能，它当时的身份是 f1。模型这次换了个名字“乙”输出同一个功能：
+    // 按名称键查墓碑查不到，按身份查得到。
+    const renamedOutput = { ...withLegacy, features: [...withLegacy.features, { name: "乙", summary: "换个名字的同一个功能", scenarios: [] }] };
+    const db = identityDb({ ...renamedPast, registry: [["乙", "f1"]], switchedOffFeatureIdentities: ["f1"] });
+
+    const { features } = await insertSpecVersion(db, run, renamedOutput);
+
+    expect(features.map((feature) => feature.name)).not.toContain("乙");
+  });
+
+  it("blocks by identity a scenario of a renamed feature that a person switched off, and keeps the feature's other scenarios", async () => {
+    // 用户只下线过那个功能的 HP-1。模型换个名字重新输出这个功能时，HP-1 不该回来，HP-2 照常保留。
+    const renamedOutput = {
+      ...withLegacy,
+      features: [...withLegacy.features, { name: "乙", summary: "换个名字的同一个功能", scenarios: [{ ...scenario, reference: "HP-1" }, { ...scenario, reference: "HP-2" }] }],
+    };
+    const db = identityDb({ ...renamedPast, registry: [["乙", "f1"]], switchedOffScenarioIdentities: [scenarioIdentityKey("f1", "HP-1")] });
+
+    const { features } = await insertSpecVersion(db, run, renamedOutput);
+
+    expect(features.find((feature) => feature.name === "乙")?.scenarios.map((item) => item.reference)).toEqual(["HP-2"]);
+  });
+
+  it("does not block it when the identity layer is switched off, because only names are checked then", async () => {
+    vi.stubEnv("SPEC_IDENTITY_LAYER", "false");
+    try {
+      const renamedOutput = { ...withLegacy, features: [...withLegacy.features, { name: "乙", summary: "换个名字的同一个功能", scenarios: [] }] };
+      const db = identityDb({ ...renamedPast, registry: [["乙", "f1"]], switchedOffFeatureIdentities: ["f1"] });
+
+      const { features } = await insertSpecVersion(db, run, renamedOutput);
+
+      expect(features.map((feature) => feature.name)).toContain("乙");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("reads which identities were switched off by hand, next to the names it already read", async () => {
+    const db = identityDb({ ...renamedPast, registry: [["乙", "f1"]], switchedOffFeatureIdentities: ["f1"] });
+    await insertSpecVersion(db, run, withLegacy);
+
+    const identityQueries = mockOf(db).mock.calls.filter(([sql]) => String(sql).includes("identity_key IS NOT NULL"));
+    // 人工下线的功能一条、人工下线的场景一条，都只读。
+    expect(identityQueries.map(([sql]) => [String(sql).includes("FROM features WHERE") ? "features" : "scenarios", String(sql).startsWith("SELECT")])).toEqual([["features", true], ["scenarios", true]]);
+  });
+
   it("returns the plan so the workbench rows can carry the same identities", async () => {
     const db = identityDb(renamedPast);
     const { identities, baseline } = await insertSpecVersion(db, run, withLegacy);
@@ -792,5 +855,42 @@ describe("identity layer in the write path", () => {
     expect(identities?.features.get("authentication")).toMatchObject({ identityKey: "sign-in", origin: "continued" });
     expect(identities?.features.get("authentication")?.scenarios.get("HP-1")?.identityKey).toBe('["sign-in","HP-1"]');
     expect(identities?.features.get("new feature")).toMatchObject({ identityKey: "new feature", origin: "minted" });
+  });
+});
+
+describe("墓碑按身份加宽 (widenTombstonesByIdentity)", () => {
+  const loaded = {
+    featureKeys: new Set(["甲"]),
+    scenarioKeys: new Set([specScenarioKey("甲", "HP-1")]),
+    featureIdentities: ["f1"],
+    scenarioIdentities: [scenarioIdentityKey("f1", "HP-1"), "不是我们的编码"],
+  };
+  /** 每个名称键现在解析到哪个身份：甲和乙是同一个功能（改过名），丙是另一个。 */
+  const names: Array<readonly [string, string]> = [["甲", "f1"], ["乙", "f1"], ["丙", "f2"]];
+
+  it("adds every name that resolves to a switched-off identity, for features and for scenarios", () => {
+    expect(widenTombstonesByIdentity(loaded, names)).toEqual({
+      featureKeys: new Set(["甲", "乙"]),
+      scenarioKeys: new Set([specScenarioKey("甲", "HP-1"), specScenarioKey("乙", "HP-1")]),
+    });
+  });
+
+  it("does not reach a different feature that merely shares a name prefix or a reference", () => {
+    const widened = widenTombstonesByIdentity(loaded, names);
+    expect(widened.featureKeys.has("丙")).toBe(false);
+    expect(widened.scenarioKeys.has(specScenarioKey("丙", "HP-1"))).toBe(false);
+    expect(widened.scenarioKeys.has(specScenarioKey("乙", "HP-2"))).toBe(false);
+  });
+
+  it("returns the name keys as they are when nothing was recorded by identity", () => {
+    const plain = { featureKeys: new Set(["甲"]), scenarioKeys: new Set<string>(), featureIdentities: [], scenarioIdentities: [] };
+    expect(widenTombstonesByIdentity(plain, names)).toEqual({ featureKeys: new Set(["甲"]), scenarioKeys: new Set() });
+  });
+
+  it("never narrows: a name key that was blocked stays blocked even if it now resolves elsewhere", () => {
+    const widened = widenTombstonesByIdentity(loaded, [["甲", "f9"]]);
+    expect(widened.featureKeys.has("甲")).toBe(true);
+    expect(widened.scenarioKeys.has(specScenarioKey("甲", "HP-1"))).toBe(true);
+    expect(widened.featureKeys.has("乙")).toBe(false);
   });
 });
