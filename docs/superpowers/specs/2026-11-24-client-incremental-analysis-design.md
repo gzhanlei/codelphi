@@ -392,7 +392,8 @@ git -c core.quotePath=false diff --no-color --no-ext-diff --no-textconv --find-r
 | 共享模块已有确定性完整消费者索引 | `expanded_closed`；direct 与全部扩展消费者都进入 serverRequired 并重分析 |
 | `shared/`、`common/`、公共 utils、barrel/public API、全局类型定义 | 若规则不能证明封闭消费集，则 `global_unbounded` |
 | middleware、路由注册、权限策略、依赖注入或 registry | `global_unbounded`；默认要求 full resync |
-| SQL schema、migration、数据库权限或 RLS | `global_unbounded`，不得按普通文件 carry |
+| 数据库迁移脚本：`migrations/`、`migration/` 目录下的文件，以及所有 `.sql` 文件 | `no_detected_behavior_change`，原因码 `schema_artifact`。迁移脚本已移出分析目标（2026-11-25，见下文与 §23），不需要补丁证据；纯重命名仍按上面的纯重命名一行处理，带上重锚信息 |
+| ORM 模型与 schema 定义：`models/`、`*.entity.ts`、`*.prisma`、`*.graphql`，以及数据库权限或 RLS | `global_unbounded`，不得按普通文件 carry |
 | 环境变量、运行时配置、功能开关 | `global_unbounded` 或 `unknown`，不得归入无行为 |
 | 依赖清单、lockfile、构建产物版本变化 | `global_unbounded`；不能按文档处理 |
 | CI/部署配置 | 至少 `no_detected_behavior_change`；影响运行入口、环境或权限时 `global_unbounded` |
@@ -404,7 +405,18 @@ git -c core.quotePath=false diff --no-color --no-ext-diff --no-textconv --find-r
 | 二进制内容 | 命中已知非行为资产规则（`impact-v1`：文档目录或常见图片、音视频、字体扩展名）时为 `no_detected_behavior_change`，原因 `binary_asset`；否则 `unknown` |
 | 版本控制与编辑器配置（`.gitattributes`、`.gitignore`、`.editorconfig` 等） | `no_detected_behavior_change` |
 
-一个文件同时命中多行时取最保守的一档：`global_unbounded` > `unknown` > `expanded_closed` 与 `direct` > `no_detected_behavior_change` > `no_behavior`。
+一个文件同时命中多行时取最保守的一档：`global_unbounded` > `unknown` > `expanded_closed` 与 `direct` > `no_detected_behavior_change` > `no_behavior`。迁移脚本那一行也遵守这条：路径同时落在别的全局规则里时（例如 `config/migrations/001.sql`）取全局规则。
+
+**迁移脚本已移出分析目标（2026-11-25 产品负责人决定）。** 原因来自现网账本：抽查 30 条引用迁移脚本的场景，真正从建表语句分析出行为描述的只有 4 条，另有 4 条转述的是迁移文件头部的开发者注释；11 条是一次性的迁移事件（“迁移 027 回填了…”），11 条是把运行时行为错挂到了迁移文件上。迁移文件对行为描述的贡献小、噪声大，却是全量重同步的头号来源（§19.4）。决定之后，托管分析与客户端分类器用同一个判定：
+
+- 选材不选它，窗口 diff 的强制装入也跳过它。
+- 提示词的“文件变化”一节不带它的补丁；证据允许集不含它，模型仍然引用它的场景按不可溯源剔除。
+- 受影响功能反查、必选路径和 PR 预演都不按它查。改了迁移脚本的功能不因此被重新分析。
+- 覆盖率口径不算它：实现面分母、装配面分子、diff 口径、库存清单的入选面都不含它，否则每次带迁移的提交都会显示成有遗漏。
+- 只改迁移脚本的提交走零变更通道：不调模型，上一版规格原样沿用。
+- 现有账本里引用迁移脚本的锚点留作历史，不批量清理；发布页照实列出迁移文件，只是不再标为行为变更。
+
+ORM 模型代码与 schema 定义文件不在此列，仍按上一行的全局规则处理。
 
 表中“公共 utils”“barrel”“路由注册”是类别描述，不是可执行规则。`impact-v1` 必须把它们落成明确的路径模式清单，两端跑同一份实现；没有落成模式的类别一律按 `global_unbounded`。全局规则针对的是装配点，而不是被装配的实现：路由处理函数、中间件函数体本身是普通实现文件，走 `direct`；把它们挂接起来的注册与装配文件才是 `global_unbounded`。
 
@@ -1041,7 +1053,7 @@ comparability = comparable
 五条规则把回执和逐锚记录绑死：
 
 - 窗口结论与锚点事实是两件事。`impactStatus` 取窗口结论，`no_behavior` 与 `no_detected_behavior_change` 是两个不同的取值；覆盖结果回答的是“这条证据的锚点在新版本里成了什么样”。`no_behavior` 只说明窗口的行为性分类，不自动把锚点判成 `unaffected`。
-- `content_changed_nonbehavioral` 只承认内容级的非行为判定：相交的 hunk 被 patch-scan 证明只有注释、空白或格式重排，这种判定目前只对实现文件成立。文档、测试、CI 配置属于路径级的非行为分类，证明不了锚点内容没变，它们的锚点被 hunk 触及后一律是 `stale`。
+- `content_changed_nonbehavioral` 只承认内容级的非行为判定：相交的 hunk 被 patch-scan 证明只有注释、空白或格式重排，这种判定目前只对实现文件成立。文档、测试、CI 配置属于路径级的非行为分类，证明不了锚点内容没变，它们的锚点被 hunk 触及后一律是 `stale`。迁移脚本（§8.3）归入这一类：它已移出分析目标，所在文件改了也不会触发重分析，被改的行落在锚点上就按 `stale` 记。
 - 引用了回执的锚点才推进 `lastImpactCheckedRevision` 和 `lastImpactRulesVersion`。没有被任何回执覆盖的证据锚，不因为版本水位推进而获得新的检查时间。legacy `unknown` 的锚点同样被回执覆盖，推进的是影响检查记录；它的 `evidenceStatus` 保持 `unknown`，不因此升级。
 - 覆盖原因说明这条锚点为什么得到这个覆盖结果：`window_no_behavioral_change`、`outside_affected_set`、`non_behavioral_file_changed`、`non_behavioral_hunk_touched`、`evidence_lines_changed`。
 - 被重分析的场景不引用窗口回执，它们的影响检查记录就是自身的重分析结果。manual 条目的锚点不进自动回执，命中变更时按 §9.1 处理。
@@ -1581,7 +1593,8 @@ force push、分支切换、global/unknown 无法收敛以及旧草稿缺少版�
 
 - 跨文件共享工具。
 - middleware/auth 与权限策略。
-- schema/migration。
+- 迁移脚本（已移出分析目标，只改它的窗口走快速路径）。
+- ORM 模型与 schema 定义（强制全量重同步）。
 - 公共类型和 barrel export。
 - 新功能、功能删除、功能合并。
 - 文件移动、删除和 rename+modify。
@@ -1682,7 +1695,7 @@ force push、分支切换、global/unknown 无法收敛以及旧草稿缺少版�
 | `dependency_manifest` | 9 | 3 | 74.5% |
 | `assembly_point` | 4 | 2 | 74.1% |
 
-所以下一步最该优化的是迁移规则：数据库迁移是全量重同步的头号来源，其余几条规则单独封闭都只能提高一两个百分点。迁移能不能细分，例如只新增表或列的迁移按影响范围有限处理，需要单独设计，这次试验不做这个决定。
+所以下一步最该优化的是迁移规则：数据库迁移是全量重同步的头号来源，其余几条规则单独封闭都只能提高一两个百分点。迁移能不能细分，例如只新增表或列的迁移按影响范围有限处理，需要单独设计，这次试验不做这个决定。（后来的决定见下面的“决定后的重测”：没有细分迁移规则，而是把迁移脚本整体移出了分析目标。）
 
 对照仓库不参与判定：
 
@@ -1700,6 +1713,42 @@ Golden Repository 的冻结窗口取自 CoDelphi 的发布顺序。§19.2 列的
 
 产物在 `artifacts/incremental-usability-trial/`：账本导出 `ledger-index.jsonl`，本次运行 `run-2026-11-24/` 下的 `report.md`、`report.json`、`windows.jsonl`。分类器、试验脚本和测试在分支 `feat/client-incremental`。
 报告要能回答两个问题：日常开发中有多大比例的提交能走 delta 或快速路径；如果把 `global_unbounded` 里的某几条规则换成范围有限、可人工维护的声明式 consumer registry（§8.1），可用率能提高多少，值不值这部分建设成本。结论不理想时调整规则或先建 registry，不放宽失败关闭，也不带着“大多数提交都要全量”的结果进入全面开发。
+
+**决定后的重测（2026-11-25）。** 上面的结果出来后，产品负责人查了现网账本，决定把迁移脚本移出分析目标（§8.3）。规则变了，同一份账本导出、同一批本地克隆重跑一遍，结果另记在这里。上面按事先写定的阈值与口径得到的 73.3% / 72.6% 仍然是进入实施的门槛结论，不被替换。
+
+重跑之前先写下预期：只因为迁移规则而全量的 32 个窗口会变成可增量，即 219/255 = 85.9%；token 节省率会略降，因为全量读取的字节数不含迁移脚本之后分母变小了。
+
+口径有三处随决定改动。它们发生在原始测量之后，不是事先写定的，如实标明：
+
+1. 全量读取的字节不含迁移脚本，与托管分析一致。
+2. 增量读取集跳过旧功能仍然引用的迁移证据：读了也不能当证据。
+3. stale 模拟里，迁移脚本上的锚点按文档锚点的规矩算（§12.5），不按实现文件记“证据状态保留”。
+
+Golden 情形里的 schema/migration 相应拆成迁移脚本和 ORM 模型与 schema 定义两条。
+
+| 主数据集 CoDelphi | 决定前（11-24） | 决定后（11-25） |
+|---|---|---|
+| 可增量窗口比例 | 73.3% | **85.9%** |
+| 预估 token 节省率 | 72.6% | **84.9%** |
+| 窗口归宿 | direct 155、no_behavior 29、no_detected_behavior_change 3、global_unbounded 68 | direct 184、no_behavior 29、no_detected_behavior_change 6、global_unbounded 36 |
+| 重分析功能占比（direct 窗口平均） | 8.5% | 14.2% |
+| 按提交计的可增量比例 | 83.7% | 92.3% |
+| stale | 32 个快速路径窗口，新增 stale 锚点 0 个 | 35 个快速路径窗口，新增 stale 锚点 0 个 |
+
+两项目标仍然达标。token 节省率的走向和事先写的预期相反：不是略降，而是从 72.6% 升到 84.9%。预期只算对了分母变小这一头，漏了另一头——变成可增量的窗口原来记 0，现在按增量记。逐窗口核对的结果：
+
+- 33 个窗口从全量变成可增量，CoDelphi 32 个、Chandler 1 个；其余窗口的归宿不变。
+- 其中 30 个是 `direct`，不是快速路径。这些提交同时改了迁移脚本和普通代码，现在只按代码文件重分析受影响的功能。只有 3 个是纯迁移窗口，走快速路径。
+- 72 个迁移文件改判为 `schema_artifact`，没有任何非迁移文件的分类变了。
+- CoDelphi 两轮都是 `direct` 的 155 个窗口，平均 token 节省率从 98.75% 降到 98.74%，是分母变小的效果。可增量窗口从 187 个变成 219 个。
+
+剩下的全量触发原因：`shared_module` 17 个窗口、`runtime_config` 13 个、`dependency_manifest` 9 个、`assembly_point` 4 个（一个窗口可以命中多条，合计 36 个窗口）。按单独触发明细，`shared_module` 若能封闭可到 91.0%，`runtime_config` 89.4%。
+
+对照仓库：repomap 65.2% / 64.2%、dict_2026 66.7% / 66.4%，都没有变；Chandler 从 0% 变成 20%，5 个窗口里有 1 个同时改了迁移脚本和代码，现在是 `direct`。
+
+Golden Repository 的冻结窗口：§19.2 列的情形里，能从分类结果认出来的 17 个中找到 14 个。纯重命名、ORM 模型与 schema 定义、文档改动落在文档证据锚行上这三种真实历史里没有，要用合成夹具补。
+
+重跑的产物在 `run-2026-11-25-after-migration-decision/`，文件同上。
 
 ## 20. 数据迁移与兼容
 
@@ -1778,13 +1827,39 @@ Golden Repository 的冻结窗口取自 CoDelphi 的发布顺序。§19.2 列的
 
 实施前需基于当时账本快照重新执行逐文件反查，不能以本节替代最新爆炸半径检查。
 
+**迁移脚本移出分析目标的改动面（2026-11-25，已实施）。** 当日按账本快照 `9bfd6c0` 做了逐文件反查。A1、A2 两个提交已落在 `feat/client-incremental`，未推送：
+
+| 文件 | 以它为证据的场景 | 改了什么 | 要守住的行为 |
+|---|---|---|---|
+| `lib/evidence.ts` | 8 | 新增迁移脚本判定、实现面判定和两个取改动清单的函数 | 证据分级不变：迁移脚本仍是 implementation 档，否则只引用它的场景会被误打“测试佐证” |
+| `lib/slice-planner/index.ts`、`selection-policy.ts` | 32、14 | 噪声种类加 `schema`；强制装入循环跳过迁移脚本 | CI 与测试文件仍被强制装入；子树份额上限不变 |
+| `lib/patch-scan.ts` | 8 | `behavioralChangePaths` 排除迁移脚本 | 注释、格式重排、未知语言、脚本文件的判定不变 |
+| `lib/ai.ts`、`lib/extraction-pass.ts`、`lib/extraction-contract.ts`、`lib/behavioral-enumeration.ts` | 1、11 | 提示词的“文件变化”和三处证据允许集不含迁移脚本 | 范围外的证据仍被丢弃；消息结构不变 |
+| `lib/analysis.ts` | 分析执行与规格落库 | 窗口 diff、受影响功能反查、必选路径、合成零回执都只算分析目标内的文件 | 增量模式回退全量的条件不变，diff 文件数仍按全部改动文件计 |
+| `lib/analysis-coverage.ts`、`lib/full-analysis.ts`、`lib/snapshot/effective-coverage.ts`、`lib/behavior-inventory/index.ts` | 17 | 实现面口径用同一个判定 | 覆盖率仍能如实报告遗漏；库存编排的范围指纹随之变化 |
+| `lib/pr-preview.ts` | 10 | 反查索引时跳过迁移路径 | PR 触碰的文件数照实报告 |
+| `lib/impact-classification.ts`、`lib/incremental-trial.ts`、`lib/incremental-trial-metrics.ts` | 本次新增的文件 | 迁移脚本改判 `schema_artifact`；试验口径随之调整 | 规则版本仍是 `impact-v1`，它还没有发布过 |
+
+有意不改的：`lib/spec-file-index.ts`（索引本身不变，否则 MCP 的零变化核验会把旧证据判成不可读）、`lib/spec-editor-service.ts`（人工编辑保护）、`lib/spec-drift.ts`、`lib/stable-links.ts`、`lib/feature-history.ts`、`lib/regression-tasks.ts`。
+
+**身份层的回归红线（2026-11-25 反查，尚未动这些文件）。**
+
+| 文件 | 以它为证据的场景 | 必须守住 |
+|---|---|---|
+| `lib/spec-diff.ts` | 165 | 劫持门禁、墓碑抑制、锚点级保真、折叠、坍缩检测的现有测试不改且通过 |
+| `lib/spec-versions.ts` | 95 | 插入参数的现有按下标断言不改；变更记录的 JSON 不含身份字段 |
+| `lib/spec-editor-service.ts` | 41 | 不改 |
+| `lib/spec-drift.ts`、`lib/stable-links.ts`、`lib/feature-history.ts`、`lib/regression-tasks.ts` | 44 | 不改。稳定链接、历史、回归任务逐项一致 |
+
+部署这一部分时要提前知道两点：带迁移的提交在发布页仍列出迁移文件，只是不再标为行为变更；生产上如果有在途的 inventory 模式任务，上线后会因范围指纹变化而无法续跑，要并入现有的部署在途判据。
+
 ## 22. 验收门槛
 
 ### 22.1 进入实施的前置条件
 
 2026-11-24 产品负责人决定修订部分不再送外部评审，按本文档开工。开始实质开发之前，三项必须全部满足；缺任何一项都不开始身份层和增量发布链的开发。三项的状态：
 
-1. §19.4 的可用率试验已有结论并达到阈值。已满足：2026-11-24 试验通过，主数据集可增量窗口比例 73.3%，预估 token 节省率 72.6%。
+1. §19.4 的可用率试验已有结论并达到阈值。已满足：2026-11-24 试验通过，主数据集可增量窗口比例 73.3%，预估 token 节省率 72.6%。2026-11-25 把迁移脚本移出分析目标后重测为 85.9% 和 84.9%（§19.4），门槛结论不变。
 2. §24.2 的产品取舍已经拍板。已满足：`trialing` 账户放行已由产品负责人确认，其余各项按正文写的默认执行。
 3. 讨论稿《客户端形态与发布触发方式讨论整理》里的待拍板事项已有结论并并入本规格。已满足：产品负责人决定不再等令牌能否当模型凭证的结论，正文按只认 API key 执行。
 
@@ -1850,6 +1925,7 @@ Golden Repository 的冻结窗口取自 CoDelphi 的发布顺序。§19.2 列的
 - 模型 key 按环境变量、凭证环境文件、agent 工具本地凭证的顺序查找，用户填写的优先于自动找到的；都没有时进入接入步骤，选服务商、粘贴 API key，结果写进凭证环境文件。接入步骤借鉴 Cindy 的做法。
 - 远端观察值机制移出首期范围，原文保留在附录 A。
 - 可用率试验通过（主数据集可增量窗口比例 73.3%，token 节省率 72.6%），进入身份层实施。
+- 数据库迁移脚本移出分析目标（2026-11-25）：不读、不能当证据、改动不触发重新分析；客户端分类器把它判为 `no_detected_behavior_change`。ORM 模型代码与 schema 定义仍然强制全量。现有引用迁移脚本的锚点留作历史，不批量清理（§8.3）。决定后主数据集可增量窗口比例 85.9%，token 节省率 84.9%。
 
 ## 24. 评审修订记录（2026-11-24）
 
@@ -2011,6 +2087,36 @@ Golden Repository 的冻结窗口取自 CoDelphi 的发布顺序。§19.2 列的
 - §21 的改动面和红线没有覆盖这次修订新增的文件。已补，并按当日的账本快照重新反查。
 
 远端观察值机制为什么可以移出：它在这份规格里的作用是让网页端提示“远端已前进”，并处理推送通知乱序带来的歧义。发现账本落后现在由新鲜度承担，网页端可以复用同一个函数按需计算。`repository_remote_heads` 是本节之前规格提出的新表，代码里不存在；规格里引用它的只有 client 模式的 webhook 分支、发布事务收尾的条件删除、模式切换时的一句说明，以及对应的验收用例和决策，托管模式的触发路径不读它。原文保留在附录 A，将来如果要在没有代码托管连接的仓库上做网页端提示，可以从那里恢复。
+
+### 24.8 实施期间的修订（2026-11-25）
+
+开工后，产品负责人查了现网账本，决定把数据库迁移脚本移出分析目标。这条决定不在之前的评审里，正文按它改了下面几处。随后标的“默认”是并入时代替产品负责人定的实施细节，没有经过评审。
+
+| 位置 | 修订 |
+|---|---|
+| §8.3 | 迁移脚本一行从 `global_unbounded` 改为 `no_detected_behavior_change`，原因码 `schema_artifact`；新增一段说明分析目标的含义和托管分析怎么处理；ORM 模型与 schema 定义单独一行，仍是 `global_unbounded` |
+| §12.5 | 迁移脚本上的锚点归入路径级的非行为分类，被改的行触及时记 `stale` |
+| §19.2 | Golden 情形 schema/migration 拆成迁移脚本、ORM 模型与 schema 定义两条 |
+| §19.4 | 新增“决定后的重测”，记录三处事后改动的口径和新结果；原来的门槛结论保留 |
+| §21 | 新增这一部分的改动面、有意不改的文件、身份层的回归红线和部署时要注意的两点 |
+| §22.1、§23 | 记录重测结果和这条决定 |
+
+并入时代定的默认：
+
+1. “迁移脚本”的范围是 `migrations/`、`migration/` 目录下的文件和所有 `.sql` 文件。ORM 模型代码（`models.py`、`*.entity.ts`）、Prisma 与 GraphQL 的 schema 定义、`alembic/` 和 `drizzle/` 目录不在其中，仍然强制全量。
+2. 规则版本号保持 `impact-v1`。它随客户端增量分析一起首次发布，此前没有线上数据依赖旧的取值集合。原因码的集合多了一个 `schema_artifact`。
+3. 迁移脚本的纯重命名仍走通用分支，带上重锚信息。现有账本里有引用迁移脚本的锚点，文件改名时它们要能跟着走。
+4. 路径同时落在别的全局规则里时取全局规则，“同时命中多行取最保守一档”的读法不变。
+5. 增量模式回退全量的“diff 文件数”条件不变，仍按全部改动文件计。它是偏保守的条件，没有因为移出而放宽。
+6. 现有账本里引用迁移脚本的锚点留作历史，不批量清理（产品负责人的决定）。
+7. 试验口径的三处改动和 Golden 情形的拆分见 §19.4。
+
+实施中发现、计划里没有列到的三处同类入口，用同一个判定一并处理了：`lib/extraction-contract.ts` 和 `lib/behavioral-enumeration.ts` 各自拼装的证据允许集，以及整条版本链都没有回执时写下的合成零回执。
+
+知道而没有处理的两点：
+
+- 代码托管平台返回的改动文件有补丁长度预算，迁移脚本的补丁在被过滤掉之前仍然占这份预算。它不影响账本，只是让同一窗口里其他文件的补丁可能更早被截断。要改就会动到发布页用的数据，另议。
+- `scripts/measure-first-analysis.ts` 仍按历史口径把迁移脚本算进实现面。它是 2026-11-08 那次测量用的脚本，量的就是当时的口径。
 
 ## 附录 A：已移出首期范围的远端观察值规则
 

@@ -7,6 +7,7 @@
 > 修订：2026-11-20 v4：全量分析三模式（`legacy` / `inventory_shadow` / `inventory`）与行为清单编排成文（§13）；不可变 manifest 恢复语义、双重覆盖门禁、at-least-once 执行、共享预算、摘要降级与激活门禁；完整性账本新增 inventory 枚举详情与新路径 sourceCoverage 口径（§9）。§0 概览修正「×6 分区」过时表述（v3 已取消分区数上限）。
 > 修订：2026-11-20 v5（Task 15）：配对行为 benchmark 统计层与冻结协议成文（`lib/behavior-benchmark.ts`、`docs/benchmark/frozen/behavior-inventory-v1.md`、离线测量脚本 `scripts/measure-inventory-analysis.ts`）；inventory 遥测口径修正（tasksExecuted 含发起后失败任务、tasksPending 按字面 pending 行计数）；明确 `primaryRangesOmitted` 只在账本 details JSON 中可见，不是 `analysis_coverage_receipts` 的表列。**人工 shadow 验收未执行，`inventory` 模式保持禁用。**
 > 修订：2026-11-23 v6：批处理候选 I1 实测否决。独立 scratch 中 batch/describe_judge 相对 task I0 的调用数降至 23.4%，但总 token 为 76.9%、实际成本为 2.62 倍，且激活门禁失败；**batch 不予采用，legacy 与 inventory task 默认均不改变。**
+> 修订：2026-11-25 v7：数据库迁移脚本移出分析目标——不读、不能当证据、改动不触发重新分析；覆盖率的实现面口径随之调整。依据见《客户端增量分析与 Delta Merge Contract 设计》§8.3。实现提交在分支 `feat/client-incremental`，写这条时尚未推送和部署，生产仍是移出之前的行为。
 
 ## 0. 一页总览
 
@@ -63,13 +64,13 @@ incremental 请求 → 全部满足才走增量：
 
 **选择顺序（每个分区）**：
 
-1. **相关文件优先**：`requiredPaths ?? diffPaths` 按路径序优先入选，跳过噪声分类与子树份额，仍尊重每分区预算。装不下的路径在后续分区续装，直到相关范围耗尽，不因固定趟数丢弃。
+1. **相关文件优先**：`requiredPaths ?? diffPaths` 按路径序优先入选，跳过噪声分类与子树份额，仍尊重每分区预算。装不下的路径在后续分区续装，直到相关范围耗尽，不因固定趟数丢弃。例外是数据库迁移脚本（`migrations/`、`migration/` 目录下的文件和所有 `.sql` 文件）：这个循环不走噪声分类，所以单独跳过。受影响功能反查与必选路径也不按它算。
 2. **按模式决定是否全仓遍历**：
    - `required_only`（增量 / RC2-carry）：只读取 diff 与受影响功能的既有证据文件。相关但未变更的证据仍读取，无关文件不进入 AI，也不为覆盖率执行全树枚举。
    - `full`：继续 scope roots 广度优先遍历，覆盖完整实现面。噪声目录整树跳过，文件级噪声分类排除，entrypoint 信号模式定优先序；多子树竞争时单子树份额 ≤50%。
-3. **真实 diff 独立记账**：diff 文件含测试/文档/CI，占用预算；实现面装配与 diff 覆盖分别通过 receipt 记录，不混用定向证据并集计算 diff 遗漏。
+3. **真实 diff 独立记账**：diff 文件含测试/文档/CI，占用预算；迁移脚本不进装配，不占分区预算（它在改动上下文里的补丁仍占代码托管平台那份补丁长度预算）。实现面装配与 diff 覆盖分别通过 receipt 记录，不混用定向证据并集计算 diff 遗漏。
 
-分区切分由 `excludePaths` 驱动：跨分区稳定（路径序），互不重叠。装配结果经 `sliceToSourceFiles` 硬顶裁剪（超预算整文件排除），**真实窗口以裁剪后为准**——assertEvidence/清洗的允许集来自它，不来自规划面。
+分区切分由 `excludePaths` 驱动：跨分区稳定（路径序），互不重叠。装配结果经 `sliceToSourceFiles` 硬顶裁剪（超预算整文件排除），**真实窗口以裁剪后为准**——assertEvidence/清洗的允许集来自它，不来自规划面。允许集由分区窗口和分析目标内的改动文件组成，不含迁移脚本；模型仍然引用迁移脚本的场景按不可溯源剔除。
 
 **覆盖披露（B1）**：每次成功 run 落 `analysis_coverage_receipts`。全量以完整实现面为分母，定向增量以 requiredPaths 中实际存在的实现文件为分母；真实 diff 的入选/遗漏始终独立记录。新 run 不再因分区数量产生 `partitionsCapped=true`，该字段仅为历史回执兼容。覆盖率与装配指标不展示在产品总览或规格工作台，后台回执继续用于完整性诊断。
 
@@ -94,7 +95,7 @@ incremental 请求 → 全部满足才走增量：
 
 分区提取覆盖「实现面」，但自由阅读的注意力会偏向大而显著的行为，小而深的边缘行为被泛化吞掉（W0-7 后残余 L8/L15 实测：文件已读、行为未写）。W0-8/W0-9 把召回从注意力问题变枚举问题：
 
-1. **枚举**：`behavioralChangePaths`（patch-scan：实现级文件 + 代码行变更判定，注释/空白变更不算，保守方向宁算行为）给出行为文件清单
+1. **枚举**：`behavioralChangePaths`（patch-scan：实现级文件 + 代码行变更判定，注释/空白变更不算，保守方向宁算行为；迁移脚本不算，它已移出分析目标）给出行为文件清单。只改迁移脚本的窗口因此是零行为变更窗口，不调模型，上一版规格原样沿用。
 2. **分组**：每组 ≤6 文件、≤8 组（`BEHAVIORAL_ENUM_GROUP_SIZE` / `_MAX_GROUPS`），路径序稳定分片
 3. **两步提取（每组 2 次调用）**：
    - **复述步**：逐变更块只复述改前/改后——机械任务不做显著性判断（`@@` 头解析 → hunk ±30 行上下文读取，单文件 400 行帽）
