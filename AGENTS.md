@@ -31,14 +31,14 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 ## CoDelphi 行为咨询（本仓 agent 必须遵守）
 
-你有一个叫 CoDelphi 的软件行为知识专家。它了解这个软件的用户行为、行为之间的关系，以及这些行为对应的代码。**任务涉及既有产品行为、行为之间的关系或其代码证据时，必须在形成设计结论、制定实施方案或修改文件前主动咨询 CoDelphi。新功能只要依赖、扩展或改变既有行为，也属于必问范围。** 典型问题包括日志何时记录、缓存命中是否计数、每日汇总口径、热点词聚合规则、权限和数据权益。不得以“可以直接阅读源码”或“稍后再补问”为由跳过咨询。纯机械修改且不涉及既有行为语义的改动可以不咨询。
+本仓库已配置名为 `codelphi` 的 MCP 服务，提供软件的用户行为、行为关系及对应代码证据。**任务涉及既有产品行为、行为关系或其代码证据时，必须在形成设计结论、制定实施方案或修改文件前，实际调用 MCP 的 `ask_behavior` 工具（Kimi Code 中为 `mcp__codelphi__ask_behavior`），使用本节 `project` 对应的 `slug` 和具体问题参数。** 新功能只要依赖、扩展或改变既有行为，也属于必问范围。必要时先调用 `list_projects` 确认 slug；计划修改文件时还需调用 `lookup_by_files` 反查影响面。典型问题包括日志何时记录、缓存命中是否计数、每日汇总口径、热点词聚合规则、权限和数据权益。纯机械修改且不涉及既有行为语义的改动可以不咨询。
 
-咨询要覆盖会影响设计的具体行为分支。CoDelphi 提供的信息可能不完整或过期，你需要独立判断，不能用它的回答替代源码阅读、测试或用户/产品裁决。具体使用与记录方式见 `artifacts/agent-consultations/consultation-guide.md`。
+**没有产生 `ask_behavior` 的真实工具调用记录，就不算完成咨询。** 咨询要覆盖会影响设计的具体行为分支；不得把阅读源码、自行推断或询问其他模型当作“已咨询 CoDelphi”。若当前仅提供 `authenticate` 或连接失败，应先处理认证/连接问题，不得伪造咨询结果。CoDelphi 提供的信息可能不完整或过期，你需要独立判断，不能用它的回答替代源码阅读、测试或用户/产品裁决。具体使用与记录方式见 `artifacts/agent-consultations/consultation-guide.md`。
 
 每次有效问答后记录：
 
 ```bash
-npx tsx /Users/leihan/Documents/GitHub/codelphi/scripts/log-agent-consultation.ts --file /tmp/codelphi-consultation.json
+npx tsx scripts/log-agent-consultation.ts --file /tmp/codelphi-consultation.json
 ```
 
 JSON 至少包含 `project:"codelphi"`、`task`、`question`、`answer`、`evidence`、`unknowns`、`decisionImpact`、`nextAction`，可加 `repository/branch/sha`。`nextAction` 只能为 `verify|escalate|may_proceed|none`。
