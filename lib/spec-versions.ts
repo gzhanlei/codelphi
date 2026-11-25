@@ -485,7 +485,8 @@ export async function insertSpecVersion(connection: PoolConnection, run: RunCont
       coverageComplete: options.coverageComplete ?? false,
     }) : undefined,
   });
-  const activatedFeatures = preserveUncertainDisappearances(previousCanonical?.features ?? [], finalFeatures, changes);
+  // 保留不确定的消失时也要带着墓碑：人工下线的条目不是“没覆盖到”，不能在这里以旧名字回来。
+  const activatedFeatures = preserveUncertainDisappearances(previousCanonical?.features ?? [], finalFeatures, changes, tombstones);
   const visibilityConflicts = detectVisibilityConflicts(activatedFeatures);
   if (visibilityConflicts.length > 0) {
     console.error("[spec] visibility outcome conflicts rejected", { runId: run.id, conflicts: visibilityConflicts.map((conflict) => ({ feature: conflict.feature, token: conflict.token })) });

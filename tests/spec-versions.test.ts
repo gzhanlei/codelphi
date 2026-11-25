@@ -856,6 +856,53 @@ describe("identity layer in the write path", () => {
     expect(identities?.features.get("authentication")?.scenarios.get("HP-1")?.identityKey).toBe('["sign-in","HP-1"]');
     expect(identities?.features.get("new feature")).toMatchObject({ identityKey: "new feature", origin: "minted" });
   });
+
+  it("keeps an identity a person switched off out of the version when the previous version still carries it", async () => {
+    // 上一版就有这个功能（身份 f1），用户把它下线了；登记表里它的另一个名字是“乙”。模型这次用“乙”把它输出回来。
+    const db = identityDb({
+      previousFeatures: [{ versionId: 11, nameKey: "authentication", identity_key: "f1" }],
+      previousScenarios: [{ versionId: 11, featureIdentityKey: "f1", reference: "HP-1", identity_key: scenarioIdentityKey("f1", "HP-1") }],
+      registry: [["乙", "f1"]],
+      switchedOffFeatureIdentities: ["f1"],
+    });
+    const renamedOutput = { ...result, features: [{ name: "乙", summary: "同一个功能，换了名字", scenarios: [{ ...scenario }] }] };
+
+    const { features, identities } = await insertSpecVersion(db, run, renamedOutput);
+
+    // 不只是新名字不在：这个身份本身不能以任何名字回到版本里。
+    expect(features.map((feature) => feature.name)).not.toContain("乙");
+    expect([...(identities?.features.values() ?? [])].map((feature) => feature.identityKey)).not.toContain("f1");
+  });
+
+  it("keeps a name a person switched off out of the version when the previous version still carries it", async () => {
+    const db = connection([{ id: 11 }], false, { feature: "Authentication" });
+
+    const { features } = await insertSpecVersion(db, run, result);
+
+    expect(features.map((feature) => feature.name)).not.toContain("Authentication");
+  });
+
+  it("keeps a scenario a person switched off out of the version when the previous version still carries it", async () => {
+    // 用户下线过 HP-1，那时功能叫“乙”（身份 f1）。上一版和这次的输出里它都叫 Authentication：按名字的墓碑查不到。
+    const db = identityDb({
+      previousFeatures: [{ versionId: 11, nameKey: "authentication", identity_key: "f1" }],
+      previousScenarios: [{ versionId: 11, featureIdentityKey: "f1", reference: "HP-1", identity_key: scenarioIdentityKey("f1", "HP-1") }],
+      registry: [["乙", "f1"]],
+      switchedOffScenarioIdentities: [scenarioIdentityKey("f1", "HP-1")],
+    });
+
+    const { features } = await insertSpecVersion(db, run, result);
+
+    expect(features.find((feature) => feature.name === "Authentication")?.scenarios.map((item) => item.reference)).not.toContain("HP-1");
+  });
+
+  it("keeps a scenario a person switched off by name out of the version when the previous version still carries it", async () => {
+    const db = connection([{ id: 11 }], false, { scenario: "HP-1" });
+
+    const { features } = await insertSpecVersion(db, run, result);
+
+    expect(features.find((feature) => feature.name === "Authentication")?.scenarios.map((item) => item.reference)).not.toContain("HP-1");
+  });
 });
 
 describe("墓碑按身份加宽 (widenTombstonesByIdentity)", () => {

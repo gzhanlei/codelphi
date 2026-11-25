@@ -856,30 +856,56 @@ export function preserveExactScenarioIdentities(
   return result.filter((feature) => feature.source === "manual" || feature.scenarios.length > 0 || originalCounts.get(feature) === 0);
 }
 
-export function preserveUncertainDisappearances(previousFeatures: SpecFeature[], currentFeatures: SpecFeature[], changes: SpecChange[]): SpecFeature[] {
+interface Restoration {
+  result: SpecFeature[];
+  byKey: Map<string, SpecFeature>;
+  tombstones: SpecTombstones;
+}
+
+/** 把上一版的一个功能放回这一版。人工下线的功能不放；它名下人工下线的场景一并去掉。 */
+function restoreFeature(state: Restoration, feature: SpecFeature): void {
+  if (state.tombstones.featureKeys.has(specFeatureKey(feature.name))) return;
+  const restored: SpecFeature = { ...feature, scenarios: feature.scenarios.filter((scenario) => !state.tombstones.scenarioKeys.has(specScenarioKey(feature.name, scenario.reference))) };
+  state.byKey.set(specFeatureKey(restored.name), restored);
+  state.result.push(restored);
+}
+
+/** 场景级的不确定消失：功能还在就把场景补回去，功能自己也没了就带着这一个场景把功能带回来。人工下线的场景不补。 */
+function restoreScenario(state: Restoration, previousFeature: SpecFeature, previousScenario: SpecScenario): void {
+  if (state.tombstones.scenarioKeys.has(specScenarioKey(previousFeature.name, previousScenario.reference))) return;
+  const currentFeature = state.byKey.get(specFeatureKey(previousFeature.name));
+  if (!currentFeature) {
+    restoreFeature(state, { ...previousFeature, scenarios: [previousScenario] });
+    return;
+  }
+  if (!currentFeature.scenarios.some((scenario) => scenario.reference === previousScenario.reference)) {
+    currentFeature.scenarios.push(previousScenario);
+  }
+}
+
+/**
+ * 没有移除证据的消失不算数：上一版的功能和场景保留回这一版。
+ * 人工下线的条目（tombstones）除外：它们是被故意去掉的，不是没覆盖到。不挡的话，前面按墓碑去掉的条目会在这里以旧名字回来。
+ */
+export function preserveUncertainDisappearances(
+  previousFeatures: SpecFeature[],
+  currentFeatures: SpecFeature[],
+  changes: SpecChange[],
+  tombstones: SpecTombstones = { featureKeys: new Set<string>(), scenarioKeys: new Set<string>() },
+): SpecFeature[] {
   const result = currentFeatures.map((feature) => ({ ...feature, scenarios: [...feature.scenarios] }));
-  const byKey = new Map(result.map((feature) => [specFeatureKey(feature.name), feature]));
+  const state: Restoration = { result, byKey: new Map(result.map((feature) => [specFeatureKey(feature.name), feature])), tombstones };
   for (const change of changes) {
     if (change.kind !== "uncertain") continue;
     const previousFeature = previousFeatures.find((feature) => specFeatureKey(feature.name) === specFeatureKey(change.featureName));
     if (!previousFeature) continue;
     const key = specFeatureKey(previousFeature.name);
-    if (change.entityType === "feature" && !byKey.has(key)) {
-      byKey.set(key, { ...previousFeature, scenarios: [...previousFeature.scenarios] });
-      result.push(byKey.get(key)!);
+    if (change.entityType === "feature" && !state.byKey.has(key)) {
+      restoreFeature(state, previousFeature);
       continue;
     }
     if (change.entityType !== "scenario") continue;
-    const previousScenario = change.before as SpecScenario;
-    const currentFeature = byKey.get(key);
-    if (!currentFeature) {
-      byKey.set(key, { ...previousFeature, scenarios: [previousScenario] });
-      result.push(byKey.get(key)!);
-      continue;
-    }
-    if (!currentFeature.scenarios.some((scenario) => scenario.reference === previousScenario.reference)) {
-      currentFeature.scenarios.push(previousScenario);
-    }
+    restoreScenario(state, previousFeature, change.before as SpecScenario);
   }
   return result;
 }
