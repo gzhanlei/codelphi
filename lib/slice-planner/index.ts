@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { basename } from "node:path";
 import { normalizeSourcePath } from "../remote-source-index/index";
+import { isSchemaArtifact } from "../evidence";
 import { SourceIndexError, type SourceLineSlice, type SourceSignal, type SourceTreeEntry } from "../remote-source-index/types";
 import type { EvidenceClaim, PlannerDiagnostic, ProductSliceInput, ScopeResolution, SelectedSourceFile, SelectedSourceReason, SliceConfidence, SlicePlanResult, SlicePlanningState, SlicePlanner, StackProfileId, StackProfileMatch, TargetedReadApproval, TargetedReadDecision, TargetedReadRequest } from "./types";
 import type { OpenedRemoteSourceRevision } from "../remote-source-index/types";
@@ -261,8 +262,10 @@ class DeterministicSlicePlanner implements SlicePlanner {
       // W0-7：窗口 diff 文件必选装配（W0-2 solo 重跑残余根因：装配 126 < diff 131，
       // 行为证据的一手面未被保证入选）。diff 文件跳过噪声过滤与子树份额（被本窗口修改
       // 本身就是入选理由），仍尊重文件数 / 行数 / 字节预算；路径序保证跨分区稳定分片。
+      // 例外是数据库迁移脚本：它已移出分析目标，这个循环不看噪声分类，所以要在这里单独拦住。
       const diffPaths = [...new Set(input.requiredPaths ?? input.diffPaths ?? [])]
         .filter((path) => !state.input.excludePaths?.has(path))
+        .filter((path) => !isSchemaArtifact(path))
         .sort();
       for (const path of diffPaths) {
         if (state.budgetsRemaining.selectedFiles <= 0 || state.budgetsRemaining.selectedLineRanges <= 0 || state.budgetsRemaining.plannerContentBytes <= 0) break;

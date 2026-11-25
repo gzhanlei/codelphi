@@ -829,6 +829,22 @@ describe("analysis orchestration", () => {
     expect(vi.mocked(capture)).toHaveBeenCalled();
   });
 
+  it("treats a migration-only window as no-behavioral: no AI call, previous spec carried verbatim", async () => {
+    // 迁移脚本移出了分析目标（2026-11-25）：只改迁移的提交不读、不重新分析、不调模型。
+    adapter.getChangeContext.mockResolvedValue({
+      message: "feat: add gift wallet table\n\nbody",
+      committedAt: "2026-11-01T00:00:00Z",
+      url: "https://github.com/commit/migration",
+      files: [{ path: "migrations/090_add_gift_wallet.sql", status: "added", patch: "+CREATE TABLE gift_wallets (id BIGINT PRIMARY KEY);" }],
+    });
+    await runAnalysis(8);
+    expect(analyzeWithAI).not.toHaveBeenCalled();
+    expect(partitionedSourcesMock).not.toHaveBeenCalled();
+    const calledResult = vi.mocked(insertSpecVersion).mock.calls[0][2];
+    expect(calledResult.features[0]?.name).toBe("统一登录");
+    expect(calledResult.changes).toEqual([]);
+  });
+
   it("inherits the nearest effective coverage receipt on a no-behavioral window (BM-10 链式继承修复)", async () => {
     // 生产 run 220 根因复现：上一版是回填快照（无回执），写侧须沿链向上继承而非落合成零回执
     adapter.getChangeContext.mockResolvedValue({

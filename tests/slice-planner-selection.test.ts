@@ -34,6 +34,11 @@ describe("selection policy classification", () => {
     expect(selectionNoiseKind("src/flask/app.py")).toBeNull();
     expect(selectionNoiseKind("lib/router/index.js")).toBeNull();
     expect(selectionNoiseKind("apps/web/app/page.tsx")).toBeNull();
+    // 迁移脚本不在分析目标里（2026-11-25 产品决定）：目录下的文件与 .sql 一律按 schema 噪声处理
+    expect(selectionNoiseKind("migrations/001_init.sql")).toBe("schema");
+    expect(selectionNoiseKind("alembic/versions/x.py")).toBeNull();
+    expect(selectionNoiseKind("db/schema.sql")).toBe("schema");
+    expect(selectionNoiseKind("lib/migration-planner.ts")).toBeNull();
   });
 
   it("exempts build manifests even in noise-looking locations", () => {
@@ -48,6 +53,8 @@ describe("selection policy classification", () => {
     expect(isWalkNoiseDirectory("examples/auth")).toBe(true);
     expect(isWalkNoiseDirectory("packages/bench")).toBe(true);
     expect(isWalkNoiseDirectory(".github/workflows")).toBe(true);
+    expect(isWalkNoiseDirectory("migrations")).toBe(true);
+    expect(isWalkNoiseDirectory("superset/migrations/versions")).toBe(true);
     expect(isWalkNoiseDirectory("src")).toBe(false);
     expect(isWalkNoiseDirectory("lib/router")).toBe(false);
     expect(isWalkNoiseDirectory("")).toBe(false);
@@ -258,6 +265,32 @@ describe("planner selection policy", () => {
     const result = await planSelection({ maxSelectedFiles: 2 }, files, trees, [{ path: "" }]);
     // 两个普通源文件无优先级差，按 basename 字母序（routes < server）
     expect(result.slice?.files.map((file) => file.path)).toEqual(["go.mod", "internal/routes.go"]);
+  });
+
+  it("never selects migration files, not even as window diff or required paths", async () => {
+    // 迁移脚本移出了分析目标：强制装入的循环本来不看噪声分类，所以这里单独拦住它。
+    const files = new Map([
+      ["package.json", "{\"dependencies\":{\"express\":\"4.0.0\"}}\n"],
+      ["migrations/001_init.sql", "CREATE TABLE a (id INT PRIMARY KEY);\n"],
+      ["db/report.sql", "SELECT 1;\n"],
+      ["src/main.ts", "export const main = 1;\n"],
+    ]);
+    const trees = new Map<string, SourceTreeApiEntry[]>([
+      ["", [blob("package.json"), tree("migrations"), tree("db"), tree("src")]],
+      ["migrations", [blob("migrations/001_init.sql")]],
+      ["db", [blob("db/report.sql")]],
+      ["src", [blob("src/main.ts")]],
+    ]);
+    const listed: string[] = [];
+    const forced = await planSelection({}, files, trees, [{ path: "" }], (path) => listed.push(path), ["migrations/001_init.sql", "db/report.sql", "src/main.ts"]);
+    expect(forced.slice?.files.map((file) => file.path)).toEqual(["src/main.ts", "package.json"]);
+    expect(listed).not.toContain("migrations");
+
+    const required = await planSelection({}, files, trees, [{ path: "" }], undefined, ["migrations/001_init.sql"], undefined, {
+      mode: "required_only",
+      requiredPaths: ["migrations/001_init.sql", "db/report.sql", "src/main.ts"],
+    });
+    expect(required.slice?.files.map((file) => file.path)).toEqual(["src/main.ts"]);
   });
 
   it("selects only unique required paths without full-tree discovery", async () => {

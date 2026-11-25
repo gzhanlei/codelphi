@@ -1,8 +1,30 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { evidenceKind } from "../lib/evidence";
+import { evidenceKind, isSchemaArtifact } from "../lib/evidence";
 import { EvidenceLinks } from "../components/evidence-links";
+
+describe("isSchemaArtifact", () => {
+  it("recognises migration scripts and SQL files", () => {
+    expect(isSchemaArtifact("migrations/083_product_presentations.sql")).toBe(true);
+    expect(isSchemaArtifact("superset/migrations/versions/2026_11_01.py")).toBe(true);
+    expect(isSchemaArtifact("db/migration/001_init.rb")).toBe(true);
+    expect(isSchemaArtifact("internal/store/sqlc/queries/oauth_clients.sql")).toBe(true);
+  });
+
+  it("leaves ordinary source, ORM model code and look-alike names alone", () => {
+    expect(isSchemaArtifact("lib/billing/gift-wallet.ts")).toBe(false);
+    expect(isSchemaArtifact("prisma/schema.prisma")).toBe(false);
+    expect(isSchemaArtifact("django_app/models.py")).toBe(false);
+    expect(isSchemaArtifact("docs/migrations.md")).toBe(false);
+    expect(isSchemaArtifact("lib/migration-planner.ts")).toBe(false);
+  });
+
+  it("is a separate predicate: the evidence tier of a migration file does not change", () => {
+    // 不给 evidenceKind 加档位：否则只引用迁移的场景会被当成弱证据，打上“测试佐证”。
+    expect(evidenceKind("migrations/083_product_presentations.sql")).toBe("implementation");
+  });
+});
 
 describe("evidenceKind", () => {
   it("classifies test files", () => {

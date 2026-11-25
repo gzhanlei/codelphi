@@ -33,6 +33,17 @@ export function isInfrastructureEvidence(path: string): boolean {
 }
 
 /**
+ * 数据库迁移脚本（2026-11-25 产品决定：移出分析目标）。它们不进提示词、不能作证据、
+ * 变更也不触发重新分析。这是独立的判定，不并入 evidenceKind：isTestOnlyEvidence 把一切
+ * 非 implementation 的档位都当弱证据，只引用迁移的场景会被误打「测试佐证」。ORM 模型代码不在此列。
+ */
+const SCHEMA_ARTIFACT = /(?:^|\/)migrations?\/|\.sql$/i;
+
+export function isSchemaArtifact(path: string): boolean {
+  return SCHEMA_ARTIFACT.test(path);
+}
+
+/**
  * 证据强度分级：链接到 README/prompt 的条目只证明「文档这样要求」，
  * 不证明「运行时如此执行」——测试与文档证据必须和实现代码区分开。
  */
