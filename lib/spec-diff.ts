@@ -498,6 +498,23 @@ export interface DiffSpecOptions {
   behavioralChangePaths?: ReadonlySet<string>;
   language?: "zh-CN" | "en";
   removedProofs?: ReadonlyMap<string, RemovalProof>;
+  /** 两边各自的功能身份。给了才按身份配对功能，见 DiffIdentities。 */
+  identities?: DiffIdentities;
+}
+
+/**
+ * 跨版本比对时两边的功能身份：名称键 → 身份键。
+ *
+ * 给了它，功能先按身份配对；没配上的（有一侧没有身份，或者两边身份不同）再按名称键配对。
+ * 不给就是原来的做法，一律按名称键。身份和名称连续一致时，两种配对的结果逐项相同、顺序也相同。
+ * 托管模式下模型的改名会折叠回旧名，所以按身份配对今天只在读侧的比对重算里用；
+ * 客户端增量协议上线后，真正的改名也从这里走：改名记一条 changed，不是一个移除加一个新增。
+ * 场景在配对好的功能里照旧按编号配对。按现在的身份规则（功能身份，编号），这和按场景身份配对是一回事；
+ * 编号变了的情形由原有的重编号折叠处理。
+ */
+export interface DiffIdentities {
+  before: ReadonlyMap<string, string>;
+  after: ReadonlyMap<string, string>;
 }
 
 function scenarioChanges(before: SpecFeature, after: SpecFeature, outcome: DiffOutcome, options?: DiffSpecOptions) {
@@ -631,15 +648,81 @@ export function diffSpec(before: SpecFeature[] | null, after: SpecFeature[], opt
   return diffSpecWithFolded(before, after, options).changes;
 }
 
+/** 一对要比对的功能。两侧都有就是同一个功能；只有一侧就是新增或移除。 */
+interface FeaturePair {
+  /** 排序位置：变更前的名称键；没有变更前的功能时是变更后的名称键。 */
+  orderKey: string;
+  previous: SpecFeature | undefined;
+  current: SpecFeature | undefined;
+}
+
+/** 按名称键配对。输出顺序是名称键的码点序。 */
+function pairsByName(before: SpecFeature[], after: SpecFeature[]): FeaturePair[] {
+  const beforeFeatures = new Map(before.map((feature) => [specFeatureKey(feature.name), feature]));
+  const afterFeatures = new Map(after.map((feature) => [specFeatureKey(feature.name), feature]));
+  return mergedSortedKeys(beforeFeatures, afterFeatures).map((key) => ({ orderKey: key, previous: beforeFeatures.get(key), current: afterFeatures.get(key) }));
+}
+
+/** 按身份给一侧的功能建索引。同一个身份出现两次时取第一个，另一个留给名称键配对。没有身份的功能不在索引里。 */
+function indexByIdentity(features: SpecFeature[], identities: ReadonlyMap<string, string>): Map<string, SpecFeature> {
+  const byIdentity = new Map<string, SpecFeature>();
+  for (const feature of features) {
+    const identity = identities.get(specFeatureKey(feature.name));
+    if (identity !== undefined && !byIdentity.has(identity)) byIdentity.set(identity, feature);
+  }
+  return byIdentity;
+}
+
+const compareCodeUnits = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+
+/**
+ * 先按身份配对，剩下的再按名称键配对。配成对的一对按变更前的名称键排序，
+ * 所以身份和名称连续一致时，这里的输出和 pairsByName 逐项相同。
+ *
+ * 排序位置相同的两对（改名改成了一个同时被腾出来的名字）靠稳定排序分先后：数组排序是稳定的，
+ * 按身份配成对的那一对先插入，所以排在前面。比较器只比排序位置，不另写先后规则。
+ */
+function pairsByIdentity(before: SpecFeature[], after: SpecFeature[], identities: DiffIdentities): FeaturePair[] {
+  const beforeByIdentity = indexByIdentity(before, identities.before);
+  const remainingBefore = new Map(before.map((feature) => [specFeatureKey(feature.name), feature]));
+  const remainingAfter = new Map<string, SpecFeature>();
+  const pairs: FeaturePair[] = [];
+  for (const current of after) {
+    const identity = identities.after.get(specFeatureKey(current.name));
+    const previous = identity === undefined ? undefined : beforeByIdentity.get(identity);
+    // 变更前的这个功能已经被配走了：眼前这个只能留给名称键配对。
+    if (previous === undefined || !remainingBefore.delete(specFeatureKey(previous.name))) {
+      remainingAfter.set(specFeatureKey(current.name), current);
+      continue;
+    }
+    pairs.push({ orderKey: specFeatureKey(previous.name), previous, current });
+  }
+  for (const key of mergedSortedKeys(remainingBefore, remainingAfter)) pairs.push({ orderKey: key, previous: remainingBefore.get(key), current: remainingAfter.get(key) });
+  return pairs.sort((a, b) => compareCodeUnits(a.orderKey, b.orderKey));
+}
+
 /** 与 diffSpec 同判定的折叠报告版：changes 之外同时返回被等价判定吞掉的差异明细。 */
 export function diffSpecWithFolded(before: SpecFeature[] | null, after: SpecFeature[], options?: DiffSpecOptions): DiffOutcome {
   const outcome: DiffOutcome = { changes: [], folded: [] };
   if (!before) return outcome;
-  const beforeFeatures = new Map(before.map((feature) => [specFeatureKey(feature.name), feature]));
-  const afterFeatures = new Map(after.map((feature) => [specFeatureKey(feature.name), feature]));
-
-  for (const key of mergedSortedKeys(beforeFeatures, afterFeatures)) diffFeature(beforeFeatures.get(key), afterFeatures.get(key), outcome, options);
+  const pairs = options?.identities ? pairsByIdentity(before, after, options.identities) : pairsByName(before, after);
+  for (const { previous, current } of pairs) diffFeature(previous, current, outcome, options);
   return outcome;
+}
+
+export interface DiffPairingComparison {
+  /** 两种配对的结果是否逐项相同。 */
+  same: boolean;
+  byName: DiffOutcome;
+  byIdentity: DiffOutcome;
+}
+
+/** 按名称键和按身份各比对一遍，放在一起对照。回放工具和验收用：身份和名称连续一致时 same 必须为 true。 */
+export function compareDiffPairing(before: SpecFeature[] | null, after: SpecFeature[], options?: DiffSpecOptions): DiffPairingComparison {
+  const { identities, ...rest } = options ?? {};
+  const byName = diffSpecWithFolded(before, after, rest);
+  const byIdentity = identities ? diffSpecWithFolded(before, after, options) : byName;
+  return { same: byName === byIdentity || JSON.stringify(byName) === JSON.stringify(byIdentity), byName, byIdentity };
 }
 
 export interface SpecTombstones {
