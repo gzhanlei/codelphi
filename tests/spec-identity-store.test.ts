@@ -95,7 +95,7 @@ describe("bulkAssignSql", () => {
       { id: 11, values: ["支付", "统一登录"] },
     ]);
     expect(built?.sql.replace(/\s+/g, " ")).toBe(
-      "UPDATE `spec_features` AS t JOIN (SELECT ? AS id, ? AS identity_key, ? AS parent_identity_key UNION ALL SELECT ?, ?, ?) AS src ON src.id = t.id " +
+      "UPDATE `spec_features` AS t JOIN (SELECT CAST(? AS UNSIGNED) AS id, CAST(? AS CHAR) AS identity_key, CAST(? AS CHAR) AS parent_identity_key UNION ALL SELECT ?, ?, ?) AS src ON src.id = t.id " +
         "SET t.identity_key = src.identity_key, t.parent_identity_key = src.parent_identity_key",
     );
     expect(built?.params).toEqual([10, "统一登录", null, 11, "支付", "统一登录"]);
@@ -103,7 +103,7 @@ describe("bulkAssignSql", () => {
 
   it("builds a single-column statement with the same shape", () => {
     expect(bulkAssignSql("spec_scenarios", ["identity_key"], [{ id: 500, values: ["x"] }])?.sql.replace(/\s+/g, " ")).toBe(
-      "UPDATE `spec_scenarios` AS t JOIN (SELECT ? AS id, ? AS identity_key) AS src ON src.id = t.id SET t.identity_key = src.identity_key",
+      "UPDATE `spec_scenarios` AS t JOIN (SELECT CAST(? AS UNSIGNED) AS id, CAST(? AS CHAR) AS identity_key) AS src ON src.id = t.id SET t.identity_key = src.identity_key",
     );
   });
 

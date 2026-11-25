@@ -133,7 +133,8 @@ export const ASSIGN_CHUNK_SIZE = 400;
 export function bulkAssignSql(table: string, columns: readonly string[], rows: readonly IdentityAssignment[]): { sql: string; params: Array<string | number | null> } | null {
   if (rows.length === 0) return null;
   const width = columns.length + 1;
-  const first = `SELECT ? AS id${columns.length === 0 ? "" : `, ${columns.map((column) => `? AS ${column}`).join(", ")}`}`;
+  // 参数显式定型：主键转成无符号整数，连接才能走主键索引（不转的话参数可能被当成浮点数）；身份键转成字符。
+  const first = `SELECT CAST(? AS UNSIGNED) AS id${columns.length === 0 ? "" : `, ${columns.map((column) => `CAST(? AS CHAR) AS ${column}`).join(", ")}`}`;
   const rest = rows.slice(1).map(() => `UNION ALL SELECT ${Array(width).fill("?").join(", ")}`).join(" ");
   const params: Array<string | number | null> = [];
   for (const row of rows) params.push(row.id, ...row.values);
