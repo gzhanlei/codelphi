@@ -73,4 +73,55 @@ describe("database migrations", () => {
     expect(sql).toContain("REFERENCES spec_features(id) ON DELETE CASCADE");
     expect(sql).not.toContain("ALTER TABLE spec_scenarios");
   });
+
+  describe("identity layer (084)", () => {
+    const sql = readFileSync(new URL("../migrations/084_spec_identity.sql", import.meta.url), "utf8");
+
+    it("creates the two identity registries and the two link tables", () => {
+      for (const table of ["feature_identities", "scenario_identities", "feature_identity_links", "scenario_identity_links"]) {
+        expect(sql).toContain(`CREATE TABLE IF NOT EXISTS ${table} (`);
+        const body = sql.slice(sql.indexOf(`CREATE TABLE IF NOT EXISTS ${table} (`));
+        expect(body).toContain("CONSTRAINT " + table + "_product_fk FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE");
+      }
+      // 身份在一个产品内唯一，按逐字精确的比较。
+      expect(sql).toContain("UNIQUE KEY feature_identities_product_key_unique (product_id, identity_key)");
+      expect(sql).toContain("UNIQUE KEY scenario_identities_product_key_unique (product_id, identity_key)");
+      // 按功能身份找它的场景身份。
+      expect(sql).toContain("KEY scenario_identities_product_feature_idx (product_id, feature_identity_key, reference)");
+    });
+
+    it("adds nullable identity columns to existing tables and changes nothing else", () => {
+      expect(sql).toContain("ALTER TABLE spec_features\n    ADD COLUMN identity_key VARCHAR(191) COLLATE utf8mb4_bin NULL,\n    ADD COLUMN parent_identity_key VARCHAR(191) COLLATE utf8mb4_bin NULL;");
+      expect(sql).toContain("ALTER TABLE spec_scenarios\n    ADD COLUMN identity_key VARCHAR(512) COLLATE utf8mb4_bin NULL;");
+      expect(sql).toContain("ALTER TABLE spec_changes\n    ADD COLUMN feature_identity_key VARCHAR(191) COLLATE utf8mb4_bin NULL,\n    ADD COLUMN scenario_identity_key VARCHAR(512) COLLATE utf8mb4_bin NULL;");
+      expect(sql).toContain("ALTER TABLE features\n    ADD COLUMN identity_key VARCHAR(191) COLLATE utf8mb4_bin NULL;");
+      expect(sql).toContain("ALTER TABLE scenarios\n    ADD COLUMN identity_key VARCHAR(512) COLLATE utf8mb4_bin NULL;");
+      // 只做加法：新列全部可空，既有列一列不动。旧应用要能在新表结构上继续服务。
+      const added = [...sql.matchAll(/ADD COLUMN ([^\n]+)/g)].map((match) => match[1].replace(/[;,]$/, ""));
+      expect(added).toHaveLength(7);
+      for (const column of added) {
+        expect(column, column).toMatch(/\bNULL$/);
+        expect(column, column).not.toContain("NOT NULL");
+      }
+      for (const forbidden of ["DROP ", "MODIFY ", "CHANGE COLUMN", " AFTER ", "RENAME "]) expect(sql).not.toContain(forbidden);
+    });
+
+    it("declares every identity column with the exact-collation binary collation", () => {
+      // 现有名称列是不区分大小写和重音的排序规则，身份比较必须和应用层的名称键规则一致。
+      const columns = [...sql.matchAll(/(?:identity_key|parent_identity_key|feature_identity_key|name_key) VARCHAR\(\d+\)( COLLATE utf8mb4_bin)?/g)];
+      expect(columns).toHaveLength(15);
+      for (const column of columns) expect(column[1], column[0]).toBe(" COLLATE utf8mb4_bin");
+    });
+
+    it("keeps comment lines free of the statement separator the migration runner splits on", () => {
+      // scripts/migrate.ts 按行尾的分号切分语句，注释里的分号会把一句话切成两段。
+      for (const line of sql.split("\n")) {
+        if (line.trimStart().startsWith("--")) expect(line, line).not.toContain(";");
+      }
+      // 每条语句都以行尾分号结束。
+      const statements = sql.split(/;\s*(?:\r?\n|$)/).map((part) => part.trim()).filter(Boolean);
+      expect(statements.length).toBeGreaterThan(4);
+      for (const statement of statements) expect(statement).toMatch(/^(?:--|CREATE TABLE|ALTER TABLE)/);
+    });
+  });
 });
