@@ -1153,7 +1153,7 @@ kind + repositoryId + branch + baseSpecVersionId + baseSha + headSha + artifactH
 
 ### 14.4 锁竞争与唯一约束冲突
 
-- 使用 MySQL InnoDB 事务，默认在 `REPEATABLE READ` 下以 repository 行作为仓库级串行化锁；固定锁定顺序为 `repository → watermark → publication → 版本写入`。首次基线同样先锁 repository，避免依赖不存在的 watermark 行或间隙锁行为。（生产的实际默认隔离级别是 `READ COMMITTED`，见 §24.10 第 4 条；规则未改。）
+- 使用 MySQL InnoDB 事务，默认在 `REPEATABLE READ` 下以 repository 行作为仓库级串行化锁；固定锁定顺序为 `repository → watermark → publication → 版本写入`。首次基线同样先锁 repository，避免依赖不存在的 watermark 行或间隙锁行为。（2026-11-26 决定：发布事务要显式声明隔离级别，不依赖服务器的默认值。生产的默认值是 `READ COMMITTED`，见 §24.10 第 4 条。声明哪一个级别见 §24.11，实现随客户端增量协议一起做。）
 - 锁范围只有 repository、watermark、publication 三类行。账户状态不加锁（§17）。
 - 大型 JSON、hash、分类和身份匹配不得长时间占用仓库锁。事务外结果必须绑定 baseSpecVersionId、baseSha 和规则版本，事务内先复核基线再使用。
 - 两个客户端即使同时完成事务外计算，也只能由 repository 锁和 `(repository_id, base_spec_version_id)` 唯一约束产生一个成功后继。
@@ -1908,7 +1908,7 @@ Golden Repository 的冻结窗口：§19.2 列的情形里，能从分类结果�
 
 实施后的状态：`lib/spec-diff.ts` 既有的 68 个测试、`lib/spec-versions.ts` 既有的 61 个测试一个没改，原样通过。后两个文件没有动。身份键不放进规格对象，变化记录的 JSON 里没有身份字段。`lib/spec-diff.ts` 里加的是可选的按身份配对和两份对照函数，不给身份时走原来的代码。`lib/spec-editor-service.ts` 没有动。新增的文件是 `lib/spec-identity.ts`（分配身份的规则）、`lib/spec-identity-store.ts`（登记表的读写）、`scripts/backfill-spec-identities.ts`（回填）、`scripts/verify-spec-identity.ts`（离线验收）；`scripts/replay-spec-diff.ts` 加了对照模式。
 
-真实 MySQL 演练之后另有一处改动：`lib/spec-diff.ts` 的 `preserveUncertainDisappearances` 多一个可选的墓碑参数，不给时行为和原来一样（§24.10）；`tests/spec-versions.test.ts` 末尾追加四条测试，原有的一条没改。新增的文件还有 `scripts/verify-spec-identity-mysql.ts`（真实 MySQL 演练）、`tests/spec-diff-tombstones.test.ts`、`tests/verify-spec-identity-mysql.test.ts`。
+真实 MySQL 演练之后另有一处改动：`lib/spec-diff.ts` 的 `preserveUncertainDisappearances` 多一个可选的墓碑参数，不给时行为和原来一样（§24.10）；`tests/spec-versions.test.ts` 末尾追加四条测试，原有的一条没改。新增的文件还有 `scripts/verify-spec-identity-mysql.ts`（真实 MySQL 演练）、`tests/spec-diff-tombstones.test.ts`、`tests/verify-spec-identity-mysql.test.ts`。之后还改了一处既有迁移：`migrations/049_personal_workspace_slug_randomize.sql` 用 `SHA2()` 代替 `MD5()`，`tests/migrations.test.ts` 多一条守卫（§24.11）。它是账本里「多租户工作区与成员邀请」一条场景的证据，行为没有变。
 
 部署身份层时的顺序和要注意的事见 §20 的末尾。
 
@@ -1993,6 +1993,10 @@ Golden Repository 的冻结窗口：§19.2 列的情形里，能从分类结果�
 - 比对拿到两边的身份时先按身份配对，没配上的退回名称键；托管模式下模型的改名仍然折叠回旧名。
 - 人工下线的墓碑按身份加宽成名称键，检查墓碑的地方不变。
 - 人工下线的条目不算“不确定的消失”：合并之后那一步同样带着墓碑，不把它保留回版本（2026-11-25，真实 MySQL 演练查出，§24.10）。
+- 发布事务显式声明隔离级别，不依赖服务器的默认值（2026-11-26，§24.11）。
+- 迁移 049 不再依赖 `MD5()`，空的数据库在 MySQL 8 和 9 上都能建起来（2026-11-26）。
+- 不查生产历史：修正不改写历史版本，被放回的功能在下一次发布时自动去掉（2026-11-26）。
+- 身份层上线：合并到 main、部署、给线上全部仓库回填（2026-11-26）。
 
 ## 24. 评审修订记录（2026-11-24）
 
@@ -2234,9 +2238,18 @@ Golden Repository 的冻结窗口：§19.2 列的情形里，能从分类结果�
 **三、四条边界，留给后面。**
 
 1. **回填不能在“身份和名称键不同”的行上重跑。** 回填从空登记表开始按名称键重算，并覆盖行上已有的身份。今天每一行上身份就是名称键：服务端只按名称键分配身份，模型给出的改名会被折叠回旧名；2026-11-25 只读核对了生产 10 个仓库 36,709 行功能，`stable_key` 和按 `name` 算出的名称键没有一行不一致。所以现在重复回填是安全的，演练里也验证了。等客户端增量协议带来真正的改名，就必须先让回填沿用它遇到的身份，或者明确作废回填。演练脚本把“改过名”的情形放在回填之后，就是为了不把这个边界算成通过。
-2. **MySQL 9 没有 `MD5()`。** 迁移 049 用了它，在 MySQL 9 上从零建库会失败。生产是 MySQL 8，不受影响；运行时的 SQL 没有用到它。演练脚本的 `--md5-stand-in` 只在临时库里放一个同名的替身，让迁移链走完。要不要把 049 改成不依赖 `MD5()`，由产品负责人定。
+2. **MySQL 9 没有 `MD5()`。** 迁移 049 用了它，在 MySQL 9 上从零建库会失败。生产是 MySQL 8，不受影响；运行时的 SQL 没有用到它。演练脚本的 `--md5-stand-in` 只在临时库里放一个同名的替身，让迁移链走完。要不要把 049 改成不依赖 `MD5()`，由产品负责人定。**2026-11-26 已改**：049 改用 `SHA2()`，替身开关去掉了，见 §24.11。
 3. **迁移和回填还没有在 MySQL 8 上执行过。** 2026-11-26 在生产数据的副本上演练了一次（§20 末尾），副本跑在本机 MySQL 9.6.0 上。同时查清了生产的设置：MySQL 8.0.30（腾讯云 CynosDB），严格模式，二进制日志为 ROW，默认隔离级别 `READ COMMITTED`，库的默认字符集是 `utf8mb3`。后两条和本机不同，本机是 `REPEATABLE READ` 和 `utf8mb4`。084 里表和列的字符集、排序规则都是写明的，在 `utf8mb3` 的默认值下建出来的仍是 `utf8mb4`。要在 8.0 上真正执行一遍有两条路，都要产品负责人点头：在本机起一个 MySQL 8.0 的临时容器（仓库约定不引入本地数据库容器），或者在生产的实例上建一个只含那五张表的临时库（大约 140MB，要在生产实例上写入）。
 4. **生产的默认隔离级别和规格的假设不一样。** §14 是按 `REPEATABLE READ` 写的。应用没有自己设置隔离级别，所以生产的事务实际跑在 `READ COMMITTED` 下；本机的 MySQL 默认是 `REPEATABLE READ`。按行加锁串行化、不依赖间隙锁、把删除写成条件操作，这些规则在两个级别下都成立。受影响的是任何依赖“事务里多次读到同一份快照”的推理，以及在本机默认设置下跑的并发测试。客户端增量协议开工前要定一件事：发布事务要不要显式声明隔离级别。这里只记事实，规则没有改。
+
+### 24.11 上线前的决定（2026-11-26）
+
+产品负责人在生产数据副本的演练之后定了四件事，记在这里。都没有经过评审。
+
+1. **发布事务显式声明隔离级别。** 不再依赖服务器的默认值。声明哪一个级别是我的理解，产品负责人只说了“显式声明”：按 §14 的规则推导时所用的 `REPEATABLE READ`。如果本意是别的级别，§14 的加锁规则要按那个级别重新推一遍。这件事随客户端增量协议一起实现，身份层的写入路径这次没有动。
+2. **人工下线的条目不回来，这个修正随身份层一起上线。** 它同时修了主线原有的按名字记的墓碑（§24.10）。
+3. **迁移 049 不再依赖 `MD5()`。** 改用 `SHA2()`，结果的形态相同。生产早已执行过这条迁移，不受影响；从今往后空的数据库在 MySQL 8 和 9 上都能从零建起来。`tests/migrations.test.ts` 多了一条守卫，任何迁移都不得调用 `MD5()` 或 `SHA1()`。演练脚本不再需要替身函数，`--md5-stand-in` 去掉了；不用替身从空库跑一遍，86 个迁移文件全部通过。
+4. **不查生产历史。** 修正只管以后的版本。被放回的功能在下一次发布时按新逻辑去掉，不需要清理。
 
 ## 附录 A：已移出首期范围的远端观察值规则
 
