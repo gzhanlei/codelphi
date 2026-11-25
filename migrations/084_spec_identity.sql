@@ -7,6 +7,10 @@
 --
 -- 身份列一律用 utf8mb4_bin。现有的名称列不区分大小写和重音，身份比较必须和应用层的名称键规则
 -- 逐字一致。所以不要在 SQL 里把身份列和名称列直接比较或连接，两种排序规则混用会报错。
+--
+-- 两张登记表只追加、不修改。身份是产品级的，版本链是仓库级的，一个产品下有几个仓库时，
+-- 「某个身份现在在不在链上」在这张表上说不清，所以这里不记。在不在链上，看最新版本的身份列，
+-- 退休和恢复的事实由关系表按版本记录。
 
 CREATE TABLE IF NOT EXISTS feature_identities (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -14,9 +18,7 @@ CREATE TABLE IF NOT EXISTS feature_identities (
   identity_key VARCHAR(191) COLLATE utf8mb4_bin NOT NULL,
   first_name VARCHAR(191) NOT NULL,
   first_spec_version_id BIGINT UNSIGNED NOT NULL,
-  retired_spec_version_id BIGINT UNSIGNED NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   UNIQUE KEY feature_identities_product_key_unique (product_id, identity_key),
   KEY feature_identities_first_version_idx (first_spec_version_id),
   CONSTRAINT feature_identities_product_fk FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
@@ -30,9 +32,7 @@ CREATE TABLE IF NOT EXISTS scenario_identities (
   feature_identity_key VARCHAR(191) COLLATE utf8mb4_bin NOT NULL,
   reference VARCHAR(32) COLLATE utf8mb4_bin NOT NULL,
   first_spec_version_id BIGINT UNSIGNED NOT NULL,
-  retired_spec_version_id BIGINT UNSIGNED NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   UNIQUE KEY scenario_identities_product_key_unique (product_id, identity_key),
   KEY scenario_identities_product_feature_idx (product_id, feature_identity_key, reference),
   CONSTRAINT scenario_identities_product_fk FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE

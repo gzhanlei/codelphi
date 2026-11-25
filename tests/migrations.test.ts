@@ -90,6 +90,17 @@ describe("database migrations", () => {
       expect(sql).toContain("KEY scenario_identities_product_feature_idx (product_id, feature_identity_key, reference)");
     });
 
+    it("keeps the registries append-only: a version chain's state lives in the version rows, not here", () => {
+      // 身份是产品级的，版本链是仓库级的。一个产品下有几个仓库时，登记表上说不出
+      // “这个身份现在在不在链上”。所以登记表只追加，退休和恢复由关系表按版本记录。
+      for (const table of ["feature_identities", "scenario_identities"]) {
+        const start = sql.indexOf(`CREATE TABLE IF NOT EXISTS ${table} (`);
+        const body = sql.slice(start, sql.indexOf(") ENGINE=InnoDB", start));
+        expect(body, table).not.toContain("retired");
+        expect(body, table).not.toContain("ON UPDATE");
+      }
+    });
+
     it("adds nullable identity columns to existing tables and changes nothing else", () => {
       expect(sql).toContain("ALTER TABLE spec_features\n    ADD COLUMN identity_key VARCHAR(191) COLLATE utf8mb4_bin NULL,\n    ADD COLUMN parent_identity_key VARCHAR(191) COLLATE utf8mb4_bin NULL;");
       expect(sql).toContain("ALTER TABLE spec_scenarios\n    ADD COLUMN identity_key VARCHAR(512) COLLATE utf8mb4_bin NULL;");
