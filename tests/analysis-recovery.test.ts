@@ -104,19 +104,19 @@ describe("startup analysis recovery", () => {
   });
 
   it("never re-queues or dispatches runs the server does not execute", async () => {
-    // client_upload 的 run 是客户端发布的回执，产品由客户端分析时服务端不跑分析。启动恢复不能把它们捞出来。
+    // client_upload 和 import_backfill 的 run 都是回执，产品由客户端分析时服务端不跑分析。启动恢复不能把它们捞出来。
     const { execute } = sqlRouter();
     await recoverInterruptedRuns(runAnalysis, execute, gatePass);
     const statements = execute.mock.calls.map((call) => call[0] as string);
     const requeue = statements[0];
-    expect(requeue).toContain("trigger_type <> 'client_upload'");
+    expect(requeue).toContain("trigger_type NOT IN ('client_upload', 'import_backfill')");
     expect(requeue).toContain("WHERE p.analysis_executor = 'client'");
     // 条件括在状态条件的外面：只排除不归服务端执行的 run，不改哪些状态会被重排。
-    expect(requeue).toMatch(/WHERE \(status = 'running'[\s\S]*started_at IS NOT NULL\)\)\s+AND trigger_type <> 'client_upload'/);
+    expect(requeue).toMatch(/WHERE \(status = 'running'[\s\S]*started_at IS NOT NULL\)\)\s+AND trigger_type NOT IN \('client_upload', 'import_backfill'\)/);
     const candidates = statements[1];
     expect(candidates).toContain("r.status = 'queued' AND r.started_at IS NULL");
     expect(candidates).toContain("JOIN products p ON p.id = repo.product_id");
-    expect(candidates).toContain("r.trigger_type <> 'client_upload' AND p.analysis_executor <> 'client'");
+    expect(candidates).toContain("r.trigger_type NOT IN ('client_upload', 'import_backfill') AND p.analysis_executor <> 'client'");
   });
 });
 
@@ -172,7 +172,7 @@ describe("stuck queued run recovery (sweep entry)", () => {
     await dispatchStuckQueuedRuns(runAnalysis, execute, gatePass);
     const newest = calls()[0][0];
     // 排除放在「每个仓库最新一条」的子查询里：客户端分析的仓库整段不出现，它的旧 run 也不会被顺手标成 superseded。
-    expect(newest).toMatch(/SELECT r\.repository_id, MAX\(r\.id\) AS max_id[\s\S]*r\.trigger_type <> 'client_upload' AND p\.analysis_executor <> 'client'[\s\S]*GROUP BY r\.repository_id/);
+    expect(newest).toMatch(/SELECT r\.repository_id, MAX\(r\.id\) AS max_id[\s\S]*r\.trigger_type NOT IN \('client_upload', 'import_backfill'\) AND p\.analysis_executor <> 'client'[\s\S]*GROUP BY r\.repository_id/);
     expect(newest).toContain("JOIN products p ON p.id = repo.product_id");
   });
 });

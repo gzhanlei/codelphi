@@ -11,6 +11,18 @@ export type AnalysisExecutor = "server" | "client";
 
 /** 客户端发布的 run 的 trigger_type。它只是一张回执：只在发布事务里创建，提交时就是 succeeded，服务端从不执行。 */
 export const CLIENT_UPLOAD_TRIGGER = "client_upload";
+/** 导入草稿回填的 run 的 trigger_type（scripts/backfill-import-draft.ts）。同样是回执，同样从不执行。 */
+export const IMPORT_BACKFILL_TRIGGER = "import_backfill";
+
+/** 回执类 run：一个事务里建行、写完、标成功，外界从来看不到它排队或运行；服务端没有任何执行它的代码。 */
+const RECEIPT_OF: Readonly<Record<string, string>> = {
+  [CLIENT_UPLOAD_TRIGGER]: "a client publish",
+  [IMPORT_BACKFILL_TRIGGER]: "an import backfill",
+};
+
+export function isReceiptTrigger(triggerType: string | null): boolean {
+  return triggerType !== null && Object.hasOwn(RECEIPT_OF, triggerType);
+}
 
 export const CLIENT_MODE_ERROR = "analysis_mode_is_client";
 
@@ -32,15 +44,16 @@ export interface ExecutionMode {
   executor: AnalysisExecutor;
 }
 
-/** 一个 run 该不该由服务端执行。client_upload 的 run、客户端分析的产品的 run，都不该。 */
+/** 一个 run 该不该由服务端执行。回执类的 run、客户端分析的产品的 run，都不该。 */
 export function serverMayExecute(mode: ExecutionMode): boolean {
-  return mode.triggerType !== CLIENT_UPLOAD_TRIGGER && mode.executor !== "client";
+  return !isReceiptTrigger(mode.triggerType) && mode.executor !== "client";
 }
 
 /** 服务端拒绝执行时写进 run 的原因。 */
 export function clientRunRefusal(mode: ExecutionMode): string {
-  return mode.triggerType === CLIENT_UPLOAD_TRIGGER
-    ? `${CLIENT_MODE_ERROR}: a ${CLIENT_UPLOAD_TRIGGER} run is the receipt of a client publish and is never executed by the server`
+  const receipt = mode.triggerType !== null ? RECEIPT_OF[mode.triggerType] : undefined;
+  return receipt
+    ? `${CLIENT_MODE_ERROR}: a ${mode.triggerType} run is the receipt of ${receipt} and is never executed by the server`
     : `${CLIENT_MODE_ERROR}: this product is analysed by the client; the server does not run its analyses`;
 }
 
@@ -64,9 +77,11 @@ export async function assertServerExecuted(repositoryId: number, execute: Execut
  * 查询里 analysis_runs 的别名由调用方给，repositories 固定叫 repo、products 固定叫 p。
  */
 export function serverExecutedRunSql(runAlias = "r"): string {
-  return `${runAlias}.trigger_type <> '${CLIENT_UPLOAD_TRIGGER}' AND p.analysis_executor <> 'client'`;
+  return `${runAlias}.trigger_type ${NOT_RECEIPT_SQL} AND p.analysis_executor <> 'client'`;
 }
 
+const NOT_RECEIPT_SQL = `NOT IN (${Object.keys(RECEIPT_OF).map((trigger) => `'${trigger}'`).join(", ")})`;
+
 /** 给不带头表的 analysis_runs 语句用的等价条件。 */
-export const SERVER_EXECUTED_RUN_UNJOINED_SQL = `trigger_type <> '${CLIENT_UPLOAD_TRIGGER}'
+export const SERVER_EXECUTED_RUN_UNJOINED_SQL = `trigger_type ${NOT_RECEIPT_SQL}
        AND repository_id NOT IN (SELECT repo.id FROM repositories repo JOIN products p ON p.id = repo.product_id WHERE p.analysis_executor = 'client')`;

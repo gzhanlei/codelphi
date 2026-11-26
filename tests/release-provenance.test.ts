@@ -21,6 +21,15 @@ describe("clientProvenanceOf", () => {
     expect(clientProvenanceOf(JSON.parse(stored))).toEqual({ executor: "client", model: "tenant-model", clientVersion: "0.1.0" });
     for (const other of [null, undefined, "", "not json", {}, JSON.stringify({ server: { executor: "server" } })]) expect(clientProvenanceOf(other)).toBeNull();
   });
+
+  it("tells a version backfilled from an imported snapshot apart: no model was recorded, and it is not a client publish either", () => {
+    const stored = JSON.stringify({ server: { executor: "client", entry: "import_backfill", specVersionId: 40 }, client: null });
+    expect(clientProvenanceOf(stored)).toEqual({ executor: "client", entry: "import_backfill" });
+    expect(clientProvenanceOf(JSON.parse(stored))).toEqual({ executor: "client", entry: "import_backfill" });
+    // 记了来源但没有模型的发布版本、来源信息里没有这一项的版本，都不当成回填。
+    expect(clientProvenanceOf(JSON.stringify({ server: { executor: "client" }, client: { model: "m" } }))).toEqual({ executor: "client", model: "m", clientVersion: "" });
+    expect(clientProvenanceOf(JSON.stringify({ server: { executor: "server", entry: "import_backfill" } }))).toBeNull();
+  });
 });
 
 describe("release card provenance", () => {
@@ -31,6 +40,17 @@ describe("release card provenance", () => {
     expect(html).toContain("本地分析");
     expect(html).toContain("文件级影响面");
     expect(render({ provenance: { executor: "client", model: "tenant-model", clientVersion: "0.1.0" } }, "en")).toContain("client-declared");
+  });
+
+  it("says a backfilled version came from an imported snapshot and was never analysed on the server", () => {
+    const html = render({ provenance: { executor: "client", entry: "import_backfill" } });
+    expect(html).toContain("导入的雷达快照");
+    expect(html).toContain("未在服务端分析");
+    expect(html).toContain("模型未记录");
+    // 回填不是客户端发布：不能出现「客户端声明」这种说法，也没有模型名可填。
+    expect(html).not.toContain("客户端声明");
+    expect(html).not.toContain("{model}");
+    expect(render({ provenance: { executor: "client", entry: "import_backfill" } }, "en")).toContain("not analysed on the server");
   });
 
   it("says nothing about provenance on a hosted version", () => {

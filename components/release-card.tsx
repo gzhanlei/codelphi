@@ -202,7 +202,7 @@ export function ReleaseCard({ slug, release, changes, reviewedChanges = [], beha
         <div>
           <time>{formatDateIn(locale, release.committedAt, { dateStyle: "long" })}</time><h2>{release.title}</h2>
           {release.provenance
-            ? <span className="release-provenance">{pick(locale, RELEASE_CARD.clientAnalysis).replace("{model}", release.provenance.model)}</span>
+            ? <span className="release-provenance">{"entry" in release.provenance ? pick(locale, RELEASE_CARD.importedSnapshot) : pick(locale, RELEASE_CARD.clientAnalysis).replace("{model}", release.provenance.model)}</span>
             : null}
         </div>
         {/* 仓库只存在于租户自己的机器上时没有可以点开的地址，就不放链接。 */}

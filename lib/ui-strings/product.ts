@@ -244,6 +244,8 @@ export const RELEASE_CARD = {
   impactHint: { "zh-CN": "影响面推荐 · 证据路径与本次改动文件命中", en: "Impact-suggested · evidence paths matched files changed in this release" },
   // 模型名是客户端声明的，服务端没有核实；核验范围只有文件级的影响面。两件事都写在明面上。
   clientAnalysis: { "zh-CN": "本地分析 · 模型 {model}（客户端声明）· 服务端核验：文件级影响面", en: "Analysed on the client · model {model} (client-declared) · server verification: file-level impact" },
+  // 从导入的雷达快照回填出来的版本：导入没有记模型，服务端也没有为它分析过。
+  importedSnapshot: { "zh-CN": "由导入的雷达快照回填 · 未在服务端分析 · 模型未记录", en: "Backfilled from an imported radar snapshot · not analysed on the server · model not recorded" },
   scenarioRef: { "zh-CN": "场景 {id}", en: "Scenario {id}" },
   statusAria: { "zh-CN": "回归状态：{feature} {reference}", en: "Regression status: {feature} {reference}" },
   skipPlaceholder: { "zh-CN": "跳过原因（可选）", en: "Skip reason (optional)" },

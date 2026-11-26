@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { runAnalysis } from "../lib/analysis";
-import { assertServerExecuted, ClientAnalysisError, loadAnalysisExecutor, serverMayExecute, SERVER_EXECUTED_RUN_UNJOINED_SQL, serverExecutedRunSql } from "../lib/analysis-executor";
+import { assertServerExecuted, ClientAnalysisError, isReceiptTrigger, loadAnalysisExecutor, serverMayExecute, SERVER_EXECUTED_RUN_UNJOINED_SQL, serverExecutedRunSql } from "../lib/analysis-executor";
 import { enqueueRunWithReservation, enqueueRunWithReservationInTransaction } from "../lib/billing/core";
 
 const dbMock = vi.hoisted(() => ({ db: undefined as unknown }));
@@ -58,13 +58,20 @@ beforeEach(() => {
 });
 
 describe("analysis executor gate", () => {
-  it("says only server-executed runs may run: neither client_upload runs nor runs of a client-analysed product", () => {
+  it("says only server-executed runs may run: neither receipt runs nor runs of a client-analysed product", () => {
     expect(serverMayExecute({ triggerType: "manual", executor: "server" })).toBe(true);
     expect(serverMayExecute({ triggerType: "push", executor: "server" })).toBe(true);
     expect(serverMayExecute({ triggerType: null, executor: "server" })).toBe(true);
     expect(serverMayExecute({ triggerType: "client_upload", executor: "server" })).toBe(false);
+    expect(serverMayExecute({ triggerType: "import_backfill", executor: "server" })).toBe(false);
     expect(serverMayExecute({ triggerType: "manual", executor: "client" })).toBe(false);
     expect(serverMayExecute({ triggerType: "client_upload", executor: "client" })).toBe(false);
+  });
+
+  it("knows the two receipt triggers and nothing else: a run row is a receipt only when one transaction creates it finished", () => {
+    expect(isReceiptTrigger("client_upload")).toBe(true);
+    expect(isReceiptTrigger("import_backfill")).toBe(true);
+    for (const other of ["manual", "push", "webhook", "", null, "CLIENT_UPLOAD"]) expect(isReceiptTrigger(other)).toBe(false);
   });
 
   it("reads the executor from the product and treats anything unknown as server", async () => {
@@ -119,6 +126,15 @@ describe("runAnalysis refuses what the server must not execute", () => {
     );
   });
 
+  it("fails an import_backfill run even when the product is marked server", async () => {
+    const { execute } = runDatabase({ ...baseRun, triggerType: "import_backfill", analysisExecutor: "server" });
+    await expect(runAnalysis(5)).resolves.toBeUndefined();
+    expect(execute).toHaveBeenCalledWith(
+      expect.stringContaining("SET status = 'failed'"),
+      [expect.stringMatching(/^analysis_mode_is_client: a import_backfill run is the receipt of an import backfill/), 5],
+    );
+  });
+
   it("leaves a run of a server-analysed product to the normal path", async () => {
     const { execute, calls } = runDatabase({ ...baseRun, triggerType: "manual", analysisExecutor: "server" });
     await expect(runAnalysis(5)).resolves.toBeUndefined();
@@ -132,10 +148,10 @@ describe("runAnalysis refuses what the server must not execute", () => {
 });
 
 describe("recovery queries carry the same rule", () => {
-  it("excludes client_upload runs and runs of client-analysed products, with whatever alias the query uses", () => {
-    expect(serverExecutedRunSql()).toBe("r.trigger_type <> 'client_upload' AND p.analysis_executor <> 'client'");
-    expect(serverExecutedRunSql("queued")).toBe("queued.trigger_type <> 'client_upload' AND p.analysis_executor <> 'client'");
-    expect(SERVER_EXECUTED_RUN_UNJOINED_SQL).toContain("trigger_type <> 'client_upload'");
+  it("excludes both receipt triggers and runs of client-analysed products, with whatever alias the query uses", () => {
+    expect(serverExecutedRunSql()).toBe("r.trigger_type NOT IN ('client_upload', 'import_backfill') AND p.analysis_executor <> 'client'");
+    expect(serverExecutedRunSql("queued")).toBe("queued.trigger_type NOT IN ('client_upload', 'import_backfill') AND p.analysis_executor <> 'client'");
+    expect(SERVER_EXECUTED_RUN_UNJOINED_SQL).toContain("trigger_type NOT IN ('client_upload', 'import_backfill')");
     expect(SERVER_EXECUTED_RUN_UNJOINED_SQL).toContain("WHERE p.analysis_executor = 'client'");
   });
 });
