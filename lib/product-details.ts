@@ -14,6 +14,18 @@ import { loadVersionIdentityMaps } from "./spec-identity-store";
 import { loadCoverageReceipt, type CoverageReceiptRow } from "./analysis-coverage";
 import { loadCompletenessLedgerBySpecVersion } from "./completeness-ledger";
 import type { BehaviorChangeRow, ChangeRow, FeatureRow, FoldedBehaviorChangeRow, ReleaseRow, ScenarioRow } from "./types";
+import { clientProvenanceOf } from "./version-provenance";
+
+/** 发布清单连同每一版的来源信息：只有客户端分析的版本带 provenance_json，托管分析的版本是空的。 */
+const RELEASE_SELECT = "SELECT r.id, r.title, r.summary, r.sha, r.url, r.committed_at AS committedAt, r.spec_version_id AS specVersionId, sv.provenance_json AS provenance";
+const RELEASE_FROM = "FROM releases r LEFT JOIN spec_versions sv ON sv.id = r.spec_version_id WHERE r.product_id = ?";
+
+function releaseRowsOf(raw: unknown): ReleaseRow[] {
+  return (raw as Array<Omit<ReleaseRow, "provenance"> & { provenance?: unknown }>).map((row) => {
+    const provenance = clientProvenanceOf(row.provenance);
+    return provenance ? { ...row, provenance } : { ...row, provenance: null };
+  });
+}
 
 interface EvidenceSource {
   owner: string;
@@ -190,11 +202,11 @@ export async function getProductDetails(slug: string, organizationId?: number, o
   );
   const [featureRows] = await db.execute("SELECT id, name, display_name AS displayName, summary, parent_id AS parentId, source, stale_since AS staleSince, stale_change_id AS staleChangeId, verified_at AS verifiedAt, verified_by AS verifiedBy, last_edited_by AS lastEditedBy, last_edited_at AS lastEditedAt, created_at AS createdAt FROM features WHERE product_id = ? AND active = 1 ORDER BY name", [product.id]);
   const [releaseRows, countRows] = await Promise.all([
-    db.execute("SELECT id, title, summary, sha, url, committed_at AS committedAt, spec_version_id AS specVersionId FROM releases WHERE product_id = ? ORDER BY committed_at DESC LIMIT ?", [product.id, RELEASE_PAGE_SIZE]),
+    db.execute(`${RELEASE_SELECT} ${RELEASE_FROM} ORDER BY r.committed_at DESC LIMIT ?`, [product.id, RELEASE_PAGE_SIZE]),
     db.execute("SELECT COUNT(*) AS total FROM releases WHERE product_id = ?", [product.id]),
   ]);
   const features = featureRows as FeatureRow[];
-  const releases = releaseRows[0] as ReleaseRow[];
+  const releases = releaseRowsOf(releaseRows[0]);
   const releaseTotal = Number((countRows[0] as Array<{ total: number }>)[0]?.total ?? 0);
   const loadReleaseOnlyData = view === undefined || view === "changes";
   const regressionReleaseIds = view === undefined ? undefined : releases.map((release) => release.id);
@@ -311,10 +323,10 @@ export async function loadReleasePage(slug: string, organizationId: number | und
     [product.id],
   );
   const [releaseRows, countRows] = await Promise.all([
-    db.execute("SELECT id, title, summary, sha, url, committed_at AS committedAt, spec_version_id AS specVersionId FROM releases WHERE product_id = ? ORDER BY committed_at DESC LIMIT ? OFFSET ?", [product.id, limit, offset]),
+    db.execute(`${RELEASE_SELECT} ${RELEASE_FROM} ORDER BY r.committed_at DESC LIMIT ? OFFSET ?`, [product.id, limit, offset]),
     db.execute("SELECT COUNT(*) AS total FROM releases WHERE product_id = ?", [product.id]),
   ]);
-  const releases = releaseRows[0] as ReleaseRow[];
+  const releases = releaseRowsOf(releaseRows[0]);
   const total = Number((countRows[0] as Array<{ total: number }>)[0]?.total ?? 0);
   const [changes, reviewedChanges, behaviorChanges, foldedChanges, regressionTasks] = await Promise.all([
     loadChanges(releases),

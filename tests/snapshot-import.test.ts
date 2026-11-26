@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { buildImportedPresentation, parseGithubOrigin, slugifyRepoName, validateImportArtifact } from "../lib/snapshot-import";
+import { buildImportedPresentation, ImportValidationError, parseGithubOrigin, slugifyRepoName, validateImportArtifact } from "../lib/snapshot-import";
 import { presentationFingerprint } from "../lib/product-presentation";
 
 /** BYO 导入校验链（设计 §4.2）：校验失败拒绝、contractVersion 门、引用唯一性、锚点路径卫生。 */
@@ -29,6 +29,24 @@ const validArtifact = {
 };
 
 describe("validateImportArtifact", () => {
+  it("refuses a snapshot that carries source excerpts before anything else looks at it, and says to upgrade", () => {
+    // 摘录不在 schema 的声明里，解析之后就被剥掉。所以这一步必须排在 schema 之前（修订稿 §4.2）。
+    const withSnippets = { ...validArtifact, evidenceSnippets: [{ id: "evidence-1", path: "lib/a.ts", lines: [{ number: 1, text: "export const a = 1;" }] }] };
+    let caught: unknown;
+    try {
+      validateImportArtifact(withSnippets, "1.0.0");
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(ImportValidationError);
+    expect((caught as ImportValidationError).code).toBe("artifact_contains_source");
+    expect((caught as ImportValidationError).message).toMatch(/upgrade/);
+    // 摘录为空的快照和以前一样可以导入。
+    expect(() => validateImportArtifact({ ...validArtifact, evidenceSnippets: [] }, "1.0.0")).not.toThrow();
+    // 新的提案契约（没有摘录字段）不受影响：这不是快照导入的形状，照旧按快照的 schema 报错，而不是报「带源码」。
+    expect(() => validateImportArtifact({ ...validArtifact, evidenceSnippets: "not an array" }, "1.0.0")).not.toThrow();
+  });
+
   it("accepts a well-formed artifact and normalizes scenario evidence", () => {
     const features = validateImportArtifact(validArtifact, "1.0.0");
     expect(features).toHaveLength(1);

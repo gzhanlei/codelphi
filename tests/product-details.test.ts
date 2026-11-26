@@ -34,6 +34,29 @@ describe("product details", () => {
     expect(execute.mock.calls[0][0]).toContain("organization_id = ?");
   });
 
+  it("carries a version's provenance into the release list: present for a client-analysed version, null for a hosted one", async () => {
+    const row = { id: 6, title: "v1", summary: "Release", sha: "abc", url: "", committedAt: new Date("2026-11-01T00:00:00Z"), specVersionId: 3 };
+    const rows = [
+      { ...row, id: 7, provenance: JSON.stringify({ server: { executor: "client", specVersionId: 4 }, client: { model: "tenant-model", clientVersion: "0.1.0" } }) },
+      { ...row, provenance: null },
+    ];
+    execute.mockImplementation(async (sql: string = "") => {
+      if (sql.includes("FROM products")) return [[product]];
+      if (sql.includes("FROM repositories")) return [[{ provider: "github", owner: "gzhanlei", name: "codelphi", defaultBranch: "main" }]];
+      if (sql.includes("FROM releases")) return [rows];
+      return [[]];
+    });
+    const details = await getProductDetails("radar", 7);
+    // 查询要连上规格版本，才拿得到来源信息。
+    const releaseQuery = execute.mock.calls.map((call) => String(call[0])).find((sql) => sql.includes("FROM releases"))!;
+    expect(releaseQuery).toContain("LEFT JOIN spec_versions sv ON sv.id = r.spec_version_id");
+    expect(releaseQuery).toContain("sv.provenance_json AS provenance");
+    expect(details?.releases.map((release) => release.provenance)).toEqual([
+      { executor: "client", model: "tenant-model", clientVersion: "0.1.0" },
+      null,
+    ]);
+  });
+
   it("loads feature, release and parsed behavior evidence without an organization filter", async () => {
     execute.mockImplementation(async (sql: string = "") => {
       if (sql.includes("FROM products")) return [[product]];

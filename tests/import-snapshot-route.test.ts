@@ -70,6 +70,14 @@ describe("POST /api/products/import-snapshot", () => {
     importSnapshotArtifact.mockRejectedValue(new MockImportError("invalid_artifact", "x", []));
     expect((await POST(request("sk_cd_write"))).status).toBe(400);
   });
+
+  it("answers a snapshot that carries source excerpts with 409, the minimum client version and an upgrade hint", async () => {
+    verifyApiKey.mockResolvedValue({ keyId: 7, organizationId: 2, scope: "snapshot_write" });
+    importSnapshotArtifact.mockRejectedValue(new MockImportError("artifact_contains_source", "upgrade the client", { minClientVersion: "0.1.0" }));
+    const response = await POST(request("sk_cd_write"));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "artifact_contains_source", message: "upgrade the client", minClientVersion: "0.1.0" });
+  });
 });
 
 describe("POST /api/products/import-snapshot 分片组装", () => {

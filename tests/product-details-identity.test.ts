@@ -21,7 +21,8 @@ function answer(withIdentities: boolean) {
     if (sql.includes("SELECT id FROM products WHERE slug")) return [[{ id: 4 }]];
     if (sql.includes("FROM repositories WHERE product_id")) return [[{ owner: "gzhanlei", name: "radar" }]];
     if (sql.includes("FROM analysis_runs r")) return [[]];
-    if (sql.includes("AS specVersionId FROM releases")) return [[release]];
+    // 发布清单的查询现在连着规格版本（取来源信息）；按连接的那一句认它。
+    if (sql.includes("FROM releases r LEFT JOIN spec_versions sv")) return [[release]];
     if (sql.includes("SELECT COUNT(*) AS total FROM releases")) return [[{ total: 1 }]];
     if (sql.includes("AS baseVersionId")) return [[{ versionId: 3, baseVersionId: 2 }]];
     if (sql.includes("identity_key FROM spec_features WHERE spec_version_id IN")) {

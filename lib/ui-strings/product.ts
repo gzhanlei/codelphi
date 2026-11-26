@@ -242,6 +242,8 @@ export const RELEASE_CARD = {
   regressionHeading: { "zh-CN": "回归清单", en: "Regression checklist" },
   exportMarkdown: { "zh-CN": "导出 Markdown ↓", en: "Export Markdown ↓" },
   impactHint: { "zh-CN": "影响面推荐 · 证据路径与本次改动文件命中", en: "Impact-suggested · evidence paths matched files changed in this release" },
+  // 模型名是客户端声明的，服务端没有核实；核验范围只有文件级的影响面。两件事都写在明面上。
+  clientAnalysis: { "zh-CN": "本地分析 · 模型 {model}（客户端声明）· 服务端核验：文件级影响面", en: "Analysed on the client · model {model} (client-declared) · server verification: file-level impact" },
   scenarioRef: { "zh-CN": "场景 {id}", en: "Scenario {id}" },
   statusAria: { "zh-CN": "回归状态：{feature} {reference}", en: "Regression status: {feature} {reference}" },
   skipPlaceholder: { "zh-CN": "跳过原因（可选）", en: "Skip reason (optional)" },

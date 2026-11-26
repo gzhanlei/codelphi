@@ -75,6 +75,8 @@ export interface ReleaseRow {
   url: string;
   committedAt: Date;
   specVersionId: number | null;
+  /** 这一版是客户端分析出来的才有；托管分析的版本没有（来源信息为空就是托管）。 */
+  provenance?: { executor: "client"; model: string; clientVersion: string } | null;
 }
 
 export interface BehaviorChangeRow {

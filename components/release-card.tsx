@@ -199,8 +199,16 @@ export function ReleaseCard({ slug, release, changes, reviewedChanges = [], beha
   return (
     <section className="release-card" id={`release-${release.id}`} ref={sectionRef}>
       <div className="release-header">
-        <div><time>{formatDateIn(locale, release.committedAt, { dateStyle: "long" })}</time><h2>{release.title}</h2></div>
-        <a href={release.url} target="_blank" rel="noreferrer"><code>{release.sha.slice(0, 7)}</code> ↗</a>
+        <div>
+          <time>{formatDateIn(locale, release.committedAt, { dateStyle: "long" })}</time><h2>{release.title}</h2>
+          {release.provenance
+            ? <span className="release-provenance">{pick(locale, RELEASE_CARD.clientAnalysis).replace("{model}", release.provenance.model)}</span>
+            : null}
+        </div>
+        {/* 仓库只存在于租户自己的机器上时没有可以点开的地址，就不放链接。 */}
+        {release.url
+          ? <a href={release.url} target="_blank" rel="noreferrer"><code>{release.sha.slice(0, 7)}</code> ↗</a>
+          : <code>{release.sha.slice(0, 7)}</code>}
       </div>
       <p className="release-summary">{release.summary}</p>
       {hasDetails ? (

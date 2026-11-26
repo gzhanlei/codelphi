@@ -64,6 +64,10 @@ export async function POST(request: NextRequest) {
     }
   } catch (error) {
     if (error instanceof ImportValidationError) {
+      if (error.code === "artifact_contains_source") {
+        // 旧客户端的快照带源码摘录：请求体没有落任何表。回执里带上最低版本和「请升级」；状态码沿用导入其余错误的 409（修订稿 §4.2）。
+        return NextResponse.json({ error: error.code, message: error.message, ...((error.details as { minClientVersion?: string } | undefined)?.minClientVersion ? { minClientVersion: (error.details as { minClientVersion: string }).minClientVersion } : {}) }, { status: 409 });
+      }
       const status = error.code === "invalid_artifact" || error.code === "duplicate_reference" ? 400 : 409;
       return NextResponse.json({ error: error.code, message: error.message, details: error.details ?? null }, { status });
     }

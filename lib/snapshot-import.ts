@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { parsePresentationPayload, presentationFingerprint, type PresentationCapability } from "./product-presentation";
+import { CLIENT_VERSION } from "./client-publish/version";
 import { acceptImportedJourneys, journeyCoverage, presentationLedgerFingerprint, saveProductPresentation, type GeneratedPresentation, type PresentationLedger } from "./product-presentation-service";
 
 /**
@@ -91,7 +92,7 @@ export interface ImportArtifactFeatures {
 }
 
 export class ImportValidationError extends Error {
-  code: "invalid_artifact" | "contract_version_mismatch" | "duplicate_reference" | "product_has_content";
+  code: "invalid_artifact" | "contract_version_mismatch" | "duplicate_reference" | "product_has_content" | "artifact_contains_source";
   details: unknown;
   constructor(code: ImportValidationError["code"], message: string, details?: unknown) {
     super(message);
@@ -100,8 +101,17 @@ export class ImportValidationError extends Error {
   }
 }
 
-/** 校验链（§4.2）：artifactKind/exportVersion → zod 全量 → 引用唯一性。contractVersion 由调用方比对后抛 mismatch。 */
+/** 第一个不含源码摘录的客户端版本：更早的雷达 skill 会随快照上传 `evidenceSnippets`（真实源码行）。 */
+export const MIN_CLIENT_WITHOUT_EXCERPTS = CLIENT_VERSION;
+
+/** 校验链（§4.2）：源码摘录 → artifactKind/exportVersion → zod 全量 → 引用唯一性。contractVersion 由调用方比对后抛 mismatch。 */
 export function validateImportArtifact(raw: unknown, currentContractVersion: string): ImportArtifactFeatures[] {
+  // 摘录不在 schema 的声明里，解析之后就被剥掉、看不到了，所以这一步必须排在 schema 之前。
+  // 旧客户端的快照带真实源码行：不收，请它升级（修订稿 §4.2「旧客户端迁移」）。
+  const snippets = typeof raw === "object" && raw !== null ? (raw as { evidenceSnippets?: unknown }).evidenceSnippets : undefined;
+  if (Array.isArray(snippets) && snippets.length > 0) {
+    throw new ImportValidationError("artifact_contains_source", "the snapshot carries source excerpts; upgrade the client, newer versions do not upload them", { minClientVersion: MIN_CLIENT_WITHOUT_EXCERPTS });
+  }
   const parsed = importArtifactSchema.safeParse(raw);
   if (!parsed.success) {
     throw new ImportValidationError("invalid_artifact", "artifact failed schema validation", parsed.error.issues.slice(0, 20));
