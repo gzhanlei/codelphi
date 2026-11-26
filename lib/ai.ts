@@ -6,6 +6,7 @@ import type { SourceFile } from "./github";
 import { recordLlmCallReceipt, recordRequestScopedReceipt, type ChargeComponent, type LlmCallStage } from "./billing/cost-receipt";
 import type { OutputLanguage } from "./analysis-language";
 import type { PatchHunk } from "./spec-diff";
+import { withNoSourceOutput } from "./prompt-policy";
 
 const evidenceSchema = z.object({
   path: z.string().min(1).max(500),
@@ -449,7 +450,7 @@ export function extractionInstructionLines(language: OutputLanguage, options: { 
   ];
 }
 
-export function buildAnalysisMessages(sources: SourceFile[], change: ChangeContext, context: { previousFeatureNames?: string[]; previousSpec?: SpecAnchorFeature[]; affectedFeatureNames?: string[]; unassignedBehavioralPaths?: string[]; partition?: { index: number; total: number }; outputLanguage?: "zh-CN" | "en" } = {}) {
+export function buildAnalysisMessages(sources: SourceFile[], change: ChangeContext, context: { previousFeatureNames?: string[]; previousSpec?: SpecAnchorFeature[]; affectedFeatureNames?: string[]; unassignedBehavioralPaths?: string[]; partition?: { index: number; total: number }; outputLanguage?: "zh-CN" | "en"; noSourceOutput?: boolean } = {}) {
   const language: OutputLanguage = context.outputLanguage ?? "zh-CN";
   const anchor = specAnchoringSection(context.previousSpec, 24_000, language);
   const continuity = anchor ? null : featureContinuitySection(context.previousFeatureNames, language);
@@ -484,11 +485,12 @@ export function buildAnalysisMessages(sources: SourceFile[], change: ChangeConte
 
   return [
     { role: "system", content: systemPrompt(language) },
-    { role: "user", content: prompt },
+    // 客户端分析（noSourceOutput）才加「不输出源码」的硬约束；托管分析不传，提示词不变（修订稿 §4.2）。
+    { role: "user", content: withNoSourceOutput(prompt, language, context.noSourceOutput) },
   ];
 }
 
-export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext, context: { previousFeatureNames?: string[]; previousSpec?: SpecAnchorFeature[]; affectedFeatureNames?: string[]; unassignedBehavioralPaths?: string[]; partition?: { index: number; total: number }; outputLanguage?: "zh-CN" | "en"; billing?: LlmBillingContext; client?: StructuredCompletionClient } = {}): Promise<AnalysisResult> {
+export async function analyzeWithAI(sources: SourceFile[], change: ChangeContext, context: { previousFeatureNames?: string[]; previousSpec?: SpecAnchorFeature[]; affectedFeatureNames?: string[]; unassignedBehavioralPaths?: string[]; partition?: { index: number; total: number }; outputLanguage?: "zh-CN" | "en"; billing?: LlmBillingContext; client?: StructuredCompletionClient; noSourceOutput?: boolean } = {}): Promise<AnalysisResult> {
   const messages = buildAnalysisMessages(sources, change, context);
   const content = context.client
     ? await context.client.complete(messages)
@@ -730,24 +732,37 @@ function descriptions_filter(descriptions: BehavioralDescription[], path: string
     : "（本文件无逐块复述，直接核对 diff 与上下文）";
 }
 
-export async function analyzeBehavioralGroup(targets: BehavioralTarget[], knownFeatureNames: string[], change: ChangeContext, billing?: LlmBillingContext, language: OutputLanguage = "zh-CN"): Promise<AnalysisResult> {
+/**
+ * 调用模型的方式。客户端分析注入自己的模型客户端（服务端出口一个字节都不走），并要求提示词带上「不输出源码」的约束；
+ * 托管分析什么都不传。
+ */
+export interface ModelCallOptions {
+  client?: StructuredCompletionClient;
+  noSourceOutput?: boolean;
+}
+
+/** 两个调用出口里选一个：注入了客户端就走它，否则走服务端出口。 */
+function completionOf(billing: LlmBillingContext | undefined, options: ModelCallOptions): (messages: Array<{ role: string; content: string }>) => Promise<string> {
+  return options.client ? (messages) => options.client!.complete(messages) : (messages) => requestStructuredCompletion(messages, billing);
+}
+
+export async function analyzeBehavioralGroup(targets: BehavioralTarget[], knownFeatureNames: string[], change: ChangeContext, billing?: LlmBillingContext, language: OutputLanguage = "zh-CN", options: ModelCallOptions = {}): Promise<AnalysisResult> {
+  const complete = completionOf(billing, options);
   // 第一步·复述：每个变更块的改前/改后（机械任务，不做显著性判断）
-  const describeContent = await requestStructuredCompletion(
+  const describeContent = await complete(
     [
       { role: "system", content: systemPrompt(language) },
-      { role: "user", content: behavioralDescribePrompt(targets, change, language) },
+      { role: "user", content: withNoSourceOutput(behavioralDescribePrompt(targets, change, language), language, options.noSourceOutput) },
     ],
-    billing,
   );
   const descriptions = parseBehavioralDescriptions(describeContent, targets);
   // 第二步·判定：对每条复述显式分类（宁多勿漏；内部实现 → reviewed 留痕）
   const judgePrompt = behavioralJudgmentPrompt(descriptions, targets, knownFeatureNames, change, language);
-  const content = await requestStructuredCompletion(
+  const content = await complete(
     [
       { role: "system", content: systemPrompt(language) },
-      { role: "user", content: judgePrompt },
+      { role: "user", content: withNoSourceOutput(judgePrompt, language, options.noSourceOutput) },
     ],
-    billing,
   );
   return parseBehavioralContent(content, targets);
 }

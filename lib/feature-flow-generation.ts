@@ -1,4 +1,5 @@
-import { requestStructuredCompletion, type LlmBillingContext } from "./ai";
+import { requestStructuredCompletion, type LlmBillingContext, type ModelCallOptions } from "./ai";
+import { withNoSourceOutput } from "./prompt-policy";
 import { FEATURE_FLOW_MAX_ENTRIES, FlowValidationError, validateFeatureFlowGraph, type FeatureFlowGraph } from "./semantic-feature-flow";
 import type { SpecFeature } from "./spec-diff";
 import type { OutputLanguage } from "./analysis-language";
@@ -57,24 +58,26 @@ function normalizeEmptyLabels(graph: unknown): unknown {
   };
 }
 
-export async function generateFeatureFlowGraph(feature: SpecFeature, billing?: LlmBillingContext, language: OutputLanguage = "zh-CN"): Promise<FeatureFlowGraph> {
+/** 流程图生成不读源码，所以客户端分析也能做：注入自己的模型客户端即可（修订稿 §5.4）。 */
+export async function generateFeatureFlowGraph(feature: SpecFeature, billing?: LlmBillingContext, language: OutputLanguage = "zh-CN", options: ModelCallOptions = {}): Promise<FeatureFlowGraph> {
   const messages = [
     { role: "system", content: language === "en" ? "You are a rigorous product flow analyzer that outputs only verifiable structured JSON." : "你是严谨的产品流程分析器，只输出可验证的结构化 JSON。" },
-    { role: "user", content: featureFlowPrompt(feature, language) },
+    { role: "user", content: withNoSourceOutput(featureFlowPrompt(feature, language), language, options.noSourceOutput) },
   ];
   const receipt = billing ? { ...billing, callKind: "feature_flow" } : undefined;
-  const content = await requestStructuredCompletion(messages, receipt);
+  const complete = (calls: Array<{ role: string; content: string }>): Promise<string> => (options.client ? options.client.complete(calls) : requestStructuredCompletion(calls, receipt));
+  const content = await complete(messages);
   try {
     return validateFeatureFlowGraph(normalizeEmptyLabels(parseContent(content)), feature.scenarios);
   } catch (error) {
     if (!(error instanceof FlowValidationError)) throw error;
-    const correction = await requestStructuredCompletion([
+    const correction = await complete([
       ...messages,
       { role: "assistant", content },
       { role: "user", content: language === "en"
         ? `The previous output failed validation: ${error.message}. Regenerate it completely with the fix — do not return a partial patch. A reference in excludedScenarios must not appear in any node or edge scenarioRefs; the evidence and main-chain requirements are unchanged.`
         : `上次输出未通过校验：${error.message}。请完整重新生成并修正，不得只返回局部修改。excludedScenarios 中的 reference 不得出现在任何节点或边的 scenarioRefs 中；其他证据与主链要求保持不变。` },
-    ], receipt);
+    ]);
     return validateFeatureFlowGraph(normalizeEmptyLabels(parseContent(correction)), feature.scenarios);
   }
 }

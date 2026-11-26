@@ -2,7 +2,9 @@ import type { ChangeFile } from "./code-hosting/types";
 import type { OpenedRemoteSourceRevision } from "./remote-source-index";
 import { analyzeBehavioralGroup, type LlmBillingContext } from "./ai";
 import type { AnalysisResult } from "./ai";
-import { sanitizeEvidence } from "./analysis";
+// sanitizeEvidence 定义在提取层。以前从 ./analysis 导入，形成循环依赖，客户端打包时会把数据库和分析入口拖进单文件。
+import { sanitizeEvidence } from "./extraction-pass";
+import type { StructuredCompletionClient } from "./llm-client";
 import { behavioralEnumerationGroupSize, behavioralEnumerationMaxGroups } from "./env";
 import { analyzedChangePaths } from "./evidence";
 import type { ChangeContext } from "./ai";
@@ -94,7 +96,11 @@ export interface BehavioralEnumerationOptions {
   knownFeatureNames: string[];
   /** 分析输出语言（072）：透传给两步提取的 prompt 语言段。 */
   outputLanguage?: "zh-CN" | "en";
-  billing: LlmBillingContext;
+  /** 服务端分析的计费上下文。客户端分析不带它，改带自己的模型客户端。 */
+  billing?: LlmBillingContext;
+  client?: StructuredCompletionClient;
+  /** 客户端分析：提示词加上「不输出源码」的约束。 */
+  noSourceOutput?: boolean;
 }
 
 export interface BehavioralEnumerationChunk {
@@ -241,11 +247,11 @@ export async function enumerateBehavioralChunks(options: BehavioralEnumerationOp
     if (targets.length === 0) continue;
     let chunk: AnalysisResult;
     try {
-      chunk = await analyzeBehavioralGroup(targets, options.knownFeatureNames, options.change, options.billing, options.outputLanguage);
+      chunk = await analyzeBehavioralGroup(targets, options.knownFeatureNames, options.change, options.billing, options.outputLanguage, { client: options.client, noSourceOutput: options.noSourceOutput });
     } catch (firstError) {
       console.warn("[analysis] behavioral enumeration group failed; retrying once", { label, error: firstError instanceof Error ? firstError.message.slice(0, 160) : String(firstError) });
       try {
-        chunk = await analyzeBehavioralGroup(targets, options.knownFeatureNames, options.change, options.billing, options.outputLanguage);
+        chunk = await analyzeBehavioralGroup(targets, options.knownFeatureNames, options.change, options.billing, options.outputLanguage, { client: options.client, noSourceOutput: options.noSourceOutput });
       } catch (secondError) {
         console.warn("[analysis] behavioral enumeration group skipped after retry", { label, error: secondError instanceof Error ? secondError.message.slice(0, 160) : String(secondError) });
         continue;
