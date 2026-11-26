@@ -392,6 +392,11 @@ async function reportUpload(status: number, body: Record<string, unknown>, local
   if (status === 200) {
     const replayed = body.replayed === true;
     io.stdout(t({ zh: `${replayed ? "这份提案之前已经发布过，没有产生新版本。" : "已发布。"}产品 ${slug}：版本 #${body.specVersionId}${body.releaseId == null ? "" : `，发布 #${body.releaseId}`}。`, en: `${replayed ? "This proposal had already been published; no new version was created." : "Published."} Product ${slug}: version #${body.specVersionId}${body.releaseId == null ? "" : `, release #${body.releaseId}`}.` }));
+    // 首次发布接住了雷达快照导入的草稿时，服务端在回执里写明接了多少行。租户原先在工作台里看到的就是这些行，要说清楚它们去哪了。
+    const absorbed = body.draftAbsorbed as { features?: unknown; scenarios?: unknown } | undefined;
+    if (typeof absorbed?.features === "number" && typeof absorbed.scenarios === "number") {
+      io.stdout(t({ zh: `导入的草稿并进了这次发布：${absorbed.features} 个功能、${absorbed.scenarios} 条场景。同名同引用的沿用原来的条目并换成这次的内容，这次没有分析到的停用，不再显示在工作台里。`, en: `The imported draft was taken over by this publish: ${absorbed.features} features and ${absorbed.scenarios} scenarios. Entries the analysis named again kept their place and now carry the new content; the ones it did not are retired and no longer shown in the workbench.` }));
+    }
     return 0;
   }
   if (status === 409 && body.error === "base_changed") {

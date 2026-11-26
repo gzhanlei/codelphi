@@ -233,6 +233,18 @@ describe("publish", () => {
     expect(text).toContain("fixture");
   });
 
+  it("says when the first publish took over an imported draft, and says nothing when it did not", async () => {
+    const { root } = await repository();
+    const absorbed = harness({ environment: { AI_API_KEY: "k", AI_MODEL: "m" } });
+    absorbed.uploadResponses.push({ status: 200, body: { replayed: false, repositoryId: 7, specVersionId: 41, releaseId: 30, revisionSha: "a".repeat(40), verification: { reanalyzed: 1, deterministicallyCarried: 0, clientDeclaredUnaffected: 0 }, draftAbsorbed: { features: 2, scenarios: 3 } } });
+    expect(await publishMain([root, "--slug", "fixture"], absorbed.io)).toBe(0);
+    expect(absorbed.out.join("\n")).toContain("导入的草稿并进了这次发布：2 个功能、3 条场景");
+    expect(absorbed.out.join("\n")).toContain("停用");
+    const untouched = harness({ environment: { AI_API_KEY: "k", AI_MODEL: "m" } });
+    expect(await publishMain([root, "--slug", "fixture"], untouched.io)).toBe(0);
+    expect(untouched.out.join("\n")).not.toContain("导入的草稿");
+  });
+
   it("needs --slug unless exactly one product is analysed by the client", async () => {
     const { root } = await repository();
     const single = harness({ environment: { AI_API_KEY: "k", AI_MODEL: "m" } });

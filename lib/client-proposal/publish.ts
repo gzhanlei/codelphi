@@ -22,6 +22,7 @@ import { deliverAnalysisNotifications } from "../notifications";
 import { loadVersionFeatureMap } from "../spec-versions";
 import { diffSpec, specFeatureKey, type SpecFeature } from "../spec-diff";
 import { loadPresentationLedger, presentationLedgerFingerprint, saveProductPresentation } from "../product-presentation-service";
+import { convertImportDraft } from "../import-draft-backfill";
 import { buildImportedPresentation } from "../snapshot-import";
 import { changeOf, coverageOf, provenanceOf, runContextOf, type PublishIdentity, type VerificationCounts } from "./adapt";
 import type { Proposal } from "./contract";
@@ -68,6 +69,8 @@ export interface PublishReceipt {
   revisionSha: string;
   verification: VerificationCounts;
   flows?: ClientFlowSummary;
+  /** 首次发布接住的导入草稿：有多少行并进了这次发布。没有草稿时没有这一项。 */
+  draftAbsorbed?: { features: number; scenarios: number };
 }
 
 /** 提案只能发给由客户端分析的产品（修订稿 §6：受控试点，运营逐个产品开启）。 */
@@ -246,6 +249,11 @@ async function publishInTransaction(connection: PoolConnection, proposal: Propos
   });
   const change = changeOf(proposal);
   const coverage: AnalysisCoverageReceipt | undefined = coverageOf(proposal);
+  // 首次发布接住导入的草稿（修订稿 §13.3 第 14 条）。雷达快照的导入只写工作台草稿，不写版本；合并入口又只更新
+  // generated 的行。不改来源的话，这次发布之后工作台是新旧混杂：同名的功能留着导入时的旧文字，消失的功能不下线。
+  // 先把草稿行的来源改成 generated，行号不变，再走合并：同名同引用的沿用原来的行并更新，其余由合并入口停用。
+  // 人工改过的条目来源是 manual，不受影响。只在没有基线时做：有基线说明这个产品早就有了版本，草稿已经不在了。
+  const draftAbsorbed = proposal.base === null ? await convertImportDraft(connection, target.productId) : undefined;
   let saved: Awaited<ReturnType<typeof saveResultInTransaction>>;
   try {
     saved = await saveResultInTransaction(connection, run, proposal.proposal, change, null, coverage);
@@ -269,7 +277,16 @@ async function publishInTransaction(connection: PoolConnection, proposal: Propos
   await storeClientPresentation(execute, { productId: target.productId, specVersionId: saved.specVersionId, proposal, merged: saved.features });
 
   return {
-    receipt: { replayed: false, repositoryId: repository.id, specVersionId: saved.specVersionId, releaseId: saved.releaseId, revisionSha: proposal.revision.sha, verification, flows },
+    receipt: {
+      replayed: false,
+      repositoryId: repository.id,
+      specVersionId: saved.specVersionId,
+      releaseId: saved.releaseId,
+      revisionSha: proposal.revision.sha,
+      verification,
+      flows,
+      ...(draftAbsorbed && draftAbsorbed.features + draftAbsorbed.scenarios > 0 ? { draftAbsorbed } : {}),
+    },
     run,
     change,
   };

@@ -13,6 +13,9 @@
  *      首次发布建立绑定（远端和纯本地各一次）。
  *   7. 零网络调用：整个演练期间把 fetch 换成一调用就记账并抛错的函数，每次发布之后断言账本是空的。
  *      服务端发模型请求和拉源码都走 fetch。
+ *   8. 首次发布接住导入的草稿：用真实的导入入口造一份和生产上 AIRecord 同形的草稿（只有工作台行，没有仓库行、
+ *      没有版本）。客户端首次发布之后，同名同引用的行沿用原编号并换成新内容，这次没分析到的停用，
+ *      没有留下导入来源的行；有基线的发布不再碰它。
  *
  * 只接受库名以 codelphi_test_client_publish 开头的库，每次运行都先删掉重建；绝不读 DATABASE_URL。
  *
@@ -25,6 +28,8 @@ import { saveResult, type RunContext } from "../lib/analysis";
 import type { AnalysisResult } from "../lib/ai";
 import { sealProposal, type Proposal } from "../lib/client-proposal/contract";
 import { ProposalRejection, loadPublishTarget, publishProposal, recordProposalRejection, type PublishReceipt, type PublishTarget } from "../lib/client-proposal/publish";
+import { CONTRACT_VERSION } from "../lib/extraction-contract";
+import { importSnapshotArtifact } from "../lib/snapshot-import";
 import { insertIdOf, withScratchDatabase } from "./scratch-database";
 
 const SCRATCH_PREFIX = "codelphi_test_client_publish";
@@ -365,6 +370,48 @@ async function main(): Promise<void> {
       console.log("  仓库身份：托管产品、不存在、增量、没绑定、属主不符、已被占用各自被拒；远端和纯本地的首次发布建立了绑定");
 
       noNetwork("仓库身份");
+
+      // ── 8. 首次发布接住导入的草稿 ─────────────────────────────────────────────
+      const draft = await importSnapshotArtifact({
+        execute: pool.execute.bind(pool) as unknown as (statement: string, parameters?: unknown[]) => Promise<unknown>,
+        currentContractVersion: CONTRACT_VERSION,
+        organizationId,
+        probeRemote: async () => ({ state: "unverified", reason: "rehearsal makes no network calls" }),
+      }, {
+        artifactKind: "codelphi-radar-snapshot",
+        exportVersion: 1,
+        contractVersion: CONTRACT_VERSION,
+        identity: { name: "legacy-draft", revision: "9".repeat(40), workingTreeDirty: true },
+        language: "zh-CN",
+        features: [
+          { name: "Login", summary: "导入时写的登录说明", scenarios: [
+            { reference: "HP-1", context: "导入时的上下文", action: "导入时的动作", outcome: "导入时的结果", category: "happy", evidence: [{ path: "lib/old.ts", startLine: 1 }] },
+            { reference: "EC-9", context: "这次分析没有再提到它", action: "做一件旧事", outcome: "旧结果", category: "edge", evidence: [{ path: "lib/old.ts", startLine: 2 }] },
+          ] },
+          { name: "Legacy export", summary: "这次分析没有再提到它", scenarios: [{ reference: "HP-1", context: "旧", action: "旧导出", outcome: "旧文件", category: "happy", evidence: [{ path: "lib/legacy.ts", startLine: 1 }] }] },
+        ],
+      });
+      await pool.execute("UPDATE products SET analysis_executor = 'client' WHERE id = ?", [draft.productId]);
+      const draftRows = "SELECT s.id, f.name AS featureName, s.reference, s.source, s.active, s.context, s.outcome FROM scenarios s JOIN features f ON f.id = s.feature_id WHERE f.product_id = ? ORDER BY s.id";
+      const beforePublish = await query(pool, draftRows, [draft.productId]);
+      mustBe(beforePublish.length === 3 && beforePublish.every((row) => row.source === "ai_snapshot_import") && Number((await query(pool, "SELECT COUNT(*) AS count FROM repositories WHERE product_id = ?", [draft.productId]))[0]?.count) === 0, "草稿：导入只写了三条工作台行，没有仓库行", beforePublish);
+      const draftTarget = await loadPublishTarget(pool, draft.slug, organizationId);
+      const legacyRepo = { provider: "github", host: "github.com", owner: "acme", name: "legacy-draft" };
+      const absorbed = await publishProposal(pool, proposalOf({ idempotencyKey: nextKey(), repository: { repositoryId: null, ...legacyRepo }, sha: SHA1, title: "release 1", base: null, publication: firstPublication, withWindow: false }), draftTarget);
+      mustBe(JSON.stringify(absorbed.draftAbsorbed) === JSON.stringify({ features: 2, scenarios: 3 }), "首次发布的回执应写明接住了 2 个功能、3 条场景", absorbed);
+      const afterPublish = await query(pool, draftRows, [draft.productId]);
+      mustBe(afterPublish.filter((row) => row.source === "ai_snapshot_import").length === 0, "发布之后没有留下导入来源的行", afterPublish);
+      const kept = afterPublish.find((row) => row.featureName === "Login" && row.reference === "HP-1");
+      mustBe(kept !== undefined && Number(kept.id) === Number(beforePublish[0].id) && kept.source === "generated" && Number(kept.active) === 1 && kept.context === "用户使用产品" && kept.outcome === "进入首页", "同名同引用的沿用原来的行，内容换成这次分析的", kept);
+      const retired = afterPublish.filter((row) => row.featureName === "Legacy export" || row.reference === "EC-9");
+      mustBe(retired.length === 2 && retired.every((row) => Number(row.active) === 0 && row.source === "generated"), "这次没有分析到的草稿场景停用，行还在", retired);
+      const featuresAfter = await query(pool, "SELECT name, active, source, summary FROM features WHERE product_id = ? ORDER BY id", [draft.productId]);
+      mustBe(JSON.stringify(featuresAfter.map((row) => [row.name, Number(row.active), row.source])) === JSON.stringify([["Login", 1, "generated"], ["Legacy export", 0, "generated"], ["Billing", 1, "generated"]]) && featuresAfter[0].summary === "Login handles sign-in.", "功能：同名的更新，消失的停用，这次分析的加进来", featuresAfter);
+      const secondOnDraft = await publishProposal(pool, proposalOf({ idempotencyKey: nextKey(), repository: { repositoryId: absorbed.repositoryId, ...legacyRepo }, sha: SHA2, title: "release 2", base: { specVersionId: absorbed.specVersionId, sha: SHA1 }, publication: secondPublication, withWindow: true }), draftTarget);
+      mustBe(secondOnDraft.draftAbsorbed === undefined && secondOnDraft.specVersionId !== absorbed.specVersionId, "有基线的发布不再碰草稿，回执里没有这一项", secondOnDraft);
+      console.log("  首次发布接住导入的草稿：同名同引用的沿用原行并换成新内容，其余停用；回执写明接住了多少行");
+
+      noNetwork("首次发布接住导入的草稿");
       mustBe(networkCalls.length === 0, "整个演练期间不该有任何网络调用", networkCalls);
       console.log("  零网络调用：整个演练期间模型和源码接口一次都没被调用");
     } finally {

@@ -225,6 +225,17 @@ export async function loadDraftRows(execute: Execute, productId: number): Promis
   };
 }
 
+/**
+ * 把在用的导入条目的来源改成 generated，行号不变。合并入口只更新 generated 的行：不改来源，
+ * 之后的发布既更新不了这些行，也不会下线已经消失的功能。人工改过的条目来源已经是 manual，不碰。
+ * 回填用它；客户端的首次发布也用它（lib/client-proposal/publish.ts）。
+ */
+export async function convertImportDraft(connection: Pick<PoolConnection, "execute">, productId: number): Promise<{ features: number; scenarios: number }> {
+  const [features] = (await connection.execute("UPDATE features SET source = 'generated' WHERE product_id = ? AND source = ?", [productId, IMPORT_SOURCE])) as [{ affectedRows?: number }, unknown];
+  const [scenarios] = (await connection.execute("UPDATE scenarios s JOIN features f ON f.id = s.feature_id SET s.source = 'generated' WHERE f.product_id = ? AND s.source = ?", [productId, IMPORT_SOURCE])) as [{ affectedRows?: number }, unknown];
+  return { features: Number(features?.affectedRows ?? 0), scenarios: Number(scenarios?.affectedRows ?? 0) };
+}
+
 const CATEGORIES: ReadonlySet<string> = new Set(["happy", "edge", "error"]);
 
 /** 导入时只校验过锚点的形状；这里再按合并入口的口径收一遍，形状不对就报错回滚，不悄悄丢。 */
@@ -384,12 +395,11 @@ export async function backfillDraftInTransaction(connection: PoolConnection, tar
   const result = resultOf(rows, candidate.outputLanguage);
 
   // 来源改成 generated，行号不变。之后的合并入口才会更新这些行。
-  const [convertedFeatures] = (await connection.execute("UPDATE features SET source = 'generated' WHERE product_id = ? AND source = ?", [candidate.productId, IMPORT_SOURCE])) as [{ affectedRows?: number }, unknown];
-  const [convertedScenarios] = (await connection.execute("UPDATE scenarios s JOIN features f ON f.id = s.feature_id SET s.source = 'generated' WHERE f.product_id = ? AND s.source = ?", [candidate.productId, IMPORT_SOURCE])) as [{ affectedRows?: number }, unknown];
+  const converted = await convertImportDraft(connection, candidate.productId);
   const draftFeatures = candidate.workbench.features[`${IMPORT_SOURCE}:active`] ?? 0;
   const draftScenarios = candidate.workbench.scenarios[`${IMPORT_SOURCE}:active`] ?? 0;
-  if (Number(convertedFeatures?.affectedRows) !== draftFeatures || Number(convertedScenarios?.affectedRows) !== draftScenarios) {
-    throw new Error(`the draft changed while it was being read: expected ${draftFeatures} features and ${draftScenarios} scenarios, converted ${String(convertedFeatures?.affectedRows)} and ${String(convertedScenarios?.affectedRows)}`);
+  if (converted.features !== draftFeatures || converted.scenarios !== draftScenarios) {
+    throw new Error(`the draft changed while it was being read: expected ${draftFeatures} features and ${draftScenarios} scenarios, converted ${converted.features} and ${converted.scenarios}`);
   }
 
   const [inserted] = (await connection.execute(
