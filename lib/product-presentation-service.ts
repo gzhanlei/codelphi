@@ -87,6 +87,8 @@ export interface PresentationLedger {
   productId: number;
   name: string;
   description: string;
+  /** 产品由谁来分析（products.analysis_executor）。client 的产品，理解层随客户端的提案一起交上来。缺省按托管。 */
+  analysisExecutor?: "server" | "client";
   language: PresentationLanguage;
   specVersionId: number | null;
   features: PresentationLedgerFeature[];
@@ -108,8 +110,8 @@ function errorMessage(error: unknown): string {
 }
 
 export async function loadPresentationLedger(execute: Execute, productId: number): Promise<PresentationLedger | null> {
-  const product = payloadRows<{ name: string; description: string; output_language: string | null }>(await execute(
-    "SELECT name, description, output_language FROM products WHERE id = ? LIMIT 1",
+  const product = payloadRows<{ name: string; description: string; output_language: string | null; analysis_executor?: string }>(await execute(
+    "SELECT name, description, output_language, analysis_executor FROM products WHERE id = ? LIMIT 1",
     [productId],
   ))[0];
   if (!product) return null;
@@ -131,6 +133,7 @@ export async function loadPresentationLedger(execute: Execute, productId: number
     productId,
     name: product.name,
     description: product.description ?? "",
+    analysisExecutor: product.analysis_executor === "client" ? "client" : "server",
     language: presentationLanguage(product.output_language),
     specVersionId: latest?.spec_version_id ?? null,
     features,
@@ -680,7 +683,7 @@ function evenlySample<T>(items: T[], limit: number): T[] {
 // ── 落库与调度 ──
 
 /** 理解层落库（每产品一行）：生成期间若规格又变了（pending_fingerprint 与本次指纹不同）则保持待更新并排期。 */
-export async function saveProductPresentation(execute: Execute, input: { productId: number; specVersionId: number | null; source: "generated" | "ai_snapshot_import"; fingerprint: string; payload: GeneratedPresentation; modelName?: string | null }) {
+export async function saveProductPresentation(execute: Execute, input: { productId: number; specVersionId: number | null; source: "generated" | "ai_snapshot_import" | "client_generated"; fingerprint: string; payload: GeneratedPresentation; modelName?: string | null }) {
   await execute(
     `INSERT INTO product_presentations (product_id, spec_version_id, language, status, source, tagline, capabilities_json, journeys_json, coverage_json, fingerprint, model_name, passes, last_error, last_attempt_at, generated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, CURRENT_TIMESTAMP(3), CURRENT_TIMESTAMP(3))
@@ -800,6 +803,8 @@ export async function schedulePresentationRefresh(options: {
   const execute = options.execute ?? defaultExecute;
   const ledger = await loadPresentationLedger(execute, options.productId);
   if (!ledger) return { outcome: "skipped", reason: "product_not_found" };
+  // 客户端分析的产品：理解层随提案一起交上来，服务端不为它调模型（定时清扫和手动刷新都走这里）。
+  if (ledger.analysisExecutor === "client") return { outcome: "skipped", reason: "client_analysed" };
   if (ledger.features.length === 0) return { outcome: "skipped", reason: "no_features" };
   const fingerprint = presentationLedgerFingerprint(ledger);
   await ensurePresentationRow(execute, options.productId);
@@ -858,6 +863,7 @@ export async function runPresentationRefreshSweepOnce(options: { execute?: Execu
     `SELECT product_id FROM product_presentations
      WHERE pending = 1 AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP(3))
        AND (lease_until IS NULL OR lease_until <= CURRENT_TIMESTAMP(3))
+       AND product_id NOT IN (SELECT id FROM products WHERE analysis_executor = 'client')
      ORDER BY next_attempt_at IS NULL DESC, next_attempt_at LIMIT ?`,
     [options.limit ?? 2],
   ));

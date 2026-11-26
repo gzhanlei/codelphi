@@ -110,6 +110,8 @@ const proposalFieldsSchema = z.object({
   artifactKind: z.literal(PROPOSAL_ARTIFACT_KIND),
   idempotencyKey: uuid,
   mode: z.enum(["full", "incremental"]),
+  /** 提案文本的语言。规格版本的 output_language 按它记。 */
+  language: z.enum(["zh-CN", "en"]),
   repository: repositoryIdentitySchema,
   revision: z.object({
     sha: commitId,
@@ -132,12 +134,14 @@ const proposalFieldsSchema = z.object({
   coverage: coverageReceiptSchema.nullable(),
   flows: z.array(z.object({ featureStableKey: z.string().min(1).max(191), fingerprint: z.string().min(1).max(64), graph: z.unknown() })),
   presentation: z.unknown(),
+  // 客户端的说法，服务端不核对（修订稿 §6：来源信息分「服务端确认」和「客户端声明」两组）。
   client: z.object({
     version: shortVersion,
     pipelineVersion: shortVersion,
     promptVersion: shortVersion,
     model: z.string().min(1).max(200),
     impactRulesVersion: shortVersion,
+    analyzedAt: z.string().min(1).max(64),
   }),
 });
 

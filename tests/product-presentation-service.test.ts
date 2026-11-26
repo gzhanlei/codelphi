@@ -553,6 +553,8 @@ describe("journey mining prompt", () => {
 // ── 调度 ──
 
 interface FakeDb {
+  /** 产品由谁来分析。client：理解层随客户端的提案一起交上来，服务端不重生成。 */
+  analysisExecutor?: "server" | "client";
   /** never_generated=1 表示从未成功过；缺省字段按「已有内容」补齐。 */
   state: { fingerprint: string; pending: number; interval_elapsed: number; never_generated?: number; failure_count?: number; retry_due?: number } | null;
   leaseAffected: number;
@@ -570,6 +572,7 @@ function fakeDb(db: Partial<FakeDb> = {}): FakeDb & { execute: Execute & ReturnT
   const ledger = leafLedger();
   const state: FakeDb = {
     state: { fingerprint: "", pending: 0, interval_elapsed: 1, never_generated: 1 },
+    analysisExecutor: "server",
     leaseAffected: 1,
     due: [],
     previous: null,
@@ -581,7 +584,7 @@ function fakeDb(db: Partial<FakeDb> = {}): FakeDb & { execute: Execute & ReturnT
   };
   // 带类型的 mock 直接当 Execute 用会被 TS 拒（mock 实例带构造签名），显式标注为二者交集。
   const execute = vi.fn(async (sql: string, params: Array<string | number | null> = []) => {
-    if (sql.includes("FROM products WHERE id")) return [[{ name: ledger.name, description: ledger.description, output_language: "zh-CN" }]];
+    if (sql.includes("FROM products WHERE id")) return [[{ name: ledger.name, description: ledger.description, output_language: "zh-CN", analysis_executor: state.analysisExecutor }]];
     if (sql.includes("FROM features WHERE product_id")) return [ledger.features];
     if (sql.includes("FROM scenarios WHERE active")) return [ledger.scenarios];
     if (sql.includes("FROM releases WHERE product_id")) return [[{ spec_version_id: 7 }]];
@@ -831,5 +834,18 @@ describe("presentation refresh scheduling", () => {
     expect(sweepQuery[0]).toContain("lease_until <= CURRENT_TIMESTAMP(3)");
     expect(sweepQuery[1]).toEqual([2]);
     expect(db.execute.mock.calls.filter(([sql]) => String(sql).includes("INSERT INTO product_presentations (product_id, spec_version_id"))).toHaveLength(2);
+  });
+
+  it("never regenerates the presentation of a client-analysed product: the client supplies it with each proposal", async () => {
+    const db = fakeDb({ analysisExecutor: "client", state: { fingerprint: "old", pending: 1, interval_elapsed: 1 }, due: [1] });
+    const restore = silenceConsole();
+    const forced = await schedulePresentationRefresh({ productId: 1, force: true, background: false, execute: db.execute, client: client(() => miningAnswer([oneJourney])) });
+    const summary = await runPresentationRefreshSweepOnce({ execute: db.execute, client: client(() => miningAnswer([oneJourney])) });
+    restore();
+    expect(forced).toEqual({ outcome: "skipped", reason: "client_analysed" });
+    // 扫描的候选查询就把这种产品排除了；即使别的路径把它送进来，上面那一关也会拦住，模型一次都不调。
+    expect(db.execute.mock.calls.find(([sql]) => sql.includes("SELECT product_id FROM product_presentations"))![0]).toContain("analysis_executor = 'client'");
+    expect(summary.generated).toBe(0);
+    expect(db.execute.mock.calls.filter(([sql]) => String(sql).includes("INSERT INTO product_presentations"))).toHaveLength(0);
   });
 });

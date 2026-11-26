@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { verifyApiKey } from "@/lib/mcp/api-keys";
-import { consumeRateLimit } from "@/lib/rate-limit";
+import { assembleJsonBody } from "@/lib/chunked-upload";
 import { CONTRACT_VERSION } from "@/lib/extraction-contract";
 import { ImportValidationError, importSnapshotArtifact } from "@/lib/snapshot-import";
 
@@ -9,46 +9,10 @@ export const runtime = "nodejs";
 
 
 /**
- * 请求体组装（2026-11-19 分片上传）：无分片头=单发整体；带 x-import-* 头则按
- * (organizationId, importId) 累积分块，末块组装为完整 JSON 并计一次限流。
- * 分块让 nginx 请求体上限退化为「单块传输参数」而非产品规模天花板。
- * 组装态只存内存（单实例部署拓扑），30 分钟无进展惰性过期。
+ * 请求体组装走共用的分块上传（lib/chunked-upload.ts）：单发或按 x-import-* 头分块，每个 key 每小时 10 次完整上传。
  */
-const chunkUploads = new Map<string, { parts: Map<number, Buffer>; total: number; expires: number }>();
-const CHUNK_TTL_MS = 30 * 60_000;
-const CHUNK_HEADER_MAX_TOTAL = 1000;
-
-async function assembleBody(request: NextRequest, identity: { keyId: number; organizationId: number }): Promise<unknown> {
-  const raw = Buffer.from(await request.arrayBuffer());
-  const importId = request.headers.get("x-import-id");
-  const indexHeader = request.headers.get("x-import-chunk-index");
-  if (!importId || indexHeader === null) return JSON.parse(raw.toString("utf8"));
-
-  const total = Number(request.headers.get("x-import-chunk-total"));
-  const index = Number(indexHeader);
-  if (!importId || importId.length > 64 || !Number.isInteger(total) || total < 1 || total > CHUNK_HEADER_MAX_TOTAL
-    || !Number.isInteger(index) || index < 0 || index >= total) {
-    throw new Error("invalid_chunk");
-  }
-  const now = Date.now();
-  for (const [key, entry] of chunkUploads) if (entry.expires < now) chunkUploads.delete(key);
-  const uploadKey = `${identity.organizationId}#${importId}`;
-  let entry = chunkUploads.get(uploadKey);
-  if (!entry || entry.total !== total) {
-    entry = { parts: new Map(), total, expires: now + CHUNK_TTL_MS };
-    chunkUploads.set(uploadKey, entry);
-  }
-  entry.parts.set(index, raw);
-  entry.expires = now + CHUNK_TTL_MS;
-  if (entry.parts.size < total) {
-    throw new Error("__chunk_wait__");
-  }
-  const assembled = Buffer.concat(Array.from({ length: total }, (_, part) => entry!.parts.get(part)!));
-  chunkUploads.delete(uploadKey);
-  const limit = await consumeRateLimit({ kind: "user", identity: `snapshot-import:${identity.keyId}`, limit: 10, windowSeconds: 3600 });
-  if (!limit.allowed) throw new Error("rate_limited");
-  return JSON.parse(assembled.toString("utf8"));
-}
+const assembleBody = (request: NextRequest, identity: { keyId: number; organizationId: number }) =>
+  assembleJsonBody(request, identity, { name: "snapshot-import", limit: 10, windowSeconds: 3600 });
 
 
 /**

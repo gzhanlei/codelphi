@@ -23,6 +23,7 @@ function body(): Record<string, unknown> {
     artifactKind: "codelphi-analysis-proposal",
     idempotencyKey: "6f1c0d2e-3a4b-4c5d-8e9f-0a1b2c3d4e5f",
     mode: "full",
+    language: "zh-CN",
     repository: { repositoryId: 57, provider: "github", host: "github.com", owner: "acme", name: "api" },
     revision: { sha: "a".repeat(40), treeSha: "b".repeat(40), committedAt: "2026-11-26T10:00:00.000Z", title: "feat: login", branch: "main" },
     base: null,
@@ -37,7 +38,7 @@ function body(): Record<string, unknown> {
     coverage: { implFilesAssembled: 2, implFilesTotal: 3, implBytesAssembled: 200, implBytesTotal: 300, partitionsUsed: 1, partitionsCapped: false, diffTotalPaths: null, diffSelectedPaths: null, diffOmittedPaths: null, primaryRangesOmitted: null },
     flows: [{ featureStableKey: "登录", fingerprint: "abc123", graph: { nodes: [{ id: "n1", label: "打开登录页" }] } }],
     presentation: { headline: "Acme API" },
-    client: { version: "1.2.0", pipelineVersion: "p1", promptVersion: "2026-11-26", model: "tenant-model", impactRulesVersion: "impact-v1" },
+    client: { version: "1.2.0", pipelineVersion: "p1", promptVersion: "2026-11-26", model: "tenant-model", impactRulesVersion: "impact-v1", analyzedAt: "2026-11-26T10:30:00.000Z" },
   };
 }
 
