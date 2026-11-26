@@ -67,12 +67,17 @@ export async function withScratchDatabase<T>(
   } finally {
     await pool?.end();
     // 被演练的代码会经 getDb() 另开一个全局连接池；不关掉它，进程在出错时不退出。
-    await globalThis.codelphiDb?.end();
-    globalThis.codelphiDb = undefined;
+    // 有的演练会把这个位置换成记账替身，所以只在前者真的能关的时候关。
     try {
-      await admin.query(`DROP DATABASE IF EXISTS \`${database}\``);
+      const globalPool = globalThis.codelphiDb as { end?: () => Promise<void> } | undefined;
+      await globalPool?.end?.();
     } finally {
-      await admin.end();
+      globalThis.codelphiDb = undefined;
+      try {
+        await admin.query(`DROP DATABASE IF EXISTS \`${database}\``);
+      } finally {
+        await admin.end();
+      }
     }
   }
 }

@@ -21,7 +21,7 @@ import { mergeChunkResults, type ExtractionChunk } from "./extraction-merge";
 import type { AnchorScenarioLink } from "./behavior-unit-state";
 import { behavioralEnumerationEnabled, analysisConvergenceEpsilon, analysisConvergenceRounds, fullAnalysisMode } from "./env";
 import { runInventoryFullAnalysis } from "./full-analysis";
-import { behavioralChangePaths } from "./patch-scan";
+import { behavioralChangePaths, behavioralPathsOf } from "./patch-scan";
 import { analyzedChangePaths, isSchemaArtifact } from "./evidence";
 import { featureIdentityColumn, scenarioIdentityColumn, type VersionIdentityPlan } from "./spec-identity";
 import { parsePatchHunks } from "./spec-diff";
@@ -33,7 +33,7 @@ import { evidenceAllowSet, extractPassWithRetry } from "./extraction-pass";
 import type { EvidenceSanitizeSummary } from "./completeness-ledger";
 export { sanitizeEvidence } from "./extraction-pass";
 import type { SpecFeature } from "./spec-diff";
-import type { SpecAnchorFeature } from "./spec-versions";
+import type { FeatureCollapse, FeatureFold, MisplacedScenario, SpecAnchorFeature, SpecVersionCollapse } from "./spec-versions";
 import { markSpecDrift } from "./spec-drift";
 import { deliverAnalysisNotifications } from "./notifications";
 import { rewriteReleaseNoteCopy } from "./release-notes-enhance";
@@ -167,7 +167,7 @@ export async function upsertRelease(connection: PoolConnection, run: RunContext,
   // P0：发布改动文件清单落库，供回归任务的影响面映射（文件 → 证据路径 → 场景）离线复算。
   // 行为性标志（patch-scan）：注释/空白变动的文件不构成行为变更，渲染期折叠重算与
   // tests-only 门禁共用该标志。
-  const behavioralPaths = behavioralChangePaths(change.files);
+  const behavioralPaths = behavioralPathsOf(change);
   if (change.files.length > 0) {
     await connection.execute("DELETE FROM release_files WHERE release_id = ?", [releaseId]);
     for (const file of change.files) {
@@ -238,69 +238,98 @@ async function persistBehaviorFinalMappings(connection: PoolConnection, run: Run
   }
 }
 
+/** saveResult 写出来的东西。 */
+export interface SavedResult {
+  specVersionId: number;
+  releaseId: number;
+  releaseChangeProjections: ReleaseChangeProjection[];
+  features: SpecFeature[];
+  collapse: SpecVersionCollapse | null;
+  featureCollapses: FeatureCollapse[];
+  misplacedScenarios: MisplacedScenario[];
+  identityHijacksDropped: number;
+  featureFolds: FeatureFold[];
+  /** 这个 run 是不是仓库里最新的一个。不是的话，托管路径提交之后抛「被超越」，这一版只留作历史。 */
+  activate: boolean;
+  /** 仓库里最新的 run。这个 run 被超越时，托管路径的报错里带上它。 */
+  supersededBy: number;
+}
+
+/**
+ * saveResult 的事务体，写给已经拿着连接的调用方。
+ * 托管分析走下面的 saveResult，它自己开事务；客户端提案的发布在它自己的事务里调用这里，
+ * 那边的锁、绑定和基线核对都在同一个事务里（修订稿 §4.6）。
+ * 这里不开事务、不提交、不回滚、不归还连接。
+ */
+export async function saveResultInTransaction(connection: PoolConnection, run: RunContext, result: AnalysisResult, change: ChangeContext, affectedKeys: ReadonlySet<string> | null = null, coverage?: AnalysisCoverageReceipt, behaviorLinks: readonly AnchorScenarioLink[] = []): Promise<SavedResult> {
+  const latestRunId = await loadLatestRunId(connection, run);
+  const activate = latestRunId === run.id;
+  if (activate) {
+    await connection.execute(
+      "UPDATE products SET description = ?, description_source = 'generated', description_evidence = ? WHERE id = ? AND description = ''",
+      [result.product.description, JSON.stringify(result.product.evidence), run.productId],
+    );
+  }
+  // 调用方算好了行为变更集合和行号区间（客户端提案）就用它的；托管分析不带，从补丁算。
+  const behavioralPaths = behavioralPathsOf(change);
+  // 逐锚点保真判定（2026-11-19 根治 release 280 丢 20 场景）：行为文件的 hunk 供
+  // preserveUnchangedEvidence 做锚点级相交判定与确定性行号重映射。
+  const changedHunksByPath = new Map(
+    change.files
+      .filter((file) => behavioralPaths.has(file.path))
+      .map((file) => [file.path, file.hunks ?? parsePatchHunks(file.patch)] as const),
+  );
+  const { specVersionId, specChanges, baseline, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds, scenarioIdByLocalKey, identities = null } = await insertSpecVersion(connection, run, result, { ...(affectedKeys ? { affectedKeys } : {}), behavioralChangePaths: behavioralPaths, changedHunksByPath, base: activate ? "latest" : "beforeRun", baseVersionId: run.baseCapturedAt ? run.baseSpecVersionId : undefined, changeFiles: change.files, fullAnalysis: affectedKeys === null, coverageComplete: affectedKeys === null && coverage?.coverageRatio === 1 && !coverage.partitionsCapped && coverage.diffOmittedPaths === 0 });
+  if (activate) {
+    // BM-11 别名登记：变体名 → canonical 旧键，走 feature_aliases 显式归并通道
+    // （migrations/030；progress-summary 的历史 spec_changes 归并已消费该表）。幂等 INSERT IGNORE。
+    for (const fold of featureFolds) {
+      await connection.execute(
+        "INSERT IGNORE INTO feature_aliases (product_id, alias_key, canonical_key) VALUES (?, ?, ?)",
+        [run.productId, fold.fromKey, fold.intoKey],
+      );
+    }
+  }
+  // Task 12：行为锚点 ↔ 最终场景映射回填（同事务；缺失即抛错回滚）
+  await persistBehaviorFinalMappings(connection, run, behaviorLinks, scenarioIdByLocalKey);
+  if (activate) {
+    await rebuildSpecFileIndex(connection, run.repositoryId, specVersionId);
+    await markSpecDrift(connection, run.productId, specVersionId);
+  }
+  // B1：覆盖率回执与规格版本同事务落库（append-only，历史版本可回溯）
+  if (coverage) await saveCoverageReceipt(connection, specVersionId, coverage);
+  if (collapse) {
+    console.error("[spec] suspected spec collapse", { runId: run.id, specVersionId, previousScenarios: collapse.previousScenarios, currentScenarios: collapse.currentScenarios, activate });
+    if (activate) throw new Error(`spec_collapse_rejected:${collapse.previousScenarios}->${collapse.currentScenarios}`);
+  }
+  if (activate) {
+    // P0(I1):下线基准必须是 carry-forward 合并后的完整规格——用 AI 原始输出会让
+    // 增量模式把未受影响的 generated 功能全部下线,工作台坍缩为本次触及的功能。
+    await upsertGeneratedSpec(connection, run, mergedFeatures, identities);
+  }
+  const { releaseId, projections: releaseChangeProjections } = await upsertRelease(connection, run, result, change, specVersionId, specChanges, baseline ? mergedFeatures : null, { activate });
+  if (activate) {
+    await connection.execute("UPDATE releases SET is_current = 0 WHERE repository_id = ?", [run.repositoryId]);
+    await connection.execute("UPDATE releases SET is_current = 1 WHERE id = ? AND repository_id = ?", [releaseId, run.repositoryId]);
+    const [succeeded] = await connection.execute("UPDATE analysis_runs SET status = 'succeeded', finished_at = CURRENT_TIMESTAMP(3) WHERE id = ? AND status = 'running'", [run.id]) as [{ affectedRows?: number }, unknown];
+    if ((succeeded.affectedRows ?? 0) !== 1) {
+      // run 已不归本执行持有（被恢复路径重置）：回滚整笔落库，规格与 run 状态保持一致
+      throw new Error(`analysis run ${run.id} is no longer running; result discarded`);
+    }
+  }
+  return {  specVersionId, releaseId, releaseChangeProjections, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds , activate, supersededBy: latestRunId };
+}
+
 export async function saveResult(run: RunContext, result: AnalysisResult, change: ChangeContext, affectedKeys: ReadonlySet<string> | null = null, coverage?: AnalysisCoverageReceipt, behaviorLinks: readonly AnchorScenarioLink[] = []) {
   const connection = await getDb().getConnection();
   let committed = false;
   try {
     await connection.beginTransaction();
-    const latestRunId = await loadLatestRunId(connection, run);
-    const activate = latestRunId === run.id;
-    if (activate) {
-      await connection.execute(
-        "UPDATE products SET description = ?, description_source = 'generated', description_evidence = ? WHERE id = ? AND description = ''",
-        [result.product.description, JSON.stringify(result.product.evidence), run.productId],
-      );
-    }
-    const behavioralPaths = behavioralChangePaths(change.files);
-    // 逐锚点保真判定（2026-11-19 根治 release 280 丢 20 场景）：行为文件的 hunk 供
-    // preserveUnchangedEvidence 做锚点级相交判定与确定性行号重映射。
-    const changedHunksByPath = new Map(
-      change.files
-        .filter((file) => behavioralPaths.has(file.path))
-        .map((file) => [file.path, parsePatchHunks(file.patch)] as const),
-    );
-    const { specVersionId, specChanges, baseline, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds, scenarioIdByLocalKey, identities = null } = await insertSpecVersion(connection, run, result, { ...(affectedKeys ? { affectedKeys } : {}), behavioralChangePaths: behavioralPaths, changedHunksByPath, base: activate ? "latest" : "beforeRun", baseVersionId: run.baseCapturedAt ? run.baseSpecVersionId : undefined, changeFiles: change.files, fullAnalysis: affectedKeys === null, coverageComplete: affectedKeys === null && coverage?.coverageRatio === 1 && !coverage.partitionsCapped && coverage.diffOmittedPaths === 0 });
-    if (activate) {
-      // BM-11 别名登记：变体名 → canonical 旧键，走 feature_aliases 显式归并通道
-      // （migrations/030；progress-summary 的历史 spec_changes 归并已消费该表）。幂等 INSERT IGNORE。
-      for (const fold of featureFolds) {
-        await connection.execute(
-          "INSERT IGNORE INTO feature_aliases (product_id, alias_key, canonical_key) VALUES (?, ?, ?)",
-          [run.productId, fold.fromKey, fold.intoKey],
-        );
-      }
-    }
-    // Task 12：行为锚点 ↔ 最终场景映射回填（同事务；缺失即抛错回滚）
-    await persistBehaviorFinalMappings(connection, run, behaviorLinks, scenarioIdByLocalKey);
-    if (activate) {
-      await rebuildSpecFileIndex(connection, run.repositoryId, specVersionId);
-      await markSpecDrift(connection, run.productId, specVersionId);
-    }
-    // B1：覆盖率回执与规格版本同事务落库（append-only，历史版本可回溯）
-    if (coverage) await saveCoverageReceipt(connection, specVersionId, coverage);
-    if (collapse) {
-      console.error("[spec] suspected spec collapse", { runId: run.id, specVersionId, previousScenarios: collapse.previousScenarios, currentScenarios: collapse.currentScenarios, activate });
-      if (activate) throw new Error(`spec_collapse_rejected:${collapse.previousScenarios}->${collapse.currentScenarios}`);
-    }
-    if (activate) {
-      // P0(I1):下线基准必须是 carry-forward 合并后的完整规格——用 AI 原始输出会让
-      // 增量模式把未受影响的 generated 功能全部下线,工作台坍缩为本次触及的功能。
-      await upsertGeneratedSpec(connection, run, mergedFeatures, identities);
-    }
-    const { releaseId, projections: releaseChangeProjections } = await upsertRelease(connection, run, result, change, specVersionId, specChanges, baseline ? mergedFeatures : null, { activate });
-    if (activate) {
-      await connection.execute("UPDATE releases SET is_current = 0 WHERE repository_id = ?", [run.repositoryId]);
-      await connection.execute("UPDATE releases SET is_current = 1 WHERE id = ? AND repository_id = ?", [releaseId, run.repositoryId]);
-      const [succeeded] = await connection.execute("UPDATE analysis_runs SET status = 'succeeded', finished_at = CURRENT_TIMESTAMP(3) WHERE id = ? AND status = 'running'", [run.id]) as [{ affectedRows?: number }, unknown];
-      if ((succeeded.affectedRows ?? 0) !== 1) {
-        // run 已不归本执行持有（被恢复路径重置）：回滚整笔落库，规格与 run 状态保持一致
-        throw new Error(`analysis run ${run.id} is no longer running; result discarded`);
-      }
-    }
+    const { activate, supersededBy, ...saved } = await saveResultInTransaction(connection, run, result, change, affectedKeys, coverage, behaviorLinks);
     await connection.commit();
     committed = true;
-    if (!activate) throw new Error(`Analysis superseded by run ${latestRunId}`);
-    return { specVersionId, releaseId, releaseChangeProjections, features: mergedFeatures, collapse, featureCollapses, misplacedScenarios, identityHijacksDropped, featureFolds };
+    if (!activate) throw new Error(`Analysis superseded by run ${supersededBy}`);
+    return saved;
   } catch (error) {
     if (!committed) await connection.rollback();
     throw error;

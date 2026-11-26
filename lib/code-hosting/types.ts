@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { PatchHunk } from "../spec-diff";
 
 export const codeHostingProviderSchema = z.enum(["github", "gitee", "gitlab", "gitea"]);
 export type CodeHostingProvider = z.infer<typeof codeHostingProviderSchema>;
@@ -40,6 +41,8 @@ export interface ChangeFile {
   path: string;
   status: string;
   patch: string;
+  /** 调用方已经解析好的行号区间。客户端提案不带补丁文本，区间由客户端算好交上来；托管分析不填，从补丁解析。 */
+  hunks?: readonly PatchHunk[];
 }
 
 export interface ChangeContext {
@@ -47,4 +50,6 @@ export interface ChangeContext {
   committedAt: string;
   url: string;
   files: ChangeFile[];
+  /** 调用方已经算好的「含行为变更的路径集合」。客户端提案不带补丁文本；托管分析不填，从补丁算。 */
+  behavioralPaths?: ReadonlySet<string>;
 }

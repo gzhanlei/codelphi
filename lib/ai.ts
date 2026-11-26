@@ -5,6 +5,7 @@ import type { StructuredCompletionClient } from "./llm-client";
 import type { SourceFile } from "./github";
 import { recordLlmCallReceipt, recordRequestScopedReceipt, type ChargeComponent, type LlmCallStage } from "./billing/cost-receipt";
 import type { OutputLanguage } from "./analysis-language";
+import type { PatchHunk } from "./spec-diff";
 
 const evidenceSchema = z.object({
   path: z.string().min(1).max(500),
@@ -189,7 +190,9 @@ export function capScenariosPerFeature(parsed: unknown, max = 40): unknown {
 
 export interface ChangeContext {
   message: string;
-  files: Array<{ path: string; status: string; patch: string }>;
+  files: Array<{ path: string; status: string; patch: string; hunks?: readonly PatchHunk[] }>;
+  /** 调用方已经算好的「含行为变更的路径集合」。客户端提案不带补丁文本；托管分析不填，从补丁算。 */
+  behavioralPaths?: ReadonlySet<string>;
 }
 
 export function chatCompletionsUrl() {

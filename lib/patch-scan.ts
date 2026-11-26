@@ -110,6 +110,21 @@ export function behavioralChangePaths(files: ReadonlyArray<ChangeFile>): Set<str
   return behavioral;
 }
 
+/** 一次发布的变更，可以带着调用方已经算好的「含行为变更的路径集合」。 */
+export interface ChangeWithBehavioralPaths {
+  files: ReadonlyArray<ChangeFile>;
+  behavioralPaths?: ReadonlySet<string>;
+}
+
+/**
+ * 这次发布里含行为变更的路径集合：调用方算好了就用它的，否则从补丁算。
+ * 客户端提案不带补丁文本，集合和行号区间都由客户端在本地用同一个函数算好交上来（修订稿 §4.4）。
+ */
+export function behavioralPathsOf(change: ChangeWithBehavioralPaths): ReadonlySet<string> {
+  return change.behavioralPaths ?? behavioralChangePaths(change.files);
+}
+
+
 /** 路径层级：只有实现证据才进入行为判定。测试、文档、CI/基础设施与迁移脚本在此排除。 */
 function carriesBehavior(path: string): boolean {
   return evidenceKind(path) === "implementation" && !isInfrastructureEvidence(path) && !isSchemaArtifact(path);
