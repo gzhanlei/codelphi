@@ -25,6 +25,7 @@ export const MAX_SUPPORTED_CONTRACT_VERSIONS = [PROPOSAL_CONTRACT_VERSION] as co
 export const MIN_SUPPORTED_CONTRACT_VERSION = MAX_SUPPORTED_CONTRACT_VERSIONS[MAX_SUPPORTED_CONTRACT_VERSIONS.length - 1];
 
 export const REPOSITORY_PROVIDERS = ["github", "gitlab", "gitee", "gitea", "local"] as const;
+export type RepositoryProvider = (typeof REPOSITORY_PROVIDERS)[number];
 
 export type ProposalErrorCode = "invalid_proposal" | "proposal_hash_mismatch" | "contract_version_mismatch";
 

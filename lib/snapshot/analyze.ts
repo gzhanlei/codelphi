@@ -23,6 +23,8 @@ export interface AnalyzeProductSnapshotOptions {
   enumerateSurface?: typeof import("../analysis-coverage").enumerateImplementationSurface;
   now?: () => Date;
   onProgress?: (event: SnapshotProgressEvent) => void;
+  /** 客户端分析：每个提示词加上「不输出源码」的约束（修订稿 §4.2）。 */
+  noSourceOutput?: boolean;
 }
 
 export async function analyzeProductSnapshot(options: AnalyzeProductSnapshotOptions): Promise<SnapshotAnalysis> {
@@ -46,5 +48,6 @@ export async function analyzeProductSnapshot(options: AnalyzeProductSnapshotOpti
   return finalizeSnapshotAnalysis(prepared, executions, {
     modelName: options.client.displayName ?? "Configured model",
     client: options.client,
+    ...(prepared.noSourceOutput ? { noSourceOutput: true } : {}),
   });
 }

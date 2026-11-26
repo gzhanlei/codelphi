@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { OutputLanguage } from "../analysis-language";
 import type { AnalysisResult } from "../ai";
 import type { StructuredCompletionClient } from "../llm-client";
+import { withNoSourceOutput } from "../prompt-policy";
 import type { SnapshotCoreCapability, SnapshotConcept, SnapshotJourney, SnapshotPresentation, SnapshotScenarioRef } from "./types";
 
 const scenarioRefSchema = z.object({ featureName: z.string().trim().min(1), reference: z.string().trim().min(1) });
@@ -239,6 +240,7 @@ async function createLargeSnapshotPresentation(options: {
   language: OutputLanguage;
   client: StructuredCompletionClient;
   relax?: boolean;
+  noSourceOutput?: boolean;
 }): Promise<SnapshotPresentation> {
   const languageName = options.language === "en" ? "English" : "Simplified Chinese";
   const planSchema = z.object({
@@ -251,7 +253,7 @@ async function createLargeSnapshotPresentation(options: {
     : `你在为大型、带证据的产品创建领域计划。不得新增事实或结论。先用一句话 tagline 说明产品解决什么问题、由哪些主要部分组成，避免以框架或实现术语开头。定义 4-8 个面向用户价值的产品领域，能够容纳全部功能，包括技术与运维功能，避免“其他”兜底域。本步不要分配功能。只返回 JSON，结构为：{"tagline":"","domains":[{"name":"","summary":""}]}。\n\n产品简介：${options.result.product.description}\n\nDomain plan feature inventory:\n${JSON.stringify(inventory)}`;
   const plan = parseJson(await options.client.complete([
     { role: "system", content: `You reorganize specifications without adding facts. Use ${languageName} for name and summary fields.` },
-    { role: "user", content: planPrompt },
+    { role: "user", content: withNoSourceOutput(planPrompt, options.language, options.noSourceOutput) },
   ]), planSchema);
   const domainNames = new Set(plan.domains.map((domain) => domain.name));
   const assignmentSchema = z.object({ assignments: z.array(z.object({ featureName: z.string().trim().min(1), domainName: z.string().trim().min(1) })).min(1) });
@@ -267,7 +269,7 @@ async function createLargeSnapshotPresentation(options: {
         : `把本批每个功能恰好分配到一个已有领域。不得新增领域或功能。每个输入 featureName 必须恰好出现一次，domainName 只能使用给定值。只返回 JSON，结构为：{"assignments":[{"featureName":"","domainName":""}]}。\n\n领域：\n${JSON.stringify(plan.domains)}\n\nFeature assignment batch:\n${JSON.stringify(batch.map((feature) => ({ name: feature.name, summary: feature.summary })))}`;
       const output = parseJson(await options.client.complete([
         { role: "system", content: `You assign existing specifications to existing domains without adding facts. Use ${languageName}.` },
-        { role: "user", content: prompt },
+        { role: "user", content: withNoSourceOutput(prompt, options.language, options.noSourceOutput) },
       ]), assignmentSchema);
       const expected = new Set(batch.map((feature) => feature.name));
       const assigned = new Set(output.assignments.map((assignment) => assignment.featureName));
@@ -305,7 +307,7 @@ async function createLargeSnapshotPresentation(options: {
     : `只使用这些已有、带证据的场景，为第一次接触项目的用户生成理解层。不得新增事实、对象、关系或结论。创建最多五条端到端用户旅程，每条包含 2-6 个有序的原有场景步骤，必须连接至少两个功能；证据不足就不要强行生成。优先选择产品级目标和跨模块流程，避免孤立的类调用。有其他选择时，优先生成可跨 Provider 或集成复用的旅程，Provider 专属实例最多保留一条。提取最多十二个关键领域概念，只建立有明确场景支持的关系。每个概念和关系都必须引用原有场景。只返回 JSON，结构为：{"journeys":[{"name":"","steps":[{"featureName":"","reference":"HP-1"}]}],"concepts":[{"name":"","summary":"","scenarioRefs":[{"featureName":"","reference":"HP-1"}],"relations":[{"targetName":"","summary":"","scenarioRef":{"featureName":"","reference":"HP-1"}}]}]}。\n\n产品简介：${options.result.product.description}\n\nCandidate scenarios:\n${JSON.stringify(candidates)}`;
   const details = parseJson(await options.client.complete([
     { role: "system", content: `You reorganize specifications without adding facts. Use ${languageName} for name and summary fields.` },
-    { role: "user", content: detailPrompt },
+    { role: "user", content: withNoSourceOutput(detailPrompt, options.language, options.noSourceOutput) },
   ]), detailSchema);
   return (options.relax ? parseSnapshotPresentationRelaxed : parseSnapshotPresentation)(JSON.stringify({ ...grouping, ...details }), options.result);
 }
@@ -316,6 +318,8 @@ export async function createSnapshotPresentation(options: {
   client: StructuredCompletionClient;
   /** relax=true 走宽松解析（站内理解层用）：逐条 salvage，只保「每个功能恰好归属一次」这条硬约束。缺省保持 Radar 的严格行为。 */
   relax?: boolean;
+  /** 客户端分析（修订稿 §4.2）：提示词加上「不输出源码」的约束。站内的理解层不传。 */
+  noSourceOutput?: boolean;
 }): Promise<SnapshotPresentation> {
   if (options.result.features.length > 40) return createLargeSnapshotPresentation(options);
   const languageName = options.language === "en" ? "English" : "Simplified Chinese";
@@ -329,7 +333,7 @@ export async function createSnapshotPresentation(options: {
     : `你在为第一次接触项目的用户整理一份已有、带证据的产品规格。不得新增事实、功能、场景、用户角色、集成、对象、关系或结论。先用一句话 tagline 说明产品解决什么问题、由哪些主要部分组成，避免以框架、库名、API 名、部署细节和实现术语开头。然后把所有现有功能归组为 4-8 个产品领域（输入功能更少时可更少），名称面向用户价值而非实现名称。技术与运维功能也要留在分组中，不能凭空删除。每个领域给出简短名称、一句话简介、原样 featureNames，以及最多两个最能说明典型用法的原有场景引用。每个输入功能必须恰好出现一次。然后创建最多五条端到端用户旅程，每条包含 2-6 个有序的原有场景步骤；产品有多个功能时，旅程必须连接至少两个功能，证据不足就不要强行生成。优先选择用户目标和跨模块流程，避免孤立的类调用或内部算法。最后提取最多十二个关键领域概念，只建立有明确场景支持的概念关系。每个概念和关系都必须引用原有场景。只返回 JSON，结构为：{"tagline":"","coreCapabilities":[{"name":"","summary":"","featureNames":[""],"scenarioRefs":[{"featureName":"","reference":"HP-1"}]}],"journeys":[{"name":"","steps":[{"featureName":"","reference":"HP-1"}]}],"concepts":[{"name":"","summary":"","scenarioRefs":[{"featureName":"","reference":"HP-1"}],"relations":[{"targetName":"","summary":"","scenarioRef":{"featureName":"","reference":"HP-1"}}]}]}。\n\n产品简介：${options.result.product.description}\n\n现有功能：\n${JSON.stringify(existing)}`;
   const content = await options.client.complete([
     { role: "system", content: `You reorganize specifications without adding facts. Use ${languageName} for name and summary fields.` },
-    { role: "user", content: prompt },
+    { role: "user", content: withNoSourceOutput(prompt, options.language, options.noSourceOutput) },
   ]);
   return (options.relax ? parseSnapshotPresentationRelaxed : parseSnapshotPresentation)(content, options.result);
 }

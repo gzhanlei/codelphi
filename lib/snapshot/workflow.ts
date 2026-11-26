@@ -21,6 +21,8 @@ export interface PreparedSnapshotAnalysis {
   enumerateSurface: typeof enumerateImplementationSurface;
   now: () => Date;
   onProgress?: (event: SnapshotProgressEvent) => void;
+  /** 每个提示词都要带上「不输出源码」的约束。只有客户端分析会打开；分步工作区的命令不打开。 */
+  noSourceOutput?: boolean;
 }
 
 export interface SnapshotExecution {
@@ -60,6 +62,7 @@ export async function prepareSnapshotAnalysis(options: PrepareSnapshotAnalysisOp
     context: {
       previousFeatureNames: [],
       outputLanguage: options.outputLanguage,
+      ...(options.noSourceOutput ? { noSourceOutput: true } : {}),
       ...(partitions.length > 1 ? { partition: { index: partitionIndex + 1, total: partitions.length } } : {}),
     },
   }));
@@ -72,6 +75,7 @@ export async function prepareSnapshotAnalysis(options: PrepareSnapshotAnalysisOp
     workOrders,
     enumerateSurface: options.enumerateSurface ?? enumerateImplementationSurface,
     now,
+    noSourceOutput: options.noSourceOutput === true,
     ...(options.onProgress ? { onProgress: options.onProgress } : {}),
   };
 }
@@ -102,6 +106,7 @@ export async function finalizeSnapshotAnalysis(prepared: PreparedSnapshotAnalysi
   modelName: string;
   client?: StructuredCompletionClient;
   presentation?: unknown;
+  noSourceOutput?: boolean;
 }): Promise<SnapshotAnalysis> {
   if (executions.length === 0) {
     const { SnapshotAnalysisError } = await import("./analyze");
@@ -127,7 +132,7 @@ export async function finalizeSnapshotAnalysis(prepared: PreparedSnapshotAnalysi
     const presentationStartedAt = Date.now();
     prepared.onProgress?.({ stage: "presentation", status: "start" });
     try {
-      presentation = await createSnapshotPresentation({ result, language: prepared.language, client: options.client });
+      presentation = await createSnapshotPresentation({ result, language: prepared.language, client: options.client, ...(options.noSourceOutput ? { noSourceOutput: true } : {}) });
       prepared.onProgress?.({ stage: "presentation", status: "complete", durationMs: Date.now() - presentationStartedAt });
     } catch {
       presentationFallback = true;

@@ -4,9 +4,11 @@ import { basename, dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { runSnapshot, type SnapshotRunOptions, type SnapshotRunResult } from "../lib/snapshot/run";
 import { completeSnapshotWorkspace, finalizeSnapshotWorkspace, prepareSnapshotWorkspace, readSnapshotWorkOrder, readZeroYieldWorkOrderIds } from "../lib/snapshot/workspace";
+import { parseEnvFile } from "../lib/env-file";
 import { resolveCompletionBackend } from "../lib/snapshot/host-ai";
 import { standaloneGatewayHost, type CompletionUsageHandler } from "../lib/llm-client";
 import type { SnapshotProgressEvent } from "../lib/snapshot/types";
+import { configMain, consoleIo, publishMain, statusMain } from "../lib/client-publish/cli";
 
 class SnapshotCliError extends Error {
   constructor(readonly code: string, message: string) {
@@ -46,28 +48,11 @@ function usage(language: "zh-CN" | "en") {
     : `用法：npm run snapshot -- <本地路径|GitHub公开仓库URL> [选项]\n\n选项：\n  --ref <revision>       要分析的 commit、分支或标签\n  --scope <path>         限定仓库内分析路径（可重复）\n  --language <zh-CN|en>  CLI 消息与 HTML 报告语言\n  --env-file <path>      显式 standalone AI 配置文件\n  --standalone          显式使用 standalone AI 配置\n  --output <file>       HTML 输出路径\n  --force               覆盖已有报告\n  --help                显示此帮助`;
 }
 
+/** --env-file 的解析和凭证文件共用一份；格式不对的值照旧报 invalid_env_file。 */
 function parseEnvironmentFile(content: string) {
-  const result: Record<string, string> = {};
-  for (const row of content.split(/\r?\n/)) {
-    const line = row.trim();
-    if (!line || line.startsWith("#")) continue;
-    const match = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
-    if (!match) continue;
-    const [, key, rawValue] = match;
-    const raw = rawValue.trim();
-    let value: string;
-    if (raw.startsWith('"')) {
-      try { value = JSON.parse(raw) as string; } catch { throw new SnapshotCliError("invalid_env_file", `Invalid quoted value for ${key}`); }
-    } else if (raw.startsWith("'")) {
-      const end = raw.indexOf("'", 1);
-      if (end < 0) throw new SnapshotCliError("invalid_env_file", `Invalid quoted value for ${key}`);
-      value = raw.slice(1, end);
-    } else {
-      value = raw.split(/\s+#/, 1)[0].trim();
-    }
-    result[key] = value;
-  }
-  return result;
+  const { values, invalid } = parseEnvFile(content);
+  if (invalid.length > 0) throw new SnapshotCliError("invalid_env_file", `Invalid quoted value for ${invalid[0]}`);
+  return values;
 }
 
 function scopeRoots(values: string[] | undefined) {
@@ -329,7 +314,21 @@ async function uploadSnapshotFile(snapshotPath: string, uploadUrl: string, uploa
   return 0;
 }
 
+/** 客户端分析的三个命令（修订稿 §5.1）：逻辑在 lib/client-publish/cli.ts，这里只接上真实的终端。 */
+async function clientCommandMain(argv: string[], dependencies: CliDependencies) {
+  const [command, ...args] = argv;
+  const io = {
+    ...consoleIo(dependencies.environment ?? process.env),
+    stdout: dependencies.stdout ?? ((message: string) => console.log(message)),
+    stderr: dependencies.stderr ?? ((message: string) => console.error(message)),
+  };
+  if (command === "config") return configMain(args, io);
+  if (command === "status") return statusMain(args, io);
+  return publishMain(args, io);
+}
+
 export async function main(argv = process.argv.slice(2), dependencies: CliDependencies = {}) {
+  if (argv[0] === "config" || argv[0] === "publish" || argv[0] === "status") return clientCommandMain(argv, dependencies);
   if (argv[0] === "prepare" || argv[0] === "finalize" || argv[0] === "show" || argv[0] === "complete" || argv[0] === "upload") return workspaceMain(argv, dependencies);
   const language = languageFromArgv(argv);
   const stdout = dependencies.stdout ?? ((message: string) => console.log(message));
