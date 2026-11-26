@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { PoolConnection } from "mysql2/promise";
 import { getDb, type Execute } from "./db";
+import { clientRunRefusal, serverMayExecute, type AnalysisExecutor } from "./analysis-executor";
 import { analyzeWithAI, type AnalysisResult } from "./ai";
 import { recordRunFailureFeedback } from "./feedback";
 import { BillingError, capture, enqueueRunWithReservation, hasActiveReservation, heartbeat, release, reserveForNewRun } from "./billing/core";
@@ -62,6 +63,9 @@ export interface RunContext {
   analyzeMode?: "full" | "incremental";
   /** 分析输出语言（migration 072）：决定提取/发布稿/问答各 prompt 的语言段；缺省按 zh-CN。 */
   outputLanguage?: "zh-CN" | "en";
+  /** 这个 run 该不该由服务端执行（lib/analysis-executor）。loadRun 读出来；自己构造 run 的调用方不填就是托管。 */
+  triggerType?: string;
+  analysisExecutor?: AnalysisExecutor;
 }
 
 async function loadLatestRunId(connection: PoolConnection, run: RunContext) {
@@ -328,7 +332,8 @@ async function loadRun(runId: number) {
     `SELECT r.id, r.repository_id AS repositoryId, p.id AS productId, p.slug AS productSlug, p.name AS productName,
             repo.owner, repo.name, r.before_sha AS beforeSha, r.after_sha AS afterSha, repo.connection_id AS connectionId,
             r.base_spec_version_id AS baseSpecVersionId, r.base_captured_at AS baseCapturedAt,
-            repo.provider, p.organization_id AS organizationId, r.account_id AS accountId, p.analyze_mode AS analyzeMode, p.output_language AS outputLanguage
+            repo.provider, p.organization_id AS organizationId, r.account_id AS accountId, p.analyze_mode AS analyzeMode, p.output_language AS outputLanguage,
+            r.trigger_type AS triggerType, p.analysis_executor AS analysisExecutor
      FROM analysis_runs r
      JOIN repositories repo ON repo.id = r.repository_id
      JOIN products p ON p.id = repo.product_id
@@ -900,6 +905,17 @@ function countMergedScenarios(result: AnalysisResult): number {
 async function runAnalysisSafely(runId: number) {
   const run = await loadRun(runId);
   if (!run) return;
+  // 所有触发最终都调到这里，所以在认领之前再看一眼该不该由服务端执行（入队时的闸门是第一道）。
+  // 产品被切成客户端分析之前入队的 run、client_upload 的 run，都在这里标失败，不认领、不预留。
+  const mode = { triggerType: run.triggerType ?? null, executor: run.analysisExecutor ?? "server" };
+  if (!serverMayExecute(mode)) {
+    console.warn("[analysis] run refused: not executed by the server", { runId, triggerType: mode.triggerType, executor: mode.executor });
+    await getDb().execute(
+      "UPDATE analysis_runs SET status = 'failed', error_message = ?, finished_at = CURRENT_TIMESTAMP(3) WHERE id = ? AND status <> 'succeeded'",
+      [clientRunRefusal(mode), runId],
+    );
+    return;
+  }
   await performAnalysis(run);
 }
 

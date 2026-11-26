@@ -18,13 +18,12 @@
  *   SAVE_RESULT_BASELINE_DATABASE_URL="mysql://user:pass@127.0.0.1:3306/codelphi_test_save_result" \
  *     npx tsx scripts/verify-save-result-baseline.ts [--record]
  */
-import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import mysql, { type Pool, type PoolConnection } from "mysql2/promise";
+import type { Pool, PoolConnection } from "mysql2/promise";
 import { type RunContext, saveResult } from "../lib/analysis";
 import { type AnalysisResult } from "../lib/ai";
-import { databaseConfig } from "../lib/database-config";
+import { insertIdOf, withScratchDatabase } from "./scratch-database";
 
 const SCRATCH_PREFIX = "codelphi_test_save_result";
 const ENV_URL = "SAVE_RESULT_BASELINE_DATABASE_URL";
@@ -45,23 +44,6 @@ interface World {
   organizationId: number;
   productId: number;
   repositoryId: number;
-}
-
-const insertIdOf = (result: unknown): number => Number((result as [{ insertId: number }, unknown])[0].insertId);
-
-/** 从连接地址里取出库名，并确认它是一个可以随便删了重建的临时库。 */
-function scratchDatabase(url: string): string {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    throw new Error(`${ENV_URL} 不是合法的连接地址`);
-  }
-  const name = parsed.pathname.replace(/^\//, "");
-  if (parsed.protocol !== "mysql:" || !name.startsWith(SCRATCH_PREFIX) || !/^[0-9a-z_]*$/.test(name.slice(SCRATCH_PREFIX.length))) {
-    throw new Error(`拒绝：这个脚本会删掉并重建它指向的库，库名必须以 ${SCRATCH_PREFIX} 开头（收到的是「${name}」）`);
-  }
-  return name;
 }
 
 /** 参数里能放进 JSON 的原样放；日期和二进制换成带标记的普通值，undefined 记成 null。 */
@@ -239,13 +221,6 @@ export async function rehearse(pool: Pool): Promise<Recording> {
   return recording;
 }
 
-function runMigrations(): number {
-  const result = spawnSync(process.execPath, ["--import", "tsx", "scripts/migrate.ts"], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
-  if (result.status !== 0) throw new Error(`迁移失败（退出码 ${result.status}）：\n${output.slice(-3000)}`);
-  return output.split("\n").filter((line) => line.startsWith("Applied ")).length;
-}
-
 /** 逐字节比较。返回第一条对不上的语句的说明；全部相同就返回空。 */
 function firstDifference(scenario: Scenario, expected: Statement[], actual: Statement[]): string {
   const size = Math.max(expected.length, actual.length);
@@ -270,25 +245,14 @@ async function main(): Promise<void> {
   const url = process.env[ENV_URL];
   if (!url) throw new Error(`缺少 ${ENV_URL}：这个脚本只认它，不读 DATABASE_URL（它会删库重建，不能指向别的库）`);
   const options = parseArgs(process.argv.slice(2));
-  const database = scratchDatabase(url);
-  // 仓库的连接池从这里读配置。只改这个进程和它启动的子进程，不碰别的。
-  process.env.DATABASE_URL = url;
-  process.env.DATABASE_SSL = "false";
-  // 本机的临时库不走 TLS。
-  const config = { ...databaseConfig(), ssl: undefined };
-  const admin = await mysql.createConnection({ ...config, database: undefined });
-  let pool: Pool | undefined;
-  try {
-    await admin.query(`DROP DATABASE IF EXISTS \`${database}\``);
-    await admin.query(`CREATE DATABASE \`${database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`);
-    const migrations = runMigrations();
-    pool = mysql.createPool(config);
+  await withScratchDatabase({ url, prefix: SCRATCH_PREFIX, envName: ENV_URL }, async (pool, info) => {
     const recording = await rehearse(pool);
     const lines = SCENARIOS.map((scenario) => `${scenario}：${recording[scenario].length} 条语句`);
+    const summary = `临时库 ${info.database}，服务器 MySQL ${info.serverVersion}，${info.migrations} 个迁移文件。`;
     if (options.record) {
       mkdirSync(BASELINE_DIR, { recursive: true });
       for (const scenario of SCENARIOS) writeFileSync(join(BASELINE_DIR, `${scenario}.json`), `${JSON.stringify(recording[scenario], null, 1)}\n`);
-      console.log(`临时库 ${database}，${migrations} 个迁移文件。基线已写入 ${BASELINE_DIR}：`);
+      console.log(`${summary}基线已写入 ${BASELINE_DIR}：`);
       for (const line of lines) console.log(`  ${line}`);
       return;
     }
@@ -298,16 +262,9 @@ async function main(): Promise<void> {
       return difference ? [difference] : [];
     });
     if (differences.length > 0) throw new Error(`托管落库路径发给数据库的语句和基线不同：\n${differences.join("\n")}`);
-    console.log(`临时库 ${database}，${migrations} 个迁移文件。和基线逐字节相同：`);
+    console.log(`${summary}和基线逐字节相同：`);
     for (const line of lines) console.log(`  ${line}`);
-  } finally {
-    await pool?.end();
-    try {
-      await admin.query(`DROP DATABASE IF EXISTS \`${database}\``);
-    } finally {
-      await admin.end();
-    }
-  }
+  });
 }
 
 if (process.argv[1]?.endsWith("verify-save-result-baseline.ts")) {

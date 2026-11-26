@@ -20,7 +20,7 @@ function deliveryHarness() {
   const skipped: Array<{ repository_id: number; sha: string; reason: string; delivery_id: string }> = [];
   const repoUpdates: Array<{ sql: string; pending: number | null }> = [];
   const conns: Array<{ commit: ReturnType<typeof vi.fn>; rollback: ReturnType<typeof vi.fn> }> = [];
-  const triggerState = { mode: "push", n: 5, pending: 0 };
+  const triggerState = { mode: "push", n: 5, pending: 0, executor: "server" };
   const db = {
     execute: vi.fn(),
     getConnection: vi.fn(async () => {
@@ -54,8 +54,8 @@ function deliveryHarness() {
             skipped.push({ repository_id: Number(params[0]), sha: String(params[1]), reason: String(params[2]), delivery_id: String(params[3]) });
             return [{}];
           }
-          if (sql.includes("FROM repositories r WHERE r.id = ?") && sql.includes("analysis_trigger")) {
-            return [[{ mode: triggerState.mode, triggerN: triggerState.n, pendingPushCount: triggerState.pending, hasSucceededAnalysis: 1 }], []];
+          if (sql.includes("FROM repositories r") && sql.includes("analysis_trigger AS mode")) {
+            return [[{ mode: triggerState.mode, triggerN: triggerState.n, pendingPushCount: triggerState.pending, hasSucceededAnalysis: 1, analysisExecutor: triggerState.executor }], []];
           }
           if (sql.includes("UPDATE repositories SET pending_push_count")) {
             const next = sql.includes("pending_push_count + 1") ? triggerState.pending + 1 : 0;
@@ -152,6 +152,21 @@ describe("staged push delivery (contract P0-4)", () => {
     const row = h.row("D3");
     expect(row.status).toBe("skipped");
     expect(h.skipped).toEqual([{ repository_id: 9, sha: "after-sha", reason: "quota_exceeded", delivery_id: "D3" }]);
+  });
+
+  it("skips a push for a client-analysed product: nothing is enqueued and no billing notice is sent", async () => {
+    const h = deliveryHarness();
+    vi.mocked(getDb).mockReturnValue(h.db as never);
+    h.triggerState.executor = "client";
+    const enqueue = vi.fn(async () => ({ runId: 66, reused: false }));
+    const result = await processGitHubWebhook(pushInput("D9"), baseDependencies(enqueue));
+    expect(result).toEqual({ status: 202, body: { accepted: false, skipped: true, reason: "analysis_mode_is_client" } });
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(h.row("D9").status).toBe("skipped");
+    expect(h.skipped).toEqual([{ repository_id: 9, sha: "after-sha", reason: "analysis_mode_is_client", delivery_id: "D9" }]);
+    // 跳过和状态推进在同一个事务里落库：不回滚。额度的通知只走 getDb().execute，这里一次都不该调用。
+    expect(h.conns.every((conn) => conn.rollback.mock.calls.length === 0)).toBe(true);
+    expect(h.db.execute).not.toHaveBeenCalled();
   });
 
   it("rolls back the gate-rejected enqueue transaction so no orphan queued run is committed (prod 137-141 regression)", async () => {

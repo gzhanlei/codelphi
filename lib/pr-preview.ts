@@ -65,11 +65,13 @@ interface PreviewTarget {
   defaultBranch: string;
   connectionId: number | null;
   organizationId: number;
+  analysisExecutor?: string;
 }
 
 async function loadPreviewTarget(repositoryId: number): Promise<PreviewTarget | undefined> {
   const [rows] = await getDb().execute(
-    `SELECT repo.provider, repo.default_branch AS defaultBranch, repo.connection_id AS connectionId, p.organization_id AS organizationId
+    `SELECT repo.provider, repo.default_branch AS defaultBranch, repo.connection_id AS connectionId, p.organization_id AS organizationId,
+            p.analysis_executor AS analysisExecutor
      FROM repositories repo JOIN products p ON p.id = repo.product_id WHERE repo.id = ?`,
     [repositoryId],
   );
@@ -105,7 +107,8 @@ export async function runPrPreview(job: PrPreviewJob) {
   if (!prPreviewEnabled()) return;
   try {
     const target = await loadPreviewTarget(job.repositoryId);
-    if (!target) return;
+    // 产品由客户端分析时服务端不读它的源码：预演要拉 PR 的文件和补丁，所以整个不做。
+    if (!target || target.analysisExecutor === "client") return;
     const adapter = getCodeHostingAdapter(target.provider ?? "github");
     if (!adapter.getPullRequestFiles) return;
 

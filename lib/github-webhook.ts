@@ -6,6 +6,7 @@ import { getDb } from "./db";
 import { verifyGitHubSignature } from "./github";
 import { getLatestGitHubApp } from "./github-integrations";
 import { requiredEnv } from "./env";
+import { CLIENT_MODE_ERROR, ClientAnalysisError } from "./analysis-executor";
 import { BillingError, enqueueRunWithReservationInTransaction } from "./billing/core";
 import { enqueueBillingNotification } from "./billing/notifications";
 
@@ -179,6 +180,26 @@ async function markPushDeliverySkipped(deliveryId: string, repositoryId: number,
   }
 }
 
+/** 阶段二里把这次投递记成跳过并提交（触发模式推迟、产品由客户端分析）。调用方拿着事务，这里提交并归还连接。 */
+async function skipStagedDelivery(
+  conn: PoolConnection,
+  input: { deliveryId: string; repositoryId: number; after: string },
+  reason: string,
+): Promise<{ status: number; body: Record<string, unknown> }> {
+  await conn.execute(
+    `INSERT INTO skipped_pushes (repository_id, sha, reason, delivery_id) VALUES (?, ?, ?, ?)`,
+    [input.repositoryId, input.after, reason, input.deliveryId],
+  );
+  const body = { accepted: false, skipped: true, reason };
+  await conn.execute(
+    `UPDATE github_webhook_deliveries SET status = 'skipped', result_json = ? WHERE delivery_id = ?`,
+    [JSON.stringify(body), input.deliveryId],
+  );
+  await conn.commit();
+  conn.release();
+  return { status: 202, body };
+}
+
 /** 阶段二：行锁 + 状态机推进；queued/skipped 幂等返回原结果，received/processing/failed_retryable 续处理（P0-4）。 */
 async function deliverStagedPush(
   input: { deliveryId: string; repositoryId: number; before: string; after: string },
@@ -209,11 +230,17 @@ async function deliverStagedPush(
     // 标记 deferred_trigger（当天兜底 sweep 会以 before=成功水位 / after=最新 HEAD 补一次累计分析）。
     const [triggerRows] = await conn.execute(
       `SELECT r.analysis_trigger AS mode, COALESCE(r.analysis_trigger_n, ?) AS triggerN, r.pending_push_count AS pendingPushCount,
-              EXISTS(SELECT 1 FROM analysis_runs ar WHERE ar.repository_id = r.id AND ar.status = 'succeeded') AS hasSucceededAnalysis
-       FROM repositories r WHERE r.id = ? LIMIT 1`,
+              EXISTS(SELECT 1 FROM analysis_runs ar WHERE ar.repository_id = r.id AND ar.status = 'succeeded') AS hasSucceededAnalysis,
+              p.analysis_executor AS analysisExecutor
+       FROM repositories r JOIN products p ON p.id = r.product_id
+       WHERE r.id = ? LIMIT 1`,
       [DEFAULT_TRIGGER_N, input.repositoryId],
     );
-    const triggerState = (triggerRows as Array<{ mode: string; triggerN: number; pendingPushCount: number; hasSucceededAnalysis: number }>)[0];
+    const triggerState = (triggerRows as Array<{ mode: string; triggerN: number; pendingPushCount: number; hasSucceededAnalysis: number; analysisExecutor?: string }>)[0];
+    if (triggerState?.analysisExecutor === "client") {
+      // 产品由客户端分析：服务端不跑、不读源码。记成跳过，不入队、不预留、不发额度的通知。
+      return skipStagedDelivery(conn, input, CLIENT_MODE_ERROR);
+    }
     if (triggerState) {
       const action = resolvePushTriggerAction({
         mode: triggerState.mode as AnalysisTriggerMode,
@@ -223,19 +250,7 @@ async function deliverStagedPush(
       });
       if (action === "defer") {
         await conn.execute(`UPDATE repositories SET pending_push_count = pending_push_count + 1 WHERE id = ?`, [input.repositoryId]);
-        const reason = "deferred_trigger";
-        await conn.execute(
-          `INSERT INTO skipped_pushes (repository_id, sha, reason, delivery_id) VALUES (?, ?, ?, ?)`,
-          [input.repositoryId, input.after, reason, input.deliveryId],
-        );
-        const body = { accepted: false, skipped: true, reason };
-        await conn.execute(
-          `UPDATE github_webhook_deliveries SET status = 'skipped', result_json = ? WHERE delivery_id = ?`,
-          [JSON.stringify(body), input.deliveryId],
-        );
-        await conn.commit();
-        conn.release();
-        return { status: 202, body };
+        return skipStagedDelivery(conn, input, "deferred_trigger");
       }
       if (triggerState.mode !== "push") {
         // 阈值触发或首分析：本 push 立即派发并清零计数（窗口内此前未处理的 push 由
@@ -348,7 +363,14 @@ export async function processGitHubWebhook(input: WebhookInput, dependencies: We
 
   if (!input.deliveryId) {
     // 无投递身份（测试/脚本路径）：直接入队（闸门仍生效，BillingError 上抛）
-    const runId = await dependencies.queue(repository.id, payload.before, payload.after);
+    let runId: number;
+    try {
+      runId = await dependencies.queue(repository.id, payload.before, payload.after);
+    } catch (error) {
+      // 产品由客户端分析：这不是故障，投递方不必重试。
+      if (!(error instanceof ClientAnalysisError)) throw error;
+      return { status: 202, body: { accepted: false, skipped: true, reason: error.code } };
+    }
     return { status: 202, body: { accepted: true, runId }, runId };
   }
 

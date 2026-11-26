@@ -17,9 +17,9 @@ interface RouterState {
 function sqlRouter() {
   const state: RouterState = { requeueAffected: 0, bootQueue: [], stuckNewest: [] };
   const execute = vi.fn(async (sql: string, _params?: unknown[]) => {
-    if (sql.includes("WHERE status = 'running'") && sql.includes("OR (status = 'failed' AND error_message = ?)")) return [{ affectedRows: state.requeueAffected }];
-    if (sql.includes("FROM analysis_runs WHERE status = 'queued' AND started_at IS NULL ORDER BY id")) return [state.bootQueue];
-    if (sql.includes("MAX(id) AS max_id")) return [state.stuckNewest];
+    if (sql.includes("status = 'running'") && sql.includes("OR (status = 'failed' AND error_message = ?)")) return [{ affectedRows: state.requeueAffected }];
+    if (sql.includes("SELECT r.id, r.trigger_type AS triggerType, r.account_id AS accountId")) return [state.bootQueue];
+    if (sql.includes("MAX(r.id) AS max_id")) return [state.stuckNewest];
     if (sql.includes("SET status = 'failed', error_message = ?")) return [{ affectedRows: 1 }];
     if (sql.includes("SET started_at = CURRENT_TIMESTAMP(3)")) return [{ affectedRows: 1 }];
     throw new Error(`unrouted sql: ${sql}`);
@@ -44,7 +44,7 @@ describe("startup analysis recovery", () => {
     const result = await recoverInterruptedRuns(runAnalysis, execute, gatePass);
     expect(result).toEqual({ requeued: 2, dispatched: 3 });
     expect(execute).toHaveBeenCalledWith(
-      expect.stringContaining("WHERE status = 'running'"),
+      expect.stringContaining("status = 'running'"),
       [orphanedRunMessage],
     );
     expect(runAnalysis).toHaveBeenCalledTimes(3);
@@ -102,6 +102,22 @@ describe("startup analysis recovery", () => {
     await expect(recoverInterruptedRuns(runAnalysis, execute, gatePass)).resolves.toEqual({ requeued: 0, dispatched: 0 });
     expect(runAnalysis).not.toHaveBeenCalled();
   });
+
+  it("never re-queues or dispatches runs the server does not execute", async () => {
+    // client_upload 的 run 是客户端发布的回执，产品由客户端分析时服务端不跑分析。启动恢复不能把它们捞出来。
+    const { execute } = sqlRouter();
+    await recoverInterruptedRuns(runAnalysis, execute, gatePass);
+    const statements = execute.mock.calls.map((call) => call[0] as string);
+    const requeue = statements[0];
+    expect(requeue).toContain("trigger_type <> 'client_upload'");
+    expect(requeue).toContain("WHERE p.analysis_executor = 'client'");
+    // 条件括在状态条件的外面：只排除不归服务端执行的 run，不改哪些状态会被重排。
+    expect(requeue).toMatch(/WHERE \(status = 'running'[\s\S]*started_at IS NOT NULL\)\)\s+AND trigger_type <> 'client_upload'/);
+    const candidates = statements[1];
+    expect(candidates).toContain("r.status = 'queued' AND r.started_at IS NULL");
+    expect(candidates).toContain("JOIN products p ON p.id = repo.product_id");
+    expect(candidates).toContain("r.trigger_type <> 'client_upload' AND p.analysis_executor <> 'client'");
+  });
 });
 
 describe("stuck queued run recovery (sweep entry)", () => {
@@ -135,7 +151,7 @@ describe("stuck queued run recovery (sweep entry)", () => {
     const { state } = sqlRouter();
     state.stuckNewest = [{ id: 139, repositoryId: 8, triggerType: "push", accountId: 7 }];
     const execute = vi.fn(async (sql: string, _params?: unknown[]) => {
-      if (sql.includes("MAX(id) AS max_id")) return [state.stuckNewest];
+      if (sql.includes("MAX(r.id) AS max_id")) return [state.stuckNewest];
       if (sql.includes("SET status = 'failed', error_message = ?")) return [{ affectedRows: 0 }];
       if (sql.includes("SET started_at = CURRENT_TIMESTAMP(3)")) return [{ affectedRows: 0 }];
       throw new Error(`unrouted sql: ${sql}`);
@@ -149,6 +165,15 @@ describe("stuck queued run recovery (sweep entry)", () => {
     const { execute } = sqlRouter();
     await expect(dispatchStuckQueuedRuns(runAnalysis, execute, gatePass)).resolves.toEqual({ superseded: 0, dispatched: 0 });
     expect(runAnalysis).not.toHaveBeenCalled();
+  });
+
+  it("leaves runs the server does not execute out of the newest-per-repository query", async () => {
+    const { execute, calls } = sqlRouter();
+    await dispatchStuckQueuedRuns(runAnalysis, execute, gatePass);
+    const newest = calls()[0][0];
+    // 排除放在「每个仓库最新一条」的子查询里：客户端分析的仓库整段不出现，它的旧 run 也不会被顺手标成 superseded。
+    expect(newest).toMatch(/SELECT r\.repository_id, MAX\(r\.id\) AS max_id[\s\S]*r\.trigger_type <> 'client_upload' AND p\.analysis_executor <> 'client'[\s\S]*GROUP BY r\.repository_id/);
+    expect(newest).toContain("JOIN products p ON p.id = repo.product_id");
   });
 });
 

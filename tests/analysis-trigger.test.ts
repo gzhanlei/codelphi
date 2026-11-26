@@ -87,4 +87,12 @@ describe("runAnalysisTriggerSweepOnce", () => {
     expect(executed.some(({ sql, params }) => sql.includes("pending_push_count = 0") && params[0] === 10)).toBe(true);
     expect(queue).toHaveBeenCalledTimes(2);
   });
+
+  it("leaves products analysed by the client out of the sweep", async () => {
+    // 服务端不为它们跑分析：扫描时整段跳过，不是每次去入队再吃一个拒绝。
+    const { executed, queue, deps } = sweepHarness({ lastSha: "sha-base", head: "sha-head" });
+    await runAnalysisTriggerSweepOnce(deps as unknown as TriggerSweepDependencies);
+    expect(executed[0].sql).toContain("p.analysis_executor <> 'client'");
+    expect(queue).toHaveBeenCalledTimes(1);
+  });
 });

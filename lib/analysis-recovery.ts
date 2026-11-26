@@ -1,3 +1,4 @@
+import { SERVER_EXECUTED_RUN_UNJOINED_SQL, serverExecutedRunSql } from "./analysis-executor";
 import { defaultExecute, type Execute } from "./db";
 import { decideQueuedRunDispatch, type QueuedRunDispatchDecision } from "./billing/core";
 
@@ -39,17 +40,23 @@ export async function recoverInterruptedRuns(
   execute: Execute = defaultExecute,
   gate: QueuedRunGate = defaultGate,
 ) {
+  // 不归服务端执行的 run（client_upload 的回执、客户端分析的产品的 run）不在恢复范围内：条件括在状态条件外面。
   const [result] = await execute(
     `UPDATE analysis_runs SET status = 'queued', error_message = NULL, finished_at = NULL, started_at = NULL
-     WHERE status = 'running'
+     WHERE (status = 'running'
         OR (status = 'failed' AND error_message = ?)
-        OR (status = 'queued' AND started_at IS NOT NULL)`,
+        OR (status = 'queued' AND started_at IS NOT NULL))
+       AND ${SERVER_EXECUTED_RUN_UNJOINED_SQL}`,
     [orphanedRunMessage],
   ) as [{ affectedRows?: number }, unknown];
   const requeued = result.affectedRows ?? 0;
 
   const dispatched = await dispatchQueuedRuns(
-    "SELECT id, trigger_type AS triggerType, account_id AS accountId FROM analysis_runs WHERE status = 'queued' AND started_at IS NULL ORDER BY id",
+    `SELECT r.id, r.trigger_type AS triggerType, r.account_id AS accountId
+     FROM analysis_runs r
+     JOIN repositories repo ON repo.id = r.repository_id
+     JOIN products p ON p.id = repo.product_id
+     WHERE r.status = 'queued' AND r.started_at IS NULL AND ${serverExecutedRunSql("r")} ORDER BY r.id`,
     [],
     runAnalysis,
     execute,
@@ -75,10 +82,13 @@ export async function dispatchStuckQueuedRuns(
     `SELECT r.id, r.repository_id AS repositoryId, r.trigger_type AS triggerType, r.account_id AS accountId
      FROM analysis_runs r
      JOIN (
-       SELECT repository_id, MAX(id) AS max_id
-       FROM analysis_runs
-       WHERE status = 'queued' AND started_at IS NULL AND created_at < DATE_SUB(NOW(3), INTERVAL ? MINUTE)
-       GROUP BY repository_id
+       SELECT r.repository_id, MAX(r.id) AS max_id
+       FROM analysis_runs r
+       JOIN repositories repo ON repo.id = r.repository_id
+       JOIN products p ON p.id = repo.product_id
+       WHERE r.status = 'queued' AND r.started_at IS NULL AND r.created_at < DATE_SUB(NOW(3), INTERVAL ? MINUTE)
+         AND ${serverExecutedRunSql("r")}
+       GROUP BY r.repository_id
      ) latest ON latest.repository_id = r.repository_id AND latest.max_id = r.id
      ORDER BY r.id`,
     [QUEUED_RUN_RECOVERY_THRESHOLD_MINUTES],

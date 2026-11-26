@@ -76,7 +76,8 @@ export async function runAnalysisTriggerSweepOnce(dependencies: TriggerSweepDepe
             r.connection_id AS connectionId, p.organization_id AS organizationId
      FROM repositories r JOIN products p ON p.id = r.product_id
      WHERE r.analysis_trigger IN ('daily', 'push_count') AND r.pending_push_count > 0
-       AND HOUR(CURRENT_TIMESTAMP) = COALESCE(r.analysis_trigger_hour, ?)`,
+       AND HOUR(CURRENT_TIMESTAMP) = COALESCE(r.analysis_trigger_hour, ?)
+       AND p.analysis_executor <> 'client'`,
     [DEFAULT_TRIGGER_HOUR],
   ) as [Array<{ repositoryId: number; provider: CodeHostingProvider; owner: string; name: string; defaultBranch: string; connectionId: number | null; organizationId: number }>, unknown];
 

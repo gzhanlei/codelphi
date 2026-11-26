@@ -79,6 +79,18 @@ describe("runPrPreview", () => {
     expect(upsertIssueComment.mock.calls[0][3]).toBe(2);
   });
 
+  it("reads nothing from the repository when the product is analysed by the client", async () => {
+    // 产品由客户端分析时，服务端不读它的源码——PR 预演要拉 PR 的文件和补丁，所以整个不做。
+    execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("FROM repositories repo")) return [[{ provider: "github", defaultBranch: "main", connectionId: 42, organizationId: 7, analysisExecutor: "client" }]];
+      return [[]];
+    });
+    await runPrPreview(job);
+    expect(getPullRequestFiles).not.toHaveBeenCalled();
+    expect(upsertIssueComment).not.toHaveBeenCalled();
+    expect(createCheckRun).not.toHaveBeenCalled();
+  });
+
   it("runs by default when the switch is unset", async () => {
     vi.stubEnv("PR_PREVIEW_ENABLED", "");
     await runPrPreview(job);

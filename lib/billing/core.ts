@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { PoolConnection } from "mysql2/promise";
+import { assertServerExecuted } from "../analysis-executor";
 import { getDb } from "../db";
 import { RESERVATION_TTL_MINUTES, DEADLOCK_RETRIES, FIRST_RUN_UNITS, TRIAL_UNITS } from "./constants";
 
@@ -889,6 +890,9 @@ async function findActiveRunRow(conn: PoolConnection, repositoryId: number, afte
 
 /** 事务内入队全流程（供两阶段投递的持有事务方调用）；调用方负责死锁重试与 D19/020 冲突收敛。 */
 export async function enqueueRunWithReservationInTransaction(conn: PoolConnection, input: EnqueueInput): Promise<EnqueueResult> {
+  // 托管入队的两个入口都汇到这里，所以「产品由客户端分析就不启动托管分析」只在这一点判断。
+  // 放在锁账户之前：拒绝时不留 run 行、不预留。
+  await assertServerExecuted(input.repositoryId, (statement, parameters) => conn.execute(statement, parameters));
   const accountId = await resolveRunOwnership(conn, input.repositoryId);
   const account = await lockAccountForUpdate(conn, accountId);
   const existingRunId = await findActiveRunRow(conn, input.repositoryId, input.afterSha);

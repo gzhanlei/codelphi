@@ -6,6 +6,7 @@ import { resolveManualAnalysis } from "@/lib/manual-analysis";
 import { requireSessionUser } from "@/lib/session";
 import { requireProductAccess } from "@/lib/product-access";
 import { BillingError, billingHttpStatus } from "@/lib/billing/core";
+import { CLIENT_MODE_RESPONSE_MESSAGE, ClientAnalysisError } from "@/lib/analysis-executor";
 import { after } from "next/server";
 
 export const runtime = "nodejs";
@@ -39,6 +40,10 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
     after(() => runAnalysis(runId));
     return NextResponse.json({ accepted: true, runId, sha: targetSha }, { status: 202 });
   } catch (error) {
+    // 产品由客户端分析：不是故障，也不是额度问题，不通知、不调度。
+    if (error instanceof ClientAnalysisError) {
+      return NextResponse.json({ error: error.code, message: CLIENT_MODE_RESPONSE_MESSAGE }, { status: 409 });
+    }
     if (error instanceof BillingError) {
       return NextResponse.json(
         { error: error.code, message: `补分析未执行：${error.code === "quota_exceeded" ? "额度不足，请升级或购买超额包后重试" : "当前账户状态不允许新分析"}` },

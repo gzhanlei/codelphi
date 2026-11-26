@@ -82,6 +82,45 @@ describe("database migrations", () => {
     expect(sql).not.toContain("ALTER TABLE spec_scenarios");
   });
 
+  describe("client analysis (085)", () => {
+    const sql = readFileSync(new URL("../migrations/085_client_analysis.sql", import.meta.url), "utf8");
+
+    it("adds the executor switch with a closed default, so every existing product stays server-analysed", () => {
+      expect(sql).toContain("ALTER TABLE products\n    ADD COLUMN analysis_executor VARCHAR(16) NOT NULL DEFAULT 'server';");
+      // 不复用 analyze_mode：那一列表示的是全量还是增量。
+      expect(sql).not.toMatch(/ALTER TABLE products\s+MODIFY/);
+    });
+
+    it("only adds: the new columns are nullable or defaulted, and no existing column or key changes", () => {
+      for (const forbidden of ["DROP ", "MODIFY ", "CHANGE COLUMN", " AFTER ", "RENAME ", "DROP INDEX"]) expect(sql).not.toContain(forbidden);
+      const added = [...sql.matchAll(/ADD COLUMN ([^\n]+)/g)].map((match) => match[1].replace(/[;,]$/, ""));
+      expect(added).toHaveLength(5);
+      for (const column of added) expect(column, column).toMatch(/NULL$|DEFAULT 'server'$/);
+      // repositories 的唯一键不动：同一个 provider/owner/name 仍然只有一条托管记录。
+      expect(sql).not.toMatch(/UNIQUE KEY repositories_/);
+    });
+
+    it("makes the proposal idempotency key and content hash unique per repository", () => {
+      expect(sql).toContain("ADD UNIQUE KEY analysis_runs_client_idempotency_unique (repository_id, client_idempotency_key)");
+      expect(sql).toContain("ADD UNIQUE KEY analysis_runs_client_proposal_unique (repository_id, client_proposal_hash)");
+    });
+
+    it("stores rejected proposals without any request content", () => {
+      const start = sql.indexOf("CREATE TABLE IF NOT EXISTS client_proposal_rejections (");
+      expect(start).toBeGreaterThanOrEqual(0);
+      const body = sql.slice(start, sql.indexOf(") ENGINE=InnoDB", start));
+      for (const column of ["organization_id", "product_id", "repository_id", "revision_sha", "proposal_hash", "error_code", "details_json"]) expect(body).toContain(column);
+      for (const forbidden of ["payload", "body", "content", "snippet", "text "]) expect(body).not.toContain(forbidden);
+      expect(body).toContain("CONSTRAINT client_proposal_rejections_product_fk FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE");
+    });
+
+    it("keeps comment lines free of the statement separator the migration runner splits on", () => {
+      for (const line of sql.split("\n")) {
+        if (line.trimStart().startsWith("--")) expect(line, line).not.toContain(";");
+      }
+    });
+  });
+
   describe("identity layer (084)", () => {
     const sql = readFileSync(new URL("../migrations/084_spec_identity.sql", import.meta.url), "utf8");
 

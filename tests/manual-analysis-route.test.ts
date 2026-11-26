@@ -1,12 +1,15 @@
 import { after, NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "../app/api/products/[slug]/analyze/route";
+import { POST as reanalyzeLatest } from "../app/api/products/[slug]/reanalyze-latest/route";
 import { queueAnalysis, runAnalysis } from "@/lib/analysis";
+import { ClientAnalysisError } from "@/lib/analysis-executor";
 import { resolveManualAnalysis } from "@/lib/manual-analysis";
 
 vi.mock("next/server", async (importOriginal) => ({ ...await importOriginal<typeof import("next/server")>(), after: vi.fn() }));
 vi.mock("@/lib/analysis", () => ({ queueAnalysis: vi.fn(), runAnalysis: vi.fn() }));
 vi.mock("@/lib/manual-analysis", () => ({ resolveManualAnalysis: vi.fn() }));
+vi.mock("@/lib/db", () => ({ getDb: () => ({ execute: async () => [[{ sha: "sha-release" }]] }) }));
 vi.mock("@/lib/session", () => ({ requireSessionUser: vi.fn(async () => ({ sub: "user" })) }));
 vi.mock("@/lib/product-access", () => ({
   requireProductAccess: vi.fn(async () => ({
@@ -49,5 +52,51 @@ describe("manual analysis route", () => {
     expect(typeof scheduled).toBe("function");
     if (typeof scheduled === "function") await scheduled();
     expect(runAnalysis).toHaveBeenCalledWith(33);
+  });
+
+  it("answers 409 and schedules nothing when the product is analysed by the client", async () => {
+    vi.mocked(resolveManualAnalysis).mockResolvedValue({ repositoryId: 9, afterSha: "sha-head" });
+    vi.mocked(queueAnalysis).mockRejectedValue(new ClientAnalysisError());
+    const response = await request("radar");
+    expect(response.status).toBe(409);
+    const body = await response.json();
+    expect(body.error).toBe("analysis_mode_is_client");
+    expect(typeof body.message).toBe("string");
+    expect(after).not.toHaveBeenCalled();
+  });
+});
+
+describe("reanalyze-latest route", () => {
+  beforeEach(() => {
+    vi.mocked(resolveManualAnalysis).mockReset();
+    vi.mocked(queueAnalysis).mockReset();
+    vi.mocked(runAnalysis).mockReset();
+    vi.mocked(after).mockReset();
+  });
+
+  it("answers 409 and schedules nothing when the product is analysed by the client", async () => {
+    vi.mocked(resolveManualAnalysis).mockResolvedValue({ repositoryId: 9, afterSha: "sha-head" });
+    vi.mocked(queueAnalysis).mockRejectedValue(new ClientAnalysisError());
+    const response = await reanalyzeLatest(
+      new NextRequest("http://localhost/api/products/radar/reanalyze-latest", { method: "POST", body: JSON.stringify({ confirm: true }), headers: { "content-type": "application/json" } }),
+      { params: Promise.resolve({ slug: "radar" }) },
+    );
+    expect(response.status).toBe(409);
+    const body = await response.json();
+    expect(body.error).toBe("analysis_mode_is_client");
+    expect(typeof body.message).toBe("string");
+    expect(after).not.toHaveBeenCalled();
+  });
+
+  it("still queues the latest released SHA for a server-analysed product", async () => {
+    vi.mocked(resolveManualAnalysis).mockResolvedValue({ repositoryId: 9, afterSha: "sha-head" });
+    vi.mocked(queueAnalysis).mockResolvedValue(34);
+    const response = await reanalyzeLatest(
+      new NextRequest("http://localhost/api/products/radar/reanalyze-latest", { method: "POST", body: JSON.stringify({ confirm: true }), headers: { "content-type": "application/json" } }),
+      { params: Promise.resolve({ slug: "radar" }) },
+    );
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({ accepted: true, runId: 34, sha: "sha-release" });
+    expect(queueAnalysis).toHaveBeenCalledWith(9, null, "sha-release", "manual");
   });
 });
