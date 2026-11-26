@@ -133,8 +133,9 @@ async function reconcileHost(connection: PoolConnection, repository: LockedRepos
     if (claimedHost !== null) await connection.execute("UPDATE repositories SET host = ? WHERE id = ?", [claimedHost, repository.id]);
     return claimedHost;
   }
+  // 同一个 provider/owner/name 换了一个主机名，是另一个仓库（自托管实例靠主机名区分），不是字段写错了。
   if (claimedHost === null || repository.host.toLowerCase() !== claimedHost.toLowerCase()) {
-    throw new ProposalRejection("repository_mismatch", `repository ${repository.id} is hosted at ${repository.host}, the proposal says ${claimedHost ?? "no host"}`, { repositoryId: repository.id });
+    throw new ProposalRejection("repository_identity_conflict", `repository ${repository.id} is hosted at ${repository.host}, the proposal says ${claimedHost ?? "no host"}`, { repositoryId: repository.id });
   }
   return repository.host;
 }
@@ -175,8 +176,12 @@ async function lockRepository(connection: PoolConnection, proposal: Proposal, ta
     )) as unknown as [{ insertId: number }, unknown];
     return { id: Number(inserted.insertId), productId: target.productId, provider: "local", host: null, owner: `local-product-${target.productId}`, name: claimed.name as string };
   }
-  const taken = rowsOf(await connection.execute("SELECT id FROM repositories WHERE provider = ? AND owner = ? AND name = ? LIMIT 1 FOR UPDATE", [claimed.provider, claimed.owner, claimed.name]))[0];
+  const taken = rowsOf(await connection.execute("SELECT id, host FROM repositories WHERE provider = ? AND owner = ? AND name = ? LIMIT 1 FOR UPDATE", [claimed.provider, claimed.owner, claimed.name]))[0];
   if (taken) {
+    const storedHost = taken.host === null || taken.host === undefined ? null : String(taken.host);
+    if (storedHost !== null && claimed.host !== null && storedHost.toLowerCase() !== claimed.host.toLowerCase()) {
+      throw new ProposalRejection("repository_identity_conflict", `this repository is registered at ${storedHost}, the proposal says ${claimed.host}`, { repositoryId: Number(taken.id) });
+    }
     throw new ProposalRejection("repository_already_bound", "this repository is already bound to another product", { repositoryId: Number(taken.id) });
   }
   const [inserted] = (await connection.execute(
