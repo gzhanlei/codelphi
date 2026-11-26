@@ -1,0 +1,681 @@
+[
+ {
+  "sql": "SELECT id FROM analysis_runs WHERE repository_id = ? ORDER BY id DESC LIMIT 1",
+  "params": [
+   1
+  ]
+ },
+ {
+  "sql": "UPDATE products SET description = ?, description_source = 'generated', description_evidence = ? WHERE id = ? AND description = ''",
+  "params": [
+   "Baseline product description.",
+   "[{\"path\":\"lib/auth.ts\",\"startLine\":1}]",
+   1
+  ]
+ },
+ {
+  "sql": "SELECT id FROM spec_versions WHERE repository_id = ? ORDER BY id DESC LIMIT 1",
+  "params": [
+   1
+  ]
+ },
+ {
+  "sql": "SELECT features.id, features.name, features.summary, features.parent_id AS parentId, parents.name AS parentKey, features.source\n     FROM features LEFT JOIN features parents ON parents.id = features.parent_id AND parents.active = 1\n     WHERE features.product_id = ? AND features.active = 1 AND (\n       features.source = 'manual' OR EXISTS (\n         SELECT 1 FROM scenarios s WHERE s.feature_id = features.id AND s.source = 'manual' AND s.active = 1\n       ) OR EXISTS (\n         SELECT 1 FROM features child WHERE child.parent_id = features.id AND child.active = 1\n       )\n     )",
+  "params": [
+   1
+  ]
+ },
+ {
+  "sql": "SELECT name FROM features WHERE product_id = ? AND active = 0 AND source = 'manual'",
+  "params": [
+   1
+  ]
+ },
+ {
+  "sql": "SELECT f.name AS featureName, s.reference FROM scenarios s JOIN features f ON f.id = s.feature_id WHERE f.product_id = ? AND s.active = 0 AND s.source = 'manual'",
+  "params": [
+   1
+  ]
+ },
+ {
+  "sql": "SELECT identity_key FROM features WHERE product_id = ? AND active = 0 AND source = 'manual' AND identity_key IS NOT NULL",
+  "params": [
+   1
+  ]
+ },
+ {
+  "sql": "SELECT s.identity_key FROM scenarios s JOIN features f ON f.id = s.feature_id WHERE f.product_id = ? AND s.active = 0 AND s.source = 'manual' AND s.identity_key IS NOT NULL",
+  "params": [
+   1
+  ]
+ },
+ {
+  "sql": "SELECT id, name, summary, parent_key AS parentKey, source FROM spec_features WHERE spec_version_id = ? ORDER BY position",
+  "params": [
+   2
+  ]
+ },
+ {
+  "sql": "SELECT feature_id AS featureId, reference, context, action, outcome, category, step_order AS step, source, evidence\n     FROM scenarios WHERE source = 'manual' AND active = 1 AND feature_id IN (?)",
+  "params": [
+   3
+  ]
+ },
+ {
+  "sql": "SELECT spec_feature_id AS featureId, reference, context, action, outcome, category, step_order AS step, source, evidence\n     FROM spec_scenarios WHERE spec_feature_id IN (?,?,?,?)",
+  "params": [
+   3,
+   4,
+   5,
+   6
+  ]
+ },
+ {
+  "sql": "SELECT identity_key AS nameKey, identity_key FROM feature_identities WHERE product_id = ?",
+  "params": [
+   1
+  ]
+ },
+ {
+  "sql": "SELECT feature_identity_key AS featureIdentityKey, reference, identity_key FROM scenario_identities WHERE product_id = ?",
+  "params": [
+   1
+  ]
+ },
+ {
+  "sql": "SELECT spec_version_id AS versionId, stable_key AS nameKey, identity_key FROM spec_features WHERE spec_version_id IN (?)",
+  "params": [
+   2
+  ]
+ },
+ {
+  "sql": "SELECT sf.spec_version_id AS versionId, sf.identity_key AS featureIdentityKey, ss.reference, ss.identity_key\n       FROM spec_scenarios ss JOIN spec_features sf ON sf.id = ss.spec_feature_id WHERE sf.spec_version_id IN (?)",
+  "params": [
+   2
+  ]
+ },
+ {
+  "sql": "INSERT INTO spec_versions (product_id, repository_id, analysis_run_id, base_spec_version_id, sha, output_language) VALUES (?, ?, ?, ?, ?, ?)",
+  "params": [
+   1,
+   1,
+   3,
+   2,
+   "sha-3",
+   "zh-CN"
+  ]
+ },
+ {
+  "sql": "INSERT INTO spec_features (spec_version_id, stable_key, name, summary, parent_key, source, position, identity_key, parent_identity_key)\n       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "params": [
+   3,
+   "billing",
+   "Billing",
+   "Billing handles invoices.",
+   null,
+   "generated",
+   0,
+   "billing",
+   null
+  ]
+ },
+ {
+  "sql": "INSERT INTO spec_scenarios\n          (spec_feature_id, reference, context, action, outcome, category, step_order, source, evidence, identity_key)\n         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "params": [
+   7,
+   "HP-1",
+   "用户使用产品",
+   "做 HP-1 对应的事",
+   "看到账单",
+   "happy",
+   null,
+   "generated",
+   "[{\"path\":\"lib/billing.ts\",\"startLine\":5}]",
+   "[\"billing\",\"HP-1\"]"
+  ]
+ },
+ {
+  "sql": "INSERT INTO spec_features (spec_version_id, stable_key, name, summary, parent_key, source, position, identity_key, parent_identity_key)\n       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "params": [
+   3,
+   "exports",
+   "Exports",
+   "Exports data.",
+   null,
+   "generated",
+   1,
+   "exports",
+   null
+  ]
+ },
+ {
+  "sql": "INSERT INTO spec_scenarios\n          (spec_feature_id, reference, context, action, outcome, category, step_order, source, evidence, identity_key)\n         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "params": [
+   8,
+   "HP-1",
+   "用户使用产品",
+   "做 HP-1 对应的事",
+   "导出成功",
+   "happy",
+   null,
+   "generated",
+   "[{\"path\":\"lib/export.ts\",\"startLine\":3}]",
+   "[\"exports\",\"HP-1\"]"
+  ]
+ },
+ {
+  "sql": "INSERT INTO spec_features (spec_version_id, stable_key, name, summary, parent_key, source, position, identity_key, parent_identity_key)\n       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "params": [
+   3,
+   "login",
+   "Login",
+   "Login handles sign-in.",
+   null,
+   "generated",
+   2,
+   "login",
+   null
+  ]
+ },
+ {
+  "sql": "INSERT INTO spec_scenarios\n          (spec_feature_id, reference, context, action, outcome, category, step_order, source, evidence, identity_key)\n         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "params": [
+   9,
+   "EC-1",
+   "用户使用产品",
+   "做 EC-1 对应的事",
+   "提示密码错误",
+   "happy",
+   null,
+   "generated",
+   "[{\"path\":\"lib/auth.ts\",\"startLine\":20}]",
+   "[\"login\",\"EC-1\"]"
+  ]
+ },
+ {
+  "sql": "INSERT INTO spec_scenarios\n          (spec_feature_id, reference, context, action, outcome, category, step_order, source, evidence, identity_key)\n         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "params": [
+   9,
+   "HP-1",
+   "用户使用产品",
+   "做 HP-1 对应的事",
+   "进入首页",
+   "happy",
+   null,
+   "generated",
+   "[{\"path\":\"lib/auth.ts\",\"startLine\":11}]",
+   "[\"login\",\"HP-1\"]"
+  ]
+ },
+ {
+  "sql": "INSERT INTO spec_features (spec_version_id, stable_key, name, summary, parent_key, source, position, identity_key, parent_identity_key)\n       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "params": [
+   3,
+   "manual notes",
+   "Manual notes",
+   "人工维护的说明",
+   null,
+   "manual",
+   3,
+   "manual notes",
+   null
+  ]
+ },
+ {
+  "sql": "INSERT INTO spec_scenarios\n          (spec_feature_id, reference, context, action, outcome, category, step_order, source, evidence, identity_key)\n         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "params": [
+   10,
+   "HP-1",
+   "人工",
+   "查看说明",
+   "看到人工说明",
+   "happy",
+   null,
+   "manual",
+   "[]",
+   "[\"manual notes\",\"HP-1\"]"
+  ]
+ },
+ {
+  "sql": "INSERT INTO spec_changes\n        (spec_version_id, base_spec_version_id, entity_type, kind, feature_key, feature_name,\n         scenario_reference, summary, highlight_type, highlight_reason, before_json, after_json, judgment, evidence_state, reason_codes,\n         feature_identity_key, scenario_identity_key)\n       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "params": [
+   3,
+   2,
+   "scenario",
+   "changed",
+   "login",
+   "Login",
+   "HP-1",
+   "「Login」更新场景 HP-1",
+   null,
+   null,
+   "{\"reference\":\"HP-1\",\"context\":\"用户使用产品\",\"action\":\"做 HP-1 对应的事\",\"outcome\":\"进入首页，重试次数增加\",\"category\":\"happy\",\"step\":null,\"source\":\"generated\",\"evidence\":[{\"path\":\"lib/auth.ts\",\"startLine\":11}]}",
+   "{\"reference\":\"HP-1\",\"context\":\"用户使用产品\",\"action\":\"做 HP-1 对应的事\",\"outcome\":\"进入首页\",\"category\":\"happy\",\"evidence\":[{\"path\":\"lib/auth.ts\",\"startLine\":11}]}",
+   null,
+   null,
+   null,
+   "login",
+   "[\"login\",\"HP-1\"]"
+  ]
+ },
+ {
+  "sql": "SELECT sf.id AS specFeatureId, ss.id AS specScenarioId, ss.evidence\n     FROM spec_features sf\n     LEFT JOIN spec_scenarios ss ON ss.spec_feature_id = sf.id\n     WHERE sf.spec_version_id = ?",
+  "params": [
+   3
+  ]
+ },
+ {
+  "sql": "DELETE FROM spec_file_index WHERE repository_id = ?",
+  "params": [
+   1
+  ]
+ },
+ {
+  "sql": "INSERT INTO spec_file_index (repository_id, spec_version_id, spec_feature_id, spec_scenario_id, path) VALUES (?, ?, ?, ?, ?)",
+  "params": [
+   1,
+   3,
+   7,
+   9,
+   "lib/billing.ts"
+  ]
+ },
+ {
+  "sql": "INSERT INTO spec_file_index (repository_id, spec_version_id, spec_feature_id, spec_scenario_id, path) VALUES (?, ?, ?, ?, ?)",
+  "params": [
+   1,
+   3,
+   8,
+   10,
+   "lib/export.ts"
+  ]
+ },
+ {
+  "sql": "INSERT INTO spec_file_index (repository_id, spec_version_id, spec_feature_id, spec_scenario_id, path) VALUES (?, ?, ?, ?, ?)",
+  "params": [
+   1,
+   3,
+   9,
+   11,
+   "lib/auth.ts"
+  ]
+ },
+ {
+  "sql": "INSERT INTO spec_file_index (repository_id, spec_version_id, spec_feature_id, spec_scenario_id, path) VALUES (?, ?, ?, ?, ?)",
+  "params": [
+   1,
+   3,
+   9,
+   12,
+   "lib/auth.ts"
+  ]
+ },
+ {
+  "sql": "SELECT id, entity_type AS entityType, feature_key AS featureKey, scenario_reference AS scenarioReference FROM spec_changes WHERE spec_version_id = ?",
+  "params": [
+   3
+  ]
+ },
+ {
+  "sql": "SELECT id, name, source FROM features WHERE product_id = ? AND active = 1",
+  "params": [
+   1
+  ]
+ },
+ {
+  "sql": "SELECT s.id, s.feature_id AS featureId, s.reference, s.source FROM scenarios s\n     JOIN features f ON f.id = s.feature_id\n     WHERE f.product_id = ? AND s.active = 1 AND f.active = 1",
+  "params": [
+   1
+  ]
+ },
+ {
+  "sql": "INSERT INTO analysis_coverage_receipts\n      (spec_version_id, impl_files_assembled, impl_files_total, impl_bytes_assembled, impl_bytes_total, coverage_ratio, partitions_used, partitions_capped, diff_total_paths, diff_selected_paths, diff_omitted_paths)\n     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "params": [
+   3,
+   2,
+   3,
+   200,
+   300,
+   0.6666666666666666,
+   1,
+   0,
+   null,
+   null,
+   null
+  ]
+ },
+ {
+  "sql": "UPDATE features f\n     LEFT JOIN features child ON child.parent_id = f.id AND child.active = 1\n     SET f.active = 0\n     WHERE f.product_id = ? AND f.source = 'generated'\n       AND NOT EXISTS (SELECT 1 FROM scenarios WHERE feature_id = f.id AND source = 'manual' AND active = 1)\n       AND child.id IS NULL",
+  "params": [
+   1
+  ]
+ },
+ {
+  "sql": "UPDATE scenarios s JOIN features f ON f.id = s.feature_id\n     SET s.active = 0 WHERE f.product_id = ? AND s.source = 'generated'",
+  "params": [
+   1
+  ]
+ },
+ {
+  "sql": "INSERT INTO features (product_id, name, summary, source, active, identity_key)\n     VALUES (?, ?, ?, 'generated', 1, ?)\n     ON DUPLICATE KEY UPDATE\n       id = LAST_INSERT_ID(id),\n       summary = IF(source = 'generated', VALUES(summary), summary),\n       verified_at = IF(source = 'generated' AND summary <> VALUES(summary), NULL, verified_at),\n       verified_by = IF(source = 'generated' AND summary <> VALUES(summary), NULL, verified_by),\n       active = IF(source = 'generated', 1, active),\n       identity_key = COALESCE(features.identity_key, VALUES(identity_key))",
+  "params": [
+   1,
+   "Billing",
+   "Billing handles invoices.",
+   "billing"
+  ]
+ },
+ {
+  "sql": "INSERT INTO scenarios\n         (feature_id, reference, context, action, outcome, category, step_order, source, active, evidence, identity_key)\n       VALUES (?, ?, ?, ?, ?, ?, ?, 'generated', 1, ?, ?)\n       ON DUPLICATE KEY UPDATE\n         context = IF(source = 'generated', VALUES(context), context),\n         action = IF(source = 'generated', VALUES(action), action),\n         outcome = IF(source = 'generated', VALUES(outcome), outcome),\n         category = IF(source = 'generated', VALUES(category), category),\n         step_order = IF(source = 'generated', VALUES(step_order), step_order),\n         evidence = IF(source = 'generated', VALUES(evidence), evidence),\n         verified_at = IF(source = 'generated' AND (context <> VALUES(context) OR action <> VALUES(action) OR outcome <> VALUES(outcome) OR category <> VALUES(category)), NULL, verified_at),\n         verified_by = IF(source = 'generated' AND (context <> VALUES(context) OR action <> VALUES(action) OR outcome <> VALUES(outcome) OR category <> VALUES(category)), NULL, verified_by),\n         active = IF(source = 'generated', 1, active),\n         identity_key = COALESCE(scenarios.identity_key, VALUES(identity_key))",
+  "params": [
+   1,
+   "HP-1",
+   "用户使用产品",
+   "做 HP-1 对应的事",
+   "看到账单",
+   "happy",
+   null,
+   "[{\"path\":\"lib/billing.ts\",\"startLine\":5}]",
+   "[\"billing\",\"HP-1\"]"
+  ]
+ },
+ {
+  "sql": "INSERT INTO features (product_id, name, summary, source, active, identity_key)\n     VALUES (?, ?, ?, 'generated', 1, ?)\n     ON DUPLICATE KEY UPDATE\n       id = LAST_INSERT_ID(id),\n       summary = IF(source = 'generated', VALUES(summary), summary),\n       verified_at = IF(source = 'generated' AND summary <> VALUES(summary), NULL, verified_at),\n       verified_by = IF(source = 'generated' AND summary <> VALUES(summary), NULL, verified_by),\n       active = IF(source = 'generated', 1, active),\n       identity_key = COALESCE(features.identity_key, VALUES(identity_key))",
+  "params": [
+   1,
+   "Exports",
+   "Exports data.",
+   "exports"
+  ]
+ },
+ {
+  "sql": "INSERT INTO scenarios\n         (feature_id, reference, context, action, outcome, category, step_order, source, active, evidence, identity_key)\n       VALUES (?, ?, ?, ?, ?, ?, ?, 'generated', 1, ?, ?)\n       ON DUPLICATE KEY UPDATE\n         context = IF(source = 'generated', VALUES(context), context),\n         action = IF(source = 'generated', VALUES(action), action),\n         outcome = IF(source = 'generated', VALUES(outcome), outcome),\n         category = IF(source = 'generated', VALUES(category), category),\n         step_order = IF(source = 'generated', VALUES(step_order), step_order),\n         evidence = IF(source = 'generated', VALUES(evidence), evidence),\n         verified_at = IF(source = 'generated' AND (context <> VALUES(context) OR action <> VALUES(action) OR outcome <> VALUES(outcome) OR category <> VALUES(category)), NULL, verified_at),\n         verified_by = IF(source = 'generated' AND (context <> VALUES(context) OR action <> VALUES(action) OR outcome <> VALUES(outcome) OR category <> VALUES(category)), NULL, verified_by),\n         active = IF(source = 'generated', 1, active),\n         identity_key = COALESCE(scenarios.identity_key, VALUES(identity_key))",
+  "params": [
+   6,
+   "HP-1",
+   "用户使用产品",
+   "做 HP-1 对应的事",
+   "导出成功",
+   "happy",
+   null,
+   "[{\"path\":\"lib/export.ts\",\"startLine\":3}]",
+   "[\"exports\",\"HP-1\"]"
+  ]
+ },
+ {
+  "sql": "INSERT INTO features (product_id, name, summary, source, active, identity_key)\n     VALUES (?, ?, ?, 'generated', 1, ?)\n     ON DUPLICATE KEY UPDATE\n       id = LAST_INSERT_ID(id),\n       summary = IF(source = 'generated', VALUES(summary), summary),\n       verified_at = IF(source = 'generated' AND summary <> VALUES(summary), NULL, verified_at),\n       verified_by = IF(source = 'generated' AND summary <> VALUES(summary), NULL, verified_by),\n       active = IF(source = 'generated', 1, active),\n       identity_key = COALESCE(features.identity_key, VALUES(identity_key))",
+  "params": [
+   1,
+   "Login",
+   "Login handles sign-in.",
+   "login"
+  ]
+ },
+ {
+  "sql": "INSERT INTO scenarios\n         (feature_id, reference, context, action, outcome, category, step_order, source, active, evidence, identity_key)\n       VALUES (?, ?, ?, ?, ?, ?, ?, 'generated', 1, ?, ?)\n       ON DUPLICATE KEY UPDATE\n         context = IF(source = 'generated', VALUES(context), context),\n         action = IF(source = 'generated', VALUES(action), action),\n         outcome = IF(source = 'generated', VALUES(outcome), outcome),\n         category = IF(source = 'generated', VALUES(category), category),\n         step_order = IF(source = 'generated', VALUES(step_order), step_order),\n         evidence = IF(source = 'generated', VALUES(evidence), evidence),\n         verified_at = IF(source = 'generated' AND (context <> VALUES(context) OR action <> VALUES(action) OR outcome <> VALUES(outcome) OR category <> VALUES(category)), NULL, verified_at),\n         verified_by = IF(source = 'generated' AND (context <> VALUES(context) OR action <> VALUES(action) OR outcome <> VALUES(outcome) OR category <> VALUES(category)), NULL, verified_by),\n         active = IF(source = 'generated', 1, active),\n         identity_key = COALESCE(scenarios.identity_key, VALUES(identity_key))",
+  "params": [
+   2,
+   "EC-1",
+   "用户使用产品",
+   "做 EC-1 对应的事",
+   "提示密码错误",
+   "happy",
+   null,
+   "[{\"path\":\"lib/auth.ts\",\"startLine\":20}]",
+   "[\"login\",\"EC-1\"]"
+  ]
+ },
+ {
+  "sql": "INSERT INTO scenarios\n         (feature_id, reference, context, action, outcome, category, step_order, source, active, evidence, identity_key)\n       VALUES (?, ?, ?, ?, ?, ?, ?, 'generated', 1, ?, ?)\n       ON DUPLICATE KEY UPDATE\n         context = IF(source = 'generated', VALUES(context), context),\n         action = IF(source = 'generated', VALUES(action), action),\n         outcome = IF(source = 'generated', VALUES(outcome), outcome),\n         category = IF(source = 'generated', VALUES(category), category),\n         step_order = IF(source = 'generated', VALUES(step_order), step_order),\n         evidence = IF(source = 'generated', VALUES(evidence), evidence),\n         verified_at = IF(source = 'generated' AND (context <> VALUES(context) OR action <> VALUES(action) OR outcome <> VALUES(outcome) OR category <> VALUES(category)), NULL, verified_at),\n         verified_by = IF(source = 'generated' AND (context <> VALUES(context) OR action <> VALUES(action) OR outcome <> VALUES(outcome) OR category <> VALUES(category)), NULL, verified_by),\n         active = IF(source = 'generated', 1, active),\n         identity_key = COALESCE(scenarios.identity_key, VALUES(identity_key))",
+  "params": [
+   2,
+   "HP-1",
+   "用户使用产品",
+   "做 HP-1 对应的事",
+   "进入首页",
+   "happy",
+   null,
+   "[{\"path\":\"lib/auth.ts\",\"startLine\":11}]",
+   "[\"login\",\"HP-1\"]"
+  ]
+ },
+ {
+  "sql": "INSERT INTO features (product_id, name, summary, source, active, identity_key)\n     VALUES (?, ?, ?, 'generated', 1, ?)\n     ON DUPLICATE KEY UPDATE\n       id = LAST_INSERT_ID(id),\n       summary = IF(source = 'generated', VALUES(summary), summary),\n       verified_at = IF(source = 'generated' AND summary <> VALUES(summary), NULL, verified_at),\n       verified_by = IF(source = 'generated' AND summary <> VALUES(summary), NULL, verified_by),\n       active = IF(source = 'generated', 1, active),\n       identity_key = COALESCE(features.identity_key, VALUES(identity_key))",
+  "params": [
+   1,
+   "Manual notes",
+   "人工维护的说明",
+   "manual notes"
+  ]
+ },
+ {
+  "sql": "INSERT INTO scenarios\n         (feature_id, reference, context, action, outcome, category, step_order, source, active, evidence, identity_key)\n       VALUES (?, ?, ?, ?, ?, ?, ?, 'generated', 1, ?, ?)\n       ON DUPLICATE KEY UPDATE\n         context = IF(source = 'generated', VALUES(context), context),\n         action = IF(source = 'generated', VALUES(action), action),\n         outcome = IF(source = 'generated', VALUES(outcome), outcome),\n         category = IF(source = 'generated', VALUES(category), category),\n         step_order = IF(source = 'generated', VALUES(step_order), step_order),\n         evidence = IF(source = 'generated', VALUES(evidence), evidence),\n         verified_at = IF(source = 'generated' AND (context <> VALUES(context) OR action <> VALUES(action) OR outcome <> VALUES(outcome) OR category <> VALUES(category)), NULL, verified_at),\n         verified_by = IF(source = 'generated' AND (context <> VALUES(context) OR action <> VALUES(action) OR outcome <> VALUES(outcome) OR category <> VALUES(category)), NULL, verified_by),\n         active = IF(source = 'generated', 1, active),\n         identity_key = COALESCE(scenarios.identity_key, VALUES(identity_key))",
+  "params": [
+   3,
+   "HP-1",
+   "人工",
+   "查看说明",
+   "看到人工说明",
+   "happy",
+   null,
+   "[]",
+   "[\"manual notes\",\"HP-1\"]"
+  ]
+ },
+ {
+  "sql": "SELECT id, analysis_run_id AS analysisRunId FROM releases WHERE repository_id = ? AND sha = ?",
+  "params": [
+   1,
+   "sha-3"
+  ]
+ },
+ {
+  "sql": "INSERT INTO releases\n       (product_id, repository_id, analysis_run_id, spec_version_id, sha, title, summary, url, committed_at)\n     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)\n     ON DUPLICATE KEY UPDATE analysis_run_id = VALUES(analysis_run_id), spec_version_id = VALUES(spec_version_id)",
+  "params": [
+   1,
+   1,
+   3,
+   3,
+   "sha-3",
+   "Third release",
+   "Third summary",
+   "https://github.com/baseline/repo/commit/sha-3",
+   {
+    "$date": "2026-11-01T00:00:00.000Z"
+   }
+  ]
+ },
+ {
+  "sql": "SELECT id FROM releases WHERE repository_id = ? AND sha = ?",
+  "params": [
+   1,
+   "sha-3"
+  ]
+ },
+ {
+  "sql": "DELETE FROM release_files WHERE release_id = ?",
+  "params": [
+   3
+  ]
+ },
+ {
+  "sql": "INSERT IGNORE INTO release_files (release_id, path, behavioral_change) VALUES (?, ?, ?)",
+  "params": [
+   3,
+   "lib/auth.ts",
+   1
+  ]
+ },
+ {
+  "sql": "INSERT IGNORE INTO release_files (release_id, path, behavioral_change) VALUES (?, ?, ?)",
+  "params": [
+   3,
+   "lib/billing.ts",
+   1
+  ]
+ },
+ {
+  "sql": "SELECT COUNT(*) AS count FROM changes WHERE release_id = ?",
+  "params": [
+   3
+  ]
+ },
+ {
+  "sql": "INSERT INTO changes (release_id, feature_name, kind, description, user_impact, evidence)\n       VALUES (?, ?, ?, ?, ?, ?)",
+  "params": [
+   3,
+   "Login",
+   "changed",
+   "「Login」更新场景 HP-1",
+   "",
+   "[{\"path\":\"lib/auth.ts\",\"startLine\":11}]"
+  ]
+ },
+ {
+  "sql": "INSERT INTO change_sources (change_id, spec_change_id) VALUES (?, ?)",
+  "params": [
+   6,
+   4
+  ]
+ },
+ {
+  "sql": "SELECT id, spec_version_id AS specVersionId, repository_id AS repositoryId FROM releases WHERE id = ?",
+  "params": [
+   3
+  ]
+ },
+ {
+  "sql": "SELECT c.id, c.entity_type AS entityType, c.kind, c.feature_key AS featureKey, c.feature_name AS featureName,\n              c.scenario_reference AS scenarioReference, sf.id AS featureId, ss.id AS scenarioId\n       FROM spec_changes c\n       JOIN spec_features sf ON sf.spec_version_id = c.spec_version_id AND sf.stable_key = c.feature_key\n       LEFT JOIN spec_scenarios ss ON ss.spec_feature_id = sf.id AND ss.reference = c.scenario_reference\n       WHERE c.spec_version_id = (SELECT spec_version_id FROM releases WHERE id = ?)\n       ORDER BY c.id",
+  "params": [
+   3
+  ]
+ },
+ {
+  "sql": "SELECT path FROM release_files WHERE release_id = ?",
+  "params": [
+   3
+  ]
+ },
+ {
+  "sql": "SELECT i.path, sf.id AS featureId, sf.stable_key AS featureKey, sf.name AS featureName, i.spec_scenario_id AS scenarioId, ss.reference\n       FROM spec_file_index i\n       JOIN spec_features sf ON sf.id = i.spec_feature_id\n       LEFT JOIN spec_scenarios ss ON ss.id = i.spec_scenario_id\n       WHERE i.spec_version_id = ? AND i.path IN (?,?)",
+  "params": [
+   3,
+   "lib/auth.ts",
+   "lib/billing.ts"
+  ]
+ },
+ {
+  "sql": "SELECT sf.id AS featureId, ss.id AS scenarioId, ss.reference\n       FROM spec_features sf JOIN spec_scenarios ss ON ss.spec_feature_id = sf.id\n       WHERE sf.spec_version_id = ? ORDER BY sf.id, ss.reference",
+  "params": [
+   3
+  ]
+ },
+ {
+  "sql": "SELECT t.id AS taskId, t.spec_scenario_id AS specScenarioId, t.spec_change_id AS specChangeId,\n              s.spec_change_id AS sourceChangeId, r.hit_type AS hitType, r.matched_path AS matchedPath\n       FROM regression_tasks t\n       LEFT JOIN regression_task_sources s ON s.task_id = t.id\n       LEFT JOIN regression_task_reasons r ON r.task_id = t.id\n       WHERE t.release_id = ?",
+  "params": [
+   3
+  ]
+ },
+ {
+  "sql": "INSERT INTO regression_tasks (release_id, spec_scenario_id, spec_change_id) VALUES (?, ?, ?)\n         ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)",
+  "params": [
+   3,
+   12,
+   null
+  ]
+ },
+ {
+  "sql": "INSERT IGNORE INTO regression_task_sources (task_id, spec_change_id) VALUES (?, ?)",
+  "params": [
+   7,
+   4
+  ]
+ },
+ {
+  "sql": "INSERT INTO regression_task_reasons (task_id, hit_type, matched_path, spec_feature_id, spec_scenario_id)\n         SELECT ?, ?, ?, ?, ?\n         WHERE NOT EXISTS (SELECT 1 FROM regression_task_reasons WHERE task_id = ? AND hit_type = ? AND matched_path <=> ?)",
+  "params": [
+   7,
+   "behavior_change",
+   null,
+   9,
+   12,
+   7,
+   "behavior_change",
+   null
+  ]
+ },
+ {
+  "sql": "INSERT INTO regression_task_reasons (task_id, hit_type, matched_path, spec_feature_id, spec_scenario_id)\n         SELECT ?, ?, ?, ?, ?\n         WHERE NOT EXISTS (SELECT 1 FROM regression_task_reasons WHERE task_id = ? AND hit_type = ? AND matched_path <=> ?)",
+  "params": [
+   7,
+   "evidence_path",
+   "lib/auth.ts",
+   9,
+   12,
+   7,
+   "evidence_path",
+   "lib/auth.ts"
+  ]
+ },
+ {
+  "sql": "INSERT INTO regression_tasks (release_id, spec_scenario_id, spec_change_id) VALUES (?, ?, ?)\n         ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)",
+  "params": [
+   3,
+   11,
+   null
+  ]
+ },
+ {
+  "sql": "INSERT INTO regression_task_reasons (task_id, hit_type, matched_path, spec_feature_id, spec_scenario_id)\n         SELECT ?, ?, ?, ?, ?\n         WHERE NOT EXISTS (SELECT 1 FROM regression_task_reasons WHERE task_id = ? AND hit_type = ? AND matched_path <=> ?)",
+  "params": [
+   8,
+   "evidence_path",
+   "lib/auth.ts",
+   9,
+   11,
+   8,
+   "evidence_path",
+   "lib/auth.ts"
+  ]
+ },
+ {
+  "sql": "INSERT INTO regression_tasks (release_id, spec_scenario_id, spec_change_id) VALUES (?, ?, ?)\n         ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)",
+  "params": [
+   3,
+   9,
+   null
+  ]
+ },
+ {
+  "sql": "INSERT INTO regression_task_reasons (task_id, hit_type, matched_path, spec_feature_id, spec_scenario_id)\n         SELECT ?, ?, ?, ?, ?\n         WHERE NOT EXISTS (SELECT 1 FROM regression_task_reasons WHERE task_id = ? AND hit_type = ? AND matched_path <=> ?)",
+  "params": [
+   9,
+   "evidence_path",
+   "lib/billing.ts",
+   7,
+   9,
+   9,
+   "evidence_path",
+   "lib/billing.ts"
+  ]
+ },
+ {
+  "sql": "UPDATE releases SET is_current = 0 WHERE repository_id = ?",
+  "params": [
+   1
+  ]
+ },
+ {
+  "sql": "UPDATE releases SET is_current = 1 WHERE id = ? AND repository_id = ?",
+  "params": [
+   3,
+   1
+  ]
+ },
+ {
+  "sql": "UPDATE analysis_runs SET status = 'succeeded', finished_at = CURRENT_TIMESTAMP(3) WHERE id = ? AND status = 'running'",
+  "params": [
+   3
+  ]
+ }
+]
