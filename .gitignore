@@ -22,3 +22,6 @@ vendor/archify/runtime/
 /docs/codelphi-billing-dev-plan.md
 /docs/codelphi-billing-ledger-contract.md
 /docs/codelphi-pay-state-machines.md
+
+# 别的仓库的基准测试补丁只留在本机：仓库是公开的，这些补丁是第三方源码
+/docs/benchmark/frozen/*/inputs/*/change.patch
