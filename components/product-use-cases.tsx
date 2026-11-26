@@ -7,11 +7,12 @@ import { evidenceItems } from "@/lib/evidence";
 import type { PresentationJourneyView, ProductPresentationView } from "@/lib/product-presentation";
 import { PRODUCT_JOURNEYS } from "@/lib/ui-strings/product";
 import { EvidenceLinks } from "./evidence-links";
+import { JourneyDeepLink } from "./journey-deep-link";
 
 /**
  * 使用场景视图（?view=journeys）：产品理解层的「典型使用场景」全文。
  * 每条旅程是一段「起点 → 步骤 → 终点」的叙事，但旅程本身只是引用链——步骤文字、证据全部来自
- * 被引用的规格场景，不新增事实。服务端渲染、无 JS 也可读：分组用原生 details，页内跳转用锚点。
+ * 被引用的规格场景，不新增事实。服务端渲染、无 JS 也可读：分组与单条场景都用原生 details，页内跳转用锚点。
  */
 
 function JourneyArc({ journey, locale }: { journey: PresentationJourneyView; locale: UiLocale }) {
@@ -24,11 +25,22 @@ function JourneyArc({ journey, locale }: { journey: PresentationJourneyView; loc
   );
 }
 
-function JourneyCard({ journey, locale }: { journey: PresentationJourneyView; locale: UiLocale }) {
+/**
+ * 一条使用场景：默认折叠成卡片（名称 + 起点 → 终点），点击展开步骤；页面上第一条默认展开。
+ * 原生 details——服务端渲染、无 JS 也能点开；带 #journey-N 进来时由 JourneyDeepLink 替读者展开。
+ */
+function JourneyCard({ journey, locale, expanded = false }: { journey: PresentationJourneyView; locale: UiLocale; expanded?: boolean }) {
   return (
-    <article className="journey" id={journey.id}>
-      <h4>{journey.name}</h4>
-      <JourneyArc journey={journey} locale={locale} />
+    <details className="journey" id={journey.id} open={expanded}>
+      <summary className="journey-summary">
+        <div>
+          <h4>{journey.name}</h4>
+          <JourneyArc journey={journey} locale={locale} />
+        </div>
+        {/* 展开状态由 details 自己维护：两段文案都渲染，按 [open] 由 CSS 决定显示哪一段，无 JS 也会跟着变 */}
+        <span className="journey-toggle journey-toggle-expand">{pick(locale, PRODUCT_JOURNEYS.expand)}</span>
+        <span className="journey-toggle journey-toggle-collapse">{pick(locale, PRODUCT_JOURNEYS.collapse)}</span>
+      </summary>
       <ol className="journey-steps">
         {journey.steps.map((step, index) => (
           <li className="journey-step" key={`${step.featureName}-${step.reference}-${index}`}>
@@ -50,7 +62,7 @@ function JourneyCard({ journey, locale }: { journey: PresentationJourneyView; lo
           </li>
         ))}
       </ol>
-    </article>
+    </details>
   );
 }
 
@@ -89,8 +101,11 @@ export function ProductUseCases({ presentation, hasFeatures, canEdit, locale = "
   const { row, groups, staleJourneys, foldedJourneys } = presentation;
   // 分组里的旅程都是完好且互不重复的；只有链接引用的分组也保留（总览能力卡链进来要有落点）
   const liveGroups = groups.filter((group) => group.journeys.length > 0 || group.related.length > 0);
+  // 只有页面上实际画出的第一条默认展开（第一个带完整卡片的分组的第一条），其余折叠成卡片
+  const firstJourneyId = liveGroups.find((group) => group.journeys.length > 0)?.journeys[0].id;
   return (
     <div className="use-cases">
+      <JourneyDeepLink />
       <section className="overview-panel">
         <div className="overview-panel-heading"><h2>{pick(locale, PRODUCT_JOURNEYS.heading)}</h2><span className="overview-meta-inline">{pick(locale, PRODUCT_JOURNEYS.aiNote)}</span></div>
         <p>{pick(locale, PRODUCT_JOURNEYS.note)}</p>
@@ -117,7 +132,7 @@ export function ProductUseCases({ presentation, hasFeatures, canEdit, locale = "
             {/* 没有完整卡片、只有链接引用的分组不显示「0 条」 */}
             {group.journeys.length > 0 ? <span>{pick(locale, PRODUCT_JOURNEYS.groupCount).replace("{count}", String(group.journeys.length))}</span> : null}
           </summary>
-          <div className="journey-list">{group.journeys.map((journey) => <JourneyCard journey={journey} locale={locale} key={journey.id} />)}</div>
+          <div className="journey-list">{group.journeys.map((journey) => <JourneyCard journey={journey} locale={locale} expanded={journey.id === firstJourneyId} key={journey.id} />)}</div>
           {/* 每条旅程只完整展示一次：途经本能力、在别的分组展示的场景只给链接 */}
           {group.related.length > 0 ? (
             <p className="use-cases-related">

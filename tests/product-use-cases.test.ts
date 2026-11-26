@@ -107,13 +107,55 @@ describe("use cases view", () => {
       journey(2, "从规格到发布", "capability", [["规格", "HP-1"], ["发布", "HP-1"]], ["账户与规格"]),
     ]) });
     // 生产实测（2026-11-24）：一条多标签旅程在每个相关分组各画一张完整卡，20 条旅程在页面上成了 32 张卡
-    expect(html.match(/<article class="journey" id="journey-1">/g)).toHaveLength(1);
-    expect(html.match(/<article class="journey" id="journey-2">/g)).toHaveLength(1);
+    expect(html.match(/<details class="journey" id="journey-1"(?: open="")?>/g)).toHaveLength(1);
+    expect(html.match(/<details class="journey" id="journey-2"(?: open="")?>/g)).toHaveLength(1);
     expect(html).toContain("2 条使用场景");
     // 途经的能力分组里给的是链接，落点就是那张卡；全局组排在能力组之前
     expect(html).toContain('href="#journey-1"');
     expect(html).toContain("途经这项能力、在别处展示的场景：");
     expect(html.indexOf('id="headline"')).toBeLessThan(html.indexOf('id="capability-1"'));
+  });
+
+  it("expands only the first journey on the page and collapses the rest into cards", () => {
+    const html = render({ presentation: view([
+      journey(1, "登录后查看规格", "headline", [["登录", "HP-1"], ["规格", "HP-1"]]),
+      journey(2, "从规格到发布", "capability", [["规格", "HP-1"], ["发布", "HP-1"]], ["账户与规格"]),
+      journey(3, "发布后回到登录", "capability", [["发布", "HP-1"], ["登录", "HP-1"]], ["账户与规格"]),
+    ]) });
+    // 每条使用场景是一个原生 details：页面上第一条默认展开，其余折叠成卡片、点击展开（无 JS 也能用）
+    expect(html).toContain('<details class="journey" id="journey-1" open="">');
+    expect(html).toContain('<details class="journey" id="journey-2">');
+    expect(html).toContain('<details class="journey" id="journey-3">');
+    expect(html.match(/class="journey" id="journey-\d+" open/g)).toHaveLength(1);
+  });
+
+  it("keeps the name and the start → outcome on a collapsed card so the reader can tell whether to open it", () => {
+    const html = render({ presentation: view(full) });
+    const collapsed = html.slice(html.indexOf('<details class="journey" id="journey-2">'), html.indexOf("</summary>", html.indexOf('id="journey-2"')));
+    expect(collapsed).toContain("<h4>从规格到发布</h4>");
+    expect(collapsed).toContain("起点");
+    expect(collapsed).toContain("在工作台里");
+    expect(collapsed).toContain("终点");
+    expect(collapsed).toContain("看到本次变化");
+    // 展开状态由 details 自己维护：两段切换文案都在标记里，按 [open] 由 CSS 决定显示哪一段
+    expect(collapsed).toContain(">展开<");
+    expect(collapsed).toContain(">收起<");
+    // 步骤仍在标记里（折叠只是不显示）：链接照样可以被抓取、打印和用键盘到达
+    expect(html).toContain('href="/products/default/radar?view=spec&amp;feature=3#scenario-HP-1"');
+  });
+
+  it("expands the first journey that is actually rendered, even when it is not a headline one", () => {
+    expect(render({ presentation: view([full[1]]) })).toContain('<details class="journey" id="journey-2" open="">');
+  });
+
+  it("collapses the journeys kept in the refresh group as well", () => {
+    const html = render({ presentation: view([
+      full[0],
+      journey(2, "引用部分失效", "capability", [["登录", "HP-1"], ["已被删除的功能", "HP-1"]], ["账户与规格"]),
+    ]) });
+    expect(html).toContain('<details class="journey" id="journey-1" open="">');
+    expect(html).toContain('<details class="journey" id="journey-2">');
+    expect(html).not.toMatch(/<details class="journey" id="journey-2" open/);
   });
 
   it("keeps a capability group with only cross-linked journeys reachable from its anchor", () => {
@@ -204,6 +246,8 @@ describe("use cases view", () => {
     expect(html).toContain("1 use case");
     expect(html).toContain("Also passing through this capability (shown elsewhere):");
     expect(html).toContain("Not shown (from an earlier rule)");
+    expect(html).toContain(">Expand<");
+    expect(html).toContain(">Collapse<");
     expect(html).toContain("Starting point");
     expect(html).toContain("Final outcome");
     expect(html).toContain("Step 1");

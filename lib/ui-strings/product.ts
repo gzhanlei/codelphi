@@ -117,6 +117,8 @@ export const PRODUCT_JOURNEYS = {
   brokenNote: { "zh-CN": "另有 {count} 条使用场景的引用已全部失效，暂不展示。", en: "{count} more use case(s) reference scenarios that no longer exist and are hidden." },
   related: { "zh-CN": "途经这项能力、在别处展示的场景：", en: "Also passing through this capability (shown elsewhere): " },
   relatedSeparator: { "zh-CN": "、", en: ", " },
+  expand: { "zh-CN": "展开", en: "Expand" },
+  collapse: { "zh-CN": "收起", en: "Collapse" },
   foldedGroup: { "zh-CN": "未展示的场景（较早的生成规则）", en: "Not shown (from an earlier rule)" },
   foldedNote: {
     "zh-CN": "这些场景由较早的生成规则产出——与上面的场景经过相同的功能组合，或只是把同一功能的多条场景首尾相接；下次重新生成时会自动清理。",
