@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planFeatureMerges, type PlannableFeature } from "../scripts/merge-variant-features";
+import { planFeatureMerges, workbenchFeatures, type PlannableFeature } from "../scripts/merge-variant-features";
 
 /**
  * BM-11 存量清理规划器（纯函数，restore-collapsed-scenarios 模式：判定与执行分离）。
@@ -81,6 +81,31 @@ describe("planFeatureMerges (BM-11 存量清理规划器)", () => {
     expect(moves.find((move) => move.scenarioId === 6)).toMatchObject({ drop: false, newReference: "HP-6" });
   });
 
+  it("renumbers around references held by inactive rows (the unique key counts them)", () => {
+    // 生产实锤（2026-11-26，codelphi #8）：keeper 22800 下有一条已下线的 EC-2，把 EC-1 重编号成 EC-2 搬入时撞了
+    // scenarios_feature_reference_unique，整个事务回滚。已下线的行不在 scenarios 里，但引用仍被占用。
+    const summary = "工作台里编辑功能与场景：改名、改摘要、增删场景，保存后进入下一版。";
+    const features: PlannableFeature[] = [
+      // keeper 下活跃的只有 EC-1；EC-2 是一条已下线的行，读活跃行时看不到它
+      { id: 22800, name: "规格编辑（功能与场景）", summary, source: "generated", scenarios: [scenario(1, "EC-1", "打开编辑器", { evidence: [{ path: "lib/spec-editor-service.ts" }] })], occupiedReferences: ["EC-2"] },
+      {
+        id: 22801,
+        name: "规格编辑器功能与场景接口",
+        summary,
+        source: "generated",
+        scenarios: [
+          scenario(2, "EC-1", "打开编辑器", { evidence: [{ path: "lib/spec-editor-service.ts" }] }),
+          scenario(3, "EC-2", "新增的导入行为", { context: "编辑器里点导入", action: "上传文件", evidence: [{ path: "lib/spec-editor-service.ts" }] }),
+        ],
+      },
+    ];
+    const plans = planFeatureMerges(features);
+    expect(plans).toHaveLength(1);
+    expect(plans[0].moves.find((move) => move.scenarioId === 2)).toMatchObject({ drop: true });
+    // EC-1 与 keeper 重复、删掉；EC-2 是新行为、搬入，但 EC-2 已被下线的行占着 → 重编号 EC-3
+    expect(plans[0].moves.find((move) => move.scenarioId === 3)).toMatchObject({ drop: false, newReference: "EC-3" });
+  });
+
   it("never folds manual features as source or target (AGENTS.md 红线)", () => {
     const features: PlannableFeature[] = [
       { id: 1, name: "无壳页面语言切换", summary: "手工维护", source: "manual", scenarios: [scenario(1, "HP-1", "手工维护的语言切换说明")] },
@@ -144,5 +169,19 @@ describe("planFeatureMerges 双信号离线输入（T2 根治：asSpecScenario �
       { ...grantVariants[1], summary: "导出矩阵按产品维度生成 CSV 附件并投递到订阅邮箱，缓存命中零渲染调用。" },
     ];
     expect(planFeatureMerges(divergent)).toHaveLength(0);
+  });
+});
+
+describe("workbenchFeatures (工作台行模型：已下线的行只占引用)", () => {
+  it("keeps active rows as scenarios and inactive rows as occupied references", () => {
+    const model = workbenchFeatures(
+      [{ id: 7, name: "规格编辑（功能与场景）", summary: "工作台里编辑功能与场景。", source: "generated" }],
+      [
+        { id: 101, featureId: 7, reference: "EC-1", context: "打开", action: "编辑", outcome: "保存", category: "happy", source: "generated", evidence: [], active: 1 },
+        { id: 102, featureId: 7, reference: "EC-2", context: "旧", action: "旧", outcome: "旧", category: "happy", source: "generated", evidence: [], active: 0 },
+      ],
+    );
+    expect(model[0].scenarios.map((scenario) => scenario.id)).toEqual([101]);
+    expect(model[0].occupiedReferences).toEqual(["EC-2"]);
   });
 });

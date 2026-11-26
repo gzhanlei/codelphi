@@ -36,6 +36,8 @@ export interface PlannableFeature {
   summary: string;
   source: string;
   scenarios: PlannableScenario[];
+  /** 引用已被占用、但不在 scenarios 里的编号（工作台已下线的行）——唯一键不分活跃与否，重编号时要避开。 */
+  occupiedReferences?: string[];
 }
 
 export interface ScenarioMove {
@@ -80,7 +82,7 @@ export function planFeatureMerges(features: PlannableFeature[]): FeatureMergePla
       kept.push(feature);
       continue;
     }
-    const keeperReferences = target.scenarios.map((scenario) => scenario.reference);
+    const keeperReferences = [...new Set([...(target.occupiedReferences ?? []), ...target.scenarios.map((scenario) => scenario.reference)])];
     const moves: ScenarioMove[] = [];
     for (const scenario of feature.scenarios) {
       const asSpec = asSpecScenario(scenario);
@@ -171,20 +173,41 @@ async function loadWorkbenchFeatures(db: Pool, productId: number): Promise<Plann
   if (features.length === 0) return [];
   const ids = features.map((feature) => feature.id);
   const placeholders = ids.map(() => "?").join(",");
+  // 已下线的行也要读：scenarios_feature_reference_unique 不分活跃与否，重编号时得避开它们占的引用。
   const [scenarioRows] = await db.execute(
-    `SELECT id, feature_id AS featureId, reference, context, action, outcome, category, source, evidence
-     FROM scenarios WHERE feature_id IN (${placeholders}) AND active = 1 ORDER BY feature_id, id`,
+    `SELECT id, feature_id AS featureId, reference, context, action, outcome, category, source, evidence, active
+     FROM scenarios WHERE feature_id IN (${placeholders}) ORDER BY feature_id, id`,
     ids,
   );
-  return features.map((feature) => ({
-    id: feature.id,
-    name: feature.name,
-    summary: feature.summary,
-    source: feature.source,
-    scenarios: (scenarioRows as Array<{ id: number; featureId: number; reference: string; context: string; action: string; outcome: string; category: string; source: string; evidence: unknown }>)
-      .filter((scenario) => scenario.featureId === feature.id)
-      .map((scenario) => ({ ...scenario, evidence: evidenceItems(scenario.evidence) })),
-  }));
+  return workbenchFeatures(features, scenarioRows as WorkbenchScenarioRow[]);
+}
+
+interface WorkbenchScenarioRow {
+  id: number;
+  featureId: number;
+  reference: string;
+  context: string;
+  action: string;
+  outcome: string;
+  category: string;
+  source: string;
+  evidence: unknown;
+  active: number;
+}
+
+/** 工作台的行模型：活跃的行是场景；已下线的行不是场景，但它的引用仍被占用。 */
+export function workbenchFeatures(featureRows: Array<{ id: number; name: string; summary: string; source: string }>, scenarioRows: WorkbenchScenarioRow[]): PlannableFeature[] {
+  return featureRows.map((feature) => {
+    const rows = scenarioRows.filter((row) => Number(row.featureId) === Number(feature.id));
+    return {
+      id: feature.id,
+      name: feature.name,
+      summary: feature.summary,
+      source: feature.source,
+      scenarios: rows.filter((row) => row.active).map(({ active: _active, ...row }) => ({ ...row, evidence: evidenceItems(row.evidence) })),
+      occupiedReferences: rows.filter((row) => !row.active).map((row) => row.reference),
+    };
+  });
 }
 
 async function cascadeVictims(db: Pool, variantIds: number[]): Promise<Array<{ table: string; count: number }>> {
