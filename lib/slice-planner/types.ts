@@ -43,6 +43,8 @@ export interface ProductSliceInput {
   previousSlice?: SourceSlice;
   /** 多趟提取：本趟排除此前分区已选的路径（在同一种子索引上重复规划即得下一分区）。 */
   excludePaths?: ReadonlySet<string>;
+  /** 此前分区已经分析过的内容（git blob → 那份的路径）：内容相同的文件只分析一次，跨趟也算。 */
+  excludeBlobs?: ReadonlyMap<string, string>;
   /** W0-7：窗口 diff 文件路径（行为证据的一手面）——分区装配必选，优先于遍历选择。 */
   diffPaths?: readonly string[];
   discovery?: "full" | "required_only";

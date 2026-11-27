@@ -8,6 +8,7 @@ import type { OpenedRemoteSourceRevision } from "../remote-source-index/types";
 import { isWalkNoiseDirectory, selectionNoiseKind } from "./selection-policy";
 import { VendoredDirectoryDetector } from "./vendored-directory";
 import { ToolingDirectories } from "./tooling-directory";
+import { generatedFileMarker } from "./generated-file";
 
 const interestingSignals = new Set<SourceSignal>(["manifest", "entrypoint", "route", "service", "database", "migration", "queue", "worker", "auth", "deployment", "frontend", "native"]);
 
@@ -470,6 +471,12 @@ class DeterministicSlicePlanner implements SlicePlanner {
     }
   }
 
+  /** 这个 blob 已经进过窗口（本趟选中的，或此前分区分析过的）：返回那份的路径，没有就 null。 */
+  private pathOfSelectedBlob(state: SlicePlanningState, blobSha: string): string | null {
+    for (const selected of state.selected.values()) if (selected.blobSha === blobSha) return selected.path;
+    return state.input.excludeBlobs?.get(blobSha) ?? null;
+  }
+
   private async selectFile(index: OpenedRemoteSourceRevision, state: SlicePlanningState, path: string, signals: SourceSignal[], reason: SelectedSourceReason, subtreeKey: string, options: { ignoreShareCap?: boolean } = {}) {
     if (state.selected.has(path) || state.budgetsRemaining.selectedFiles <= 0 || state.budgetsRemaining.selectedLineRanges <= 0 || state.budgetsRemaining.plannerContentBytes <= 0) return;
     if (!options.ignoreShareCap && (state.subtreeSelections.get(subtreeKey) ?? 0) >= subtreeCap(state, subtreeKey)) return;
@@ -481,6 +488,21 @@ class DeterministicSlicePlanner implements SlicePlanner {
       requestedBy: "profile",
       reason: `deterministic slice: ${reason}`,
     });
+    // 清单（package.json 这些）只用来认技术栈，不进提示词，下面两条只管进提示词的文件。
+    if (isModelContextFile(path)) {
+      // 内容和已经进过窗口的某个文件一模一样（git blob 相同）：同一份内容只分析一次。
+      const keptPath = this.pathOfSelectedBlob(state, read.blobSha);
+      if (keptPath !== null) {
+        state.excluded.push({ kind: "duplicate", path, detail: keptPath });
+        return;
+      }
+      // 文件头写着是生成的（sqlc、protoc、Flutter……）。
+      const generator = generatedFileMarker(read.lines);
+      if (generator !== null) {
+        state.excluded.push({ kind: "generated", path, detail: generator });
+        return;
+      }
+    }
     state.fileContents.set(path, read.lines.join("\n"));
     state.budgetsRemaining.selectedFiles -= 1;
     state.budgetsRemaining.selectedLineRanges -= 1;

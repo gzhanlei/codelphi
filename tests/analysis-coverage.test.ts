@@ -90,6 +90,22 @@ describe("third-party directories in the implementation surface", () => {
   });
 });
 
+describe("files the planner leaves out for what they contain", () => {
+  it("does not count a second copy of a file, or a generated file, as missing", () => {
+    const excluded = [
+      { kind: "duplicate" as const, path: "lib/copy.ts", detail: "lib/a.ts" },
+      { kind: "generated" as const, path: "lib/db/orders.sql.go", detail: "sqlc" },
+    ];
+    const receipt = computeCoverageReceipt({
+      index: fakeIndex([]),
+      partitions: [partition([{ path: "lib/a.ts", content: "x".repeat(10) }])],
+      implSurface: [{ path: "lib/a.ts", size: 10 }, { path: "lib/copy.ts", size: 10 }, { path: "lib/db/orders.sql.go", size: 50 }],
+      excluded,
+    });
+    expect(receipt).toMatchObject({ implFilesAssembled: 1, implFilesTotal: 1, implBytesAssembled: 10, implBytesTotal: 10, coverageRatio: 1 });
+  });
+});
+
 describe("tooling directories in the implementation surface", () => {
   const blob = (path: string, size = 10) => ({ path, type: "blob" as const, sha: `sha-${path}`, size });
   const tree = (path: string) => ({ path, type: "tree" as const, sha: `tree-${path}` });

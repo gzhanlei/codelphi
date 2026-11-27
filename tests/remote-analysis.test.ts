@@ -429,6 +429,30 @@ describe("unbounded partition planning", () => {
     expect(result.partitions).toHaveLength(1);
   });
 
+  it("does not select a second copy of a file that an earlier partition analysed", async () => {
+    const files = new Map([
+      ["package.json", JSON.stringify({ dependencies: { express: "4.0.0" } })],
+      ["lib/a.ts", "export const same = 1;\n"],
+      ["lib/b.ts", "export const other = 2;\n"],
+      ["lib/copy.ts", "export const same = 1;\n"],
+    ]);
+    const entry = (path: string, type: "blob" | "tree") => ({ path, type, sha: type === "blob" ? gitBlobSha(files.get(path)!) : `tree-${path}`, size: type === "blob" ? files.get(path)!.length : undefined });
+    const entries = [entry("package.json", "blob"), entry("lib", "tree"), entry("lib/a.ts", "blob"), entry("lib/b.ts", "blob"), entry("lib/copy.ts", "blob")];
+    const backend: RemoteSourceBackend = {
+      kind: "github_api",
+      resolveRevision: async () => ({ rootTreeSha: "tree-root" }),
+      listTree: async () => {
+        throw new Error("unexpected per-directory tree expansion");
+      },
+      listWholeTree: async () => ({ entries, truncated: false }),
+      fetchBlob: async (_source, path) => new TextEncoder().encode(files.get(path)!),
+    };
+    // 每趟最多选两个文件：package.json 和 a.ts 在第一趟，b.ts 在第二趟；copy.ts 和 a.ts 内容相同，哪一趟都不选。
+    const result = await getPartitionedAnalysisSources({ ...request, backend }, { planner: createSlicePlanner({ now: Date.now }), budgets: { ...analysisSliceBudgets, maxSelectedFiles: 2 } });
+    expect(result.partitions.map((partition) => partition.sources.map((source) => source.path))).toEqual([["lib/a.ts"], ["lib/b.ts"]]);
+    expect(result.excluded).toEqual([{ kind: "duplicate", path: "lib/copy.ts", detail: "lib/a.ts" }]);
+  });
+
   it("stops when a pass brings nothing new, whatever the planner does", async () => {
     // 分区数默认不设上限，循环靠「规划器不重选已选路径」才能停。2026-11-27 工具目录的入口每一趟都被重选，
     // 真实运行里就是每个分区调一次模型、无限调下去。这里不依赖规划器守规矩：没有新文件就停。

@@ -160,6 +160,8 @@ export async function getPartitionedAnalysisSources(request: RemoteAnalysisReque
   const index = await createRemoteSourceIndex(revision, { scopeRoots: request.scopeRoots, access: request.access, provider: request.provider, backend: request.backend, budgets: analysisSourceIndexBudgets });
   const partitions: AnalysisPartition[] = [];
   const excludePaths = new Set<string>();
+  // 进过提示词的内容（git blob → 路径）：内容相同的文件只分析一次。
+  const excludeBlobs = new Map<string, string>();
   const maxPartitions = analysisMaxPartitions();
   let partitionsCapped = false;
   const excluded = new Map<string, SliceExclusion>();
@@ -177,6 +179,7 @@ export async function getPartitionedAnalysisSources(request: RemoteAnalysisReque
       plannerVersion: "remote-analysis-v2",
       profileVersion: "remote-analysis-v1",
       excludePaths,
+      excludeBlobs,
       diffPaths: request.diffPaths,
       discovery: request.discovery,
       requiredPaths: request.requiredPaths,
@@ -207,6 +210,7 @@ export async function getPartitionedAnalysisSources(request: RemoteAnalysisReque
     const trimmedSlice = { ...result.slice, files: result.slice.files.filter((file) => includedPaths.has(file.path)) };
     partitions.push({ slice: trimmedSlice, sources: fresh });
     for (const source of fresh) excludePaths.add(source.path);
+    for (const file of trimmedSlice.files) if (includedPaths.has(file.path)) excludeBlobs.set(file.blobSha, file.path);
   }
   return { partitions, index, partitionsCapped, excluded: [...excluded.values()] };
 }

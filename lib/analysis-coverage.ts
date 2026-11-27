@@ -136,8 +136,10 @@ export function computeCoverageReceipt(input: {
     for (const source of partition.sources) bytesByPath.set(source.path, rawSourceBytes(source.content));
   }
   const implBytesAssembled = [...bytesByPath.values()].reduce((total, size) => total + size, 0);
+  // 规划器排除的文件（内容重复的那一份、文件头写着生成的）不进实现面的分母：它不会被装配，也不算遗漏。
+  const excludedFromSurface = new Set((input.excluded ?? []).map((exclusion) => exclusion.path));
   const surface = input.implSurface?.length
-    ? input.implSurface
+    ? input.implSurface.filter((file) => !excludedFromSurface.has(file.path))
     : assembled.map((path) => ({ path, size: bytesByPath.get(path) ?? 0 }));
   const implBytesTotal = surface.reduce((total, file) => total + file.size, 0);
   // W0-9 评审采纳：diff 必选 ≠ diff 全覆盖——diff 面自身的入选/遗漏单独计数，
