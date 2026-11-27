@@ -7,6 +7,7 @@ import { requireProductAccess } from "@/lib/product-access";
 import { productUpdateSchema } from "@/lib/product-input";
 import { productRemovalError, removeProduct } from "@/lib/product-removal";
 import { requireSessionUser } from "@/lib/session";
+import { MODEL_NOT_CONFIGURED_RESPONSE_MESSAGE, ModelNotConfiguredError, switchAnalysisExecutor } from "@/lib/analysis-executor";
 
 export const runtime = "nodejs";
 
@@ -20,7 +21,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ s
   const parsed = productUpdateSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "产品信息无效" }, { status: 400 });
 
-  const { name, slug: newSlug, description, isPublicDemo, outputLanguage } = parsed.data;
+  const { name, slug: newSlug, description, isPublicDemo, outputLanguage, analysisExecutor } = parsed.data;
   let currentSlug = slug;
   let currentName = access.product.name;
   if (name !== undefined || newSlug !== undefined || isPublicDemo !== undefined || outputLanguage !== undefined) {
@@ -33,6 +34,15 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ s
     if (renamed.status === "slug_conflict") return NextResponse.json(apiErrorBody("slug_conflict"), { status: 409 });
     currentSlug = renamed.slug;
     currentName = renamed.name;
+  }
+  if (analysisExecutor !== undefined) {
+    // 切到服务端分析时，工作区必须先有自己的模型（CoDelphi 不替用户付模型费用）。界面在没配模型时不给选，这里是绕过界面时也躲不过的那一道。
+    try {
+      await switchAnalysisExecutor(access.product.id, analysisExecutor);
+    } catch (error) {
+      if (!(error instanceof ModelNotConfiguredError)) throw error;
+      return NextResponse.json({ error: error.code, message: MODEL_NOT_CONFIGURED_RESPONSE_MESSAGE }, { status: 409 });
+    }
   }
   if (description !== undefined) {
     const result = await updateProductDescription(currentSlug, access.product.organizationId, description.trim());

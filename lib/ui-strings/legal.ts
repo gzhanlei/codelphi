@@ -125,8 +125,8 @@ interface NoticeSection {
 const NOTICE_SECTIONS: Record<UiLocale, NoticeSection[]> = {
   "zh-CN": [
     { heading: "我们读取什么", items: ["你接入产品时授权的 GitHub 仓库代码文件与 diff 内容。优先使用按仓库授权的 GitHub App Installation Token，服务端共享 Token 仅作兼容回退。"] },
-    { heading: "发送到哪里", items: ["分析所需的代码文件与 diff 仅发送给部署方配置的 AI 网关（AI_BASE_URL）及其上游模型服务，用于生成功能、场景与变化说明。", "不发送给任何其他第三方。"] },
-    { heading: "我们存储什么", items: ["分析结果：功能、场景、行为变化、证据路径与行号、发布元数据。不存储源码文件全文。", "仓库凭据（GitHub App 密钥、仓库 Token）加密存储。", "账号数据只保存 Chandler sub、邮箱、显示名和头像；不保存 Chandler 密码或 OAuth token。"] },
+    { heading: "发送到哪里", items: ["分析所需的代码文件与 diff 仅发送给部署方配置的 AI 网关（AI_BASE_URL）及其上游模型服务，用于生成功能、场景与变化说明。", "工作区配置了自己的模型时，服务端分析所需的代码文件与 diff 发送到工作区指定的模型服务地址，不经过部署方的网关。", "不发送给任何其他第三方。"] },
+    { heading: "我们存储什么", items: ["分析结果：功能、场景、行为变化、证据路径与行号、发布元数据。不存储源码文件全文。", "仓库凭据（GitHub App 密钥、仓库 Token）加密存储。", "工作区自己配置的模型 API key 加密存储，只用于替这个工作区调用它指定的模型服务。", "账号数据只保存 Chandler sub、邮箱、显示名和头像；不保存 Chandler 密码或 OAuth token。"] },
     { heading: "模型训练", items: ["我们不使用你的代码训练任何模型。", "上游模型服务商的数据处理以其自身条款为准；部署方负责确保所选网关及其上游符合保密要求。"] },
     { heading: "删除与留存", items: ["删除产品（工作区级操作）会一并删除该产品的分析数据。", "登录会话有效期 7 天，过期后重新通过 Chandler 登录。", "分析数据保留至对应产品被删除，无自动过期。"] },
     { heading: "事件通知", items: ["如发生影响你源码安全的事件，我们会尽快通知工作区联系人。"] },
@@ -134,8 +134,8 @@ const NOTICE_SECTIONS: Record<UiLocale, NoticeSection[]> = {
   ],
   en: [
     { heading: "What we read", items: ["Code files and diff content of the GitHub repositories you authorize when connecting a product. A per-repository GitHub App Installation Token is preferred; a server-wide shared token exists only as a compatibility fallback."] },
-    { heading: "Where it is sent", items: ["The code files and diffs needed for analysis are sent only to the AI gateway configured by the deployment (AI_BASE_URL) and its upstream model services, to generate features, scenarios and change descriptions.", "They are sent to no other third party."] },
-    { heading: "What we store", items: ["Analysis results: features, scenarios, behavior changes, evidence paths and line numbers, release metadata. Full source files are not stored.", "Repository credentials (GitHub App keys, repository tokens) are stored encrypted.", "Account data keeps only the Chandler sub, email, display name and avatar; Chandler passwords and OAuth tokens are never stored."] },
+    { heading: "Where it is sent", items: ["The code files and diffs needed for analysis are sent only to the AI gateway configured by the deployment (AI_BASE_URL) and its upstream model services, to generate features, scenarios and change descriptions.", "When a workspace configures its own model, the code files and diffs needed for server-side analysis go to the model service address the workspace chose, not through the deployment's gateway.", "They are sent to no other third party."] },
+    { heading: "What we store", items: ["Analysis results: features, scenarios, behavior changes, evidence paths and line numbers, release metadata. Full source files are not stored.", "Repository credentials (GitHub App keys, repository tokens) are stored encrypted.", "The API key of a workspace's own model is stored encrypted and is used only to call the model service that workspace chose.", "Account data keeps only the Chandler sub, email, display name and avatar; Chandler passwords and OAuth tokens are never stored."] },
     { heading: "Model training", items: ["We never use your code to train any model.", "Upstream model providers' data handling is governed by their own terms; the deployment operator is responsible for ensuring the chosen gateway and its upstream meet confidentiality requirements."] },
     { heading: "Deletion and retention", items: ["Deleting a product (a workspace-level action) deletes that product's analysis data with it.", "Login sessions last 7 days; after expiry you sign in through Chandler again.", "Analysis data is retained until the corresponding product is deleted — no automatic expiry."] },
     { heading: "Incident notification", items: ["If an event affects the security of your source code, we notify workspace contacts as soon as possible."] },

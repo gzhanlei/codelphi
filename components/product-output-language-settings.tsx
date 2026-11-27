@@ -36,7 +36,7 @@ export function ProductOutputLanguageSettings({ slug, current, canEdit }: { slug
 
   return (
     <section className="overview-panel settings-panel">
-      <div className="overview-panel-heading"><span>06</span><h2>分析输出语言</h2></div>
+      <div className="overview-panel-heading"><span>07</span><h2>分析输出语言</h2></div>
       <p className="overview-note">AI 提取的功能规格、场景与发布稿按所选语言生成。切换语言后，下一次分析将全量重建为新语言版本；历史版本按各自语言只读保留。</p>
       <div className="settings-form">
         <div role="radiogroup" aria-label="分析输出语言" style={{ margin: "0 0 12px" }}>

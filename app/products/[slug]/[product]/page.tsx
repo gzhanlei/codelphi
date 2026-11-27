@@ -9,7 +9,9 @@ import { AppShell } from "@/components/app-shell";
 import { DemoShell } from "@/components/demo-shell";
 import { NotificationSettings } from "@/components/notification-settings";
 import { ProductIdentitySettings } from "@/components/product-identity-settings";
+import { ProductAnalysisExecutorSettings } from "@/components/product-analysis-executor-settings";
 import { ProductOutputLanguageSettings } from "@/components/product-output-language-settings";
+import { loadProductAnalysisMode } from "@/lib/analysis-executor";
 import { DomainCandidateReview } from "@/components/domain-candidate-review";
 import { PresentationSettings } from "@/components/presentation-settings";
 import { countNewUngroupedFeatures } from "@/lib/business-domains";
@@ -125,6 +127,8 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
   const isOrganizationMember = access.via === "organization";
   const isOwner = isOrganizationMember && access.role === "owner";
 
+  // 只在设置视图里读这一条：别的视图不多一次查询。
+  const analysisMode = view === "settings" ? await loadProductAnalysisMode(details.product.id, defaultExecute) : null;
   const settings = view === "settings" ? (
     <>
       <ProductIdentitySettings slug={details.product.slug} name={details.product.name} canEdit={access.role !== "viewer"} />
@@ -142,6 +146,14 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
         slug={details.product.slug}
         repos={await listProductRepositoryTriggers(details.product.id, defaultExecute)}
         canEdit={access.role !== "viewer"}
+      />
+
+      <ProductAnalysisExecutorSettings
+        slug={details.product.slug}
+        current={analysisMode?.executor ?? "server"}
+        modelConfigured={analysisMode?.modelConfigured ?? false}
+        canEdit={access.role !== "viewer"}
+        locale={locale}
       />
 
       <ProductOutputLanguageSettings

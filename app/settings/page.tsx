@@ -3,6 +3,7 @@ import { AppShell } from "@/components/app-shell";
 import { WorkspaceTriggerDefaultSettings } from "@/components/workspace-trigger-default-settings";
 import { WorkspaceOutputLanguageSettings } from "@/components/workspace-output-language-settings";
 import { McpKeysSettings } from "@/components/mcp-keys-settings";
+import { OrganizationModelSettings } from "@/components/organization-model-settings";
 import { listApiKeys } from "@/lib/mcp/api-keys";
 import { getWorkspaceTriggerDefault, getWorkspaceOutputLanguageDefault } from "@/lib/analysis-trigger";
 import { resolveUiLocale } from "@/lib/ui-locale-server";
@@ -12,6 +13,7 @@ import { formatDateTimeIn } from "@/lib/format";
 import { getDb } from "@/lib/db";
 import { requireSessionUser } from "@/lib/session";
 import { currentOrganization } from "@/lib/organizations";
+import { describeOrganizationModel } from "@/lib/organization-model";
 
 export const dynamic = "force-dynamic";
 
@@ -132,6 +134,8 @@ export default async function SettingsPage() {
       <WorkspaceOutputLanguageSettings canEdit={canEdit} current={await getWorkspaceOutputLanguageDefault(accountId)} locale={uiLocale} />
 
       <McpKeysSettings canManage={canEdit} initialKeys={await listApiKeys(db, organization.id)} locale={uiLocale} />
+
+      <OrganizationModelSettings initial={await describeOrganizationModel(organization.id)} canManage={canEdit} locale={uiLocale} />
 
       <section className="overview-panel settings-panel">
         <div className="overview-panel-heading"><span>03</span><h2>{pick(uiLocale, L.productsHeading)}</h2></div>

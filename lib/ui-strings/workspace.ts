@@ -119,8 +119,8 @@ export const OUTPUT_LANGUAGE_PANEL_HINTS: Record<string, LocaleEntry> = {
 export const MCP_KEYS = {
   heading: { "zh-CN": "MCP 集成", en: "MCP integration" },
   intro: {
-    "zh-CN": "组织级只读 API key，供 Claude / ChatGPT 等 AI 客户端经 MCP 读取产品规格与行为变化（每条结论附证据链接）。撤销后立即失效。",
-    en: "Organization-level read-only API keys let AI clients such as Claude / ChatGPT read product specs and behavior changes over MCP (every claim carries an evidence link). Revocation takes effect immediately.",
+    "zh-CN": "组织级 API key：供 Claude / ChatGPT 等 AI 客户端经 MCP 读取产品规格与行为变化（每条结论附证据链接），或供 CoDelphi 客户端上传本机分析的结果。撤销后立即失效。",
+    en: "Organization-level API keys: for AI clients such as Claude / ChatGPT to read product specs and behavior changes over MCP (every claim carries an evidence link), or for the CoDelphi client to upload what it analysed on your machine. Revocation takes effect immediately.",
   },
   endpointLabel: { "zh-CN": "MCP 端点（Streamable HTTP，Authorization: Bearer <key>）：", en: "MCP endpoint (Streamable HTTP, Authorization: Bearer <key>):" },
   configFresh: { "zh-CN": "连接配置（已写入刚签发的 key，复制即用）", en: "Connection config (freshly issued key baked in; copy and use)" },
@@ -153,6 +153,62 @@ export const MCP_KEYS = {
   revokedPrefix: { "zh-CN": "已撤销 ", en: "Revoked " },
   activeStatus: { "zh-CN": "生效中", en: "Active" },
   revokeButton: { "zh-CN": "撤销", en: "Revoke" },
+} satisfies Record<string, LocaleEntry>;
+
+// ── 模型配置面板（工作区自己的模型；CoDelphi 不替用户付模型费用）──
+export const ORGANIZATION_MODEL = {
+  heading: { "zh-CN": "模型配置", en: "Model configuration" },
+  intro: {
+    "zh-CN": "工作区自己的模型。由服务端分析的产品和网站上的 AI 功能用它调用模型，费用由工作区直接付给模型服务商；CoDelphi 不替你付模型费用。",
+    en: "Your workspace's own model. Products analysed on the server and the AI features on this site call it with this configuration, and the workspace pays its model provider directly. CoDelphi does not pay model costs for you.",
+  },
+  currentLabel: { "zh-CN": "当前配置", en: "Current configuration" },
+  addressLabel: { "zh-CN": "服务地址", en: "Service address" },
+  modelLabel: { "zh-CN": "模型名", en: "Model" },
+  keyLabel: { "zh-CN": "API Key", en: "API key" },
+  verifiedPrefix: { "zh-CN": "验证于 ", en: "Verified " },
+  keyHidden: { "zh-CN": "API Key 已加密保存，不再显示。", en: "The API key is stored encrypted and is not shown again." },
+  disclosure: {
+    "zh-CN": "模型请求将发往你填的服务地址，用你填的 API Key，不经过 CoDelphi 的模型。",
+    en: "Model requests go to the service address you type, with the API key you type. They do not pass through CoDelphi's model.",
+  },
+  addressPlaceholder: { "zh-CN": "https://api.example.com/v1", en: "https://api.example.com/v1" },
+  keyPlaceholder: { "zh-CN": "粘贴 API Key", en: "Paste the API key" },
+  modelPlaceholder: { "zh-CN": "模型服务商给出的模型名", en: "The model name your provider uses" },
+  saveButton: { "zh-CN": "验证并保存", en: "Verify and save" },
+  savedNotice: { "zh-CN": "已验证并保存。之后由服务端分析的产品都会用这个模型。", en: "Verified and saved. Products analysed on the server use this model from now on." },
+  deleteButton: { "zh-CN": "删除配置", en: "Delete configuration" },
+  deleteConfirm: {
+    "zh-CN": "删除后，这个工作区的产品就不能用服务端分析了（还有产品在用时服务端会拒绝删除）。确定删除？",
+    en: "After this, products of this workspace can no longer be analysed on the server (the server refuses while products still use it). Delete?",
+  },
+  deletedNotice: { "zh-CN": "模型配置已删除。", en: "The model configuration was deleted." },
+  none: { "zh-CN": "还没有配置。", en: "Not configured yet." },
+} satisfies Record<string, LocaleEntry>;
+
+// ── 产品设置 · 分析方式 ──
+export const ANALYSIS_EXECUTOR = {
+  heading: { "zh-CN": "分析方式", en: "How this product is analysed" },
+  note: {
+    "zh-CN": "由谁来做这个产品的分析。选服务端分析时，服务器调用的是工作区自己的模型：CoDelphi 不替你付模型费用。",
+    en: "Who analyses this product. With server-side analysis the server calls the workspace's own model: CoDelphi does not pay model costs for you.",
+  },
+  clientLabel: { "zh-CN": "客户端分析", en: "Client-side analysis" },
+  serverLabel: { "zh-CN": "服务端分析", en: "Server-side analysis" },
+  clientHint: {
+    "zh-CN": "在本机运行 CoDelphi 客户端：源码不离开你的电脑，模型也用你自己的。结果发布之后，这里的账本才更新。服务端不读源码、不调模型。",
+    en: "Run the CoDelphi client on your own machine: source code never leaves it and the model is your own. The ledger here updates once a result is published. The server reads no source and calls no model.",
+  },
+  serverHint: {
+    "zh-CN": "CoDelphi 的服务器读取仓库，调用工作区自己的模型（在设置页「模型配置」里填写），推送后自动分析，每天兜底一次。模型费用由工作区付给模型服务商。",
+    en: "CoDelphi's server reads the repository and calls the workspace's own model (set under Model configuration on the settings page), after each push and once a day as a fallback. The workspace pays its model provider for these calls.",
+  },
+  needsModel: {
+    "zh-CN": "要先在设置页的「模型配置」里填好工作区自己的模型，才能选服务端分析。CoDelphi 不替你付模型费用。",
+    en: "Configure the workspace's own model under Model configuration on the settings page before choosing server-side analysis. CoDelphi does not pay model costs for you.",
+  },
+  settingsLink: { "zh-CN": "去设置页", en: "Open settings" },
+  savedNotice: { "zh-CN": "分析方式已保存，从下一次分析起生效。", en: "Saved. It applies from the next analysis on." },
 } satisfies Record<string, LocaleEntry>;
 
 // ── 产品标识面板 ──

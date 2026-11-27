@@ -98,10 +98,27 @@ describe("the server's single exit for model calls", () => {
       () => null,
       (caught: unknown) => caught as Error,
     );
-    expect(error?.message).toMatch(/^AI gateway 400: .*invalid temperature/);
+    expect(error?.message).toBe("the workspace's model provider answered 400: {\"error\":{\"message\":\"invalid temperature\"}}");
     expect(receiptCapture.inserts).toHaveLength(1);
     expect(receiptCapture.inserts[0].params[5]).toBe("failed");
     expect(receiptCapture.inserts[0].params[27]).toBe("organization");
+  });
+
+  it("brings the provider's reason back on one line, without the key and no longer than 300 characters, and says so when there is none", async () => {
+    // 服务商回显了 key、正文很长还带换行：key 先换成占位符，再并成一行、截短（半截的 key 认不出来，所以先换再截）。
+    const echoed = JSON.stringify({ error: { message: `bad key ${bound.apiKey}\n\n${"x".repeat(400)} tail` } });
+    const collapsed = echoed.replace(/\s+/g, " ").split(bound.apiKey).join("<key>");
+    transport.callOrganizationModel.mockResolvedValueOnce({ status: 401, body: echoed });
+    const error = await bindOrganizationModel(bound, () => requestStructuredCompletion(messages, billing)).then(
+      () => null,
+      (caught: unknown) => caught as Error,
+    );
+    // 截到 300 个字符：正好停在那一串 x 里，后面的 tail 不见了。
+    expect(error?.message).toBe(`the workspace's model provider answered 401: ${collapsed.slice(0, 300)}`);
+    expect(error?.message.endsWith("x")).toBe(true);
+    expect(error?.message).not.toContain(bound.apiKey);
+    transport.callOrganizationModel.mockResolvedValueOnce({ status: 502, body: "" });
+    await expect(bindOrganizationModel(bound, () => requestStructuredCompletion(messages, billing))).rejects.toThrow("the workspace's model provider answered 502");
   });
 
   it("records a timeout as a timeout and a transport failure as a failure", async () => {

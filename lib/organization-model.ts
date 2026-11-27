@@ -219,9 +219,19 @@ export async function loadOrganizationModel(organizationId: number, execute: Exe
 }
 
 /** 给页面和接口看的：不含 key。 */
-export async function describeOrganizationModel(organizationId: number, execute: Execute = defaultExecute): Promise<{ baseUrl: string; model: string; verifiedAt: unknown; updatedAt: unknown } | null> {
-  const result = (await execute("SELECT base_url, model, verified_at, updated_at FROM organization_models WHERE organization_id = ? LIMIT 1", [organizationId])) as unknown as [Array<{ base_url: string; model: string; verified_at: unknown; updated_at: unknown }>, unknown];
-  const rows = (Array.isArray(result) ? result[0] : result) as Array<{ base_url: string; model: string; verified_at: unknown; updated_at: unknown }>;
+export interface OrganizationModelDescription {
+  baseUrl: string;
+  model: string;
+  verifiedAt: string | Date | null;
+  updatedAt: string | Date | null;
+}
+
+export async function describeOrganizationModel(organizationId: number, execute: Execute = defaultExecute): Promise<OrganizationModelDescription | null> {
+  const result = (await execute("SELECT base_url, model, verified_at, updated_at FROM organization_models WHERE organization_id = ? LIMIT 1", [organizationId])) as unknown as [
+    Array<{ base_url: string; model: string; verified_at: string | Date | null; updated_at: string | Date | null }>,
+    unknown,
+  ];
+  const rows = (Array.isArray(result) ? result[0] : result) as Array<{ base_url: string; model: string; verified_at: string | Date | null; updated_at: string | Date | null }>;
   const row = rows[0];
   return row ? { baseUrl: row.base_url, model: row.model, verifiedAt: row.verified_at, updatedAt: row.updated_at } : null;
 }

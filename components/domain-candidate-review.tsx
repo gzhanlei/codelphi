@@ -54,7 +54,7 @@ export function DomainCandidateReview({ slug, canEdit, ungroupedCount }: { slug:
 
   return (
     <section className="overview-panel settings-panel">
-      <div className="overview-panel-heading"><span>07</span><h2>业务分组候选（AI 提案）</h2></div>
+      <div className="overview-panel-heading"><span>08</span><h2>业务分组候选（AI 提案）</h2></div>
       <p className="overview-note">AI 根据本产品的说明、功能与场景提出「业务域」候选，供首页按业务价值聚合。候选仅供参考：这里不会写入数据库，也不会改变当前首页；确认后用迁移脚本落地。</p>
       {ungroupedCount !== undefined && ungroupedCount !== null ? (
         ungroupedCount > 0

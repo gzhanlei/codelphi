@@ -575,6 +575,8 @@ export async function requestStructuredCompletionDetailed(messages: Array<{ role
   }
   if (!response.ok) {
     await recordReceipt("failed", null, null);
+    // 工作区自己的模型拒绝时，原因按客户端的同一条规则带出来（lib/llm-client.ts）。CoDelphi 自己的网关照旧。
+    if (bound) throw new Error(await workspaceRefusal(response, bound.apiKey));
     await requireSuccessfulAIResponse(response);
   }
   const payload: unknown = await response.json();
@@ -597,6 +599,16 @@ export async function requestStructuredCompletionDetailed(messages: Array<{ role
   }
   await recordReceipt("success", usage, requestId);
   return { content, usageRaw: usage, providerRequestId: requestId, finishReason };
+}
+
+/**
+ * 工作区自己的模型拒绝时的原因。只带状态码没法排查（400 可能是模型名、参数、权限里的任何一个），
+ * 所以把应答正文带上；但正文可能很长，服务商也可能回显 key：先换占位符再并成一行、截到 300 个字符
+ * （先换再截——截短会把 key 截成半截，半截的 key 就认不出来了）。这句话会进 run 的失败原因、也会给用户看。
+ */
+async function workspaceRefusal(response: Response, apiKey: string): Promise<string> {
+  const oneLine = (await response.text().catch(() => "")).replace(/\s+/g, " ").trim();
+  return `the workspace's model provider answered ${response.status}${oneLine === "" ? "" : `: ${oneLine.split(apiKey).join("<key>").slice(0, 300)}`}`;
 }
 
 /**

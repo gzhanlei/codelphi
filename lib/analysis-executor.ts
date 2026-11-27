@@ -125,12 +125,21 @@ export async function assertServerExecuted(repositoryId: number, execute: Execut
  * 把一个产品改成由客户端或服务端分析。改成服务端分析时，它的工作区必须先有自己的模型配置：
  * 界面上没配模型就不给选「服务端分析」，这里是绕过界面时也躲不过的那一道（之后入队和执行还各有一道）。
  */
+/**
+ * 一个产品由谁分析、它的工作区有没有自己的模型（产品设置页据此决定「服务端分析」能不能选）。产品不在了返回 null。
+ */
+export async function loadProductAnalysisMode(productId: number, execute: Execute = defaultExecute): Promise<AnalysisMode | null> {
+  const result = await execute(`SELECT p.analysis_executor AS analysisExecutor, ${MODEL_CONFIGURED_SQL} AS modelConfigured FROM products p WHERE p.id = ?`, [productId]);
+  const rows = (Array.isArray(result) ? (result[0] as Array<{ analysisExecutor?: string; modelConfigured?: unknown } | undefined>) : []);
+  if (!rows[0]) return null;
+  return { executor: rows[0].analysisExecutor === "client" ? "client" : "server", modelConfigured: Number(rows[0].modelConfigured) === 1 };
+}
+
 export async function switchAnalysisExecutor(productId: number, executor: AnalysisExecutor, execute: Execute = defaultExecute): Promise<void> {
   if (executor === "server") {
-    const result = await execute(`SELECT ${MODEL_CONFIGURED_SQL} AS modelConfigured FROM products p WHERE p.id = ?`, [productId]);
-    const rows = (Array.isArray(result) ? (result[0] as Array<{ modelConfigured?: unknown }>) : []);
-    if (!rows[0]) throw new Error(`product ${productId} not found`);
-    if (Number(rows[0].modelConfigured) !== 1) throw new ModelNotConfiguredError();
+    const mode = await loadProductAnalysisMode(productId, execute);
+    if (!mode) throw new Error(`product ${productId} not found`);
+    if (!mode.modelConfigured) throw new ModelNotConfiguredError();
   }
   await execute("UPDATE products SET analysis_executor = ? WHERE id = ?", [executor, productId]);
 }

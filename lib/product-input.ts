@@ -30,7 +30,7 @@ export const descriptionUpdateSchema = z.object({
   description: z.string().max(1_000, "产品简介不能超过 1000 字"),
 });
 
-/** PATCH /api/products/[slug]：改名 / 改 slug / 改概况 / 公开演示开关 / 输出语言，至少提供一项。 */
+/** PATCH /api/products/[slug]：改名 / 改 slug / 改概况 / 公开演示开关 / 输出语言 / 分析方式，至少提供一项。 */
 export const productUpdateSchema = z
   .object({
     name: z.string().trim().min(1, "请输入产品名称").max(100, "产品名称过长").optional(),
@@ -38,8 +38,14 @@ export const productUpdateSchema = z
     description: z.string().max(1_000, "产品简介不能超过 1000 字").optional(),
     isPublicDemo: z.boolean().optional(),
     outputLanguage: outputLanguageSchema.optional(),
+    /** 由谁分析：client 是客户端分析，server 是服务端分析（后者要求工作区先配自己的模型，见 lib/analysis-executor.ts）。 */
+    analysisExecutor: z.enum(["server", "client"]).optional(),
   })
-  .refine((data) => data.name !== undefined || data.slug !== undefined || data.description !== undefined || data.isPublicDemo !== undefined || data.outputLanguage !== undefined, "请提供要修改的内容");
+  .refine(
+    (data) =>
+      data.name !== undefined || data.slug !== undefined || data.description !== undefined || data.isPublicDemo !== undefined || data.outputLanguage !== undefined || data.analysisExecutor !== undefined,
+    "请提供要修改的内容",
+  );
 
 export function slugifyProductName(value: string) {
   return value

@@ -79,6 +79,18 @@ export async function setOutputLanguage(slug: string, outputLanguage: "zh-CN" | 
   return "updated" as const;
 }
 
+/** 切换产品的分析方式。工作区没配模型时服务端拒绝（409）并说要去哪里配；页面要显示的是那句话。 */
+export async function setAnalysisExecutor(slug: string, analysisExecutor: "server" | "client", fetcher: Fetcher = fetch) {
+  const response = await fetcher(`/api/products/${slug}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ analysisExecutor }),
+  });
+  const data = (await response.json().catch(() => ({}))) as { status?: string; error?: string; message?: string };
+  if (!response.ok || data.status !== "updated") throw new Error(data.message ?? data.error ?? "保存分析方式失败");
+  return "updated" as const;
+}
+
 export interface MemberEntry { userId: number; displayName: string; email: string; role: string }
 export interface InvitationEntry { id: number; email: string; role: string; expiresAt: string | Date | null }
 export interface MemberRoster { organizationMembers: MemberEntry[]; productMembers: MemberEntry[]; invitations: InvitationEntry[] }

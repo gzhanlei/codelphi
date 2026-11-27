@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runAnalysis } from "../lib/analysis";
 import { currentOrganizationModel } from "../lib/organization-model";
 import { encryptSecret } from "../lib/secret-box";
-import { assertServerExecuted, ClientAnalysisError, isReceiptTrigger, loadAnalysisExecutor, MODEL_NOT_CONFIGURED, ModelNotConfiguredError, serverMayExecute, SERVER_EXECUTED_RUN_UNJOINED_SQL, serverExecutedRunSql, switchAnalysisExecutor } from "../lib/analysis-executor";
+import { assertServerExecuted, ClientAnalysisError, isReceiptTrigger, loadAnalysisExecutor, loadProductAnalysisMode, MODEL_NOT_CONFIGURED, ModelNotConfiguredError, serverMayExecute, SERVER_EXECUTED_RUN_UNJOINED_SQL, serverExecutedRunSql, switchAnalysisExecutor } from "../lib/analysis-executor";
 import { enqueueRunWithReservation, enqueueRunWithReservationInTransaction } from "../lib/billing/core";
 
 const dbMock = vi.hoisted(() => ({ db: undefined as unknown }));
@@ -156,6 +156,19 @@ describe("analysis executor gate", () => {
     await expect(enqueueRunWithReservation(enqueueInput)).rejects.toMatchObject({ code: "analysis_mode_is_client" });
     expect(connection.rollback).toHaveBeenCalledTimes(1);
     expect(connection.commit).not.toHaveBeenCalled();
+  });
+});
+
+describe("reading how a product is analysed", () => {
+  it("tells the settings page who analyses a product and whether its workspace has a model, in one query", async () => {
+    const execute = vi.fn(async (_statement: string, _parameters: unknown[] = []) => [[{ analysisExecutor: "client", modelConfigured: 0 }], []]);
+    expect(await loadProductAnalysisMode(4, execute as never)).toEqual({ executor: "client", modelConfigured: false });
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute.mock.calls[0][0]).toContain("AS modelConfigured");
+    expect(execute.mock.calls[0][0]).toContain("FROM products p WHERE p.id = ?");
+    expect(execute.mock.calls[0][1]).toEqual([4]);
+    // 产品不在了：null，由调用方去报错。
+    expect(await loadProductAnalysisMode(4, vi.fn(async () => [[], []]) as never)).toBeNull();
   });
 });
 
