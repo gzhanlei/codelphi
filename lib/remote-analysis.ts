@@ -193,12 +193,20 @@ export async function getPartitionedAnalysisSources(request: RemoteAnalysisReque
       if (partitions.length === 0) throw new Error("No supported source files found");
       break;
     }
+    // 只收此前分区没拿走的文件。分区数默认不设上限，这个循环靠规划器不重选已选的路径才能停；
+    // 2026-11-27 工具目录的入口每一趟都被重选，就是这样跑不完的。所以这里不依赖规划器守规矩：没有新文件就停。
+    const fresh = sources.filter((source) => !excludePaths.has(source.path));
+    if (fresh.length === 0) {
+      if (partitions.length === 0) throw new Error("No supported source files found");
+      console.warn("[analysis] a partition brought no file that earlier partitions had not taken; stopping the partition loop", { planned: partitions.length });
+      break;
+    }
     // slice.files 对齐真实窗口：assertEvidence 的允许集来自 slice.files，
     // 被硬顶排除的文件不得留在允许集（AI 引用未进 prompt 的路径应视为越界）。
-    const includedPaths = new Set(sources.map((source) => source.path));
+    const includedPaths = new Set(fresh.map((source) => source.path));
     const trimmedSlice = { ...result.slice, files: result.slice.files.filter((file) => includedPaths.has(file.path)) };
-    partitions.push({ slice: trimmedSlice, sources });
-    for (const source of sources) excludePaths.add(source.path);
+    partitions.push({ slice: trimmedSlice, sources: fresh });
+    for (const source of fresh) excludePaths.add(source.path);
   }
   return { partitions, index, partitionsCapped, excluded: [...excluded.values()] };
 }

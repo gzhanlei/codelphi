@@ -429,6 +429,22 @@ describe("unbounded partition planning", () => {
     expect(result.partitions).toHaveLength(1);
   });
 
+  it("stops when a pass brings nothing new, whatever the planner does", async () => {
+    // 分区数默认不设上限，循环靠「规划器不重选已选路径」才能停。2026-11-27 工具目录的入口每一趟都被重选，
+    // 真实运行里就是每个分区调一次模型、无限调下去。这里不依赖规划器守规矩：没有新文件就停。
+    let calls = 0;
+    const planner = {
+      resolveScope: async () => ({ status: "resolved", unresolved: [], scopeRoots: [{ path: "" }] }),
+      plan: async () => {
+        calls += 1;
+        return { status: "completed", missing: [], diagnostics: [], slice: { files: [{ path: "lib/1.ts", byteSize: 1, lineRanges: [{ startLine: 1, endLine: 1, purpose: "service" }] }], confidence: "high", unresolved: [], evidenceClaims: [], metrics: {} } };
+      },
+    } as unknown as SlicePlanner;
+    const result = await getPartitionedAnalysisSources(request, { planner, budgets: analysisSliceBudgets });
+    expect(result.partitions).toHaveLength(1);
+    expect(calls).toBe(2);
+  });
+
   it("stops at the configured partition cap and discloses it (ANALYSIS_MAX_PARTITIONS)", async () => {
     vi.stubEnv("ANALYSIS_MAX_PARTITIONS", "3");
     const { planner, calls } = plannerReturningSevenPartitions();
