@@ -28,6 +28,7 @@ import { behavioralChangePaths } from "../patch-scan";
 import type { PrivacyHit, PrivacyRule, SourceText } from "../privacy-scan";
 import { createSourceIndex, scanValue } from "../privacy-scan";
 import { CLIENT_PROMPT_VERSION } from "../prompt-policy";
+import { parseSourceRoots } from "../remote-analysis";
 import type { getPartitionedAnalysisSources } from "../remote-analysis";
 import type { RemoteSourceBackend, SourceScopeRoot } from "../remote-source-index";
 import { specFeatureKey } from "../spec-diff";
@@ -72,7 +73,8 @@ export interface ProduceOptions {
   outputLanguage: "zh-CN" | "en";
   client: StructuredCompletionClient;
   modelName?: string;
-  scopeRoots?: SourceScopeRoot[];
+  /** 产品的源码根目录；字符串或对象都收（服务端发对象，调用方也可能直接给字符串）。 */
+  scopeRoots?: ReadonlyArray<SourceScopeRoot | string>;
   /** 远端地址看不出是哪一家代码托管服务时，由用户指定。 */
   provider?: RepositoryProvider;
   onProgress?: (event: ProduceProgress) => void;
@@ -278,6 +280,8 @@ export async function produceProposal(options: ProduceOptions): Promise<ProduceS
   };
   if (decision.action !== "publish") return base;
   const ledgerBase = options.product.currentRevisionSha === null ? null : { specVersionId: options.product.currentVersionId ?? 0, sha: options.product.currentRevisionSha };
+  // 服务端分析用的同一份口径（lib/analysis.ts 的 loadSourceRoots）：产品指到了哪里，就分析哪里。
+  const scopeRoots = parseSourceRoots(options.scopeRoots);
 
   // 工作目录：记下这一次是给哪个提交、哪种语言、哪个模型做的。和上一次对不上，之前的结果就都不能用了。
   const run = options.workdir
@@ -289,6 +293,8 @@ export async function produceProposal(options: ProduceOptions): Promise<ProduceS
       base: ledgerBase,
       outputLanguage: options.outputLanguage,
       modelName,
+      // 源码根目录换了，窗口就不一样：之前做好的分区不能沿用。
+      ...(scopeRoots.length > 0 ? { scopeRoots } : {}),
       thinking: options.client.thinking,
       clientVersion: CLIENT_VERSION,
       pipelineVersion: CLIENT_PIPELINE_VERSION,
@@ -315,7 +321,7 @@ export async function produceProposal(options: ProduceOptions): Promise<ProduceS
     backend,
     identity,
     productName: options.product.name || options.product.slug,
-    ...(options.scopeRoots?.length ? { scopeRoots: options.scopeRoots } : {}),
+    ...(scopeRoots.length > 0 ? { scopeRoots } : {}),
     outputLanguage: options.outputLanguage,
     noSourceOutput: true,
     ...(options.loadPartitions ? { loadPartitions: options.loadPartitions } : {}),

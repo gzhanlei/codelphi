@@ -116,6 +116,8 @@ describe("publish run store", () => {
       { clientVersion: "0.2.0" },
       { productSlug: "another-product" },
       { repositoryRoot: "/repos/another-checkout" },
+      // 源码根目录换了，窗口就不一样：之前的结果不能用。
+      { scopeRoots: [{ path: "apps/web" }] },
       // 思考开还是关，同一个分区给出的内容不一样：换了就不能沿用之前的结果。
       { thinking: "disabled" as const },
       { thinking: "enabled" as const },

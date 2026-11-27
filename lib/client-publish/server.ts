@@ -11,6 +11,8 @@ export interface ClientProduct {
   slug: string;
   name: string;
   analysisExecutor: string;
+  /** 产品的源码根目录（产品的设置里配的，服务端分析用的同一份）；没配置就是整个仓库。 */
+  sourceRoots?: ReadonlyArray<{ path: string; label?: string; role?: "web" | "api" | "worker" | "library" | "mobile" | "desktop" | "deployment" | "shared" }>;
   currentVersionId: number | null;
   currentRevisionSha: string | null;
   repository: { repositoryId: number; provider: string; host: string | null; owner: string | null; name: string | null } | null;

@@ -11,9 +11,10 @@ const { GET } = await import("../app/api/client-analysis/context/route");
 const SHA_A = "a".repeat(40);
 const SHA_B = "b".repeat(40);
 const rows = [
-  { id: 1, slug: "acme-api", name: "Acme API", analysisExecutor: "client", repositoryId: 57, provider: "github", host: "github.com", owner: "acme", repositoryName: "api", currentVersionId: 32 },
-  { id: 2, slug: "local-notes", name: "Local Notes", analysisExecutor: "client", repositoryId: 58, provider: "local", host: null, owner: "local-product-2", repositoryName: "notes", currentVersionId: 31 },
-  { id: 3, slug: "hosted", name: "Hosted", analysisExecutor: "server", repositoryId: null, provider: null, host: null, owner: null, repositoryName: null, currentVersionId: null },
+  { id: 1, slug: "acme-api", name: "Acme API", analysisExecutor: "client", repositoryId: 57, provider: "github", host: "github.com", owner: "acme", repositoryName: "api", currentVersionId: 32, sourceRoots: [{ path: "apps/api", role: "api" }] },
+  // 库里存了读不出来的东西（旧版本写坏的）：照常返回，源码根目录按没配置算。
+  { id: 2, slug: "local-notes", name: "Local Notes", analysisExecutor: "client", repositoryId: 58, provider: "local", host: null, owner: "local-product-2", repositoryName: "notes", currentVersionId: 31, sourceRoots: "garbage" },
+  { id: 3, slug: "hosted", name: "Hosted", analysisExecutor: "server", repositoryId: null, provider: null, host: null, owner: null, repositoryName: null, currentVersionId: null, sourceRoots: null },
 ];
 
 const get = (key?: string) => GET(new NextRequest("http://localhost/api/client-analysis/context", { headers: key ? { authorization: `Bearer ${key}` } : {} }));
@@ -57,6 +58,7 @@ describe("GET /api/client-analysis/context", () => {
         analysisExecutor: "client",
         currentVersionId: 32,
         currentRevisionSha: SHA_B,
+        sourceRoots: [{ path: "apps/api", role: "api" }],
         repository: { repositoryId: 57, provider: "github", host: "github.com", owner: "acme", name: "api" },
       },
       {
@@ -65,12 +67,15 @@ describe("GET /api/client-analysis/context", () => {
         analysisExecutor: "client",
         currentVersionId: 31,
         currentRevisionSha: SHA_A,
+        sourceRoots: [],
         // 纯本地仓库的属主是服务端为唯一键拼出来的，不外传。
         repository: { repositoryId: 58, provider: "local", host: null, owner: null, name: null },
       },
-      { slug: "hosted", name: "Hosted", analysisExecutor: "server", currentVersionId: null, currentRevisionSha: null, repository: null },
+      { slug: "hosted", name: "Hosted", analysisExecutor: "server", currentVersionId: null, currentRevisionSha: null, sourceRoots: [], repository: null },
     ]);
     expect(execute).toHaveBeenCalledWith("SELECT name FROM organizations WHERE id = ? LIMIT 1", [2]);
+    const productsSql = String(execute.mock.calls.find(([sql]) => sql.includes("FROM products p LEFT JOIN repositories"))?.[0]);
+    expect(productsSql).toContain("p.source_roots AS sourceRoots");
     expect(execute.mock.calls.find(([sql]) => sql.includes("FROM products p LEFT JOIN repositories"))?.[1]).toEqual([2]);
   });
 
@@ -81,6 +86,6 @@ describe("GET /api/client-analysis/context", () => {
       throw new Error(`unrouted sql: ${sql}`);
     });
     const json = await (await get("sk_cd_write")).json();
-    expect(json.products).toEqual([{ slug: "fresh", name: "Hosted", analysisExecutor: "server", currentVersionId: null, currentRevisionSha: null, repository: { repositoryId: 60, provider: "gitlab", host: "gitlab.corp.com", owner: "team", name: "api" } }]);
+    expect(json.products).toEqual([{ slug: "fresh", name: "Hosted", analysisExecutor: "server", currentVersionId: null, currentRevisionSha: null, sourceRoots: [], repository: { repositoryId: 60, provider: "gitlab", host: "gitlab.corp.com", owner: "team", name: "api" } }]);
   });
 });

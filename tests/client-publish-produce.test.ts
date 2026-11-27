@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import type { SourceScopeRoot } from "../lib/remote-source-index";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -130,6 +131,84 @@ function product(overrides: Partial<ClientProduct> = {}): ClientProduct {
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
+
+const emptyListing = { path: "", entries: [], truncated: false, status: "indexed" as const, metrics: { entryCount: 0, prunedCount: 0 } };
+// 假模型的账本要引用规划器交回的那个文件，否则证据清洗会把场景剔光。
+const pageLedger = {
+  product: { description: "A fixture product.", evidence: [{ path: "apps/web/page.tsx", startLine: 1 }] },
+  release: { title: "Fixture", summary: "Fixture" },
+  changes: [],
+  features: [{ name: "页面", summary: "渲染页面", scenarios: [{ reference: "HP-1", context: "打开", action: "渲染", outcome: "显示", category: "happy", evidence: [{ path: "apps/web/page.tsx", startLine: 1 }] }] }],
+};
+
+describe("the product's source roots", () => {
+  it("plans only the product's source roots when the server configured them", async () => {
+    const { root } = await repository();
+    const captured: Array<unknown> = [];
+    const recordScopeRoots = (async (request: { scopeRoots?: unknown }) => {
+      captured.push(request.scopeRoots);
+      const listing = { path: "", entries: [], truncated: false, status: "indexed" as const, metrics: { entryCount: 0, prunedCount: 0 } };
+      return {
+        partitions: [{ slice: { files: [{ path: "apps/web/page.tsx" }] }, sources: [{ path: "apps/web/page.tsx", content: "1: export const page = 1;" }] }],
+        // finalize 只用它枚举实现面算覆盖率：空清单就行。
+        index: { scopeRoots: [], listRoot: async () => listing, listDir: async () => listing } as never,
+        partitionsCapped: false,
+        excluded: [],
+      } as unknown as Awaited<ReturnType<NonNullable<ProduceOptions["loadPartitions"]>>>;
+    }) as unknown as NonNullable<ProduceOptions["loadPartitions"]>;
+    // 和 cli 一样：产品的 sourceRoots 由调用方变成 scopeRoots 选项传进来（lib/client-publish/cli.ts）。
+    const run = (sourceRoots?: ReadonlyArray<SourceScopeRoot | string>) => ({
+      repositoryRoot: root,
+      product: product(),
+      ...(sourceRoots?.length ? { scopeRoots: sourceRoots } : {}),
+      full: false,
+      outputLanguage: "zh-CN" as const,
+      client: fakeModel(pageLedger).client,
+      provider: "github" as const,
+      loadPartitions: recordScopeRoots,
+    });
+    await produceProposal(run([{ path: "apps/web", role: "web" }]));
+    expect(captured[0]).toEqual([{ path: "apps/web", role: "web" }]);
+    // 字符串形式的也一样（调用方可能直接给字符串）。
+    await produceProposal(run(["apps/web"]));
+    expect(captured[1]).toEqual([{ path: "apps/web" }]);
+    // 没配置就是整个仓库（工作流的默认：path 为空的共享范围根）。
+    await produceProposal(run(undefined));
+    expect(captured[2]).toEqual([{ path: "", role: "shared" }]);
+  });
+
+  it("starts over when the product's source roots change", async () => {
+    const { root } = await repository();
+    const workdir = await mkdtemp(join(tmpdir(), "codelphi-publish-work-"));
+    roots.push(workdir);
+    const onePartition = (async () => {
+      return {
+        partitions: [{ slice: { files: [{ path: "apps/web/page.tsx" }] }, sources: [{ path: "apps/web/page.tsx", content: "1: export const page = 1;" }] }],
+        index: { scopeRoots: [], listRoot: async () => emptyListing, listDir: async () => emptyListing } as never,
+        partitionsCapped: false,
+        excluded: [],
+      } as unknown as Awaited<ReturnType<NonNullable<ProduceOptions["loadPartitions"]>>>;
+    }) as unknown as NonNullable<ProduceOptions["loadPartitions"]>;
+    const run = (scopeRoots?: ReadonlyArray<SourceScopeRoot>) => ({
+      repositoryRoot: root,
+      product: product(),
+      ...(scopeRoots?.length ? { scopeRoots } : {}),
+      full: false,
+      outputLanguage: "zh-CN" as const,
+      client: fakeModel(pageLedger).client,
+      provider: "github" as const,
+      workdir,
+      loadPartitions: onePartition,
+    });
+    await produceProposal(run([{ path: "apps/web" }]));
+    // 源码根目录换了：做好的分区不能沿用（规划是本地的，每次都重跑；沿用指的是模型工作）。
+    const restarted = await produceProposal(run([{ path: "apps/api" }]));
+    expect(restarted.reused.partitions).toBe(0);
+    // 没换就照常沿用。
+    const repeated = await produceProposal(run([{ path: "apps/api" }]));
+    expect(repeated.reused.partitions).toBe(1);
+  });
 });
 
 describe("produceProposal", () => {

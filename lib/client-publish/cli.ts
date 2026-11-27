@@ -43,6 +43,13 @@ type Text = { zh: string; en: string };
 
 const say = (text: Text, language: Language): string => (language === "en" ? text.en : text.zh);
 
+/** 产品的源码根目录，说出来让人确认分析的范围；没配置就是整个仓库，不说。 */
+function scopeRootsText(sourceRoots: ClientProduct["sourceRoots"], language: "zh" | "en"): string {
+  const paths = (sourceRoots ?? []).map((root) => (typeof root === "string" ? root : root.path));
+  if (paths.length === 0) return "";
+  return language === "en" ? ` Source roots: ${paths.join(", ")}.` : `源码根目录：${paths.join("、")}。`;
+}
+
 function languageOf(argv: readonly string[]): Language {
   const index = argv.indexOf("--language");
   return index >= 0 && argv[index + 1] === "en" ? "en" : "zh-CN";
@@ -494,12 +501,14 @@ export async function publishMain(argv: string[], io: CliIo): Promise<number> {
     const thinking = resolveThinkingMode(config);
     const thinkingText = thinking === "disabled" ? t({ zh: "；思考模式：已关闭", en: "; thinking: off" }) : thinking === "enabled" ? t({ zh: "；思考模式：开启", en: "; thinking: on" }) : "";
     io.stderr(t({
-      zh: `分析模型：${client.displayName ?? config.AI_MODEL}；单次模型请求超时上限：${Number((modelTimeoutMs / 1000).toFixed(1))} 秒；输出 token 上限：${modelMaxTokens}。${thinkingText}`,
-      en: `Analysis model: ${client.displayName ?? config.AI_MODEL}; timeout per model request: ${Number((modelTimeoutMs / 1000).toFixed(1))}s; output token limit: ${modelMaxTokens}.${thinkingText}`,
+      zh: `分析模型：${client.displayName ?? config.AI_MODEL}；单次模型请求超时上限：${Number((modelTimeoutMs / 1000).toFixed(1))} 秒；输出 token 上限：${modelMaxTokens}。${scopeRootsText(selected.product.sourceRoots, "zh")}${thinkingText}`,
+      en: `Analysis model: ${client.displayName ?? config.AI_MODEL}; timeout per model request: ${Number((modelTimeoutMs / 1000).toFixed(1))}s; output token limit: ${modelMaxTokens}.${scopeRootsText(selected.product.sourceRoots, "en")}${thinkingText}`,
     }));
     const result = await produceProposal({
       repositoryRoot: positionals[0],
       product: selected.product,
+      // 服务端为这个产品配的源码根目录：分析只看这些目录（和产品的设置页、服务端分析同一个口径）。
+      ...(selected.product.sourceRoots?.length ? { scopeRoots: selected.product.sourceRoots } : {}),
       full: values.full,
       outputLanguage: language,
       client,

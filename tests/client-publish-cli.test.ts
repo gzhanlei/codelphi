@@ -289,6 +289,23 @@ describe("publish", () => {
     expect(text).toContain("未上传");
   });
 
+  it("says which source roots it will analyse and stays inside them", async () => {
+    const { root } = await repository();
+    const h = harness({ environment: { AI_API_KEY: "k", AI_MODEL: "m" } });
+    // 产品配了指向不存在目录的源码根：分析限定在里面，一个文件都找不到。
+    h.context.products = [{ slug: "fixture", name: "Fixture", analysisExecutor: "client", currentVersionId: null, currentRevisionSha: null, repository: { repositoryId: 7, provider: "local", host: null, owner: null, name: "fixture" }, sourceRoots: [{ path: "apps/web" }] }];
+    const code = await publishMain([root, "--slug", "fixture", "--dry-run"], h.io);
+    expect(code).not.toBe(0);
+    expect(h.err.join("\n")).toContain("源码根目录：apps/web");
+    // 范围解析就拒绝了：分析确实被限定在产品配的目录里。
+    expect(h.err.join("\n")).toContain("scope root does not exist: apps/web");
+    // 服务端没配（或产品没带）：不打印这一行，照常分析整个仓库。
+    const whole = harness({ environment: { AI_API_KEY: "k", AI_MODEL: "m" } });
+    whole.context.products = [{ slug: "fixture", name: "Fixture", analysisExecutor: "client", currentVersionId: null, currentRevisionSha: null, repository: { repositoryId: 7, provider: "local", host: null, owner: null, name: "fixture" } }];
+    expect(await publishMain([root, "--slug", "fixture", "--dry-run"], whole.io)).toBe(0);
+    expect(whole.out.join("\n")).not.toContain("源码根目录");
+  });
+
   it("publishes, then prints the receipt the server sent", async () => {
     const { root } = await repository();
     const h = harness({ environment: { AI_API_KEY: "k", AI_MODEL: "m" } });

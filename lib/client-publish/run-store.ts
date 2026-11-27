@@ -30,6 +30,8 @@ export interface PublishRunIdentity {
   base: { specVersionId: number; sha: string } | null;
   outputLanguage: "zh-CN" | "en";
   modelName: string;
+  /** 产品的源码根目录。换了它，窗口就不一样：之前做好的分区不能沿用。没配置就没有这一项。 */
+  scopeRoots?: Array<{ path: string; label?: string; role?: string }>;
   /** 模型思考还是不思考。换了它，做完的分区就不能沿用：同一个分区在两种模式下给出的内容不一样。不带 thinking 参数的客户端没有这一项。 */
   thinking?: "enabled" | "disabled";
   clientVersion: string;
@@ -85,7 +87,7 @@ interface Entry {
 }
 
 const SAME_IDENTITY: ReadonlyArray<keyof PublishRunIdentity> = [
-  "repositoryRoot", "productSlug", "targetSha", "treeSha", "base", "outputLanguage", "modelName", "thinking", "clientVersion", "pipelineVersion", "promptVersion",
+  "repositoryRoot", "productSlug", "targetSha", "treeSha", "base", "outputLanguage", "modelName", "scopeRoots", "thinking", "clientVersion", "pipelineVersion", "promptVersion",
 ];
 
 const sameIdentity = (left: PublishRunIdentity, right: PublishRunIdentity): boolean =>

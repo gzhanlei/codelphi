@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireSnapshotWriteKey } from "@/lib/api-key-auth";
 import { getDb } from "@/lib/db";
 import { MAX_SUPPORTED_CONTRACT_VERSIONS, MIN_SUPPORTED_CONTRACT_VERSION, PROPOSAL_CONTRACT_VERSION } from "@/lib/client-proposal/contract";
+import { parseSourceRoots } from "@/lib/remote-analysis";
 
 export const runtime = "nodejs";
 
@@ -10,6 +11,7 @@ interface ProductRow {
   slug: string;
   name: string;
   analysisExecutor: string;
+  sourceRoots: unknown;
   repositoryId: number | string | null;
   provider: string | null;
   host: string | null;
@@ -17,6 +19,15 @@ interface ProductRow {
   repositoryName: string | null;
   currentVersionId: number | string | null;
   currentRevisionSha: string | null;
+}
+
+/** 库里存坏的源码根目录按没配置算：发布不该因为一行旧数据起不来。 */
+function sourceRootsOf(value: unknown): Array<{ path: string; label?: string; role?: string }> {
+  try {
+    return parseSourceRoots(value);
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -30,7 +41,7 @@ export async function GET(request: NextRequest) {
   const db = getDb();
   const [organizationRows] = (await db.execute("SELECT name FROM organizations WHERE id = ? LIMIT 1", [auth.identity.organizationId])) as unknown as [Array<{ name: string }>, unknown];
   const [rows] = (await db.execute(
-    `SELECT p.id, p.slug, p.name, p.analysis_executor AS analysisExecutor,
+    `SELECT p.id, p.slug, p.name, p.analysis_executor AS analysisExecutor, p.source_roots AS sourceRoots,
             r.id AS repositoryId, r.provider, r.host, r.owner, r.name AS repositoryName,
             (SELECT MAX(sv.id) FROM spec_versions sv WHERE sv.repository_id = r.id) AS currentVersionId
      FROM products p LEFT JOIN repositories r ON r.product_id = p.id
@@ -54,6 +65,8 @@ export async function GET(request: NextRequest) {
       slug: row.slug,
       name: row.name,
       analysisExecutor: row.analysisExecutor,
+      // 客户端按它把分析限定在产品的源码根目录里；服务端分析用的就是这一份（lib/analysis.ts）。
+      sourceRoots: sourceRootsOf(row.sourceRoots),
       currentVersionId: row.currentVersionId == null ? null : Number(row.currentVersionId),
       currentRevisionSha: row.currentVersionId == null ? null : shas.get(Number(row.currentVersionId)) ?? null,
       repository: row.repositoryId == null ? null : {
