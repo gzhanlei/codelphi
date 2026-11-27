@@ -269,6 +269,14 @@ describe("produceProposal", () => {
     expect(result.proposal!.repository).toEqual({ repositoryId: 57, provider: "gitlab", host: "gitlab.corp.com", owner: "team", name: "api" });
   });
 
+  it("fills a missing host on the server's binding from the origin remote", async () => {
+    const { root } = await repository();
+    await git(root, "remote", "add", "origin", "https://github.com/acme/api.git");
+    const bound = product({ repository: { repositoryId: 57, provider: "github", host: null, owner: "acme", name: "api" } });
+    const result = await produceProposal({ repositoryRoot: root, product: bound, full: false, outputLanguage: "zh-CN", client: fakeModel().client });
+    expect(result.proposal!.repository).toEqual({ repositoryId: 57, provider: "github", host: "github.com", owner: "acme", name: "api" });
+  });
+
   it("takes the repository identity from the origin remote and lets the caller correct the provider", async () => {
     const { root } = await repository();
     await git(root, "remote", "add", "origin", "https://x-access-token:ghs_secretToken@github.com/acme/api.git");

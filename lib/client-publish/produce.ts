@@ -257,9 +257,10 @@ export async function produceProposal(options: ProduceOptions): Promise<ProduceS
 
   const remote = await originRemote(repositoryRoot);
   const bound = options.product.repository;
+  const detected = repositoryIdentityOf(remote, basename(repositoryRoot), { ...(options.provider ? { provider: options.provider } : {}) });
   const repository: RepositoryIdentity = bound
-    ? { repositoryId: bound.repositoryId, provider: bound.provider as RepositoryProvider, host: bound.host, owner: bound.owner, name: bound.name as string }
-    : repositoryIdentityOf(remote, basename(repositoryRoot), { ...(options.provider ? { provider: options.provider } : {}) });
+    ? { repositoryId: bound.repositoryId, provider: bound.provider as RepositoryProvider, host: bound.host ?? (bound.provider === "local" ? null : detected.host), owner: bound.owner, name: bound.name as string }
+    : detected;
   const modelName = options.modelName ?? options.client.displayName ?? "unknown";
   const base: ProduceSummary = {
     decision,

@@ -2,7 +2,7 @@
  * 提案契约 2.0.0（修订稿 §4.3、§4.6）。客户端和服务端共用这一份代码。
  *
  * 客户端分析把结果作为「提案」交给服务端；服务端不读源码、不调模型，用现有的合并逻辑落成规格版本和发布。
- * 提案体（proposal）与服务端模型输出的结构相同：直接复用 analysisSchema，所以「同形」不是靠约定，是同一个 schema。
+ * 提案体（proposal）与服务端模型输出的字段结构相同：复用 analysisSchema 的字段 schema，只去掉单次响应的集合数量上限。
  *
  * 三件事在这里一次做完：
  *   - 校验：schema 加一条「载荷里只出现整数」。比例由服务端用整数计数算，哈希的规范化因此不涉及浮点数。
@@ -95,12 +95,15 @@ export const coverageReceiptSchema = z.object({
   primaryRangesOmitted: nonNegative.nullable(),
 });
 
-/** 提案正文。features 不设上限：这是合并后的全量结果，不是一次模型响应（analysisSchema 那边的 50 是单个响应的上限）。 */
+/** 提案正文。features/scenarios 不设数量上限：这是合并后的全量结果，不是一次模型响应（analysisSchema 那边的 50/40 是单个响应的上限）。 */
+const proposalFeatureSchema = analysisSchema.shape.features.element.extend({
+  scenarios: z.array(analysisSchema.shape.features.element.shape.scenarios.element),
+});
 const proposalBodySchema = z.object({
   product: analysisSchema.shape.product,
   release: analysisSchema.shape.release,
   changes: analysisSchema.shape.changes,
-  features: z.array(analysisSchema.shape.features.element),
+  features: z.array(proposalFeatureSchema),
 });
 
 const shortVersion = z.string().min(1).max(64);

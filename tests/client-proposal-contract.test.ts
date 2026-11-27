@@ -139,6 +139,12 @@ describe("sealProposal", () => {
     const sealed = seal({ proposal: { ...part("proposal"), features: Array.from({ length: 120 }, (_, index) => feature(`功能 ${index}`, "结果")) } });
     expect(sealed.proposal.features).toHaveLength(120);
   });
+
+  it("accepts a merged feature with more scenarios than one model response may hold", () => {
+    const scenarios = Array.from({ length: 45 }, (_, index) => ({ ...feature("登录", `结果 ${index + 1}`).scenarios[0], reference: `HP-${index + 1}` }));
+    const sealed = seal({ proposal: { ...part("proposal"), features: [{ ...feature("登录", "进入首页"), scenarios }] } });
+    expect(sealed.proposal.features[0].scenarios).toHaveLength(45);
+  });
 });
 
 describe("parseProposal", () => {
