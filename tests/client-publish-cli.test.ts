@@ -305,6 +305,114 @@ describe("publish", () => {
 });
 
 describe("snapshot entry dispatches the client analysis commands", () => {
+  describe("--workdir, --prepare and --finalize", () => {
+    async function workdir(): Promise<string> {
+      const directory = await mkdtemp(join(tmpdir(), "codelphi-cli-work-"));
+      roots.push(directory);
+      return directory;
+    }
+
+    /** 能数模型调用的替身。 */
+    function counting(counts: { calls: number; prompts: string[] }): NonNullable<CliIo["createClient"]> {
+      return () => {
+        const model = fakeModel();
+        const complete = model.complete.bind(model);
+        return { ...model, complete: async (messages) => { counts.calls += 1; counts.prompts.push(messages.map((message) => message.content).join("\n")); return complete(messages); } };
+      };
+    }
+
+    // 提取和行为面枚举的第二步都以「你在维护一个产品知识库」开头，只有枚举的那一步带着改前改后的复述。
+    const extractionCalls = (prompts: string[]) => prompts.filter((prompt) => prompt.includes("产品知识库") && !prompt.includes("改前/改后复述")).length;
+
+    it("prepares without uploading, then finalizes without a model and without model credentials", async () => {
+      const { root, head } = await repository();
+      const directory = await workdir();
+      const prepared = harness({ environment: { AI_API_KEY: "k", AI_MODEL: "m" } });
+      const preparedModel = { calls: 0, prompts: [] as string[] };
+      prepared.io.createClient = counting(preparedModel);
+      expect(await publishMain([root, "--slug", "fixture", "--workdir", directory, "--prepare"], prepared.io)).toBe(0);
+      expect(prepared.requests.filter((request) => request.method === "POST")).toHaveLength(0);
+      expect(preparedModel.calls).toBeGreaterThan(0);
+      expect(prepared.out.join("\n")).toContain(directory);
+      expect(prepared.out.join("\n")).toContain("--finalize");
+
+      // finalize：不要模型，也不要模型的凭证。
+      const finalized = harness({ environment: { AI_API_KEY: undefined, AI_MODEL: undefined } });
+      const finalizeModel = { calls: 0, prompts: [] as string[] };
+      finalized.io.createClient = () => {
+        throw new Error("finalize must not create a model client");
+      };
+      expect(await publishMain([root, "--slug", "fixture", "--workdir", directory, "--finalize"], finalized.io)).toBe(0);
+      const uploads = finalized.requests.filter((request) => request.method === "POST");
+      expect(uploads).toHaveLength(1);
+      expect(JSON.parse(uploads[0].body as string).revision.sha).toBe(head);
+      expect(finalized.out.join("\n")).toContain("41");
+    });
+
+    it("runs the prepared analysis again from where it stopped instead of paying for it twice", async () => {
+      const { root } = await repository();
+      const directory = await workdir();
+      const first = harness({ environment: { AI_API_KEY: "k", AI_MODEL: "m" } });
+      const firstModel = { calls: 0, prompts: [] as string[] };
+      first.io.createClient = counting(firstModel);
+      expect(await publishMain([root, "--slug", "fixture", "--workdir", directory, "--prepare"], first.io)).toBe(0);
+      expect(extractionCalls(firstModel.prompts)).toBeGreaterThan(0);
+      const again = harness({ environment: { AI_API_KEY: "k", AI_MODEL: "m" } });
+      const againModel = { calls: 0, prompts: [] as string[] };
+      again.io.createClient = counting(againModel);
+      expect(await publishMain([root, "--slug", "fixture", "--workdir", directory, "--prepare"], again.io)).toBe(0);
+      expect(extractionCalls(againModel.prompts)).toBe(0);
+      expect(again.err.join("\n")).toContain("续跑");
+      // 没有工作目录就什么都不留。
+      const bare = harness({ environment: { AI_API_KEY: "k", AI_MODEL: "m" } });
+      const bareModel = { calls: 0, prompts: [] as string[] };
+      bare.io.createClient = counting(bareModel);
+      expect(await publishMain([root, "--slug", "fixture", "--prepare", "--dry-run"], bare.io)).toBe(2);
+    });
+
+    it("says what is wrong instead of finalizing the wrong thing", async () => {
+      const { root } = await repository();
+      const empty = await workdir();
+      const nowhere = harness({ environment: { AI_API_KEY: "k", AI_MODEL: "m" } });
+      expect(await publishMain([root, "--slug", "fixture", "--workdir", empty, "--finalize"], nowhere.io)).toBe(2);
+      expect(nowhere.err.join("\n")).toContain("--prepare");
+
+      const directory = await workdir();
+      const prepared = harness({ environment: { AI_API_KEY: "k", AI_MODEL: "m" } });
+      prepared.io.createClient = counting({ calls: 0, prompts: [] });
+      expect(await publishMain([root, "--slug", "fixture", "--workdir", directory, "--prepare"], prepared.io)).toBe(0);
+      await writeFile(join(root, "lib/auth.ts"), `${AUTH}// one more\n`);
+      await git(root, "add", ".");
+      await git(root, "-C", root, "-c", "user.name=CLI", "-c", "user.email=cli@example.test", "commit", "-m", "moved on", "--quiet");
+      const moved = harness({ environment: { AI_API_KEY: "k", AI_MODEL: "m" } });
+      expect(await publishMain([root, "--slug", "fixture", "--workdir", directory, "--finalize"], moved.io)).toBe(2);
+      expect(moved.err.join("\n")).toContain("--prepare");
+      expect(moved.requests.filter((request) => request.method === "POST")).toHaveLength(0);
+
+      // 准备到一半（没有提案）也不能上传。
+      const half = await workdir();
+      const started = harness({ environment: { AI_API_KEY: "k", AI_MODEL: "m" } });
+      started.io.createClient = () => ({ displayName: "m", complete: async () => { throw new Error("model down"); } });
+      expect(await publishMain([root, "--slug", "fixture", "--workdir", half, "--prepare"], started.io)).toBe(1);
+      const unfinished = harness({});
+      expect(await publishMain([root, "--slug", "fixture", "--workdir", half, "--finalize"], unfinished.io)).toBe(2);
+      expect(unfinished.err.join("\n")).toContain("--prepare");
+    });
+
+    it("refuses the flags it cannot make sense of before touching anything", async () => {
+      const { root } = await repository();
+      for (const argv of [
+        [root, "--slug", "fixture", "--prepare"],
+        [root, "--slug", "fixture", "--finalize"],
+        [root, "--slug", "fixture", "--workdir", await workdir(), "--prepare", "--finalize"],
+      ]) {
+        const h = harness({ environment: { AI_API_KEY: "k", AI_MODEL: "m" } });
+        expect(await publishMain(argv, h.io), argv.join(" ")).toBe(2);
+        expect(h.requests, argv.join(" ")).toHaveLength(0);
+      }
+    });
+  });
+
   it("routes config, status and publish to their implementations with the caller's output and environment", async () => {
     const { main } = await import("../scripts/snapshot");
     const file = join(tmpdir(), `codelphi-cli-dispatch-${Math.random().toString(16).slice(2)}.env`);

@@ -6,7 +6,12 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { StructuredCompletionClient, StructuredCompletionMessage } from "../lib/llm-client";
 import type { ClientProduct } from "../lib/client-publish/server";
-import { ClientPublishError, produceProposal } from "../lib/client-publish/produce";
+import { ClientPublishError, plainSource, produceProposal, sourceTexts, type ProduceOptions } from "../lib/client-publish/produce";
+import { loadPreparedPublish } from "../lib/client-publish/run-store";
+import { analyzeWithAI } from "../lib/ai";
+import { getPartitionedAnalysisSources } from "../lib/remote-analysis";
+import { resolveGitSnapshot } from "../lib/snapshot/git-backend";
+import { parseUnifiedDiff } from "../lib/client-publish/window";
 
 const exec = promisify(execFile);
 const roots: string[] = [];
@@ -136,6 +141,9 @@ describe("produceProposal", () => {
     const proposal = result.proposal!;
     expect(proposal.mode).toBe("full");
     expect(proposal.base).toBeNull();
+    // 流程图按功能排好序，几路并发谁先谁后不影响提案的内容；被校验拒掉的是 0 张。
+    expect(proposal.flows.map((flow) => flow.featureStableKey)).toEqual([...proposal.flows.map((flow) => flow.featureStableKey)].sort());
+    expect(result.flows).toEqual({ generated: 2, rejected: 0 });
     expect(proposal.revision).toMatchObject({ sha: head, title: "add billing", branch: "main" });
     // 没有远端的仓库是纯本地仓库：没有主机名和属主。
     expect(proposal.repository).toMatchObject({ repositoryId: null, provider: "local", host: null, owner: null });
@@ -164,6 +172,28 @@ describe("produceProposal", () => {
     // 每个发给模型的提示词都带了「不输出源码」的约束。
     expect(model.prompts.length).toBeGreaterThan(0);
     expect(model.prompts.every((prompt) => prompt.includes("不得出现源码") || prompt.includes("Never reproduce source code"))).toBe(true);
+  });
+
+  it("orders the flow graphs by feature however the concurrent generation happens to finish", async () => {
+    const { root } = await repository();
+    const model = fakeModel();
+    const complete = model.client.complete.bind(model.client);
+    let delayed = false;
+    // 让「登录」那张图晚到：完成的先后是 计费、登录，和按功能排好的顺序（登 在 计 之前）相反。
+    model.client.complete = async (messages) => {
+      const prompt = messages.map((message) => message.content).join("\n");
+      if (prompt.includes("执行图") && prompt.includes("登录守卫")) {
+        delayed = true;
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+      return complete(messages);
+    };
+    const result = await produceProposal({ repositoryRoot: root, product: product(), full: false, outputLanguage: "zh-CN", client: model.client });
+    expect(delayed).toBe(true);
+    expect(result.flows).toEqual({ generated: 2, rejected: 0 });
+    const keys = result.proposal!.flows.map((flow) => flow.featureStableKey);
+    expect(new Set(keys).size).toBe(2);
+    expect(keys).toEqual([...keys].sort());
   });
 
   it("does not call the model at all when the ledger already sits on the target commit", async () => {
@@ -271,5 +301,146 @@ describe("produceProposal", () => {
     const stages: string[] = [];
     await produceProposal({ repositoryRoot: root, product: product(), full: false, outputLanguage: "zh-CN", client: fakeModel().client, onProgress: (event) => stages.push(event.stage) });
     for (const stage of ["plan", "partition", "presentation", "window", "enumerate", "flows", "scan"]) expect(stages, stage).toContain(stage);
+  });
+});
+
+/** 把规划好的每个分区再按文件拆开，好让「做到一半」落在分区之间。 */
+const oneFilePerPartition: NonNullable<ProduceOptions["loadPartitions"]> = async (request, runtime, options) => {
+  const planned = await getPartitionedAnalysisSources(request, runtime, options);
+  return { ...planned, partitions: planned.partitions.flatMap((partition) => partition.sources.map((source) => ({ ...partition, sources: [source] }))) };
+};
+
+const isExtraction = (prompt: string) => prompt.includes("产品知识库") || prompt.includes("product knowledge base");
+
+describe("publish --workdir: resume", () => {
+  it("does not call the model again for work that finished before an interruption", async () => {
+    const { root, head } = await repository();
+    const workdir = await mkdtemp(join(tmpdir(), "codelphi-publish-work-"));
+    roots.push(workdir);
+    const { repoRoot } = await resolveGitSnapshot(root);
+    // 分区提取是经 analyze 这一个入口调模型的，数它最准（理解层的提示词里也会出现同样的字样）。
+    const extracted: string[][] = [];
+    const analyze: typeof analyzeWithAI = async (sources, change, context) => {
+      extracted.push(sources.map((source) => source.path));
+      return analyzeWithAI(sources, change, context);
+    };
+    const run = (client: StructuredCompletionClient) => ({ repositoryRoot: root, product: product(), full: false, outputLanguage: "zh-CN" as const, client, provider: "github" as const, workdir, loadPartitions: oneFilePerPartition, analyze });
+
+    // 第一次：第一个分区做完，第二个分区的提取一直失败，整次中止。
+    const broken = fakeModel();
+    const answer = broken.client.complete.bind(broken.client);
+    const answered = new Set<string>();
+    let failures = 0;
+    broken.client.complete = async (messages) => {
+      const prompt = messages.map((message) => message.content).join("\n");
+      if (isExtraction(prompt) && [...answered].some((done) => done !== prompt)) {
+        failures += 1;
+        throw new Error("model unavailable");
+      }
+      const reply = await answer(messages);
+      if (isExtraction(prompt)) answered.add(prompt);
+      return reply;
+    };
+    await expect(produceProposal(run(broken.client))).rejects.toThrow();
+    expect(failures).toBeGreaterThanOrEqual(1);
+    expect(answered.size).toBe(1);
+
+    // 第二次：模型恢复了。做过的那个分区不再调模型。
+    extracted.length = 0;
+    const model = fakeModel();
+    const resumed = await produceProposal(run(model.client));
+    expect(extracted).toHaveLength(1);
+    expect(resumed.reused.partitions).toBe(1);
+    expect(resumed.proposal!.revision.sha).toBe(head);
+
+    // 第三次：分区、行为面枚举、流程图都是现成的；理解层故意答坏，所以每次都重做。提案和上一次一字不差。
+    const again = fakeModel();
+    extracted.length = 0;
+    const repeated = await produceProposal(run(again.client));
+    expect(extracted).toHaveLength(0);
+    expect(again.prompts.filter((prompt) => prompt.includes("执行图"))).toHaveLength(0);
+    expect(again.prompts.filter((prompt) => prompt.includes("你在向一位不了解此变更的工程师转述"))).toHaveLength(0);
+    expect(again.prompts).toHaveLength(1);
+    expect(repeated.reused).toEqual({ partitions: 2, flows: 2, enumeration: true, presentation: false });
+    expect(repeated.proposal!.proposalHash).toBe(resumed.proposal!.proposalHash);
+
+    // --finalize 读到的就是它。
+    const prepared = await loadPreparedPublish(workdir, { repositoryRoot: repoRoot, productSlug: "fixture", targetSha: head });
+    expect(prepared.proposal.proposalHash).toBe(resumed.proposal!.proposalHash);
+    expect(prepared.summary).toEqual({ decision: resumed.decision, repository: resumed.repository, dirty: resumed.dirty, pruned: resumed.pruned, flows: resumed.flows, enumeration: resumed.enumeration, reused: repeated.reused, startedAt: repeated.startedAt });
+  });
+
+  it("starts over when the model changes, and keeps nothing when no work directory is given", async () => {
+    const { root } = await repository();
+    const workdir = await mkdtemp(join(tmpdir(), "codelphi-publish-work-"));
+    roots.push(workdir);
+    await produceProposal({ repositoryRoot: root, product: product(), full: false, outputLanguage: "zh-CN", client: fakeModel().client, provider: "github", workdir, loadPartitions: oneFilePerPartition });
+    const other = fakeModel();
+    other.client.displayName = "another-tenant-model";
+    const restarted = await produceProposal({ repositoryRoot: root, product: product(), full: false, outputLanguage: "zh-CN", client: other.client, provider: "github", workdir, loadPartitions: oneFilePerPartition });
+    expect(other.prompts.filter((prompt) => prompt.includes("执行图")).length).toBeGreaterThan(0);
+    expect(restarted.reused).toEqual({ partitions: 0, flows: 0, enumeration: false, presentation: false });
+
+    const fresh = fakeModel();
+    const single = await produceProposal({ repositoryRoot: root, product: product(), full: false, outputLanguage: "zh-CN", client: fresh.client, provider: "github", loadPartitions: oneFilePerPartition });
+    expect(single.reused).toEqual({ partitions: 0, flows: 0, enumeration: false, presentation: false });
+    expect(fresh.prompts.filter((prompt) => prompt.includes("执行图")).length).toBeGreaterThan(0);
+  });
+
+  it("does not open a work directory at all when there is nothing to publish", async () => {
+    const { root, head } = await repository();
+    const workdir = await mkdtemp(join(tmpdir(), "codelphi-publish-work-"));
+    roots.push(workdir);
+    const model = fakeModel();
+    const noop = await produceProposal({ repositoryRoot: root, product: product({ currentVersionId: 3, currentRevisionSha: head }), full: false, outputLanguage: "zh-CN", client: model.client, provider: "github", workdir });
+    expect(noop.decision.action).toBe("noop");
+    expect(model.prompts).toHaveLength(0);
+    await expect(loadPreparedPublish(workdir, { repositoryRoot: root, productSlug: "fixture", targetSha: head })).rejects.toMatchObject({ code: "publish_not_prepared" });
+  });
+});
+
+describe("the source index the privacy scan compares against", () => {
+  it("strips the line numbers the model saw, and leaves content that was never numbered alone", () => {
+    expect(plainSource("1: export const a = 1;\n2: export const b = 2;\n3: \n4: export const c = 3;\n")).toBe("export const a = 1;\nexport const b = 2;\n\nexport const c = 3;\n");
+    // 一半以上的非空行带行号才算带行号的源码；行里的「12: 」这种时间写法不一定是行号。
+    expect(plainSource("1: first\nnot numbered\nnot numbered either\n")).toBe("1: first\nnot numbered\nnot numbered either\n");
+    // 边界：只有一行且带行号；恰好一半带行号。都算带行号的源码。
+    expect(plainSource("1: export const a = 1;\n")).toBe("export const a = 1;\n");
+    expect(plainSource("1: numbered\nplain\n")).toBe("numbered\nplain\n");
+    expect(plainSource("")).toBe("");
+    expect(plainSource("const only = 1;\n")).toBe("const only = 1;\n");
+  });
+
+  it("covers every file the analysis read: each partition source without its numbers, plus the window's files that no partition read", async () => {
+    const { root, first } = await repository();
+    // 窗口里再加一个二进制文件：不进索引。
+    await writeFile(join(root, "lib/blob.bin"), "abc\0def\n");
+    await git(root, "add", ".");
+    await git(root, "commit", "-m", "add a blob");
+    const final = await git(root, "rev-parse", "HEAD");
+    // 从计费出现之前的那个提交比起，窗口里就有新加的计费文件、改过的说明和那个二进制文件。
+    const diff = await git(root, "diff", "--no-color", "-M", "--unified=0", first, final);
+    const files = [...parseUnifiedDiff(diff), { path: "lib/removed.ts", status: "removed" as const, previousPath: null, patch: "" }];
+    const texts = await sourceTexts(root, { partitions: [{ slice: {} as never, sources: [{ path: "lib/auth.ts", content: `1: ${AUTH_V2.split("\n")[0]}\n2: ${AUTH_V2.split("\n")[1]}\n` }] }] }, files, final);
+    const byPath = new Map(texts.map((text) => [text.path, text.text]));
+    expect([...byPath.keys()].sort()).toEqual(["README.md", "lib/auth.ts", "lib/billing.ts"]);
+    // 窗口里的说明文件原样进来。
+    expect(byPath.get("README.md")).toBe(README_V2);
+    // 分区里的那份已经去掉行号。
+    expect(byPath.get("lib/auth.ts")).toBe(`${AUTH_V2.split("\n")[0]}\n${AUTH_V2.split("\n")[1]}\n`);
+    // 窗口里新增的计费文件按目标提交读出来，是原样。
+    expect(byPath.get("lib/billing.ts")).toBe(BILLING);
+  });
+});
+
+describe("a ledger with a single feature", () => {
+  it("is a valid analysis, not an empty one", async () => {
+    const { root } = await repository();
+    const single = ledger();
+    single.features = single.features.slice(0, 1);
+    single.features[0].scenarios = single.features[0].scenarios.slice(0, 1);
+    const result = await produceProposal({ repositoryRoot: root, product: product(), full: false, outputLanguage: "zh-CN", client: fakeModel(single).client });
+    expect(result.proposal!.proposal.features).toHaveLength(1);
+    expect(result.flows).toEqual({ generated: 1, rejected: 0 });
   });
 });

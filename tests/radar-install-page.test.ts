@@ -37,4 +37,17 @@ describe("codelphi radar installation page", () => {
     expect(html).not.toContain("这个 skill");
     expect(html).not.toContain("用 codelphi radar skill 分析");
   });
+
+  it("documents publishing an analysis to CoDelphi, including the two-step form, in the language of the page", async () => {
+    mockLocale.value = "zh-CN";
+    const html = renderToStaticMarkup(await RadarInstallPage());
+    // 页面里的尖括号会被转义，所以占位符按转义后的样子找。
+    for (const text of ["snapshot.cjs config", "snapshot.cjs publish /path/to/repo --slug &lt;product-slug&gt;", "--workdir .codelphi-publish --prepare", "--workdir .codelphi-publish --finalize", "源码文件、补丁和源码摘录都不离开本机", "不经过 CoDelphi"]) expect(html).toContain(text);
+
+    mockLocale.value = "en";
+    const english = renderToStaticMarkup(await RadarInstallPage());
+    for (const text of ["Publish an analysis to CoDelphi", "Source files, patches, and source excerpts never leave the machine", "not through CoDelphi", "--finalize only uploads and does not call a model"]) expect(english).toContain(text);
+    expect(english).not.toContain("客户端分析");
+    expect(english).not.toContain("不离开本机");
+  });
 });

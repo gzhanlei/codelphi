@@ -12,10 +12,14 @@
  *
  * 全量提案在有基线时也带变更窗口：托管的沿用判定靠「含行为变更的路径集合」决定哪些旧场景不沿用，
  * 不带窗口的话，代码已经删掉的行为会以旧场景的形式留下来。
+ *
+ * 分步续跑（`publish --workdir`，修订稿 §5.1）：第 3 步的每个分区、第 4 步的枚举、理解层、第 5 步的每张流程图，
+ * 一有结果就写进工作目录（lib/client-publish/run-store.ts）。中断后重跑同一条命令，做过的直接拿来用。
+ * 给了工作目录但这一次的身份变了（提交、基线、语言、模型、客户端版本），之前的结果作废，从头来。
  */
 import { basename } from "node:path";
-import type { AnalysisResult } from "../ai";
-import { enumerateBehavioralChunks, type BehavioralEnumerationMetrics } from "../behavioral-enumeration";
+import type { AnalysisResult, analyzeWithAI } from "../ai";
+import { enumerateBehavioralChunks, type BehavioralEnumerationMetrics, type BehavioralEnumerationOutcome } from "../behavioral-enumeration";
 import type { RepositoryIdentity, RepositoryProvider } from "../client-proposal/contract";
 import { sealProposal, type Proposal } from "../client-proposal/contract";
 import { isSchemaArtifact } from "../evidence";
@@ -24,15 +28,17 @@ import { behavioralChangePaths } from "../patch-scan";
 import type { PrivacyHit, PrivacyRule, SourceText } from "../privacy-scan";
 import { createSourceIndex, scanValue } from "../privacy-scan";
 import { CLIENT_PROMPT_VERSION } from "../prompt-policy";
+import type { getPartitionedAnalysisSources } from "../remote-analysis";
 import type { RemoteSourceBackend, SourceScopeRoot } from "../remote-source-index";
 import { specFeatureKey } from "../spec-diff";
 import { FlowValidationError, scenarioFingerprint } from "../semantic-feature-flow";
 import type { StructuredCompletionClient } from "../llm-client";
-import { analyzeProductSnapshot } from "../snapshot/analyze";
+import { executeSnapshotWorkOrder, finalizeSnapshotAnalysis, prepareSnapshotAnalysis, type SnapshotExecution } from "../snapshot/workflow";
 import { runGit } from "../snapshot/git";
 import { createLocalGitBackend, resolveGitSnapshot } from "../snapshot/git-backend";
 import type { SnapshotAnalysis, SnapshotIdentity, SnapshotProgressEvent } from "../snapshot/types";
 import { prunePrivacyHits } from "./prune";
+import { fingerprintOf, openPublishRun, type PublishRunStore } from "./run-store";
 import { repositoryIdentityOf } from "./identity";
 import type { ClientProduct } from "./server";
 import { decidePublish, type CommitRelation, type PublishDecision } from "./state";
@@ -70,8 +76,19 @@ export interface ProduceOptions {
   /** 远端地址看不出是哪一家代码托管服务时，由用户指定。 */
   provider?: RepositoryProvider;
   onProgress?: (event: ProduceProgress) => void;
+  /** 分步续跑的工作目录（`publish --workdir`）。不给就不落盘，一次跑完。 */
+  workdir?: string;
   /** 测试注入。 */
-  analyze?: typeof analyzeProductSnapshot;
+  analyze?: typeof analyzeWithAI;
+  loadPartitions?: typeof getPartitionedAnalysisSources;
+}
+
+/** 这次有多少是直接从工作目录拿来的。没有工作目录时都是零。 */
+export interface ReusedWork {
+  partitions: number;
+  flows: number;
+  enumeration: boolean;
+  presentation: boolean;
 }
 
 export interface ProduceSummary {
@@ -84,6 +101,9 @@ export interface ProduceSummary {
   pruned: Array<{ path: string; rules: PrivacyRule[] }>;
   flows: { generated: number; rejected: number };
   enumeration: BehavioralEnumerationMetrics | null;
+  reused: ReusedWork;
+  /** 这一次分析开始的时间。有工作目录时取自它的记录，所以重跑同一次得到的提案一字不差。 */
+  startedAt: string;
 }
 
 async function exists(repositoryRoot: string, revision: string): Promise<boolean> {
@@ -136,7 +156,7 @@ async function unifiedDiff(repositoryRoot: string, from: string, to: string): Pr
 }
 
 /** 分区里的源码是带行号的；模型看到的就是它。建索引前把行号去掉，才和提案里的文本对得上。 */
-function plainSource(content: string): string {
+export function plainSource(content: string): string {
   const lines = content.split("\n");
   const nonEmpty = lines.filter((line) => line.trim() !== "");
   const numbered = nonEmpty.filter((line) => /^\d+: /.test(line)).length;
@@ -144,7 +164,7 @@ function plainSource(content: string): string {
 }
 
 /** 本次读过的全部源码：分区里的每个文件，加上变更窗口里还在的每个文件（行为面枚举读的是它们的改动区附近）。 */
-async function sourceTexts(repositoryRoot: string, analysis: SnapshotAnalysis, files: readonly WindowFileInput[], targetSha: string): Promise<SourceText[]> {
+export async function sourceTexts(repositoryRoot: string, analysis: Pick<SnapshotAnalysis, "partitions">, files: readonly WindowFileInput[], targetSha: string): Promise<SourceText[]> {
   const sources = new Map<string, string>();
   for (const partition of analysis.partitions) for (const source of partition.sources) sources.set(source.path, plainSource(source.content));
   for (const file of files) {
@@ -160,26 +180,44 @@ async function sourceTexts(repositoryRoot: string, analysis: SnapshotAnalysis, f
   return [...sources].map(([path, text]) => ({ path, text }));
 }
 
-async function generateFlows(result: AnalysisResult, client: StructuredCompletionClient, language: "zh-CN" | "en", onProgress?: (event: ProduceProgress) => void): Promise<Proposal["flows"]> {
+/** 条目文件名只用功能键里的安全字符，再接一段功能键的指纹，不同的功能不会撞名。 */
+function flowEntryName(featureKey: string): string {
+  return `${featureKey.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 80) || "feature"}-${fingerprintOf(featureKey).slice(0, 12)}`;
+}
+
+async function generateFlows(result: AnalysisResult, client: StructuredCompletionClient, language: "zh-CN" | "en", store: PublishRunStore | null, onProgress?: (event: ProduceProgress) => void): Promise<{ flows: Proposal["flows"]; reused: number }> {
   const flows: Proposal["flows"] = [];
-  let rejected = 0;
+  let reused = 0;
   let cursor = 0;
   const features = result.features;
   await Promise.all(Array.from({ length: Math.min(FLOW_WORKERS, features.length) }, async () => {
     while (cursor < features.length) {
       const feature = features[cursor++];
+      const featureStableKey = specFeatureKey(feature.name);
+      const fingerprint = scenarioFingerprint(feature.scenarios);
+      const name = `flows/${flowEntryName(featureStableKey)}.json`;
+      // 这张图之前已经生成过，场景也没变：不调模型。
+      const finished = store ? await store.read<Proposal["flows"][number]>(name, fingerprint) : null;
+      if (finished) {
+        flows.push(finished);
+        reused += 1;
+        continue;
+      }
       try {
         const graph = await generateFeatureFlowGraph(feature, undefined, language, { client, noSourceOutput: true });
-        flows.push({ featureStableKey: specFeatureKey(feature.name), fingerprint: scenarioFingerprint(feature.scenarios), graph });
+        const entry = { featureStableKey, fingerprint, graph };
+        if (store) await store.write(name, fingerprint, entry);
+        flows.push(entry);
       } catch (error) {
         // 校验不过的图不交；服务端那一栏按现有的空态解释。模型故障同样略过，不让一张图拖垮整次发布。
-        rejected += 1;
         if (!(error instanceof FlowValidationError)) console.warn("[client-publish] flow graph skipped", { feature: feature.name, message: error instanceof Error ? error.message.slice(0, 160) : String(error) });
       }
     }
   }));
+  // 按功能排好序再交出去：几路并发生成的先后每次不同，而提案的哈希要只看内容。
+  flows.sort((left, right) => (left.featureStableKey < right.featureStableKey ? -1 : left.featureStableKey > right.featureStableKey ? 1 : 0));
   onProgress?.({ stage: "flows", status: "complete", message: `${flows.length}/${features.length}` });
-  return flows;
+  return { flows, reused };
 }
 
 /**
@@ -205,6 +243,10 @@ function privatize(fields: Record<string, unknown>, index: ReturnType<typeof cre
   return pruned;
 }
 
+function newIdempotencyKey(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : "";
+}
+
 export async function produceProposal(options: ProduceOptions): Promise<ProduceSummary> {
   const onProgress = options.onProgress;
   const snapshot = await resolveGitSnapshot(options.repositoryRoot);
@@ -218,8 +260,37 @@ export async function produceProposal(options: ProduceOptions): Promise<ProduceS
   const repository: RepositoryIdentity = bound
     ? { repositoryId: bound.repositoryId, provider: bound.provider as RepositoryProvider, host: bound.host, owner: bound.owner, name: bound.name as string }
     : repositoryIdentityOf(remote, basename(repositoryRoot), { ...(options.provider ? { provider: options.provider } : {}) });
-  const base: ProduceSummary = { decision, repository, dirty: snapshot.workingTreeDirty, pruned: [], flows: { generated: 0, rejected: 0 }, enumeration: null };
+  const modelName = options.modelName ?? options.client.displayName ?? "unknown";
+  const base: ProduceSummary = {
+    decision,
+    repository,
+    dirty: snapshot.workingTreeDirty,
+    pruned: [],
+    flows: { generated: 0, rejected: 0 },
+    enumeration: null,
+    reused: { partitions: 0, flows: 0, enumeration: false, presentation: false },
+    startedAt: new Date().toISOString(),
+  };
   if (decision.action !== "publish") return base;
+  const ledgerBase = options.product.currentRevisionSha === null ? null : { specVersionId: options.product.currentVersionId ?? 0, sha: options.product.currentRevisionSha };
+
+  // 工作目录：记下这一次是给哪个提交、哪种语言、哪个模型做的。和上一次对不上，之前的结果就都不能用了。
+  const run = options.workdir
+    ? await openPublishRun(options.workdir, {
+      repositoryRoot,
+      productSlug: options.product.slug,
+      targetSha,
+      treeSha: snapshot.treeSha ?? "",
+      base: ledgerBase,
+      outputLanguage: options.outputLanguage,
+      modelName,
+      clientVersion: CLIENT_VERSION,
+      pipelineVersion: CLIENT_PIPELINE_VERSION,
+      promptVersion: CLIENT_PROMPT_VERSION,
+    })
+    : null;
+  const store = run?.store ?? null;
+  if (run) base.startedAt = run.startedAt;
 
   const identity: SnapshotIdentity = {
     source: "local",
@@ -234,16 +305,55 @@ export async function produceProposal(options: ProduceOptions): Promise<ProduceS
     ...(remote ? { originRemote: remote, repositoryUrl: remote } : {}),
   };
   const backend: RemoteSourceBackend = createLocalGitBackend(snapshot);
-  const analysis = await (options.analyze ?? analyzeProductSnapshot)({
+  const prepared = await prepareSnapshotAnalysis({
     backend,
     identity,
     productName: options.product.name || options.product.slug,
     ...(options.scopeRoots?.length ? { scopeRoots: options.scopeRoots } : {}),
     outputLanguage: options.outputLanguage,
-    client: options.client,
     noSourceOutput: true,
+    ...(options.loadPartitions ? { loadPartitions: options.loadPartitions } : {}),
     ...(onProgress ? { onProgress: (event: SnapshotProgressEvent) => onProgress(event) } : {}),
   });
+  // 每个分区做完就落盘。后面的分区要知道前面提取出了哪些功能名，所以沿用下来的结果也要计进去。
+  const executions: SnapshotExecution[] = [];
+  const knownFeatureNames = new Set<string>();
+  for (const [partitionIndex, workOrder] of prepared.workOrders.entries()) {
+    const current = partitionIndex + 1;
+    const name = `partitions/${workOrder.id}.json`;
+    const key = fingerprintOf(workOrder.sources.map((source) => [source.path, source.content]));
+    const finished = store ? await store.read<SnapshotExecution>(name, key) : null;
+    if (finished) {
+      executions.push(finished);
+      for (const feature of finished.result.features) knownFeatureNames.add(feature.name);
+      base.reused.partitions += 1;
+      onProgress?.({ stage: "partition", status: "complete", current, total: prepared.workOrders.length, message: "reused" });
+      continue;
+    }
+    const partitionStartedAt = Date.now();
+    onProgress?.({ stage: "partition", status: "start", current, total: prepared.workOrders.length });
+    const execution = await executeSnapshotWorkOrder(workOrder, {
+      client: options.client,
+      previousFeatureNames: [...knownFeatureNames],
+      onRetry: (error) => onProgress?.({ stage: "partition", status: "retry", current, total: prepared.workOrders.length, message: error.message.slice(0, 200) }),
+      ...(options.analyze ? { analyze: options.analyze } : {}),
+    });
+    if (store) await store.write(name, key, execution);
+    onProgress?.({ stage: "partition", status: "complete", current, total: prepared.workOrders.length, durationMs: Date.now() - partitionStartedAt, retries: execution.pass.retries });
+    for (const feature of execution.result.features) knownFeatureNames.add(feature.name);
+    executions.push(execution);
+  }
+  // 理解层是一次单独的模型调用，按提取结果的指纹记下来。
+  const resultKey = fingerprintOf(executions.map((execution) => execution.result));
+  const storedPresentation = store ? await store.read<unknown>("presentation.json", resultKey) : null;
+  if (storedPresentation !== null) base.reused.presentation = true;
+  const analysis = await finalizeSnapshotAnalysis(prepared, executions, {
+    modelName,
+    client: options.client,
+    noSourceOutput: true,
+    ...(storedPresentation !== null ? { presentation: storedPresentation } : {}),
+  });
+  if (store && storedPresentation === null && analysis.presentation?.status === "generated") await store.write("presentation.json", resultKey, analysis.presentation);
 
   onProgress?.({ stage: "window", status: "start" });
   const files = parseUnifiedDiff(await unifiedDiff(repositoryRoot, await windowBase(repositoryRoot, targetSha, decision.windowFrom, options.product.currentRevisionSha), targetSha));
@@ -255,18 +365,24 @@ export async function produceProposal(options: ProduceOptions): Promise<ProduceS
   const behavioralPaths = [...behavioralChangePaths(files)];
   if (behavioralPaths.length > 0) {
     onProgress?.({ stage: "enumerate", status: "start", message: `${behavioralPaths.length}` });
-    const { mergeChunkResults } = await import("../extraction-merge");
-    const enumerated = await enumerateBehavioralChunks({
+    const known = [...new Set(result.features.map((feature) => feature.name))];
+    const enumerationKey = fingerprintOf({ behavioralPaths, files, known, outputLanguage: options.outputLanguage });
+    const enumerationName = "enumeration.json";
+    const storedEnumeration = store ? await store.read<BehavioralEnumerationOutcome>(enumerationName, enumerationKey) : null;
+    const enumerated = storedEnumeration ?? await enumerateBehavioralChunks({
       behavioralPaths,
       files,
       index: analysis.index,
       change,
-      knownFeatureNames: [...new Set(result.features.map((feature) => feature.name))],
+      knownFeatureNames: known,
       outputLanguage: options.outputLanguage,
       client: options.client,
       noSourceOutput: true,
     });
+    if (store && storedEnumeration === null) await store.write(enumerationName, enumerationKey, enumerated);
+    if (storedEnumeration !== null) base.reused.enumeration = true;
     base.enumeration = enumerated.metrics;
+    const { mergeChunkResults } = await import("../extraction-merge");
     const chunks = [{ result }, ...enumerated.chunks.map((chunk) => ({ result: chunk.result }))];
     result = mergeChunkResults(chunks);
     onProgress?.({ stage: "enumerate", status: "complete", message: enumerated.metrics.status });
@@ -274,7 +390,9 @@ export async function produceProposal(options: ProduceOptions): Promise<ProduceS
   if (result.features.length === 0) throw new ClientPublishError("no_features", "the analysis produced no evidence-backed feature");
 
   onProgress?.({ stage: "flows", status: "start" });
-  const flows = await generateFlows(result, options.client, options.outputLanguage, onProgress);
+  const generated = await generateFlows(result, options.client, options.outputLanguage, store, onProgress);
+  const flows = generated.flows;
+  base.reused.flows = generated.reused;
   const { coverageRatio: _ratio, ...coverage } = analysis.coverage;
   const fields: Record<string, unknown> = {
     contractVersion: "2.0.0",
@@ -284,7 +402,7 @@ export async function produceProposal(options: ProduceOptions): Promise<ProduceS
     language: options.outputLanguage,
     repository,
     revision: { sha: targetSha, treeSha: snapshot.treeSha, committedAt: snapshot.committedAt, title: snapshot.message.slice(0, 500), branch: snapshot.branch },
-    base: options.product.currentRevisionSha === null ? null : { specVersionId: options.product.currentVersionId ?? 0, sha: options.product.currentRevisionSha },
+    base: ledgerBase,
     window: {
       files: window.files,
       analyzedPaths: files.map((file) => file.path).filter((path) => !isSchemaArtifact(path)),
@@ -301,9 +419,9 @@ export async function produceProposal(options: ProduceOptions): Promise<ProduceS
       version: CLIENT_VERSION,
       pipelineVersion: CLIENT_PIPELINE_VERSION,
       promptVersion: CLIENT_PROMPT_VERSION,
-      model: options.modelName ?? options.client.displayName ?? "unknown",
+      model: modelName,
       impactRulesVersion: CLIENT_IMPACT_RULES_VERSION,
-      analyzedAt: new Date().toISOString(),
+      analyzedAt: base.startedAt,
     },
   };
 
@@ -312,9 +430,11 @@ export async function produceProposal(options: ProduceOptions): Promise<ProduceS
   base.pruned = privatize(fields, index);
   onProgress?.({ stage: "scan", status: "complete", message: `${base.pruned.length}` });
   base.flows = { generated: flows.length, rejected: result.features.length - flows.length };
-  return { ...base, proposal: sealProposal(fields) };
-}
-
-function newIdempotencyKey(): string {
-  return typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : "";
+  const proposal = sealProposal(fields);
+  // `--prepare` 留给 `--finalize` 的两样东西。先写 summary 再写 proposal：finalize 两个都要有才认。
+  if (store) {
+    await store.write("summary.json", targetSha, { ...base });
+    await store.write("proposal.json", proposal.proposalHash, proposal);
+  }
+  return { ...base, proposal };
 }

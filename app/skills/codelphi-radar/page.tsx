@@ -46,6 +46,15 @@ node codelphi-radar/scripts/snapshot.cjs finalize --workdir .radar-work`}</code>
       </section>
 
       <section className="overview-panel">
+        <h2>{t("把分析发布到 CoDelphi（客户端分析）", "Publish an analysis to CoDelphi (client-side analysis)")}</h2>
+        <p>{t("产品在 CoDelphi 上开通了客户端分析时，不再上传快照。源码文件、补丁和源码摘录都不离开本机：上传的是一份提案（功能、场景、证据路径和行号），用你自己的模型 Key 在本机分析。模型请求发给你的模型服务商，不经过 CoDelphi。", "When a product is enabled for client-side analysis on CoDelphi, snapshots are no longer uploaded. Source files, patches, and source excerpts never leave the machine: what is uploaded is a proposal (features, scenarios, evidence paths and line numbers), analysed on your machine with your own model key. Model requests go to your model provider, not through CoDelphi.")}</p>
+        <pre><code>{`node codelphi-radar/scripts/snapshot.cjs config
+node codelphi-radar/scripts/snapshot.cjs publish /path/to/repo --slug <product-slug> --language zh-CN --workdir .codelphi-publish --prepare
+node codelphi-radar/scripts/snapshot.cjs publish /path/to/repo --slug <product-slug> --language zh-CN --workdir .codelphi-publish --finalize`}</code></pre>
+        <p>{t("config 只需运行一次：填服务端地址和上传 key、模型凭证，两组各做一次真实验证，保存在仓库之外（~/.config/codelphi/credentials.env）。一次全量要跑不少时间，所以带上 --workdir：--prepare 只分析并保存，中断后重跑会沿用做完的部分；--finalize 只上传、不调模型。不带 --workdir 就一步做完。", "Run config once: it takes the server address and upload key and the model credentials, verifies each group with a real call, and stores them outside the repository (~/.config/codelphi/credentials.env). A full analysis takes a while, so pass --workdir: --prepare analyses and saves, and running it again after an interruption reuses finished work; --finalize only uploads and does not call a model. Without --workdir it runs in one go.")}</p>
+      </section>
+
+      <section className="overview-panel">
         <h2>{t("可选 standalone 模式", "Optional standalone mode")}</h2>
         <p>{t("没有 agent 宿主时，可显式选择 standalone，由 CLI 使用 AI_BASE_URL、AI_API_KEY、AI_MODEL 完成分析。只有明确选择该模式时才需要这些配置。", "Without an agent host, explicitly choose standalone mode and let the CLI analyze with AI_BASE_URL, AI_API_KEY, and AI_MODEL. These settings are needed only when you explicitly select that mode.")}</p>
         <pre><code>{`node codelphi-radar/scripts/snapshot.cjs https://github.com/owner/repo --standalone --language en --output radar.html`}</code></pre>

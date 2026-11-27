@@ -16,6 +16,8 @@ import { basename } from "node:path";
 import type { RepositoryIdentity } from "../client-proposal/contract";
 import { CREDENTIAL_KEYS, credentialsPath, DEFAULT_SERVER_URL, describeConfig, readCredentials, resolveConfig, writeCredentials } from "./credentials";
 import { ClientPublishError, produceProposal } from "./produce";
+import { loadPreparedPublish, PublishRunError, type PreparedPublish } from "./run-store";
+import type { PrivacyRule } from "../privacy-scan";
 import { repositoryIdentityOf } from "./identity";
 import { REFUSAL_TEXT } from "./state";
 import { fetchContext, ServerRequestError, uploadProposal, type ClientContext, type ClientProduct } from "./server";
@@ -280,6 +282,38 @@ function relationText(local: string, ledger: string): Text {
 
 // ───────────────────────────── publish ─────────────────────────────
 
+const PUBLISH_USAGE: Text = {
+  zh: "用法：publish <本地仓库路径> [--slug <产品别名>] [--full] [--dry-run] [--provider <github|gitlab|gitee|gitea>] [--workdir <工作目录> [--prepare | --finalize]]",
+  en: "Usage: publish <local repository> [--slug <product>] [--full] [--dry-run] [--provider <github|gitlab|gitee|gitea>] [--workdir <work directory> [--prepare | --finalize]]",
+};
+
+/** 工作目录里没有可用的准备结果时，说清楚缺什么、下一步做什么。三句话都带 --prepare：那是一定要走的下一步。 */
+function runErrorText(error: PublishRunError, workdir: string, currentSha: string): Text {
+  if (error.code === "publish_target_mismatch") {
+    return {
+      zh: `${workdir} 里准备的是另一个提交的分析结果，本地仓库现在在 ${currentSha.slice(0, 12)}。要发准备好的那一份，先切回那个提交再运行 --finalize；要按新的提交分析，重新运行 --prepare，做过的部分会沿用。`,
+      en: `${workdir} was prepared for another commit and the repository is now at ${currentSha.slice(0, 12)}. Check that commit out again to run --finalize, or run --prepare for the new commit; finished work is reused.`,
+    };
+  }
+  if (error.code === "publish_corrupt") {
+    return {
+      zh: `${workdir} 里准备好的提案和它自己的哈希对不上，文件可能被截断或改过。重新运行 --prepare，做过的部分会沿用。`,
+      en: `The proposal prepared in ${workdir} no longer matches its own hash; the files may be truncated or edited. Run --prepare again; finished work is reused.`,
+    };
+  }
+  return {
+    zh: `${workdir} 里没有这个产品、这个仓库准备好、可以上传的提案。先运行 publish --prepare。`,
+    en: `${workdir} holds no finished proposal for this product and repository to upload. Run publish --prepare first.`,
+  };
+}
+
+/** 被隐私扫描剔除的条目：哪一项、因为哪条规则。 */
+function printPruned(pruned: ReadonlyArray<{ path: string; rules: PrivacyRule[] }>, io: CliIo, t: (text: Text) => string): void {
+  if (pruned.length === 0) return;
+  io.stderr(t({ zh: `隐私扫描剔除了 ${pruned.length} 处（看起来像源码的内容不上传）：`, en: `The privacy scan removed ${pruned.length} item(s) that looked like source code; they were not uploaded:` }));
+  for (const item of pruned) io.stderr(`  ${item.path}（${item.rules.join("、")}）`);
+}
+
 export async function publishMain(argv: string[], io: CliIo): Promise<number> {
   const language = languageOf(argv);
   const t = (text: Text) => say(text, language);
@@ -287,19 +321,31 @@ export async function publishMain(argv: string[], io: CliIo): Promise<number> {
     const { values, positionals } = parseArgs({
       args: argv.filter((argument, index) => argument !== "--language" && argv[index - 1] !== "--language"),
       allowPositionals: true,
-      options: { slug: { type: "string" }, full: { type: "boolean", default: false }, "dry-run": { type: "boolean", default: false }, provider: { type: "string" } },
-    }) as { values: { slug?: string; full: boolean; "dry-run": boolean; provider?: string }; positionals: string[] };
-    if (positionals.length !== 1) {
-      io.stderr(t({ zh: "用法：publish <本地仓库路径> [--slug <产品别名>] [--full] [--dry-run] [--provider <github|gitlab|gitee|gitea>]", en: "Usage: publish <local repository> [--slug <product>] [--full] [--dry-run] [--provider <github|gitlab|gitee|gitea>]" }));
+      options: {
+        slug: { type: "string" },
+        full: { type: "boolean", default: false },
+        "dry-run": { type: "boolean", default: false },
+        provider: { type: "string" },
+        workdir: { type: "string" },
+        prepare: { type: "boolean", default: false },
+        finalize: { type: "boolean", default: false },
+      },
+    }) as { values: { slug?: string; full: boolean; "dry-run": boolean; provider?: string; workdir?: string; prepare: boolean; finalize: boolean }; positionals: string[] };
+    // 分步续跑：--prepare 只分析并落盘，--finalize 只上传，都靠工作目录接续。一次跑完的 publish 也认 --workdir，中断后重跑只补没做完的。
+    const stage = values.prepare && values.finalize ? null : values.prepare ? "prepare" : values.finalize ? "finalize" : "publish";
+    if (positionals.length !== 1 || stage === null || (stage !== "publish" && !values.workdir)) {
+      io.stderr(t(PUBLISH_USAGE));
+      if (stage !== null && stage !== "publish" && !values.workdir) io.stderr(t({ zh: `--${stage} 要配合 --workdir 指定一个工作目录。`, en: `--${stage} needs --workdir to name a work directory.` }));
       return 2;
     }
     const config = await loadConfig(io, io.credentialsFile ?? credentialsPath({ env: io.environment }));
-    if (!config.AI_API_KEY || !config.AI_MODEL) {
-      io.stderr(t({ zh: "缺少模型配置：请先运行 config，填写 AI_API_KEY 与 AI_MODEL。", en: "Model configuration is missing: run config and fill in AI_API_KEY and AI_MODEL." }));
-      return 2;
-    }
     if (!config.CODELPHI_SNAPSHOT_KEY) {
       io.stderr(t({ zh: "缺少上传 key：请先运行 config，填写 CODELPHI_SNAPSHOT_KEY。", en: "Upload key is missing: run config and fill in CODELPHI_SNAPSHOT_KEY." }));
+      return 2;
+    }
+    // --finalize 不调模型，所以不要模型的凭证：分析在一台机器上做，上传可以在另一台上。
+    if (stage !== "finalize" && (!config.AI_API_KEY || !config.AI_MODEL)) {
+      io.stderr(t({ zh: "缺少模型配置：请先运行 config，填写 AI_API_KEY 与 AI_MODEL。", en: "Model configuration is missing: run config and fill in AI_API_KEY and AI_MODEL." }));
       return 2;
     }
     const server = { serverUrl: config.CODELPHI_SERVER_URL ?? DEFAULT_SERVER_URL, key: config.CODELPHI_SNAPSHOT_KEY };
@@ -320,6 +366,25 @@ export async function publishMain(argv: string[], io: CliIo): Promise<number> {
       io.stderr(t({ zh: `服务端不再接受这个客户端的契约版本（最低 ${context.minSupportedContractVersion}），请升级客户端。`, en: `The server no longer accepts this client's contract version (minimum ${context.minSupportedContractVersion}); upgrade the client.` }));
       return 5;
     }
+    if (stage === "finalize") {
+      // 只上传。工作目录里准备的是哪个提交，以它为准：本地仓库已经前进的话，不在不知不觉中把旧的发出去。
+      const snapshot = await resolveGitSnapshot(positionals[0]);
+      const workdir = values.workdir as string;
+      let prepared: PreparedPublish;
+      try {
+        prepared = await loadPreparedPublish(workdir, { repositoryRoot: snapshot.repoRoot, productSlug: selected.product.slug, targetSha: snapshot.revision });
+      } catch (error) {
+        if (!(error instanceof PublishRunError)) throw error;
+        io.stderr(t(runErrorText(error, workdir, snapshot.revision)));
+        return 2;
+      }
+      const features = prepared.proposal.proposal.features;
+      const scenarios = features.reduce((total, feature) => total + feature.scenarios.length, 0);
+      io.stdout(t({ zh: `使用 ${workdir} 里准备好的提案：提交 ${prepared.proposal.revision.sha.slice(0, 12)}，${features.length} 个功能、${scenarios} 条场景。`, en: `Using the proposal prepared in ${workdir}: commit ${prepared.proposal.revision.sha.slice(0, 12)}, ${features.length} features, ${scenarios} scenarios.` }));
+      printPruned(prepared.summary.pruned, io, t);
+      const upload = await uploadProposal(server, selected.product.slug, JSON.stringify(prepared.proposal), { fetchImpl: io.fetchImpl });
+      return reportUpload(upload.status, upload.body, prepared.proposal.revision.sha, server, selected.product.slug, io, t);
+    }
     const client = (io.createClient ?? createStandaloneClientFromEnv)(config);
     const result = await produceProposal({
       repositoryRoot: positionals[0],
@@ -329,6 +394,7 @@ export async function publishMain(argv: string[], io: CliIo): Promise<number> {
       client,
       modelName: client.displayName ?? config.AI_MODEL,
       ...(values.provider ? { provider: values.provider as RepositoryIdentity["provider"] } : {}),
+      ...(values.workdir ? { workdir: values.workdir } : {}),
       onProgress: (event) => {
         if (event.status === "start") io.stderr(t({ zh: `… ${stageText(event.stage).zh}${"total" in event && event.total ? `（${event.total}）` : ""}`, en: `... ${stageText(event.stage).en}${"total" in event && event.total ? ` (${event.total})` : ""}` }));
       },
@@ -343,13 +409,24 @@ export async function publishMain(argv: string[], io: CliIo): Promise<number> {
       return 0;
     }
     if (result.dirty) io.stderr(t({ zh: "工作区有未提交的改动：分析的是已提交的内容，改动不在这次发布里。", en: "The working tree has uncommitted changes: the analysis covers committed content only, so they are not part of this publish." }));
+    const reused = result.reused;
+    if (reused.partitions + reused.flows > 0 || reused.enumeration || reused.presentation) {
+      const parts = [
+        ...(reused.partitions > 0 ? [t({ zh: `分区 ${reused.partitions}`, en: `${reused.partitions} partition(s)` })] : []),
+        ...(reused.enumeration ? [t({ zh: "行为面枚举", en: "behaviour enumeration" })] : []),
+        ...(reused.presentation ? [t({ zh: "理解层", en: "the presentation" })] : []),
+        ...(reused.flows > 0 ? [t({ zh: `流程图 ${reused.flows}`, en: `${reused.flows} flow graph(s)` })] : []),
+      ];
+      io.stderr(t({ zh: `续跑：沿用了工作目录里已经完成的结果（${parts.join("、")}），没有为它们再调模型。`, en: `Resuming: finished work was taken from the work directory (${parts.join(", ")}); the model was not called again for it.` }));
+    }
     const features = proposal.proposal.features;
     const scenarios = features.reduce((total, feature) => total + feature.scenarios.length, 0);
     io.stdout(t({ zh: `全量分析：${features.length} 个功能、${scenarios} 条场景；变更窗口 ${proposal.window?.files.length ?? 0} 个文件（其中行为变更 ${proposal.window?.files.filter((file) => file.behavioral).length ?? 0} 个）；流程图 ${result.flows.generated} 张。`, en: `Full analysis: ${features.length} features, ${scenarios} scenarios; change window ${proposal.window?.files.length ?? 0} files (${proposal.window?.files.filter((file) => file.behavioral).length ?? 0} with behavioural changes); ${result.flows.generated} flow graphs.` }));
     for (const feature of features) io.stdout(`  ${feature.name}: ${feature.scenarios.map((scenario) => scenario.reference).join(" ")}`);
-    if (result.pruned.length > 0) {
-      io.stderr(t({ zh: `隐私扫描剔除了 ${result.pruned.length} 处（看起来像源码的内容不上传）：`, en: `The privacy scan removed ${result.pruned.length} item(s) that looked like source code; they were not uploaded:` }));
-      for (const item of result.pruned) io.stderr(`  ${item.path}（${item.rules.join("、")}）`);
+    printPruned(result.pruned, io, t);
+    if (stage === "prepare") {
+      io.stdout(t({ zh: `已保存到 ${values.workdir}，没有上传。确认无误后上传：publish <本地仓库路径> --slug ${selected.product.slug} --workdir ${values.workdir} --finalize`, en: `Saved to ${values.workdir}; nothing was uploaded. To upload once you have checked it: publish <local repository> --slug ${selected.product.slug} --workdir ${values.workdir} --finalize` }));
+      return 0;
     }
     if (values["dry-run"]) {
       io.stdout(t({ zh: `试运行：提案 ${JSON.stringify(proposal).length} 字节，未上传。`, en: `Dry run: the proposal is ${JSON.stringify(proposal).length} bytes; nothing was uploaded.` }));

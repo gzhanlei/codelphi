@@ -1,11 +1,11 @@
 ---
 name: codelphi-radar
-description: Understand a local Git repository or a public GitHub repository as a product and generate one self-contained HTML brief with features, scenarios, and source evidence. Use when the user wants to understand what a codebase does without setting up continuous analysis.
+description: Understand a local Git repository or a public GitHub repository as a product. Generate one self-contained HTML brief with features, scenarios, and source evidence; or, for a CoDelphi product that is enabled for client-side analysis, publish the analysis to CoDelphi from the user's own machine without uploading source files or patches. Use when the user wants to understand what a codebase does, or to update the ledger of a CoDelphi product that is enabled for client-side analysis.
 ---
 
 # CoDelphi Radar
 
-Generate one offline HTML product brief. Do not turn this into continuous analysis, release tracking, or a second implementation of the extraction pipeline.
+Generate one offline HTML product brief, or publish one analysis to CoDelphi when the product is enabled for it (section 6). Do not turn this into release tracking or a second implementation of the extraction pipeline.
 
 ## 1. Resolve the request and language
 
@@ -69,3 +69,36 @@ node "<skill-directory>/scripts/snapshot.cjs" <target> --standalone --language <
 ```
 
 Standalone uses `AI_BASE_URL`, `AI_API_KEY`, and `AI_MODEL`; never print those credentials. `AI_TIMEOUT_MS` controls the request timeout. When usage accounting is requested, set `CODELPHI_USAGE_LOG` to a JSONL path to record each successful call's duration, request id, model, and raw gateway usage; the log contains no credentials. Do not silently fall back to standalone when host-native work orders are available.
+
+## 6. Publish an analysis to CoDelphi (client-side analysis)
+
+Use this only when the user has a CoDelphi product that is enabled for client-side analysis. It replaces uploading a radar snapshot. Source files, patches, and source excerpts never leave the machine: what is uploaded is a proposal (features, scenarios, evidence paths and line numbers) produced with the user's own model key. Model requests go to the user's model provider and do not pass through CoDelphi.
+
+Set it up once, from any directory (the settings are stored outside the repository, in `~/.config/codelphi/credentials.env` or `%APPDATA%\codelphi\credentials.env`; never print them):
+
+```bash
+node "<skill-directory>/scripts/snapshot.cjs" config
+```
+
+It asks for the CoDelphi server address and upload key, then for the model provider, key and model name. It verifies both groups with a real call and says where requests will go before any key is entered. `config --show` lists what is set without showing keys.
+
+Publish from the repository:
+
+```bash
+node "<skill-directory>/scripts/snapshot.cjs" publish <local-repo> --slug <product-slug> --language <zh-CN|en>
+```
+
+- Without `--full` it does nothing when the ledger already sits on the local commit. Add `--full` to analyse again on top of the current version. Incremental analysis is not available yet.
+- A full analysis takes many minutes and spends the user's model budget. Give it a work directory so that an interruption does not cost the same work twice:
+
+```bash
+node "<skill-directory>/scripts/snapshot.cjs" publish <local-repo> --slug <product-slug> --language <zh-CN|en> --workdir <work-directory> --prepare
+node "<skill-directory>/scripts/snapshot.cjs" publish <local-repo> --slug <product-slug> --language <zh-CN|en> --workdir <work-directory> --finalize
+```
+
+`--prepare` analyses and saves the proposal without uploading. If it is interrupted, run it again: finished work is reused. `--finalize` uploads the saved proposal and does not call a model. The work directory holds intermediate results, including raw model output. Do not commit it and do not read it into the conversation.
+
+- `status <local-repo> --slug <product-slug>` shows the binding and whether the local commit is ahead of the ledger.
+- Text that looks like source code is removed before upload and listed on the terminal; the command reports how many items were removed.
+
+Do not call the CoDelphi API yourself, do not upload anything on the user's behalf outside `publish`, and do not paste the proposal into the conversation.
