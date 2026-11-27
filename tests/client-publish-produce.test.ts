@@ -232,17 +232,18 @@ describe("produceProposal", () => {
     expect(model.prompts).toEqual([]);
   });
 
-  it("refuses when the ledger's commit is unknown to the local repository", async () => {
-    const model = fakeModel();
-    const other = await mkdtemp(join(tmpdir(), "codelphi-publish-other-"));
-    roots.push(other);
-    await git(other, "init", "-b", "main");
-    await writeFile(join(other, "a.txt"), "a\n");
-    await git(other, "add", ".");
-    await git(other, "-C", other, "-c", "user.name=Other", "-c", "user.email=other@example.test", "commit", "-m", "other");
-    const result = await produceProposal({ repositoryRoot: other, product: product({ currentVersionId: 12, currentRevisionSha: "f".repeat(40) }), full: true, outputLanguage: "zh-CN", client: model.client });
-    expect(result.decision).toEqual({ action: "refuse", reason: "ledger_commit_missing" });
-    expect(model.prompts).toEqual([]);
+  it("publishes the target's own window after confirming a ledger commit unknown to the local repository", async () => {
+    const { root, head } = await repository();
+    const unforcedModel = fakeModel();
+    const unforced = await produceProposal({ repositoryRoot: root, product: product({ currentVersionId: 12, currentRevisionSha: "f".repeat(40) }), full: false, outputLanguage: "zh-CN", client: unforcedModel.client });
+    expect(unforced.decision).toEqual({ action: "refuse", reason: "ledger_commit_missing" });
+    expect(unforcedModel.prompts).toEqual([]);
+
+    const forced = await produceProposal({ repositoryRoot: root, product: product({ currentVersionId: 12, currentRevisionSha: "f".repeat(40) }), full: true, outputLanguage: "zh-CN", client: fakeModel().client });
+    expect(forced.decision).toEqual({ action: "publish", mode: "full", reason: "diverged_with_full", windowFrom: "parent" });
+    expect(forced.proposal!.base).toEqual({ specVersionId: 12, sha: "f".repeat(40) });
+    expect(forced.proposal!.revision.sha).toBe(head);
+    expect(forced.proposal!.window!.files.map((file) => file.path)).toEqual(["README.md", "lib/auth.ts", "lib/billing.ts"]);
   });
 
   it("publishes a full analysis over an unrelated history only when forced", async () => {

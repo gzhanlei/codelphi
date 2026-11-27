@@ -77,8 +77,9 @@ describe("decidePublish", () => {
     expect(decidePublish({ full: true, hasLedger: true, relation: "unrelated" })).toEqual({ action: "publish", mode: "full", reason: "diverged_with_full", windowFrom: "base" });
   });
 
-  it("refuses when the ledger's commit is not in the local history at all", () => {
-    expect(decidePublish({ full: true, hasLedger: true, relation: "missing" })).toMatchObject({ action: "refuse", reason: "ledger_commit_missing" });
+  it("asks for confirmation when the ledger's commit is missing, then analyzes the target's own window", () => {
+    expect(decidePublish({ full: false, hasLedger: true, relation: "missing" })).toMatchObject({ action: "refuse", reason: "ledger_commit_missing" });
+    expect(decidePublish({ full: true, hasLedger: true, relation: "missing" })).toEqual({ action: "publish", mode: "full", reason: "diverged_with_full", windowFrom: "parent" });
   });
 });
 

@@ -6,6 +6,7 @@
  * 相等                               空操作                全量（带基线）
  * 账本提交是目标提交的严格祖先        （第 1 期：要求 --full） 全量（带基线）
  * 互不为祖先                         要求 --full           全量（带基线）
+ * 账本提交不在本地                   要求 --full           全量（目标自身窗口）
  * 账本领先于本地                     不发布                不发布
  *
  * 「祖先」一律指严格祖先：一个提交是它自己的祖先，所以「相等」必须排在「是祖先」前面。
@@ -31,8 +32,8 @@ export function decidePublish(input: { hasLedger: boolean; relation: CommitRelat
     case "unrelated":
       return full ? { action: "publish", mode: "full", reason: "diverged_with_full", windowFrom: "base" } : { action: "refuse", reason: "needs_full_flag" };
     case "missing":
-      // 账本记的提交不在本地历史里：多半是浅克隆，或者仓库被重写过。两种都不替用户做决定。
-      return { action: "refuse", reason: "ledger_commit_missing" };
+      // 缺失的 base 不能用于 git diff；显式全量确认后按首次发布的口径读取目标提交自身窗口。
+      return full ? { action: "publish", mode: "full", reason: "diverged_with_full", windowFrom: "parent" } : { action: "refuse", reason: "ledger_commit_missing" };
   }
 }
 
