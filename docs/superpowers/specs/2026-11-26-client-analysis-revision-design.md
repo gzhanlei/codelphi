@@ -1050,3 +1050,13 @@ Node 22 单文件 `snapshot.cjs`，打包方式不变。
 - 对等试验（产品负责人决定不跑）。
 - 在生产上执行回填。AIRecord 不满足前提，不走这条路（13.3 第 14 条）；脚本没有在生产上跑过，连演练也没有。
 - 把 AIRecord 的 `analysis_executor` 改成 `client`，开始试点。租户第一次 `publish --full` 时，1,024 个功能的草稿会并进那一次发布：同名的更新，其余停用。**这件事要让租户事先知道。**
+
+### 13.7 上线记录
+
+**2026-11-27 11:17（北京时间）第 1 期的服务端上线。**
+
+- 镜像 `codelphi-server:sha-9e750b3`，从 main 的干净导出构建（`git archive`，不带本机的任何未跟踪文件）。烤进镜像的源码按 git 的 blob 哈希和提交核对过。回滚点 `codelphi-server:sha-5594e60`。
+- 迁移 `085_client_analysis.sql` 在生产的 MySQL 8.0.30 上应用（约 2 秒）。之后只读核对：`products.analysis_executor`（默认 `server`）、`repositories.host`、`analysis_runs.client_idempotency_key` 和 `client_proposal_hash`、`spec_versions.provenance_json`、表 `client_proposal_rejections` 都在，和迁移写的一致。11 个产品全部还是 `server`。
+- 部署前后各查了一次在途的分析：没有（最近一条是 2026-11-26 的 run 474）。先部署、后推送，推送触发的分析不会被重启截断。
+- 上线后的核对：容器健康，启动日志只有各定时任务的启动行；`/login`、技能安装页、产品页 200；`GET /api/client-analysis/context` 和 `POST /api/products/{slug}/analysis-proposals` 不带 key 返回 401；安装页出现了 `publish` 的说明。
+- 在 8.0 上第一次执行的是迁移和启动时带新条件的恢复查询。发布事务和回填事务还没有在 8.0 上跑过：生产上还没有客户端发布，回填没有执行。
