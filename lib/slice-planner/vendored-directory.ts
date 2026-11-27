@@ -41,7 +41,7 @@ const PACKAGE_DESCRIPTOR =
   /(?:^|\/)(?:setup\.py|setup\.cfg|pyproject\.toml|gemfile|[^/]+\.gemspec|build\.sbt|mix\.exs|package\.swift|pubspec\.yaml|deno\.json|stack\.ya?ml|[^/]+\.cabal|rebar\.config|shard\.ya?ml|build\.zig)$/i;
 
 /** 这个目录是不是一个「包」：带着自己的包描述文件。 */
-function isPackageDescriptor(path: string): boolean {
+export function isPackageDescriptor(path: string): boolean {
   return isBuildManifest(path) || PACKAGE_DESCRIPTOR.test(path);
 }
 

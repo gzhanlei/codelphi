@@ -90,6 +90,27 @@ describe("third-party directories in the implementation surface", () => {
   });
 });
 
+describe("tooling directories in the implementation surface", () => {
+  const blob = (path: string, size = 10) => ({ path, type: "blob" as const, sha: `sha-${path}`, size });
+  const tree = (path: string) => ({ path, type: "tree" as const, sha: `tree-${path}` });
+  const stat = (path: string) => ({ path, blobSha: `blob-${path}`, treeEntrySha: `tree-${path}`, byteSize: 10, cacheState: "cached" as const });
+
+  it("does not count a tooling directory, except the entry points something starts in production", async () => {
+    const trees = {
+      "": [blob("package.json"), blob("Dockerfile"), blob("lib/service.ts", 100), tree("scripts")],
+      scripts: [blob("scripts/server.js", 20), blob("scripts/worker.js", 20), blob("scripts/build.ts", 20), blob("scripts/migrate.ts", 20)],
+    };
+    const index = { ...fakeIndex([], trees), readLines: async (request: { path: string }) => ({ path: request.path, blobSha: "sha", treeEntrySha: "sha", startLine: 1, endLine: 2, lines: texts[request.path], byteSize: 0, lineCount: 2, verified: true as const, cacheState: "fetched" as const, readReceipt: { requestedBy: "profile" as const, reason: "", fetchedAt: "" } }) };
+    const texts: Record<string, string[]> = { "package.json": [JSON.stringify({ scripts: { start: "node scripts/server.js" } })], Dockerfile: ["CMD [\"node\", \"scripts/worker.js\"]"] };
+    expect((await enumerateImplementationSurface(index)).map((file) => file.path)).toEqual(["lib/service.ts", "scripts/server.js", "scripts/worker.js"]);
+  });
+
+  it("counts scripts as product code when they are all the scope has", async () => {
+    const trees = { "": [blob("README.md"), tree("scripts")], scripts: [blob("scripts/a.sh", 20), blob("scripts/b.py", 20)] };
+    expect((await enumerateImplementationSurface(fakeIndex([], trees))).map((file) => file.path)).toEqual(["scripts/a.sh", "scripts/b.py"]);
+  });
+});
+
 describe("required implementation surface", () => {
   it("stats only required paths and excludes missing or non-implementation entries", async () => {
     const index = fakeIndex([]);

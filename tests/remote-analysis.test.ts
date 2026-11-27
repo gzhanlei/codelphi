@@ -404,6 +404,31 @@ describe("unbounded partition planning", () => {
     ]);
   });
 
+  it("stops once every file is taken, including a tooling directory's entry points (2026-11-27: they were re-selected on every pass)", async () => {
+    const files = new Map([
+      ["package.json", JSON.stringify({ dependencies: { express: "4.0.0" }, scripts: { start: "node scripts/server.js" } })],
+      ["lib/service.ts", "export const service = 1;\n"],
+      ["scripts/server.js", "require('../lib/service');\n"],
+    ]);
+    const entry = (path: string, type: "blob" | "tree") => ({ path, type, sha: type === "blob" ? gitBlobSha(files.get(path)!) : `tree-${path}`, size: type === "blob" ? files.get(path)!.length : undefined });
+    const entries = [entry("package.json", "blob"), entry("lib", "tree"), entry("lib/service.ts", "blob"), entry("scripts", "tree"), entry("scripts/server.js", "blob")];
+    const backend: RemoteSourceBackend = {
+      kind: "github_api",
+      resolveRevision: async () => ({ rootTreeSha: "tree-root" }),
+      listTree: async () => {
+        throw new Error("unexpected per-directory tree expansion");
+      },
+      listWholeTree: async () => ({ entries, truncated: false }),
+      fetchBlob: async (_source, path) => new TextEncoder().encode(files.get(path)!),
+    };
+    const result = await getPartitionedAnalysisSources({ ...request, backend }, { planner: createSlicePlanner({ now: Date.now }), budgets: analysisSliceBudgets });
+    const paths = result.partitions.flatMap((partition) => partition.sources.map((source) => source.path));
+    // 一个文件只进一个分区；第一趟拿完之后第二趟没有新候选，循环就结束。
+    expect(paths.slice().sort()).toEqual(["lib/service.ts", "scripts/server.js"]);
+    expect(new Set(paths).size).toBe(paths.length);
+    expect(result.partitions).toHaveLength(1);
+  });
+
   it("stops at the configured partition cap and discloses it (ANALYSIS_MAX_PARTITIONS)", async () => {
     vi.stubEnv("ANALYSIS_MAX_PARTITIONS", "3");
     const { planner, calls } = plannerReturningSevenPartitions();

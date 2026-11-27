@@ -7,6 +7,7 @@ import type { EvidenceClaim, PlannerDiagnostic, ProductSliceInput, ScopeResoluti
 import type { OpenedRemoteSourceRevision } from "../remote-source-index/types";
 import { isWalkNoiseDirectory, selectionNoiseKind } from "./selection-policy";
 import { VendoredDirectoryDetector } from "./vendored-directory";
+import { ToolingDirectories } from "./tooling-directory";
 
 const interestingSignals = new Set<SourceSignal>(["manifest", "entrypoint", "route", "service", "database", "migration", "queue", "worker", "auth", "deployment", "frontend", "native"]);
 
@@ -267,6 +268,7 @@ class DeterministicSlicePlanner implements SlicePlanner {
       // 这个循环不走遍历那套噪声过滤，所以要自己问一遍：不在分析目标里的文件（测试、文档、迁移脚本、
       // 构建和部署文件、生成的代码、第三方副本）即使这个窗口改过，也不是行为证据。
       const detector = new VendoredDirectoryDetector(index, scope.scopeRoots);
+      const tooling = new ToolingDirectories(index, scope.scopeRoots);
       const diffPaths = [...new Set(input.requiredPaths ?? input.diffPaths ?? [])]
         .filter((path) => !state.input.excludePaths?.has(path))
         .filter((path) => isModelContextFile(path))
@@ -279,6 +281,12 @@ class DeterministicSlicePlanner implements SlicePlanner {
           state.excluded.push({ kind: "vendored", path, detail: vendoredDirectory });
           continue;
         }
+        // 开发工具目录里的文件不是产品行为，除非有启动文件点到它。
+        const location = await tooling.enclosing(path);
+        if (location && !location.entryPoints.has(path) && (await tooling.appliesWithin(tooling.scopeRootOf(path)))) {
+          state.excluded.push({ kind: "tooling", path, detail: location.directory });
+          continue;
+        }
         try {
           await this.selectFile(index, state, path, [], "window_diff", "", { ignoreShareCap: true });
         } catch (error) {
@@ -288,7 +296,7 @@ class DeterministicSlicePlanner implements SlicePlanner {
       }
       if ((input.discovery ?? "full") === "full") {
         for (const scopeRoot of scope.scopeRoots) {
-          await this.walkScopeDirectories(index, state, detector, scopeRoot.path);
+          await this.walkScopeDirectories(index, state, detector, tooling, scopeRoot.path);
         }
       }
       return this.completePlan(index, state);
@@ -397,12 +405,15 @@ class DeterministicSlicePlanner implements SlicePlanner {
   // listing is local, and on the per-directory fallback path the index tree-expansion budget
   // still bounds API calls. BFS（替代原 DFS）让顶层目录公平地先于深层子树获得预算；
   // 噪声目录（tests/examples/bench/docs/隐藏目录）在入队前整树跳过。
-  private async walkScopeDirectories(index: OpenedRemoteSourceRevision, state: SlicePlanningState, detector: VendoredDirectoryDetector, rootPath: string) {
-    const pending = [rootPath];
+  private async walkScopeDirectories(index: OpenedRemoteSourceRevision, state: SlicePlanningState, detector: VendoredDirectoryDetector, tooling: ToolingDirectories, rootPath: string) {
+    // parentEntries：上一级目录的清单，判断子目录是不是工具目录要用（上一级是不是源码根、有没有包描述文件）。
+    // toolingDirectory：这个目录所在的工具目录；null = 按普通目录走。
+    const pending: Array<{ path: string; parentEntries?: SourceTreeEntry[]; toolingDirectory: string | null }> = [{ path: rootPath, toolingDirectory: null }];
     const visited = new Set<string>();
     while (pending.length > 0) {
       if (state.budgetsRemaining.selectedFiles <= 0) return;
-      const path = pending.shift()!;
+      const item = pending.shift()!;
+      const path = item.path;
       if (visited.has(path)) continue;
       visited.add(path);
       const listing = await index.listDir(path);
@@ -415,11 +426,25 @@ class DeterministicSlicePlanner implements SlicePlanner {
         state.excluded.push({ kind: "vendored", path, detail: verdict.reason });
         continue;
       }
-      await this.selectListedFiles(index, state, listing.entries, subtreeKey);
+      // 开发工具目录（scripts、hack、bin……）：只留启动文件点到的入口，其余不进分析。范围里只有工具目录时它们就是产品。
+      let toolingDirectory = item.toolingDirectory;
+      if (toolingDirectory === null && tooling.isToolingDirectory(path, item.parentEntries ?? []) && (await tooling.appliesWithin(tooling.scopeRootOf(path)))) toolingDirectory = path;
+      if (toolingDirectory !== null) {
+        const entryPoints = await tooling.entryPointsOf(toolingDirectory, toolingDirectory === path ? item.parentEntries : undefined);
+        for (const entry of listing.entries) {
+          if (entry.pruned || entry.type !== "blob" || selectionNoiseKind(entry.path) !== null) continue;
+          // 此前分区已选的路径不再入选：否则每一趟都会重选同一个入口，分区循环永不结束（2026-11-27 fongmi-tv 实测）。
+          if (state.input.excludePaths?.has(entry.path)) continue;
+          if (entryPoints.has(entry.path)) await this.selectFile(index, state, entry.path, entry.signals, reasonFor(entry.signals), subtreeKey);
+          else state.excluded.push({ kind: "tooling", path: entry.path, detail: toolingDirectory });
+        }
+      } else {
+        await this.selectListedFiles(index, state, listing.entries, subtreeKey);
+      }
       for (const entry of listing.entries) {
         if (entry.pruned || entry.type !== "tree") continue;
         if (isWalkNoiseDirectory(entry.path)) continue;
-        if (!visited.has(entry.path)) pending.push(entry.path);
+        if (!visited.has(entry.path)) pending.push({ path: entry.path, parentEntries: listing.entries, toolingDirectory });
       }
     }
   }

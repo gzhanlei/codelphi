@@ -2,8 +2,9 @@ import type { PoolConnection } from "mysql2/promise";
 import { isImplementationSurfaceFile } from "./evidence";
 import { isModelContextFile } from "./analysis-target";
 import type { AnalysisPartition } from "./remote-analysis";
-import type { OpenedRemoteSourceRevision, SourceScopeRoot } from "./remote-source-index";
+import type { OpenedRemoteSourceRevision, SourceScopeRoot, SourceTreeEntry } from "./remote-source-index";
 import { VendoredDirectoryDetector } from "./slice-planner/vendored-directory";
+import { ToolingDirectories } from "./slice-planner/tooling-directory";
 import type { SliceExclusion } from "./slice-planner/types";
 
 /**
@@ -47,18 +48,24 @@ function isFileWithinScope(path: string, scopeRoots: OpenedRemoteSourceRevision[
 }
 
 /**
- * 全树实现面枚举：BFS listDir，元数据级（不读文件内容），受索引预算约束。
- * 装着一份拷进来的上游项目的目录整棵跳过——和规划器问的是同一个判定器，两边对同一个目录的答案一致。
+ * 全树实现面枚举：BFS listDir，元数据级（不读文件内容；只有工具目录的入口要看一眼启动文件），受索引预算约束。
+ * 装着一份拷进来的上游项目的目录整棵跳过，开发工具目录只算启动文件点到的入口——和规划器问的是同一套判定，
+ * 两边对同一个目录的答案一致。
  */
 export async function enumerateImplementationSurface(index: OpenedRemoteSourceRevision, maxDirs = Number.POSITIVE_INFINITY, scopeRoots: SourceScopeRoot[] = index.scopeRoots ?? []): Promise<Array<{ path: string; size: number }>> {
   const detector = new VendoredDirectoryDetector(index, scopeRoots);
+  const tooling = new ToolingDirectories(index, scopeRoots);
   const impl: Array<{ path: string; size: number }> = [];
-  const queue: string[] = [""];
+  const queue: Array<{ path: string; parentEntries?: SourceTreeEntry[]; toolingDirectory: string | null }> = [{ path: "", toolingDirectory: null }];
   const seenDirs = new Set<string>([""]);
   while (queue.length > 0 && seenDirs.size < maxDirs) {
-    const current = queue.shift()!;
+    const queued = queue.shift()!;
+    const current = queued.path;
     const listing = current === "" ? await index.listRoot() : await index.listDir(current);
     if (current !== "" && (await detector.isVendored(current))) continue;
+    let toolingDirectory = queued.toolingDirectory;
+    if (toolingDirectory === null && tooling.isToolingDirectory(current, queued.parentEntries ?? []) && (await tooling.appliesWithin(tooling.scopeRootOf(current)))) toolingDirectory = current;
+    const entryPoints = toolingDirectory === null ? null : await tooling.entryPointsOf(toolingDirectory, toolingDirectory === current ? queued.parentEntries : undefined);
     for (const item of listing.entries) {
       // prune 条目（third_party / 构建产物 / 二进制等）不进实现面；scope 边界须在每一层
       // 自查——索引只在根层把 scope 外条目标记 pruned，scope 根祖先目录内的 scope 外
@@ -69,11 +76,13 @@ export async function enumerateImplementationSurface(index: OpenedRemoteSourceRe
         if (!isDirWithinScope(item.path, scopeRoots)) continue;
         if (!seenDirs.has(item.path)) {
           seenDirs.add(item.path);
-          queue.push(item.path);
+          queue.push({ path: item.path, parentEntries: listing.entries, toolingDirectory });
         }
         continue;
       }
-      if (isFileWithinScope(item.path, scopeRoots) && isImplementationSurfaceFile(item.path)) impl.push({ path: item.path, size: item.size ?? 0 });
+      if (!isFileWithinScope(item.path, scopeRoots) || !isImplementationSurfaceFile(item.path)) continue;
+      // 工具目录里只有启动文件点到的入口算实现面。
+      if (toolingDirectory === null || entryPoints!.has(item.path)) impl.push({ path: item.path, size: item.size ?? 0 });
     }
   }
   return impl;

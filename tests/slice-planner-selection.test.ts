@@ -198,22 +198,110 @@ describe("planner selection policy", () => {
     ]);
   });
 
+  it("leaves a tooling directory out of the window but keeps the entry points something starts in production", async () => {
+    const files = new Map([
+      ["package.json", JSON.stringify({ dependencies: { express: "4.0.0" }, scripts: { start: "node scripts/server.js", build: "tsc scripts/build.ts", migrate: "node scripts/migrate.ts" } }) + "\n"],
+      ["Dockerfile", "FROM node:20\nCMD [\"node\", \"scripts/worker.js\"]\n"],
+      ["lib/service.ts", "export const service = 1;\n"],
+      ["scripts/server.js", "module.exports = require('../lib/service');\n"],
+      ["scripts/worker.js", "require('../lib/service');\n"],
+      ["scripts/build.ts", "export const build = 1;\n"],
+      ["scripts/migrate.ts", "export const migrate = 1;\n"],
+      ["scripts/lib/util.js", "module.exports = {};\n"],
+    ]);
+    const trees = new Map<string, SourceTreeApiEntry[]>([
+      ["", [blob("package.json"), blob("Dockerfile"), tree("lib"), tree("scripts")]],
+      ["lib", [blob("lib/service.ts")]],
+      ["scripts", [blob("scripts/server.js"), blob("scripts/worker.js"), blob("scripts/build.ts"), blob("scripts/migrate.ts"), tree("scripts/lib")]],
+      ["scripts/lib", [blob("scripts/lib/util.js")]],
+    ]);
+    const result = await planSelection({}, files, trees);
+    // package.json 的 start 和 Dockerfile 的 CMD 点到的文件留下；build、migrate 命令点到的和没被点到的都不留。
+    expect(result.slice?.files.map((file) => file.path).sort()).toEqual(["lib/service.ts", "package.json", "scripts/server.js", "scripts/worker.js"]);
+    expect(result.excluded).toEqual([
+      { kind: "tooling", path: "scripts/build.ts", detail: "scripts" },
+      { kind: "tooling", path: "scripts/migrate.ts", detail: "scripts" },
+      { kind: "tooling", path: "scripts/lib/util.js", detail: "scripts" },
+    ]);
+    // 下一趟：此前的分区已经拿走这些文件，工具目录的入口也不再重选，也不被记成排除。
+    const nextPass = await planSelection({}, files, trees, [{ path: "" }], undefined, undefined, new Set(["lib/service.ts", "package.json", "scripts/server.js", "scripts/worker.js"]));
+    expect(nextPass.slice?.files ?? []).toEqual([]);
+    expect(nextPass.excluded).toEqual([
+      { kind: "tooling", path: "scripts/build.ts", detail: "scripts" },
+      { kind: "tooling", path: "scripts/migrate.ts", detail: "scripts" },
+      { kind: "tooling", path: "scripts/lib/util.js", detail: "scripts" },
+    ]);
+  });
+
+  it("forces a changed file in a tooling directory into the window only when it is a registered entry point", async () => {
+    const files = new Map([
+      ["package.json", JSON.stringify({ scripts: { start: "node scripts/server.js", build: "tsc scripts/build.ts" } }) + "\n"],
+      ["lib/service.ts", "export const service = 1;\n"],
+      ["scripts/server.js", "require('../lib/service');\n"],
+      ["scripts/build.ts", "export const build = 1;\n"],
+    ]);
+    const trees = new Map<string, SourceTreeApiEntry[]>([
+      ["", [blob("package.json"), tree("lib"), tree("scripts")]],
+      ["lib", [blob("lib/service.ts")]],
+      ["scripts", [blob("scripts/server.js"), blob("scripts/build.ts")]],
+    ]);
+    const required = ["scripts/build.ts", "scripts/server.js", "lib/service.ts"];
+    const result = await planSelection({}, files, trees, [{ path: "" }], undefined, required, undefined, { mode: "required_only", requiredPaths: required });
+    expect(result.slice?.files.map((file) => file.path).sort()).toEqual(["lib/service.ts", "scripts/server.js"]);
+    expect(result.excluded).toEqual([{ kind: "tooling", path: "scripts/build.ts", detail: "scripts" }]);
+  });
+
+  it("treats scripts as the product when they are all the scope has", async () => {
+    const files = new Map([["README.md", "# tools\n"], ["scripts/a.sh", "echo hi\n"], ["scripts/b.py", "print('hi')\n"]]);
+    const trees = new Map<string, SourceTreeApiEntry[]>([["", [blob("README.md"), tree("scripts")]], ["scripts", [blob("scripts/a.sh"), blob("scripts/b.py")]]]);
+    const result = await planSelection({}, files, trees);
+    expect(result.slice?.files.map((file) => file.path).sort()).toEqual(["scripts/a.sh", "scripts/b.py"]);
+    expect(result.excluded).toEqual([]);
+    // 必选循环里也一样：改了的脚本照常强制进窗口。
+    const changed = ["scripts/a.sh"];
+    const incremental = await planSelection({}, files, trees, [{ path: "" }], undefined, changed, undefined, { mode: "required_only", requiredPaths: changed });
+    expect(incremental.slice?.files.map((file) => file.path)).toEqual(["scripts/a.sh"]);
+    expect(incremental.excluded).toEqual([]);
+  });
+
+  it("treats a directory with a tooling name as tooling under a package that has a descriptor, not deeper in the source", async () => {
+    const files = new Map([
+      ["package.json", "{}\n"],
+      ["apps/web/package.json", "{}\n"],
+      ["apps/web/scripts/dev.ts", "export const dev = 1;\n"],
+      ["apps/web/src/page.tsx", "export default function Page() {}\n"],
+      ["src/tools/format.ts", "export const format = 1;\n"],
+    ]);
+    const trees = new Map<string, SourceTreeApiEntry[]>([
+      ["", [blob("package.json"), tree("apps"), tree("src")]],
+      ["apps", [tree("apps/web")]],
+      ["apps/web", [blob("apps/web/package.json"), tree("apps/web/scripts"), tree("apps/web/src")]],
+      ["apps/web/scripts", [blob("apps/web/scripts/dev.ts")]],
+      ["apps/web/src", [blob("apps/web/src/page.tsx")]],
+      ["src", [tree("src/tools")]],
+      ["src/tools", [blob("src/tools/format.ts")]],
+    ]);
+    const result = await planSelection({}, files, trees);
+    expect(result.slice?.files.map((file) => file.path)).toContain("src/tools/format.ts");
+    expect(result.excluded).toEqual([{ kind: "tooling", path: "apps/web/scripts/dev.ts", detail: "apps/web/scripts" }]);
+  });
+
   it("filters noise files sitting beside real source (filename-signal decoys)", async () => {
     const files = new Map([
       ["package.json", "{\"dependencies\":{\"express\":\"4.0.0\"}}\n"],
       ["lib/router.js", "module.exports = {};\n"],
       ["test/app.route.js", "it('routes');\n"],
-      ["scripts/play.ts", "export const play = 1;\n"],
+      ["play.ts", "export const play = 1;\n"],
     ]);
     const trees = new Map<string, SourceTreeApiEntry[]>([
-      ["", [blob("package.json"), tree("lib"), tree("test"), tree("scripts")]],
+      ["", [blob("package.json"), blob("play.ts"), tree("lib"), tree("test")]],
       ["lib", [blob("lib/router.js")]],
       ["test", [blob("test/app.route.js")]],
-      ["scripts", [blob("scripts/play.ts")]],
     ]);
     const result = await planSelection({}, files, trees, [{ path: "" }]);
-    // 关键断言：test/app.route.js（route 信号 decoy）被排除；无类别的散文件（play.ts）允许保留
-    expect(result.slice?.files.map((file) => file.path)).toEqual(["package.json", "lib/router.js", "scripts/play.ts"]);
+    // 关键断言：test/app.route.js（route 信号 decoy）被排除；无类别的散文件（play.ts）允许保留。
+    // 2026-11-27 之前这个散文件放在 scripts/ 下；scripts 成了开发工具目录，换到仓库根。
+    expect(result.slice?.files.map((file) => file.path)).toEqual(["package.json", "play.ts", "lib/router.js"]);
   });
 
   it("selects the window's diff files first, but only those inside the analysis target (W0-7)", async () => {
