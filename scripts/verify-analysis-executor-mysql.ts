@@ -7,7 +7,9 @@
  *   1. 迁移从零建表（含 085）。
  *   2. 一个托管产品和一个客户端分析的产品，各有一个 queued 的 run。另给客户端的产品直接插一行
  *      client_upload 的 run（现实中发布事务外看不到这种行，这里插它是为了验证谓词）。
- *   3. 入队：客户端的产品被拒（analysis_mode_is_client），不留 run 行；托管的产品过了闸门。
+ *   3. 入队：客户端的产品被拒（analysis_mode_is_client），不留 run 行；托管的产品过了闸门
+ *      （它的工作区配了自己的模型——托管产品的工作区没配模型时同样被拒，那一条由
+ *      scripts/verify-organization-model-mysql.ts 验证，这里不重复）。
  *   4. 启动恢复：只派发托管产品的那一个；客户端产品的 running run 不被重排。
  *   5. 积压补跑：只认领托管产品的那一个；客户端产品的 queued run 不被派发，也不被标成 superseded。
  *   6. runAnalysis：客户端产品的 run、client_upload 的 run 都被标失败，原因 analysis_mode_is_client。
@@ -19,8 +21,10 @@
  *   ANALYSIS_EXECUTOR_VERIFY_DATABASE_URL="mysql://user:pass@127.0.0.1:3306/codelphi_test_executor" \
  *     npx tsx scripts/verify-analysis-executor-mysql.ts
  */
+import { randomBytes } from "node:crypto";
 import type { Pool } from "mysql2/promise";
 import { enqueueRunWithReservation, BillingError } from "../lib/billing/core";
+import { saveOrganizationModel } from "../lib/organization-model";
 import { dispatchStuckQueuedRuns, recoverInterruptedRuns, type QueuedRunGate } from "../lib/analysis-recovery";
 import { runAnalysisTriggerSweepOnce } from "../lib/analysis-trigger";
 import { runAnalysis } from "../lib/analysis";
@@ -44,6 +48,8 @@ async function rowsOf(pool: Pool, statement: string, parameters: Array<string | 
 
 async function seed(pool: Pool) {
   const organizationId = insertIdOf(await pool.execute("INSERT INTO organizations (slug, name) VALUES (?, ?)", ["executor-org", "Executor Org"]));
+  // 托管产品要过闸门，它的工作区得先有自己的模型。地址只是存进去，这里不会去连它。
+  await saveOrganizationModel((statement, parameters) => pool.execute(statement, parameters), { organizationId, baseUrl: "https://model.example/v1", apiKey: "sk-verify-only", model: "verify-model" });
   const serverProductId = insertIdOf(await pool.execute("INSERT INTO products (organization_id, slug, name, description) VALUES (?, ?, ?, ?)", [organizationId, "server-product", "Server", ""]));
   const clientProductId = insertIdOf(await pool.execute("INSERT INTO products (organization_id, slug, name, description, analysis_executor) VALUES (?, ?, ?, ?, 'client')", [organizationId, "client-product", "Client", ""]));
   const serverRepositoryId = insertIdOf(await pool.execute("INSERT INTO repositories (product_id, provider, owner, name, default_branch) VALUES (?, 'github', 'verify', 'server', 'main')", [serverProductId]));
@@ -71,13 +77,13 @@ async function verifyEnqueueGate(pool: Pool, world: World): Promise<string[]> {
   );
   mustBe(clientError instanceof ClientAnalysisError, "客户端分析的产品入队应当被 ClientAnalysisError 拒绝", String(clientError));
   mustBe(count(await rowsOf(pool, "SELECT COUNT(*) AS count FROM analysis_runs WHERE repository_id = ?", [world.clientRepositoryId])) === 2, "被拒的入队不能留下 run 行", world);
-  // 托管的产品：闸门放行，往下走到锁计费账户——临时库没有账户，所以停在那里的 BillingError 上。
+  // 托管的产品（工作区配了自己的模型）：闸门放行，往下走到锁计费账户——临时库没有账户，所以停在那里的 BillingError 上。
   const serverError = await enqueueRunWithReservation({ repositoryId: world.serverRepositoryId, beforeSha: null, afterSha: "sha-new", trigger: "push", requestId: "verify-server" }).then(
     () => null,
     (error: unknown) => error,
   );
   mustBe(serverError instanceof BillingError, "托管的产品应当过闸门（停在缺少计费账户的 BillingError 上）", String(serverError));
-  return [`入队：客户端的产品被拒（${CLIENT_MODE_ERROR}），不留 run 行；托管的产品过了闸门`];
+  return [`入队：客户端的产品被拒（${CLIENT_MODE_ERROR}），不留 run 行；托管的产品过了闸门（它的工作区有自己的模型）`];
 }
 
 /** 第 4 步：启动恢复。 */
@@ -136,6 +142,8 @@ const gatePass: QueuedRunGate = async () => ({ dispatch: true, reason: "gate_pas
 async function main(): Promise<void> {
   const url = process.env[ENV_URL];
   if (!url) throw new Error(`缺少 ${ENV_URL}：这个脚本只认它，不读 DATABASE_URL（它会删库重建，不能指向别的库）`);
+  // 加密工作区的模型 key 要用主密钥：演练自己生成一个，不用开发机上的。
+  process.env.SESSION_SECRET = randomBytes(32).toString("hex");
   await withScratchDatabase({ url, prefix: SCRATCH_PREFIX, envName: ENV_URL }, async (pool, info) => {
     const world = await seed(pool);
     console.log(`临时库 ${info.database}，服务器 MySQL ${info.serverVersion}，${info.migrations} 个迁移文件。`);

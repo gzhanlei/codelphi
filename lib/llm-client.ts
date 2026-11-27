@@ -47,7 +47,8 @@ export interface OpenAICompatibleClientOptions {
   onUsage?: CompletionUsageHandler;
 }
 
-function completionsUrl(baseUrl: string | undefined) {
+/** 把配置的地址拼成 chat-completions 的完整地址。客户端和服务端用同一条规则。 */
+export function completionsUrl(baseUrl: string | undefined) {
   const configured = (baseUrl || "http://127.0.0.1:4000").replace(/\/$/, "");
   if (configured.endsWith("/v1/chat/completions")) return configured;
   if (configured.endsWith("/v1")) return `${configured}/chat/completions`;

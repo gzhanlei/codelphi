@@ -21,8 +21,9 @@ export function PresentationRegenerateButton({ slug, locale = "zh-CN" }: { slug:
     setDetail("");
     try {
       const response = await fetch(`/api/products/${slug}/presentation`, { method: "POST" });
-      const body = await response.json().catch(() => ({})) as { outcome?: string; reason?: string; error?: string };
-      if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+      const body = await response.json().catch(() => ({})) as { outcome?: string; reason?: string; error?: string; message?: string };
+      // 工作区没配模型时服务端回 409 并带着一句给人看的解释，优先显示它。
+      if (!response.ok) throw new Error(body.message || body.error || `HTTP ${response.status}`);
       if (body.outcome === "deferred") setStatus("busy");
       else if (body.outcome === "skipped") {
         setStatus("error");

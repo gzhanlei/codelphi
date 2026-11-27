@@ -118,14 +118,16 @@ export function ReleaseNotesView({ slug, releaseId, canEdit, changelogHref, loca
 
   useEffect(() => { void load(); }, [load]);
 
-  const act = async (work: () => Promise<void>, successNotice?: string) => {
+  const act = async (work: () => Promise<void>, successNotice?: string | (() => string)) => {
     if (guard()) return;
     setPending(true);
     setError("");
     setNotice("");
     try {
       await work();
-      if (successNotice) setNotice(successNotice);
+      // 提示可以等干完活再定：生成草稿之后，有没有做 AI 润色要看服务端的应答。
+      const notice = typeof successNotice === "function" ? successNotice() : successNotice;
+      if (notice) setNotice(notice);
     } catch (cause: unknown) {
       setError(errorMessage(cause, pick(locale, RELEASE_NOTES.operationFailed)));
     } finally {
@@ -169,12 +171,15 @@ export function ReleaseNotesView({ slug, releaseId, canEdit, changelogHref, loca
       await load();
     }, pick(locale, RELEASE_NOTES.noticeEmphasisSaved));
 
-  const generate = () =>
-    act(async () => {
-      await generateDraft(slug, releaseId, [...selected], "");
+  const generate = () => {
+    // 有没有做 AI 润色要等应答回来才知道；提示跟着它变。
+    let draft: Awaited<ReturnType<typeof generateDraft>> = "generated";
+    return act(async () => {
+      draft = await generateDraft(slug, releaseId, [...selected], "");
       await load();
       setPicking(false);
-    }, pick(locale, RELEASE_NOTES.noticeDraftGenerated));
+    }, () => pick(locale, draft === "generated_without_copy" ? RELEASE_NOTES.noticeDraftWithoutModel : RELEASE_NOTES.noticeDraftGenerated));
+  };
 
   const publish = () =>
     act(async () => {

@@ -4,6 +4,7 @@ import { POST } from "../app/api/products/[slug]/presentation/route";
 import { getSessionUser } from "../lib/session";
 import { requireProductAccess } from "../lib/product-access";
 import { schedulePresentationRefresh } from "../lib/product-presentation-service";
+import { MODEL_REQUIRED_RESPONSE_MESSAGE } from "../lib/analysis-executor";
 
 vi.mock("@/lib/session", () => ({ getSessionUser: vi.fn() }));
 vi.mock("@/lib/product-access", () => ({ requireProductAccess: vi.fn() }));
@@ -40,6 +41,16 @@ describe("product presentation route", () => {
     vi.mocked(requireProductAccess).mockResolvedValue({ product: { id: 12 }, organization: { id: 3 }, role: "viewer", via: "organization" } as never);
     expect((await request("codelphi")).status).toBe(403);
     expect(schedulePresentationRefresh).not.toHaveBeenCalled();
+  });
+
+  it("answers 409 with the reason when the workspace has no model of its own, and leaves other skips as they were", async () => {
+    vi.mocked(schedulePresentationRefresh).mockResolvedValueOnce({ outcome: "skipped", reason: "model_not_configured" });
+    const response = await request("codelphi");
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "model_not_configured", message: MODEL_REQUIRED_RESPONSE_MESSAGE });
+    // 客户端分析的产品本来就不在服务端生成：这不算错误，照旧 202。
+    vi.mocked(schedulePresentationRefresh).mockResolvedValueOnce({ outcome: "skipped", reason: "client_analysed" });
+    expect((await request("codelphi")).status).toBe(202);
   });
 
   it("reports a scheduling failure as 500 without leaking a stack trace", async () => {

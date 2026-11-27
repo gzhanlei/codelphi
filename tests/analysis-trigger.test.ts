@@ -93,6 +93,8 @@ describe("runAnalysisTriggerSweepOnce", () => {
     const { executed, queue, deps } = sweepHarness({ lastSha: "sha-base", head: "sha-head" });
     await runAnalysisTriggerSweepOnce(deps as unknown as TriggerSweepDependencies);
     expect(executed[0].sql).toContain("p.analysis_executor <> 'client'");
+    // 工作区没有自己的模型的仓库同样整段跳过：入队会被拒，计数留到配好模型之后。
+    expect(executed[0].sql).toContain("EXISTS(SELECT 1 FROM organization_models m WHERE m.organization_id = p.organization_id)");
     expect(queue).toHaveBeenCalledTimes(1);
   });
 });

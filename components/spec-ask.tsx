@@ -86,6 +86,7 @@ export function SpecAnswerView({ answer, productBase, locale = "zh-CN" }: { answ
           <p>{answer.aiAnswer.answer}</p>
         </div>
       ) : null}
+      {answer.aiUnavailableReason ? <p className="spec-ask-notice">{answer.aiUnavailableReason}</p> : null}
       {answer.insufficientReason ? (
         <div className="spec-ask-ai-answer spec-ask-refusal">
           <div className="spec-ask-ai-label">{pick(locale, SPEC_ASK.insufficientLabel)}</div>

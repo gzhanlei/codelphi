@@ -49,6 +49,8 @@ export interface LlmCallReceiptInput {
   requestFingerprint?: string | null;
   /** 实际耗时（Task 4 gateway 扩展起记录；历史行 NULL）。 */
   durationMs?: number | null;
+  /** 这次调用用的是谁的 key（migration 086）：'organization' 是工作区自己的模型；不传就是 CoDelphi 自己的，列留空。 */
+  modelSource?: "organization" | null;
 }
 
 export interface ParsedLlmUsage {
@@ -95,6 +97,21 @@ const RECEIPT_INSERT_SQL = `INSERT INTO llm_call_receipts
    pricing_version, input_price, output_price, cache_price, currency, llm_cost_amount, pricing_status, call_kind,
    task_key, unit_key, attempt_id, call_stage, request_key, request_fingerprint, duration_ms)
  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+/** 工作区自己的模型的调用多带一列 model_source；CoDelphi 自己的模型照旧用上面那条 27 列的语句。 */
+const RECEIPT_INSERT_WITH_SOURCE_SQL = `INSERT INTO llm_call_receipts
+  (run_id, account_id, charge_component, model, provider_request_id, outcome, usage_status,
+   input_tokens, output_tokens, cache_hit_tokens, cache_miss_tokens, usage_json,
+   pricing_version, input_price, output_price, cache_price, currency, llm_cost_amount, pricing_status, call_kind,
+   task_key, unit_key, attempt_id, call_stage, request_key, request_fingerprint, duration_ms, model_source)
+ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+/** 写回执的语句和参数：前 27 个参数两种情况完全相同，工作区自己的模型再多一个。 */
+function receiptInsertOf(input: LlmCallReceiptInput, usage: ParsedLlmUsage, pricing: PricedLlm | null, cost: number | null): { sql: string; params: Array<string | number | null> } {
+  const params = receiptInsertParams(input, usage, pricing, cost);
+  if (input.modelSource === "organization") return { sql: RECEIPT_INSERT_WITH_SOURCE_SQL, params: [...params, "organization"] };
+  return { sql: RECEIPT_INSERT_SQL, params };
+}
 
 /** 参数序（migration 081 追加）：0-23 与既有完全一致，24-26 = request_key/request_fingerprint/duration_ms。 */
 function receiptInsertParams(
@@ -149,7 +166,8 @@ export async function recordLlmCallReceipt(input: LlmCallReceiptInput): Promise<
   try {
     const usage = parseLlmUsage(input.usageRaw);
     const { pricing, cost } = pricingSnapshot(input, usage);
-    await getDb().execute(RECEIPT_INSERT_SQL, receiptInsertParams(input, usage, pricing, cost));
+    const insert = receiptInsertOf(input, usage, pricing, cost);
+    await getDb().execute(insert.sql, insert.params);
   } catch (error) {
     // 契约：回执写入失败仅告警，不阻断分析主链路（每日对账复核缺失）
     console.error("[billing] llm call receipt write failed", error);
@@ -277,7 +295,8 @@ export async function recordRequestScopedReceipt(input: RequestScopedReceiptInpu
   const usage = parseLlmUsage(input.usageRaw);
   const { pricing, cost } = pricingSnapshot(input, usage);
   try {
-    await getDb().execute(RECEIPT_INSERT_SQL, receiptInsertParams(input, usage, pricing, cost));
+    const insert = receiptInsertOf(input, usage, pricing, cost);
+    await getDb().execute(insert.sql, insert.params);
     return "inserted";
   } catch (error) {
     if (!isDuplicateEntryError(error)) {

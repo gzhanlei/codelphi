@@ -121,6 +121,33 @@ describe("database migrations", () => {
     });
   });
 
+  describe("workspace model configuration (086)", () => {
+    const sql = readFileSync(new URL("../migrations/086_organization_models.sql", import.meta.url), "utf8");
+
+    it("keeps one configuration per workspace, bound to the workspace so that deleting it removes the configuration", () => {
+      const start = sql.indexOf("CREATE TABLE IF NOT EXISTS organization_models (");
+      expect(start).toBeGreaterThanOrEqual(0);
+      const body = sql.slice(start, sql.indexOf(") ENGINE=InnoDB", start));
+      expect(body).toContain("organization_id BIGINT UNSIGNED NOT NULL PRIMARY KEY");
+      for (const column of ["base_url VARCHAR(500) NOT NULL", "api_key_encrypted TEXT NOT NULL", "model VARCHAR(64) NOT NULL", "verified_at DATETIME(3) NOT NULL", "created_at", "updated_at"]) expect(body).toContain(column);
+      expect(body).toContain("FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE");
+      // 库里只有密文：没有任何一列是给明文 key 的。
+      for (const forbidden of ["api_key VARCHAR", "api_key TEXT", "plaintext"]) expect(body).not.toContain(forbidden);
+    });
+
+    it("only adds: the column is nullable, and nothing existing changes", () => {
+      for (const forbidden of ["DROP ", "MODIFY ", "CHANGE COLUMN", " AFTER ", "RENAME ", "DROP INDEX", "DROP COLUMN"]) expect(sql).not.toContain(forbidden);
+      expect(sql).toContain("ALTER TABLE llm_call_receipts\n    ADD COLUMN model_source VARCHAR(16) NULL;");
+      expect([...sql.matchAll(/ADD COLUMN ([^\n]+)/g)]).toHaveLength(1);
+    });
+
+    it("keeps comment lines free of the statement separator the migration runner splits on", () => {
+      for (const line of sql.split("\n")) {
+        if (line.trimStart().startsWith("--")) expect(line, line).not.toContain(";");
+      }
+    });
+  });
+
   describe("identity layer (084)", () => {
     const sql = readFileSync(new URL("../migrations/084_spec_identity.sql", import.meta.url), "utf8");
 

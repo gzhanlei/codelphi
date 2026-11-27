@@ -1,10 +1,12 @@
 import { defaultExecute, type Execute } from "./db";
 
 /**
- * 谁来分析（修订稿 §6「本地分析与托管的隔离」）。
+ * 谁来分析（修订稿 §6「本地分析与托管的隔离」），以及用谁的模型（产品负责人 2026-11-27 的决定：
+ * 打开服务端分析开关的产品，必须先让用户填自己的模型配置，CoDelphi 不替用户付模型费用）。
  *
  * products.analysis_executor：server 是托管分析，client 是租户的客户端分析。
  * 产品是 client 时，服务端不读源码、不调模型，托管分析的任何入口都不得启动。
+ * 产品是 server 时，它的工作区必须有自己的模型配置（organization_models），服务端才为它调模型。
  * 判断只在这一处：入队的两个函数和 runAnalysis 都来问它，恢复与补跑的查询带上这里的条件。
  */
 export type AnalysisExecutor = "server" | "client";
@@ -39,6 +41,34 @@ export class ClientAnalysisError extends Error {
   }
 }
 
+export const MODEL_NOT_CONFIGURED = "model_not_configured";
+
+/**
+ * 产品由服务端分析，但它的工作区没有自己的模型配置。CoDelphi 不替用户付模型费用，
+ * 所以服务端不为它调模型。入队的闸门、执行的检查和 lib/organization-model.ts 都抛这一个。路由层映射成 409。
+ */
+export class ModelNotConfiguredError extends Error {
+  readonly code = MODEL_NOT_CONFIGURED;
+
+  constructor(message = MODEL_NOT_CONFIGURED_MESSAGE) {
+    super(message);
+    this.name = "ModelNotConfiguredError";
+  }
+}
+
+const MODEL_NOT_CONFIGURED_MESSAGE = "model_not_configured: this product is analysed on the server, but its workspace has no model configuration of its own; the server does not pay for its model calls";
+
+/** 接口拒绝时给用户看的一句话。 */
+export const MODEL_NOT_CONFIGURED_RESPONSE_MESSAGE = "这个产品由服务端分析，分析要用工作区自己的模型。请先在设置页的「模型配置」里填写模型服务地址、API Key 和模型名。";
+
+/** 网站上要用模型的功能（发布稿润色、理解层刷新）在工作区没配模型时拒绝的话。 */
+export const MODEL_REQUIRED_RESPONSE_MESSAGE = "这个功能要用工作区自己的模型，CoDelphi 不替用户付模型费用。请先在设置页的「模型配置」里填写模型服务地址、API Key 和模型名。";
+
+/** 服务端因为工作区没有模型而拒绝执行时写进 run 的原因。 */
+export function modelRunRefusal(): string {
+  return MODEL_NOT_CONFIGURED_MESSAGE;
+}
+
 export interface ExecutionMode {
   triggerType: string | null;
   executor: AnalysisExecutor;
@@ -57,19 +87,71 @@ export function clientRunRefusal(mode: ExecutionMode): string {
     : `${CLIENT_MODE_ERROR}: this product is analysed by the client; the server does not run its analyses`;
 }
 
-/** 读一个仓库所属的产品由谁来分析。读不到（仓库不存在）按托管算，让调用方原有的检查去报错。 */
-export async function loadAnalysisExecutor(repositoryId: number, execute: Execute = defaultExecute): Promise<AnalysisExecutor> {
-  const result = await execute(
-    "SELECT p.analysis_executor AS analysisExecutor FROM repositories repo JOIN products p ON p.id = repo.product_id WHERE repo.id = ?",
-    [repositoryId],
-  );
-  const rows = (Array.isArray(result) ? (result[0] as Array<{ analysisExecutor?: string }>) : []);
-  return rows[0]?.analysisExecutor === "client" ? "client" : "server";
+/** 「产品所属的工作区有自己的模型配置」。查询里 products 的别名固定叫 p。 */
+export const MODEL_CONFIGURED_SQL = "EXISTS(SELECT 1 FROM organization_models m WHERE m.organization_id = p.organization_id)";
+
+export interface AnalysisMode {
+  executor: AnalysisExecutor;
+  /** 工作区有没有自己的模型配置。 */
+  modelConfigured: boolean;
 }
 
-/** 托管分析的统一入口都要过这一关：产品由客户端分析就拒绝，而且是在动任何别的表之前。 */
+/**
+ * 一条查询同时回答两件事：产品由谁来分析，它的工作区有没有自己的模型。
+ * 读不到（仓库不存在）按托管、没有模型算，让调用方原有的检查去报错。
+ */
+export async function loadAnalysisMode(repositoryId: number, execute: Execute = defaultExecute): Promise<AnalysisMode> {
+  const result = await execute(
+    `SELECT p.analysis_executor AS analysisExecutor, ${MODEL_CONFIGURED_SQL} AS modelConfigured FROM repositories repo JOIN products p ON p.id = repo.product_id WHERE repo.id = ?`,
+    [repositoryId],
+  );
+  const rows = (Array.isArray(result) ? (result[0] as Array<{ analysisExecutor?: string; modelConfigured?: unknown }>) : []);
+  return { executor: rows[0]?.analysisExecutor === "client" ? "client" : "server", modelConfigured: Number(rows[0]?.modelConfigured ?? 0) === 1 };
+}
+
+/** 读一个仓库所属的产品由谁来分析。 */
+export async function loadAnalysisExecutor(repositoryId: number, execute: Execute = defaultExecute): Promise<AnalysisExecutor> {
+  return (await loadAnalysisMode(repositoryId, execute)).executor;
+}
+
+/**
+ * 托管分析的统一入口都要过这一关，而且是在动任何别的表之前：
+ * 产品由客户端分析就拒绝；产品由服务端分析、但工作区没有自己的模型，也拒绝。
+ */
 export async function assertServerExecuted(repositoryId: number, execute: Execute): Promise<void> {
-  if ((await loadAnalysisExecutor(repositoryId, execute)) === "client") throw new ClientAnalysisError();
+  const mode = await loadAnalysisMode(repositoryId, execute);
+  if (mode.executor === "client") throw new ClientAnalysisError();
+  if (!mode.modelConfigured) throw new ModelNotConfiguredError();
+}
+
+/**
+ * 把一个产品改成由客户端或服务端分析。改成服务端分析时，它的工作区必须先有自己的模型配置：
+ * 界面上没配模型就不给选「服务端分析」，这里是绕过界面时也躲不过的那一道（之后入队和执行还各有一道）。
+ */
+/**
+ * 一个产品由谁分析、它的工作区有没有自己的模型（产品设置页据此决定「服务端分析」能不能选）。产品不在了返回 null。
+ */
+export async function loadProductAnalysisMode(productId: number, execute: Execute = defaultExecute): Promise<AnalysisMode | null> {
+  const result = await execute(`SELECT p.analysis_executor AS analysisExecutor, ${MODEL_CONFIGURED_SQL} AS modelConfigured FROM products p WHERE p.id = ?`, [productId]);
+  const rows = (Array.isArray(result) ? (result[0] as Array<{ analysisExecutor?: string; modelConfigured?: unknown } | undefined>) : []);
+  if (!rows[0]) return null;
+  return { executor: rows[0].analysisExecutor === "client" ? "client" : "server", modelConfigured: Number(rows[0].modelConfigured) === 1 };
+}
+
+export async function switchAnalysisExecutor(productId: number, executor: AnalysisExecutor, execute: Execute = defaultExecute): Promise<void> {
+  if (executor === "server") {
+    const mode = await loadProductAnalysisMode(productId, execute);
+    if (!mode) throw new Error(`product ${productId} not found`);
+    if (!mode.modelConfigured) throw new ModelNotConfiguredError();
+  }
+  await execute("UPDATE products SET analysis_executor = ? WHERE id = ?", [executor, productId]);
+}
+
+/** 这个工作区里还在用服务端分析的产品。删工作区的模型配置之前要问它：删了，这些产品就分析不了了。 */
+export async function serverAnalysedProducts(organizationId: number, execute: Execute = defaultExecute): Promise<string[]> {
+  const result = await execute("SELECT p.slug FROM products p WHERE p.organization_id = ? AND p.analysis_executor = 'server' ORDER BY p.id", [organizationId]);
+  const rows = (Array.isArray(result) ? (result[0] as Array<{ slug: string }>) : []);
+  return rows.map((row) => row.slug);
 }
 
 /**

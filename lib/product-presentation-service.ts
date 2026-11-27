@@ -1,4 +1,6 @@
 import { requestStructuredCompletion, type AnalysisResult, type LlmBillingContext } from "./ai";
+import { MODEL_CONFIGURED_SQL } from "./analysis-executor";
+import { currentOrganizationModel, withOrganizationModel } from "./organization-model";
 import { defaultExecute, type Execute } from "./db";
 import { evidenceItems } from "./evidence";
 import { parseJsonValue } from "./json";
@@ -89,6 +91,9 @@ export interface PresentationLedger {
   description: string;
   /** 产品由谁来分析（products.analysis_executor）。client 的产品，理解层随客户端的提案一起交上来。缺省按托管。 */
   analysisExecutor?: "server" | "client";
+  /** 产品所属的工作区，和它有没有自己的模型配置：服务端只为配了自己的模型的工作区调模型。手搭的账本可以不带。 */
+  organizationId?: number;
+  modelConfigured?: boolean;
   language: PresentationLanguage;
   specVersionId: number | null;
   features: PresentationLedgerFeature[];
@@ -110,8 +115,8 @@ function errorMessage(error: unknown): string {
 }
 
 export async function loadPresentationLedger(execute: Execute, productId: number): Promise<PresentationLedger | null> {
-  const product = payloadRows<{ name: string; description: string; output_language: string | null; analysis_executor?: string }>(await execute(
-    "SELECT name, description, output_language, analysis_executor FROM products WHERE id = ? LIMIT 1",
+  const product = payloadRows<{ name: string; description: string; output_language: string | null; analysis_executor?: string; organization_id: number; modelConfigured?: unknown }>(await execute(
+    `SELECT p.name, p.description, p.output_language, p.analysis_executor, p.organization_id, ${MODEL_CONFIGURED_SQL} AS modelConfigured FROM products p WHERE p.id = ? LIMIT 1`,
     [productId],
   ))[0];
   if (!product) return null;
@@ -134,6 +139,8 @@ export async function loadPresentationLedger(execute: Execute, productId: number
     name: product.name,
     description: product.description ?? "",
     analysisExecutor: product.analysis_executor === "client" ? "client" : "server",
+    organizationId: product.organization_id,
+    modelConfigured: Number(product.modelConfigured ?? 0) === 1,
     language: presentationLanguage(product.output_language),
     specVersionId: latest?.spec_version_id ?? null,
     features,
@@ -751,7 +758,17 @@ export async function runPresentationGeneration(input: { ledger: PresentationLed
     return { outcome: "failed", reason };
   };
   try {
-    const next = await generateProductPresentation({ ledger: input.ledger, billing: input.billing, client: input.client });
+    // 整个生成都在产品所属工作区自己的模型里跑（lib/organization-model.ts）。工作区的配置读不到，就在这里抛出：
+    // 记成一次失败并留下原因，不会退回 CoDelphi 自己的模型。
+    const organizationId = input.ledger.organizationId;
+    if (organizationId === undefined) return await fail("model_not_configured: the product's workspace is unknown, so there is no model to generate with");
+    let usedModel: string | null = null;
+    const next = await withOrganizationModel(organizationId, async () => {
+      const generated = await generateProductPresentation({ ledger: input.ledger, billing: input.billing, client: input.client });
+      // 落库要记实际用的模型：只有在这个范围里才读得到，出去就没了。
+      usedModel = currentOrganizationModel()?.model ?? process.env.AI_MODEL ?? null;
+      return generated;
+    }, execute);
     if (next.capabilities.length === 0 && next.journeys.length === 0) return await fail("NO_VALID_OUTPUT: the model produced no valid capability group or journey");
     const stored = payloadRows<{ capabilities_json: unknown; journeys_json: unknown; tagline: string | null }>(await execute(
       "SELECT capabilities_json, journeys_json, tagline FROM product_presentations WHERE product_id = ? LIMIT 1",
@@ -774,7 +791,7 @@ export async function runPresentationGeneration(input: { ledger: PresentationLed
       source: "generated",
       fingerprint,
       payload,
-      modelName: process.env.AI_MODEL ?? null,
+      modelName: usedModel,
     });
     const detail = { status: payload.status, capabilities: payload.capabilities.length, journeys: payload.journeys.length, replaced, keptFromPrevious: previous.journeys.length, freshlyGenerated: next.journeys.length, passes: payload.passes, coveredFeatures: payload.coverage.featuresInJourneys, featuresTotal: payload.coverage.featuresTotal };
     console.log("[product-presentation] generated", { productId, ...detail });
@@ -806,6 +823,8 @@ export async function schedulePresentationRefresh(options: {
   // 客户端分析的产品：理解层随提案一起交上来，服务端不为它调模型（定时清扫和手动刷新都走这里）。
   if (ledger.analysisExecutor === "client") return { outcome: "skipped", reason: "client_analysed" };
   if (ledger.features.length === 0) return { outcome: "skipped", reason: "no_features" };
+  // 工作区没有自己的模型：CoDelphi 不替用户付模型费用，同样不生成。
+  if (!ledger.modelConfigured) return { outcome: "skipped", reason: "model_not_configured" };
   const fingerprint = presentationLedgerFingerprint(ledger);
   await ensurePresentationRow(execute, options.productId);
   const state = payloadRows<{ fingerprint: string; pending: number; interval_elapsed: number | null; never_generated: number | null; failure_count: number | null; retry_due: number | null }>(await execute(
@@ -864,6 +883,7 @@ export async function runPresentationRefreshSweepOnce(options: { execute?: Execu
      WHERE pending = 1 AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP(3))
        AND (lease_until IS NULL OR lease_until <= CURRENT_TIMESTAMP(3))
        AND product_id NOT IN (SELECT id FROM products WHERE analysis_executor = 'client')
+       AND EXISTS(SELECT 1 FROM products p WHERE p.id = product_presentations.product_id AND ${MODEL_CONFIGURED_SQL})
      ORDER BY next_attempt_at IS NULL DESC, next_attempt_at LIMIT ?`,
     [options.limit ?? 2],
   ));

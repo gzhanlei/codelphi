@@ -18,7 +18,7 @@ interface McpKeyView {
   revokedAt: string | Date | null;
 }
 
-/** MCP 集成面板（设置页）：组织级只读 key 的签发与撤销；明文仅创建时出现一次。
+/** MCP 集成面板（设置页）：组织级 key 的签发与撤销（只读查询用，或客户端分析上传用）；明文仅创建时出现一次。
  *  连接向导：通用 mcpServers JSON 模板，签发后自动烤入真实 key（HP-3 展示端点与连接配置）。 */
 export function McpKeysSettings({ initialKeys, canManage, locale = "zh-CN" }: { initialKeys: McpKeyView[]; canManage: boolean; locale?: UiLocale }) {
   const L = MCP_KEYS;
@@ -128,7 +128,7 @@ export function McpKeysSettings({ initialKeys, canManage, locale = "zh-CN" }: { 
           />
           <select aria-label="scope" value={scope} onChange={(event) => setScope(event.target.value as "mcp_read" | "snapshot_write")}>
             <option value="mcp_read">MCP 只读查询</option>
-            <option value="snapshot_write">本地快照导入（BYO）</option>
+            <option value="snapshot_write">客户端分析上传</option>
           </select>
           <button className="secondary-button" type="button" disabled={pending || !name.trim()} onClick={create}>{pick(locale, L.issueButton)}</button>
         </div>
@@ -145,7 +145,7 @@ export function McpKeysSettings({ initialKeys, canManage, locale = "zh-CN" }: { 
             <div>
               <strong>{key.name}</strong>
               <code className="mcp-key-hint">sk_cd_…{key.keyHint}</code>
-              {key.scope === "snapshot_write" ? <span className="mcp-key-meta">本地快照导入</span> : null}
+              {key.scope === "snapshot_write" ? <span className="mcp-key-meta">客户端分析上传</span> : null}
               <span className="mcp-key-meta">{pick(locale, L.createdByPrefix)}{key.createdBy}{pick(locale, L.createdByMiddle)}{formatDate(key.createdAt)}</span>
             </div>
             {key.revokedAt ? (

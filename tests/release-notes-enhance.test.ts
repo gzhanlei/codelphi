@@ -18,6 +18,9 @@ import { POST } from "../app/api/products/[slug]/release-notes/[noteId]/enhance/
 import { buildEnhancePrompt, parseEnhancedSummary } from "../lib/release-notes-enhance";
 import { getSessionUser } from "../lib/session";
 import { requireProductAccess } from "../lib/product-access";
+import { currentOrganizationModel } from "../lib/organization-model";
+import { encryptSecret } from "../lib/secret-box";
+import { MODEL_REQUIRED_RESPONSE_MESSAGE } from "../lib/analysis-executor";
 
 const access = {
   product: { id: 1, slug: "salesbuddy", name: "SalesBuddy", description: "d", organizationId: 7 },
@@ -29,6 +32,10 @@ const access = {
 const note = { id: 5, status: "draft", emphasis: "定价已收口", voiceId: null, shareToken: "tok", publishedAt: null, unpublishedAt: null, releaseId: 9 };
 
 const blockRow = { emphasis: "", kind: "added", featureName: "助理聊天", scenarioReference: "HP-2", summary: "URL 可点", highlightType: "News" };
+
+const WORKSPACE_MODEL = { baseUrl: "https://api.example/v1", apiKey: "sk-workspace", model: "k3-256k" };
+/** 工作区有没有自己的模型配置。润色要用它；没有就什么都不调。 */
+let modelConfigured = true;
 
 function enhanceRequest(body: unknown) {
   return new NextRequest("https://codelphi.example/api/products/salesbuddy/release-notes/5/enhance", {
@@ -44,7 +51,34 @@ describe("release note enhance (A2 §4.3-3)", () => {
     vi.mocked(getSessionUser).mockResolvedValue({ id: 3, sub: "user-1", email: "a@b.c", name: "A", picture: "" } as never);
     vi.mocked(requireProductAccess).mockResolvedValue(access as never);
     loadNoteById.mockResolvedValue(note);
-    dbExecute.mockResolvedValue([[blockRow], []]);
+    vi.stubEnv("SESSION_SECRET", "enhance-test-secret");
+    modelConfigured = true;
+    dbExecute.mockImplementation(async (sql: string) => {
+      if (String(sql).includes("FROM organization_models WHERE organization_id")) {
+        return [modelConfigured ? [{ base_url: WORKSPACE_MODEL.baseUrl, api_key_encrypted: encryptSecret(WORKSPACE_MODEL.apiKey, "enhance-test-secret"), model: WORKSPACE_MODEL.model }] : []];
+      }
+      return [[blockRow], []];
+    });
+  });
+
+  it("rewrites inside the workspace's own model", async () => {
+    const seen: unknown[] = [];
+    requestStructuredCompletion.mockImplementation(async () => {
+      seen.push(currentOrganizationModel());
+      return JSON.stringify({ summary: "改写后的文案" });
+    });
+    const response = await POST(enhanceRequest({ position: 1 }), { params: Promise.resolve({ slug: "salesbuddy", noteId: "5" }) });
+    expect((await response.json()).suggestion).toBe("改写后的文案");
+    expect(seen).toEqual([{ organizationId: 7, ...WORKSPACE_MODEL }]);
+    expect(currentOrganizationModel()).toBeNull();
+  });
+
+  it("answers 409 and calls no model when the workspace has no model of its own", async () => {
+    modelConfigured = false;
+    const response = await POST(enhanceRequest({ position: 1 }), { params: Promise.resolve({ slug: "salesbuddy", noteId: "5" }) });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "model_not_configured", message: MODEL_REQUIRED_RESPONSE_MESSAGE });
+    expect(requestStructuredCompletion).not.toHaveBeenCalled();
   });
 
   it("prompt carries facts-only rules, emphasis alignment, and optional instruction", () => {

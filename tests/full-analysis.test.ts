@@ -369,10 +369,16 @@ const routeRun = {
   organizationId: 7,
   productSlug: "radar",
   productName: "CoDelphi",
+  analysisModelConfigured: true,
 };
 const routeState = { runRows: [routeRun] as unknown[], sourceRows: [] as unknown[] };
 
 vi.mock("../lib/db", () => ({ getDb: () => ({ execute: routeExecute, getConnection: async () => routeConnection }) }));
+// 路由测试只管编排：工作区配了自己的模型，run 在它的模型里跑（读配置、绑定、没配时拒绝见 tests/analysis-executor.test.ts）。
+vi.mock("../lib/organization-model", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../lib/organization-model")>(),
+  withOrganizationModel: async (_organizationId: number, work: () => unknown) => work(),
+}));
 vi.mock("../lib/billing/core", () => ({
   BillingError: class BillingError extends Error {
     constructor(public code: string, message: string) {

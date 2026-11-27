@@ -8,6 +8,8 @@ import { buildEnhancePrompt, parseEnhancedSummary } from "@/lib/release-notes-en
 import { loadNoteById } from "@/lib/release-notes-service";
 import { loadProductOutputLanguage } from "@/lib/analysis-language";
 import { enforceExportRateLimit } from "@/lib/rate-limit";
+import { MODEL_REQUIRED_RESPONSE_MESSAGE, ModelNotConfiguredError } from "@/lib/analysis-executor";
+import { withOrganizationModel } from "@/lib/organization-model";
 
 /**
  * Enhance 单块改写（A2 §4.3-3）：对草稿块调 AI 重写措辞，返回建议文本；
@@ -44,7 +46,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
 
   try {
     const language = await loadProductOutputLanguage(access.product.id, db.execute.bind(db));
-    const content = await requestStructuredCompletion(
+    // 改写用的是产品所属工作区自己的模型：CoDelphi 不替用户付模型费用。工作区没配模型时不调任何模型，回 409。
+    const content = await withOrganizationModel(access.product.organizationId, () => requestStructuredCompletion(
       [
         { role: "system", content: language === "en" ? "You are a rigorous release-notes editor; reword only, never change the facts." : "你是严谨的发布说明编辑，只改写措辞不改变事实。" },
         { role: "user", content: buildEnhancePrompt({
@@ -58,9 +61,12 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
         }, language) },
       ],
       { runId: null, accountId: null, chargeComponent: "main", callKind: "release_note_enhance" },
-    );
+    ));
     return NextResponse.json({ suggestion: parseEnhancedSummary(content) });
   } catch (error) {
+    if (error instanceof ModelNotConfiguredError) {
+      return NextResponse.json({ error: error.code, message: MODEL_REQUIRED_RESPONSE_MESSAGE }, { status: 409 });
+    }
     return NextResponse.json({ error: `改写失败：${error instanceof Error ? error.message : "AI 调用异常"}` }, { status: 502 });
   }
 }

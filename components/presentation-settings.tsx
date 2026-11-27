@@ -26,7 +26,7 @@ export function PresentationSettings({ slug, presentation, hasFeatures, canEdit,
               : pick(locale, t.statusGenerated);
   return (
     <section className="overview-panel settings-panel" id="presentation-settings">
-      <div className="overview-panel-heading"><span>08</span><h2>{pick(locale, t.title)}</h2></div>
+      <div className="overview-panel-heading"><span>09</span><h2>{pick(locale, t.title)}</h2></div>
       <p className="overview-note">{pick(locale, t.summary)}</p>
       <dl className="settings-facts">
         <div><dt>{pick(locale, t.status)}</dt><dd role="status">{status}</dd></div>

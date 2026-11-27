@@ -29,14 +29,15 @@ export async function loadReleaseNote(slug: string, releaseId: number, fetcher: 
   return parse<ReleaseNoteState & { error?: string }>(response, "加载发布稿失败");
 }
 
-export async function generateDraft(slug: string, releaseId: number, selectedIds: number[], emphasis: string, fetcher: Fetcher = fetch) {
+/** 生成发布稿草稿。工作区没有自己的模型时草稿照常生成，只是服务端不做 AI 润色——返回值把这件事告诉页面。 */
+export async function generateDraft(slug: string, releaseId: number, selectedIds: number[], emphasis: string, fetcher: Fetcher = fetch): Promise<"generated" | "generated_without_copy"> {
   const response = await fetcher(`/api/products/${slug}/releases/${releaseId}/release-notes`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ slug, releaseId, selectedIds, emphasis }),
   });
-  await parse<{ noteId?: number; error?: string }>(response, "生成发布稿失败");
-  return "generated" as const;
+  const data = await parse<{ noteId?: number; copyRewrite?: string; error?: string }>(response, "生成发布稿失败");
+  return data.copyRewrite === "skipped" ? "generated_without_copy" : "generated";
 }
 
 export async function saveNoteEdits(

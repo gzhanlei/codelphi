@@ -30,6 +30,11 @@ const adapter = {
 };
 
 vi.mock("../lib/db", () => ({ getDb: () => ({ execute, getConnection: async () => connection }) }));
+// 这些测试只管编排：工作区配了自己的模型，run 在它的模型里跑（读配置、绑定、没配时拒绝见 tests/analysis-executor.test.ts）。
+vi.mock("../lib/organization-model", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../lib/organization-model")>(),
+  withOrganizationModel: async (_organizationId: number, work: () => unknown) => work(),
+}));
 vi.mock("../lib/billing/core", () => ({
   // 真实类：analysis.ts 以 instanceof BillingError 区分「账务拒绝→回 queued」与「真失败→failed」
   BillingError: class BillingError extends Error {
@@ -94,6 +99,7 @@ const run = {
   organizationId: 7,
   productSlug: "radar",
   productName: "CoDelphi",
+  analysisModelConfigured: true,
 };
 
 let runRows: unknown[] = [];

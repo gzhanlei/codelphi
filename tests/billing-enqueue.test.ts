@@ -62,6 +62,8 @@ beforeEach(() => {
 });
 
 function routeBasics(h: ReturnType<typeof harness>, overrides: { organizationId?: number; activeRun?: number; reserveRequest?: unknown } = {}) {
+  // 闸门在锁账户之前问「谁来分析、工作区有没有自己的模型」：这里的产品由服务端分析，工作区配了模型（没配时被拒见 tests/analysis-executor.test.ts）。
+  h.on("p.analysis_executor AS analysisExecutor", () => [{ analysisExecutor: "server", modelConfigured: 1 }], { first: true });
   h.on("FROM repositories repo JOIN products p", () => [{ organizationId: overrides.organizationId ?? 7 }]);
   h.on("FROM billing_accounts WHERE account_id", () => [{ account_id: 7, plan_id: "trial", plan_status: "trialing", reconciliation_hold: 0, current_period_start: null, current_period_end: null }]);
   h.on("SELECT id FROM analysis_runs WHERE repository_id", () => (overrides.activeRun === undefined ? [] : [{ id: overrides.activeRun }]));

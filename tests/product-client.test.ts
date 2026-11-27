@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createProduct, renameProduct, requestAnalysis, setOutputLanguage, updateDescription } from "../lib/product-client";
+import { createProduct, renameProduct, requestAnalysis, setAnalysisExecutor, setOutputLanguage, updateDescription } from "../lib/product-client";
 import { productInputSchema } from "../lib/product-input";
 
 const input = productInputSchema.parse({ name: "SalesBuddy", slug: "salesbuddy", description: "", repository: "gzhanlei/salesbuddy", defaultBranch: "", analyze: false });
@@ -42,6 +42,15 @@ describe("rename client", () => {
 });
 
 describe("output language client", () => {
+  it("patches how the product is analysed and brings back the server's reason when it refuses", async () => {
+    const fetcher = vi.fn(async (_input: string, _init?: RequestInit) => new Response(JSON.stringify({ status: "updated" }), { status: 200 }));
+    await expect(setAnalysisExecutor("radar", "client", fetcher)).resolves.toBe("updated");
+    expect(fetcher).toHaveBeenCalledWith("/api/products/radar", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ analysisExecutor: "client" }) }));
+    // 工作区没配模型时服务端回 409，并且说要去哪里配：页面要显示的是这句话。
+    await expect(setAnalysisExecutor("radar", "server", async () => new Response(JSON.stringify({ error: "model_not_configured", message: "这个产品由服务端分析，分析要用工作区自己的模型。" }), { status: 409 }))).rejects.toThrow(/^这个产品由服务端分析/);
+    await expect(setAnalysisExecutor("radar", "server", async () => new Response(JSON.stringify({}), { status: 200 }))).rejects.toThrow("保存分析方式失败");
+  });
+
   it("patches the product output language and surfaces failures", async () => {
     const fetcher = vi.fn(async () => new Response(JSON.stringify({ status: "updated" }), { status: 200 }));
     await expect(setOutputLanguage("radar", "en", fetcher)).resolves.toBe("updated");

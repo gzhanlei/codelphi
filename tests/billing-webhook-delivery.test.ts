@@ -20,7 +20,8 @@ function deliveryHarness() {
   const skipped: Array<{ repository_id: number; sha: string; reason: string; delivery_id: string }> = [];
   const repoUpdates: Array<{ sql: string; pending: number | null }> = [];
   const conns: Array<{ commit: ReturnType<typeof vi.fn>; rollback: ReturnType<typeof vi.fn> }> = [];
-  const triggerState = { mode: "push", n: 5, pending: 0, executor: "server" };
+  // model：这个仓库所属的工作区有没有自己的模型配置。
+  const triggerState = { mode: "push", n: 5, pending: 0, executor: "server", model: true };
   const db = {
     execute: vi.fn(),
     getConnection: vi.fn(async () => {
@@ -55,7 +56,7 @@ function deliveryHarness() {
             return [{}];
           }
           if (sql.includes("FROM repositories r") && sql.includes("analysis_trigger AS mode")) {
-            return [[{ mode: triggerState.mode, triggerN: triggerState.n, pendingPushCount: triggerState.pending, hasSucceededAnalysis: 1, analysisExecutor: triggerState.executor }], []];
+            return [[{ mode: triggerState.mode, triggerN: triggerState.n, pendingPushCount: triggerState.pending, hasSucceededAnalysis: 1, analysisExecutor: triggerState.executor, hasModel: triggerState.model ? 1 : 0 }], []];
           }
           if (sql.includes("UPDATE repositories SET pending_push_count")) {
             const next = sql.includes("pending_push_count + 1") ? triggerState.pending + 1 : 0;
@@ -166,6 +167,23 @@ describe("staged push delivery (contract P0-4)", () => {
     expect(h.skipped).toEqual([{ repository_id: 9, sha: "after-sha", reason: "analysis_mode_is_client", delivery_id: "D9" }]);
     // 跳过和状态推进在同一个事务里落库：不回滚。额度的通知只走 getDb().execute，这里一次都不该调用。
     expect(h.conns.every((conn) => conn.rollback.mock.calls.length === 0)).toBe(true);
+    expect(h.db.execute).not.toHaveBeenCalled();
+  });
+
+  it("skips a push for a server-analysed product whose workspace has no model of its own: nothing is enqueued, nothing is counted", async () => {
+    const h = deliveryHarness();
+    vi.mocked(getDb).mockReturnValue(h.db as never);
+    h.triggerState.executor = "server";
+    h.triggerState.model = false;
+    // 就算是按天触发的模式，没配模型也直接跳过：不累加待处理的推送数。
+    h.triggerState.mode = "daily";
+    const enqueue = vi.fn(async () => ({ runId: 66, reused: false }));
+    const result = await processGitHubWebhook(pushInput("D10"), baseDependencies(enqueue));
+    expect(result).toEqual({ status: 202, body: { accepted: false, skipped: true, reason: "model_not_configured" } });
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(h.row("D10").status).toBe("skipped");
+    expect(h.skipped).toEqual([{ repository_id: 9, sha: "after-sha", reason: "model_not_configured", delivery_id: "D10" }]);
+    expect(h.triggerState.pending).toBe(0);
     expect(h.db.execute).not.toHaveBeenCalled();
   });
 

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "../app/api/products/[slug]/analyze/route";
 import { POST as reanalyzeLatest } from "../app/api/products/[slug]/reanalyze-latest/route";
 import { queueAnalysis, runAnalysis } from "@/lib/analysis";
-import { ClientAnalysisError } from "@/lib/analysis-executor";
+import { ClientAnalysisError, MODEL_NOT_CONFIGURED_RESPONSE_MESSAGE, ModelNotConfiguredError } from "@/lib/analysis-executor";
 import { resolveManualAnalysis } from "@/lib/manual-analysis";
 
 vi.mock("next/server", async (importOriginal) => ({ ...await importOriginal<typeof import("next/server")>(), after: vi.fn() }));
@@ -64,6 +64,17 @@ describe("manual analysis route", () => {
     expect(typeof body.message).toBe("string");
     expect(after).not.toHaveBeenCalled();
   });
+
+  it("answers 409 with a pointer to the settings and schedules nothing when the workspace has no model of its own", async () => {
+    vi.mocked(resolveManualAnalysis).mockResolvedValue({ repositoryId: 9, afterSha: "sha-head" });
+    vi.mocked(queueAnalysis).mockRejectedValue(new ModelNotConfiguredError());
+    const response = await request("radar");
+    expect(response.status).toBe(409);
+    const body = await response.json();
+    expect(body).toEqual({ error: "model_not_configured", message: MODEL_NOT_CONFIGURED_RESPONSE_MESSAGE });
+    expect(body.message).toContain("模型配置");
+    expect(after).not.toHaveBeenCalled();
+  });
 });
 
 describe("reanalyze-latest route", () => {
@@ -85,6 +96,18 @@ describe("reanalyze-latest route", () => {
     const body = await response.json();
     expect(body.error).toBe("analysis_mode_is_client");
     expect(typeof body.message).toBe("string");
+    expect(after).not.toHaveBeenCalled();
+  });
+
+  it("answers 409 and schedules nothing when the workspace has no model of its own", async () => {
+    vi.mocked(resolveManualAnalysis).mockResolvedValue({ repositoryId: 9, afterSha: "sha-head" });
+    vi.mocked(queueAnalysis).mockRejectedValue(new ModelNotConfiguredError());
+    const response = await reanalyzeLatest(
+      new NextRequest("http://localhost/api/products/radar/reanalyze-latest", { method: "POST", body: JSON.stringify({ confirm: true }), headers: { "content-type": "application/json" } }),
+      { params: Promise.resolve({ slug: "radar" }) },
+    );
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "model_not_configured", message: MODEL_NOT_CONFIGURED_RESPONSE_MESSAGE });
     expect(after).not.toHaveBeenCalled();
   });
 

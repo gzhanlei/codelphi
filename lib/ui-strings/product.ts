@@ -318,6 +318,11 @@ export const RELEASE_NOTES = {
   noticeEmphasisSaved: { "zh-CN": "强调语已保存", en: "Emphasis saved" },
   noticeDraftGenerated: { "zh-CN": "发布稿草稿已生成", en: "Release notes draft generated" },
   noticeDraftGeneratedPanel: { "zh-CN": "发布稿草稿已生成，逐块校对后发布", en: "Draft generated; review each block before publishing" },
+  // 工作区没有自己的模型：草稿照常生成，但服务端不做 AI 润色。
+  noticeDraftWithoutModel: {
+    "zh-CN": "发布稿草稿已生成，但没有做 AI 润色：工作区还没有配置自己的模型（设置页「模型配置」）。逐块校对后发布",
+    en: "Draft generated, but its copy was not rewritten by AI: the workspace has no model of its own yet (Model configuration on the settings page). Review each block before publishing",
+  },
   noticePublished: { "zh-CN": "已发布，公开链接可分享", en: "Published; the public link is ready to share" },
   noticeUnpublished: { "zh-CN": "已下线，公开链接不再展示", en: "Unpublished; the public link is no longer shown" },
   noticeCopied: { "zh-CN": "公开链接已复制", en: "Public link copied" },

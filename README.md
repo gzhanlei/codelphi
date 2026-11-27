@@ -144,5 +144,6 @@ CoDelphi exposes 13 MCP tools (12 read-only + 1 feedback channel) for AI coding 
 
 - Only the Chandler `sub`, email, display name and avatar are stored — never Chandler passwords or OAuth tokens. Sessions last 7 days.
 - The AI may only cite code or diff files read in the run; code is sent only to the configured AI gateway.
+- A workspace can configure a model of its own (service address, API key, model name) on the settings page. Server-side analysis and the site's AI features then call that model with that workspace's key, which is stored encrypted and never shown again; the code needed for an analysis goes to the address the workspace chose. CoDelphi does not pay model costs for its users: without a model of its own a workspace gets no server-side analysis, and the site's AI features are unavailable or say that they ran without AI.
 - GitHub access prefers per-repo GitHub App installation tokens; a server-wide PAT is a compatibility fallback only.
 - **Known limitation**: path guards prevent citation hallucination, not semantic hallucination — a real line number paired with a wrong interpretation still passes validation. Evidence coverage is not conclusion correctness; treat output as unverified until human review.

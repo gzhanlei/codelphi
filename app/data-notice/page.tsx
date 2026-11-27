@@ -4,7 +4,7 @@ import { resolveUiLocale } from "@/lib/ui-locale-server";
 import { noticeSections, DATA_NOTICE } from "@/lib/ui-strings/legal";
 import { LanguageSwitcher } from "@/components/language-switcher";
 
-const NOTICE_UPDATED = "2026-11-08";
+const NOTICE_UPDATED = "2026-11-27";
 
 export async function generateMetadata() {
   const locale = await resolveUiLocale();
