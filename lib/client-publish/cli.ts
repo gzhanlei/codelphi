@@ -15,7 +15,7 @@ import { resolveGitSnapshot } from "../snapshot/git-backend";
 import { basename } from "node:path";
 import type { RepositoryIdentity } from "../client-proposal/contract";
 import { CREDENTIAL_KEYS, credentialsPath, DEFAULT_SERVER_URL, describeConfig, readCredentials, resolveConfig, writeCredentials } from "./credentials";
-import { ClientPublishError, produceProposal } from "./produce";
+import { ClientPublishError, produceProposal, type ProduceProgress } from "./produce";
 import { loadPreparedPublish, PublishRunError, type PreparedPublish } from "./run-store";
 import type { PrivacyRule } from "../privacy-scan";
 import { repositoryIdentityOf } from "./identity";
@@ -319,9 +319,67 @@ function printPruned(pruned: ReadonlyArray<{ path: string; rules: PrivacyRule[] 
   for (const item of pruned) io.stderr(`  ${item.path}（${item.rules.join("、")}）`);
 }
 
+function durationText(durationMs: number, language: Language): string {
+  return `${(durationMs / 1000).toFixed(1)} ${language === "en" ? "s" : "秒"}`;
+}
+
+function progressPosition(event: ProduceProgress): string {
+  return "current" in event && event.current !== undefined && "total" in event && event.total !== undefined ? ` ${event.current}/${event.total}` : "";
+}
+
+function progressText(event: ProduceProgress, language: Language): string {
+  const stage = stageText(event.stage);
+  const position = progressPosition(event);
+  const duration = "durationMs" in event && event.durationMs !== undefined ? durationText(event.durationMs, language) : "";
+  const retries = "retries" in event ? event.retries ?? 0 : 0;
+  if (event.status === "start") {
+    if (event.stage === "enumerate" && event.message) return say({ zh: `… 行为面枚举（${event.message} 个行为变更文件）`, en: `... enumerating behaviour (${event.message} changed files)` }, language);
+    return say({ zh: `… ${stage.zh}${position}`, en: `... ${stage.en}${position}` }, language);
+  }
+  if (event.status === "retry") {
+    return say({ zh: `重试：${stage.zh}${position}的第 1 次请求失败（${event.message ?? "未知错误"}），正在重试；每个分区最多请求 2 次。`, en: `Retrying: ${stage.en}${position}, attempt 1 failed (${event.message ?? "unknown error"}); at most 2 attempts are made per partition.` }, language);
+  }
+  if (event.status === "fallback") {
+    return say({ zh: `提示：${stage.zh}失败，改用功能索引${duration ? `（${duration}）` : ""}。`, en: `Notice: ${stage.en} failed; using the feature index instead${duration ? ` (${duration})` : ""}.` }, language);
+  }
+  if (event.stage === "plan") return say({ zh: `完成：规划出 ${event.total ?? 0} 个分析分区。`, en: `Completed: planned ${event.total ?? 0} analysis partitions.` }, language);
+  if (event.stage === "partition" && event.message === "reused") return say({ zh: `完成：${stage.zh}${position}（沿用工作目录结果）。`, en: `Completed: ${stage.en}${position} (reused from the work directory).` }, language);
+  const details = [
+    ...(duration ? [duration] : []),
+    ...(event.stage === "partition" ? [say({ zh: `重试 ${retries} 次`, en: `${retries} retries` }, language)] : []),
+    ...(event.message && event.stage !== "partition" ? [event.message] : []),
+  ];
+  return say({ zh: `完成：${stage.zh}${position}${details.length ? `（${details.join("，")}）` : ""}。`, en: `Completed: ${stage.en}${position}${details.length ? ` (${details.join(", ")})` : ""}.` }, language);
+}
+
+function isTimeout(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const candidate = error as { name?: unknown; message?: unknown };
+  return candidate.name === "TimeoutError" || typeof candidate.message === "string" && /aborted due to timeout|timed out|timeout/i.test(candidate.message);
+}
+
+function timeoutFailureText(error: unknown, progress: ProduceProgress | undefined, timeoutMs: number, workdir: string | undefined, language: Language): string | null {
+  if (!isTimeout(error) || !progress || !["partition", "presentation", "enumerate", "flows"].includes(progress.stage)) return null;
+  const stage = stageText(progress.stage);
+  const position = progressPosition(progress);
+  const seconds = Number((timeoutMs / 1000).toFixed(1));
+  const suggested = Math.max(600_000, timeoutMs * 2);
+  const retried = progress.status === "retry";
+  const resumption = workdir
+    ? say({ zh: `重新运行同一命令会沿用已完成的分区和其他结果。`, en: `Rerunning the same command will reuse completed partitions and other finished work.` }, language)
+    : say({ zh: `可用 --workdir 保存中间结果，便于中断后续跑。`, en: `Use --workdir to save intermediate results for a later resume.` }, language);
+  return say({
+    zh: `发布失败：${stage.zh}${position}的模型请求${retried ? "重试后仍" : ""}超过 ${seconds} 秒，被客户端主动中止。可将 AI_TIMEOUT_MS 调大（例如 ${suggested}）后重试；${resumption}原始错误：${errorMessage(error)}`,
+    en: `Publish failed: the model request for ${stage.en}${position} ${retried ? "still " : ""}exceeded ${seconds}s and was aborted by the client. Increase AI_TIMEOUT_MS (for example to ${suggested}) and retry; ${resumption} Original error: ${errorMessage(error)}`,
+  }, language);
+}
+
 export async function publishMain(argv: string[], io: CliIo): Promise<number> {
   const language = languageOf(argv);
   const t = (text: Text) => say(text, language);
+  let lastProgress: ProduceProgress | undefined;
+  let modelTimeoutMs = 180_000;
+  let runWorkdir: string | undefined;
   try {
     const { values, positionals } = parseArgs({
       args: argv.filter((argument, index) => argument !== "--language" && argv[index - 1] !== "--language"),
@@ -344,6 +402,8 @@ export async function publishMain(argv: string[], io: CliIo): Promise<number> {
       return 2;
     }
     const config = await loadConfig(io, io.credentialsFile ?? credentialsPath({ env: io.environment }));
+    modelTimeoutMs = Number(config.AI_TIMEOUT_MS) || 180_000;
+    runWorkdir = values.workdir;
     if (!config.CODELPHI_SNAPSHOT_KEY) {
       io.stderr(t({ zh: "缺少上传 key：请先运行 config，填写 CODELPHI_SNAPSHOT_KEY。", en: "Upload key is missing: run config and fill in CODELPHI_SNAPSHOT_KEY." }));
       return 2;
@@ -396,6 +456,7 @@ export async function publishMain(argv: string[], io: CliIo): Promise<number> {
       return reportUpload(upload.status, upload.body, prepared.proposal.revision.sha, server, selected.product.slug, io, t);
     }
     const client = (io.createClient ?? createStandaloneClientFromEnv)(config);
+    io.stderr(t({ zh: `分析模型：${client.displayName ?? config.AI_MODEL}；单次模型请求超时上限：${Number((modelTimeoutMs / 1000).toFixed(1))} 秒。`, en: `Analysis model: ${client.displayName ?? config.AI_MODEL}; timeout per model request: ${Number((modelTimeoutMs / 1000).toFixed(1))}s.` }));
     const result = await produceProposal({
       repositoryRoot: positionals[0],
       product: selected.product,
@@ -406,7 +467,8 @@ export async function publishMain(argv: string[], io: CliIo): Promise<number> {
       ...(values.provider ? { provider: values.provider as RepositoryIdentity["provider"] } : {}),
       ...(values.workdir ? { workdir: values.workdir } : {}),
       onProgress: (event) => {
-        if (event.status === "start") io.stderr(t({ zh: `… ${stageText(event.stage).zh}${"total" in event && event.total ? `（${event.total}）` : ""}`, en: `... ${stageText(event.stage).en}${"total" in event && event.total ? ` (${event.total})` : ""}` }));
+        lastProgress = event;
+        io.stderr(progressText(event, language));
       },
     });
     const proposal = result.proposal;
@@ -449,7 +511,8 @@ export async function publishMain(argv: string[], io: CliIo): Promise<number> {
       io.stderr(t({ zh: "提案的产品简介或发布信息里有看起来像源码的内容，没法自动剔除。请调整后重新分析。", en: "The product description or release information contains text that looks like source code and cannot be removed automatically. Run the analysis again." }));
       return 5;
     }
-    io.stderr(t({ zh: `发布失败：${errorMessage(error)}`, en: `Publish failed: ${errorMessage(error)}` }));
+    const timeoutText = timeoutFailureText(error, lastProgress, modelTimeoutMs, runWorkdir, language);
+    io.stderr(timeoutText ?? t({ zh: `发布失败：${errorMessage(error)}`, en: `Publish failed: ${errorMessage(error)}` }));
     return 1;
   }
 }
@@ -465,7 +528,7 @@ function versionGreater(left: string, right: string): boolean {
 function stageText(stage: string): Text {
   switch (stage) {
     case "plan": return { zh: "规划分区", en: "planning partitions" };
-    case "partition": return { zh: "提取", en: "extracting" };
+    case "partition": return { zh: "提取分区", en: "extracting partition" };
     case "presentation": return { zh: "生成理解层", en: "building the presentation" };
     case "window": return { zh: "读取变更窗口", en: "reading the change window" };
     case "enumerate": return { zh: "行为面枚举", en: "enumerating behaviour" };

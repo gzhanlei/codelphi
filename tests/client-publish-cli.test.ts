@@ -418,6 +418,51 @@ describe("snapshot entry dispatches the client analysis commands", () => {
       expect(await publishMain([root, "--slug", "fixture", "--prepare", "--dry-run"], bare.io)).toBe(2);
     });
 
+    it("shows partition position, retry reason and completion instead of repeating the same start line", async () => {
+      const { root } = await repository();
+      const directory = await workdir();
+      const h = harness({ environment: { AI_API_KEY: "k", AI_MODEL: "m" } });
+      let extractionAttempts = 0;
+      h.io.createClient = () => {
+        const model = fakeModel();
+        const complete = model.complete.bind(model);
+        return {
+          ...model,
+          complete: async (messages) => {
+            const prompt = messages.map((message) => message.content).join("\n");
+            if (prompt.includes("产品知识库") && !prompt.includes("改前/改后复述")) {
+              extractionAttempts += 1;
+              if (extractionAttempts === 1) throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+            }
+            return complete(messages);
+          },
+        };
+      };
+      expect(await publishMain([root, "--slug", "fixture", "--workdir", directory, "--prepare"], h.io)).toBe(0);
+      const text = h.err.join("\n");
+      expect(text).toContain("提取分区 1/1");
+      expect(text).toContain("第 1 次请求失败");
+      expect(text).toContain("正在重试");
+      expect(text).toContain("完成");
+      expect(text).toContain("重试 1 次");
+    });
+
+    it("explains which partition timed out and how to resume with a longer model timeout", async () => {
+      const { root } = await repository();
+      const directory = await workdir();
+      const h = harness({ environment: { AI_API_KEY: "k", AI_MODEL: "m" } });
+      h.io.createClient = () => ({
+        displayName: "m",
+        complete: async () => { throw new DOMException("The operation was aborted due to timeout", "TimeoutError"); },
+      });
+      expect(await publishMain([root, "--slug", "fixture", "--workdir", directory, "--prepare"], h.io)).toBe(1);
+      const text = h.err.join("\n");
+      expect(text).toContain("提取分区 1/1");
+      expect(text).toContain("180 秒");
+      expect(text).toContain("AI_TIMEOUT_MS");
+      expect(text).toContain("沿用已完成");
+    });
+
     it("says what is wrong instead of finalizing the wrong thing", async () => {
       const { root } = await repository();
       const empty = await workdir();
