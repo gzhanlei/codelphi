@@ -50,7 +50,6 @@ function languageOf(argv: readonly string[]): Language {
 const MODEL_KEYS = ["AI_BASE_URL", "AI_API_KEY", "AI_MODEL"];
 const SERVER_KEYS = ["CODELPHI_SERVER_URL", "CODELPHI_SNAPSHOT_KEY"];
 /** 模型服务地址不填时的默认值。OpenAI 兼容接口的通行写法；用别家的服务就自己填（我的默认）。 */
-export const DEFAULT_MODEL_BASE_URL = "https://api.openai.com/v1";
 /** 这个客户端说的提案契约版本。服务端不再接受它时，用户得升级客户端。 */
 export const CLIENT_CONTRACT_VERSION = "2.0.0";
 
@@ -148,24 +147,30 @@ export async function configMain(argv: string[], io: CliIo): Promise<number> {
         updates[key] = equals >= 0 ? item.slice(equals + 1) : values["value-stdin"] && io.readStdin ? (await io.readStdin()).trim() : "";
       }
     } else {
-      // 接入向导：先告诉用户请求发到哪里，再逐项问。
+      // 接入向导。两句话各放在要 key 之前，说的是用户刚刚确认的那个地址。模型服务地址没有默认值：
+      // 用哪家服务商是用户的决定，不替他猜；没配过就必须要他填。
       const serverUrl = stored.CODELPHI_SERVER_URL || io.environment.CODELPHI_SERVER_URL || DEFAULT_SERVER_URL;
-      const modelBase = stored.AI_BASE_URL || io.environment.AI_BASE_URL || DEFAULT_MODEL_BASE_URL;
-      io.stdout(t({ zh: `模型请求将发送到 ${modelBase}，不经过 CoDelphi 服务端。`, en: `Model requests go to ${modelBase}; they do not pass through the CoDelphi server.` }));
-      io.stdout(t({ zh: `分析提案将上传到 ${serverUrl}，内容不含源码文件和补丁。`, en: `Analysis proposals are uploaded to ${serverUrl}; they contain no source files or patches.` }));
+      const knownModelBase = stored.AI_BASE_URL || io.environment.AI_BASE_URL;
       updates = {};
       const ask = async (prompt: string, options?: { secret?: boolean }): Promise<string> => (io.ask ? io.ask(prompt, options) : "");
       const keep = (key: string, fallback: string) => stored[key] ?? io.environment[key] ?? fallback;
       const answer = await ask(t({ zh: `服务地址 [${serverUrl}]: `, en: `Server address [${serverUrl}]: ` }));
       if (answer.trim()) updates.CODELPHI_SERVER_URL = answer.trim();
+      io.stdout(t({ zh: `分析提案将上传到 ${updates.CODELPHI_SERVER_URL ?? serverUrl}，内容不含源码文件和补丁。`, en: `Analysis proposals are uploaded to ${updates.CODELPHI_SERVER_URL ?? serverUrl}; they contain no source files and patches.` }));
       const uploadKey = await ask(t({ zh: "上传 key: ", en: "Upload key: " }), { secret: true });
       if (uploadKey.trim()) updates.CODELPHI_SNAPSHOT_KEY = uploadKey.trim();
       else if (!keep("CODELPHI_SNAPSHOT_KEY", "")) {
         io.stderr(t({ zh: "没有上传 key 就无法发布。请先在 CoDelphi 的设置页创建一把 snapshot_write 权限的 key。", en: "Publishing needs an upload key. Create a snapshot_write key in your CoDelphi settings first." }));
         return 2;
       }
-      const modelAnswer = await ask(t({ zh: `模型服务地址 [${stored.AI_BASE_URL || io.environment.AI_BASE_URL || DEFAULT_MODEL_BASE_URL}]: `, en: `Model service address [${stored.AI_BASE_URL || io.environment.AI_BASE_URL || DEFAULT_MODEL_BASE_URL}]: ` }));
+      const modelAnswer = await ask(knownModelBase ? t({ zh: `模型服务地址 [${knownModelBase}]: `, en: `Model service address [${knownModelBase}]: ` }) : t({ zh: "模型服务地址: ", en: "Model service address: " }));
+      const modelBase = modelAnswer.trim() || knownModelBase;
+      if (!modelBase) {
+        io.stderr(t({ zh: "需要模型服务地址：填你的模型服务商给出的 OpenAI 兼容地址（它文档里的 Base URL）。不填就不知道请求该发到哪里，所以这里没有默认值。", en: "The model service address is needed: the OpenAI-compatible address your model provider documents (its Base URL). Nothing is sent anywhere by default." }));
+        return 2;
+      }
       if (modelAnswer.trim()) updates.AI_BASE_URL = modelAnswer.trim();
+      io.stdout(t({ zh: `模型请求将发送到 ${modelBase}，不经过 CoDelphi 服务端。`, en: `Model requests go to ${modelBase}; they do not pass through the CoDelphi server.` }));
       const modelKey = await ask(t({ zh: "API Key: ", en: "API Key: " }), { secret: true });
       if (modelKey.trim()) updates.AI_API_KEY = modelKey.trim();
       const model = await ask(stored.AI_MODEL || io.environment.AI_MODEL ? t({ zh: `模型名 [${stored.AI_MODEL || io.environment.AI_MODEL}]: `, en: `Model [${stored.AI_MODEL || io.environment.AI_MODEL}]: ` }) : t({ zh: "模型名: ", en: "Model: " }));
@@ -346,6 +351,11 @@ export async function publishMain(argv: string[], io: CliIo): Promise<number> {
     // --finalize 不调模型，所以不要模型的凭证：分析在一台机器上做，上传可以在另一台上。
     if (stage !== "finalize" && (!config.AI_API_KEY || !config.AI_MODEL)) {
       io.stderr(t({ zh: "缺少模型配置：请先运行 config，填写 AI_API_KEY 与 AI_MODEL。", en: "Model configuration is missing: run config and fill in AI_API_KEY and AI_MODEL." }));
+      return 2;
+    }
+    // 发模型请求的那段代码在没有地址时会退到本机网关 http://127.0.0.1:4000。不替用户做这个决定：要他先填。
+    if (stage !== "finalize" && !config.AI_BASE_URL) {
+      io.stderr(t({ zh: "缺少模型服务地址：请先运行 config，填写 AI_BASE_URL（你的模型服务商给出的 OpenAI 兼容地址）。没有它就不知道该把请求和 key 发到哪里。", en: "The model service address is missing: run config and fill in AI_BASE_URL (the OpenAI-compatible address your model provider documents). Without it there is no way to know where requests and the key should go." }));
       return 2;
     }
     const server = { serverUrl: config.CODELPHI_SERVER_URL ?? DEFAULT_SERVER_URL, key: config.CODELPHI_SNAPSHOT_KEY };

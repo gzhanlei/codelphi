@@ -52,6 +52,8 @@ function fakeModel(): StructuredCompletionClient {
 interface Harness {
   io: CliIo;
   out: string[];
+  /** 输出和提问按发生顺序记在一起，用来断言「先说了什么，再要 key」。 */
+  events: string[];
   err: string[];
   asked: Array<{ prompt: string; secret: boolean; answer: string }>;
   requests: Array<{ url: string; method: string; body?: string }>;
@@ -62,6 +64,7 @@ interface Harness {
 
 function harness(options: { environment?: Record<string, string | undefined>; answers?: Record<string, string>; file?: string } = {}): Harness {
   const out: string[] = [];
+  const events: string[] = [];
   const err: string[] = [];
   const asked: Harness["asked"] = [];
   const requests: Harness["requests"] = [];
@@ -82,10 +85,15 @@ function harness(options: { environment?: Record<string, string | undefined>; an
     return new Response(JSON.stringify(response.body), { status: response.status, headers: { "content-type": "application/json" } });
   }) as typeof fetch;
   const io: CliIo = {
-    stdout: (message) => out.push(message),
+    stdout: (message) => {
+      out.push(message);
+      events.push(`out:${message}`);
+    },
     stderr: (message) => err.push(message),
-    environment: { CODELPHI_CREDENTIALS_FILE: file, CODELPHI_SNAPSHOT_KEY: "sk_cd_test", ...(options.environment ?? {}) },
+    // 模型服务地址没有默认值（用哪家是用户的决定），所以夹具自己给一个；要测「没配」的用例把它盖成 undefined。
+    environment: { CODELPHI_CREDENTIALS_FILE: file, CODELPHI_SNAPSHOT_KEY: "sk_cd_test", AI_BASE_URL: "https://gateway.example/v1", ...(options.environment ?? {}) },
     ask: async (prompt, askOptions) => {
+      events.push(`ask:${prompt}`);
       const answer = options.answers?.[prompt] ?? "";
       asked.push({ prompt, secret: askOptions?.secret === true, answer });
       return answer;
@@ -93,7 +101,7 @@ function harness(options: { environment?: Record<string, string | undefined>; an
     fetchImpl,
     createClient: () => fakeModel(),
   };
-  return { io, out, err, asked, requests, context, uploadResponses, file };
+  return { io, out, events, err, asked, requests, context, uploadResponses, file };
 }
 
 beforeEach(() => vi.stubEnv("HOME", tmpdir()));
@@ -140,28 +148,60 @@ describe("config", () => {
     expect(h.err.join("\n")).not.toContain("sk_cd_bad");
   });
 
-  it("says where requests go before asking for any key, reads keys without echo, keeps what the user skips and saves", async () => {
+  it("names the address the user just confirmed, right before asking for each key, and never guesses a model provider", async () => {
     const h = harness({
+      // 什么都没配置过：环境里也没有模型地址。
+      environment: { AI_BASE_URL: undefined },
       answers: {
-        "服务地址 [https://codelphi.com]: ": "",
+        "服务地址 [https://codelphi.com]: ": "https://codelphi.example.com",
         "上传 key: ": "sk_cd_typed",
-        "模型服务地址 [https://api.openai.com/v1]: ": "https://gateway.example/v1",
+        "模型服务地址: ": "https://gateway.example/v1",
         "API Key: ": "sk_typed",
         "模型名: ": "model-x",
       },
     });
-    const code = await configMain([], h.io);
-    expect(code).toBe(0);
-    const prompts = h.asked.map((item) => item.prompt);
-    const disclosed = h.out.findIndex((line) => line.includes("gateway.example") || line.includes("模型请求"));
-    expect(disclosed).toBeGreaterThanOrEqual(0);
-    expect(prompts.indexOf("上传 key: ")).toBeGreaterThan(disclosed);
+    expect(await configMain([], h.io)).toBe(0);
+    const at = (prefix: string) => h.events.findIndex((event) => event.startsWith(prefix));
+    // 什么都不曾配置时，没有可以回车接受的默认模型地址，输出里也不出现任何一家的地址。
+    expect(at("ask:模型服务地址: ")).toBeGreaterThanOrEqual(0);
+    expect(h.out.join("\n")).not.toContain("api.openai.com");
+    expect(h.out.join("\n")).not.toContain("127.0.0.1");
+    const serverDisclosed = at("out:分析提案将上传到 https://codelphi.example.com");
+    const uploadKeyAsked = at("ask:上传 key: ");
+    const modelDisclosed = at("out:模型请求将发送到 https://gateway.example/v1，不经过 CoDelphi 服务端。");
+    const apiKeyAsked = at("ask:API Key: ");
+    expect(serverDisclosed).toBeGreaterThan(at("ask:服务地址 ["));
+    expect(uploadKeyAsked).toBeGreaterThan(serverDisclosed);
+    expect(modelDisclosed).toBeGreaterThan(at("ask:模型服务地址: "));
+    expect(apiKeyAsked).toBeGreaterThan(modelDisclosed);
     expect(h.asked.find((item) => item.prompt === "上传 key: ")?.secret).toBe(true);
     expect(h.asked.find((item) => item.prompt === "API Key: ")?.secret).toBe(true);
     expect(h.asked.find((item) => item.prompt === "模型名: ")?.secret).toBe(false);
-    expect(await readFile(h.file, "utf8")).toContain("AI_API_KEY=sk_typed");
+    expect(await readFile(h.file, "utf8")).toContain("AI_BASE_URL=https://gateway.example/v1");
     expect(h.out.join("\n")).not.toContain("sk_typed");
     expect(h.out.join("\n")).not.toContain("sk_cd_typed");
+  });
+
+  it("offers the model address it already knows as the default and names it when the user keeps it", async () => {
+    const file = join(tmpdir(), `codelphi-cli-stored-${process.pid}.env`);
+    await writeFile(file, "AI_BASE_URL=https://kept.example/v1\n");
+    const h = harness({
+      file,
+      answers: { "服务地址 [https://codelphi.com]: ": "", "上传 key: ": "sk_cd_typed", "模型服务地址 [https://kept.example/v1]: ": "", "API Key: ": "sk_typed", "模型名: ": "model-x" },
+    });
+    expect(await configMain([], h.io)).toBe(0);
+    expect(h.out).toContain("模型请求将发送到 https://kept.example/v1，不经过 CoDelphi 服务端。");
+    expect(h.events.findIndex((event) => event === "out:模型请求将发送到 https://kept.example/v1，不经过 CoDelphi 服务端。")).toBeLessThan(h.events.findIndex((event) => event === "ask:API Key: "));
+    expect(await readFile(file, "utf8")).toContain("AI_BASE_URL=https://kept.example/v1");
+  });
+
+  it("stops before asking for a model key when no model address is configured and the user gives none", async () => {
+    const h = harness({ environment: { AI_BASE_URL: undefined }, answers: { "服务地址 [https://codelphi.com]: ": "", "上传 key: ": "sk_cd_typed", "模型服务地址: ": "" } });
+    expect(await configMain([], h.io)).toBe(2);
+    expect(h.events.some((event) => event.startsWith("ask:API Key"))).toBe(false);
+    expect(h.out.join("\n")).not.toContain("模型请求将发送到");
+    expect(h.err.join("\n")).toContain("模型服务地址");
+    await expect(readFile(h.file)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("refuses keys it does not know and deletes the file on --reset", async () => {
@@ -195,6 +235,14 @@ describe("status", () => {
 });
 
 describe("publish", () => {
+  it("refuses to call a model when no model address is configured instead of sending the key to a default gateway", async () => {
+    const { root } = await repository();
+    const h = harness({ environment: { AI_API_KEY: "k", AI_MODEL: "m", AI_BASE_URL: undefined } });
+    expect(await publishMain([root, "--slug", "fixture"], h.io)).toBe(2);
+    expect(h.err.join("\n")).toContain("AI_BASE_URL");
+    expect(h.requests.filter((request) => request.method === "POST")).toHaveLength(0);
+  });
+
   it("refuses before calling the model when the model is not configured", async () => {
     const { root } = await repository();
     const h = harness({ environment: { AI_API_KEY: undefined, AI_MODEL: undefined } });
