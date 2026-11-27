@@ -182,6 +182,31 @@ describe("config", () => {
     expect(h.out.join("\n")).not.toContain("sk_cd_typed");
   });
 
+  it("tells a DeepSeek user, before asking for the key, that the client turns thinking off and how to keep it", async () => {
+    const h = harness({
+      environment: { AI_BASE_URL: undefined },
+      answers: {
+        "服务地址 [https://codelphi.com]: ": "",
+        "模型服务地址: ": "https://api.deepseek.com",
+        "API Key: ": "sk_typed",
+        "模型名: ": "deepseek-flash",
+      },
+    });
+    expect(await configMain([], h.io)).toBe(0);
+    const at = (prefix: string) => h.events.findIndex((event) => event.startsWith(prefix));
+    const note = at("out:DeepSeek 默认开启思考");
+    expect(note).toBeGreaterThan(at("out:模型请求将发送到 https://api.deepseek.com"));
+    expect(note).toBeLessThan(h.events.indexOf("ask:API Key: "));
+    expect(h.events[note]).toContain("AI_THINKING=on");
+    // 别的服务商不提这件事：这个参数不是每家都认，客户端也不会替他们发。
+    const other = harness({
+      environment: { AI_BASE_URL: undefined },
+      answers: { "服务地址 [https://codelphi.com]: ": "", "模型服务地址: ": "https://gateway.example/v1", "API Key: ": "sk_typed", "模型名: ": "model-x" },
+    });
+    expect(await configMain([], other.io)).toBe(0);
+    expect(other.out.join("\n")).not.toContain("思考");
+  });
+
   it("offers the model address it already knows as the default and names it when the user keeps it", async () => {
     const file = join(tmpdir(), `codelphi-cli-stored-${process.pid}.env`);
     await writeFile(file, "AI_BASE_URL=https://kept.example/v1\n");
@@ -279,6 +304,25 @@ describe("publish", () => {
     const text = h.out.join("\n");
     expect(text).toContain("41");
     expect(text).toContain("fixture");
+  });
+
+  it("says with each publish whether the model will think, and that it turned DeepSeek's thinking off", async () => {
+    const { root } = await repository();
+    const run = async (environment: Record<string, string | undefined>) => {
+      const h = harness({ environment: { AI_API_KEY: "k", ...environment } });
+      expect(await publishMain([root, "--slug", "fixture"], h.io)).toBe(0);
+      return h.err.join("\n");
+    };
+    const deepseek = await run({ AI_BASE_URL: "https://api.deepseek.com", AI_MODEL: "deepseek-flash" });
+    expect(deepseek).toContain("分析模型：");
+    expect(deepseek).toContain("思考模式：已关闭");
+    expect(await run({ AI_BASE_URL: "https://api.deepseek.com", AI_MODEL: "deepseek-flash", AI_THINKING: "on" })).toContain("思考模式：开启");
+    // 别的服务商不带这个参数，也就没有这一句。
+    expect(await run({ AI_MODEL: "m" })).not.toContain("思考模式");
+    // 读不懂的值不猜：说出来是哪一项，而不是悄悄按某一种发出去。
+    const broken = harness({ environment: { AI_API_KEY: "k", AI_MODEL: "m", AI_THINKING: "maybe" } });
+    expect(await publishMain([root, "--slug", "fixture"], broken.io)).toBe(1);
+    expect(broken.err.join("\n")).toContain("AI_THINKING");
   });
 
   it("says when the first publish took over an imported draft, and says nothing when it did not", async () => {

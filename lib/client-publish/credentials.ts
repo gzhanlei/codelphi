@@ -17,7 +17,7 @@ export const CREDENTIAL_KEYS = ["AI_BASE_URL", "AI_API_KEY", "AI_MODEL", "CODELP
 export type CredentialKey = (typeof CREDENTIAL_KEYS)[number];
 
 /** 不是密钥、但也能写在凭证文件里的配置。 */
-export const OPTIONAL_KEYS = ["AI_TIMEOUT_MS", "AI_MAX_TOKENS"] as const;
+export const OPTIONAL_KEYS = ["AI_TIMEOUT_MS", "AI_MAX_TOKENS", "AI_THINKING"] as const;
 
 /** 显示配置时只说「已设置」的项。 */
 export const SECRET_KEYS: ReadonlySet<string> = new Set(["AI_API_KEY", "CODELPHI_SNAPSHOT_KEY"]);

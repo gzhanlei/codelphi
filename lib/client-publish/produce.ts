@@ -284,6 +284,7 @@ export async function produceProposal(options: ProduceOptions): Promise<ProduceS
       base: ledgerBase,
       outputLanguage: options.outputLanguage,
       modelName,
+      thinking: options.client.thinking,
       clientVersion: CLIENT_VERSION,
       pipelineVersion: CLIENT_PIPELINE_VERSION,
       promptVersion: CLIENT_PROMPT_VERSION,

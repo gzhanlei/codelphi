@@ -116,6 +116,9 @@ describe("publish run store", () => {
       { clientVersion: "0.2.0" },
       { productSlug: "another-product" },
       { repositoryRoot: "/repos/another-checkout" },
+      // 思考开还是关，同一个分区给出的内容不一样：换了就不能沿用之前的结果。
+      { thinking: "disabled" as const },
+      { thinking: "enabled" as const },
     ]) {
       const directory = await workdir();
       const first = await openPublishRun(directory, identity);
@@ -125,6 +128,22 @@ describe("publish run store", () => {
       expect(await second.store.read("partitions/partition-001.json", "key")).toBeNull();
       expect(JSON.parse(await readFile(join(directory, "publish.json"), "utf8"))).toMatchObject({ ...identity, ...change });
     }
+  });
+
+  it("resumes a run made without the thinking parameter, but not once thinking is switched on or off", async () => {
+    // 旧客户端写下的说明文件里没有 thinking 这一项。不带这个参数的客户端照旧接得上；开了或关了思考，就是另一次分析。
+    const directory = await workdir();
+    const first = await openPublishRun(directory, identity);
+    await first.store.write("partitions/partition-001.json", "key", { done: true });
+    expect((await openPublishRun(directory, identity)).resumed).toBe(true);
+    const switched = await openPublishRun(directory, { ...identity, thinking: "disabled" });
+    expect(switched.resumed).toBe(false);
+    expect(await switched.store.read("partitions/partition-001.json", "key")).toBeNull();
+    // 开着思考做完的，也不能拿来当关着思考的续跑。
+    const on = await openPublishRun(directory, { ...identity, thinking: "enabled" });
+    expect((await openPublishRun(directory, { ...identity, thinking: "enabled" })).resumed).toBe(true);
+    expect((await openPublishRun(directory, { ...identity, thinking: "disabled" })).resumed).toBe(false);
+    expect(on.resumed).toBe(false);
   });
 
   it("treats a work directory it cannot make sense of as a fresh run", async () => {

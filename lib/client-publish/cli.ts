@@ -9,7 +9,7 @@ import { createInterface } from "node:readline";
 import { Writable } from "node:stream";
 import { parseArgs } from "node:util";
 import type { StructuredCompletionClient } from "../llm-client";
-import { AiOutputTruncatedError, createStandaloneClientFromEnv } from "../llm-client";
+import { AiOutputTruncatedError, createStandaloneClientFromEnv, isDeepSeekApi, resolveThinkingMode } from "../llm-client";
 import { runGit } from "../snapshot/git";
 import { resolveGitSnapshot } from "../snapshot/git-backend";
 import { basename } from "node:path";
@@ -171,6 +171,12 @@ export async function configMain(argv: string[], io: CliIo): Promise<number> {
       }
       if (modelAnswer.trim()) updates.AI_BASE_URL = modelAnswer.trim();
       io.stdout(t({ zh: `模型请求将发送到 ${modelBase}，不经过 CoDelphi 服务端。`, en: `Model requests go to ${modelBase}; they do not pass through the CoDelphi server.` }));
+      if (isDeepSeekApi(modelBase)) {
+        io.stdout(t({
+          zh: "DeepSeek 默认开启思考，一次分析要几分钟。这个客户端会关掉它；想保留思考，运行时设 AI_THINKING=on。",
+          en: "DeepSeek turns thinking on by default, which makes an analysis take minutes. This client turns it off; set AI_THINKING=on when running to keep it.",
+        }));
+      }
       const modelKey = await ask(t({ zh: "API Key: ", en: "API Key: " }), { secret: true });
       if (modelKey.trim()) updates.AI_API_KEY = modelKey.trim();
       const model = await ask(stored.AI_MODEL || io.environment.AI_MODEL ? t({ zh: `模型名 [${stored.AI_MODEL || io.environment.AI_MODEL}]: `, en: `Model [${stored.AI_MODEL || io.environment.AI_MODEL}]: ` }) : t({ zh: "模型名: ", en: "Model: " }));
@@ -473,7 +479,13 @@ export async function publishMain(argv: string[], io: CliIo): Promise<number> {
       return reportUpload(upload.status, upload.body, prepared.proposal.revision.sha, server, selected.product.slug, io, t);
     }
     const client = (io.createClient ?? createStandaloneClientFromEnv)(config);
-    io.stderr(t({ zh: `分析模型：${client.displayName ?? config.AI_MODEL}；单次模型请求超时上限：${Number((modelTimeoutMs / 1000).toFixed(1))} 秒；输出 token 上限：${modelMaxTokens}。`, en: `Analysis model: ${client.displayName ?? config.AI_MODEL}; timeout per model request: ${Number((modelTimeoutMs / 1000).toFixed(1))}s; output token limit: ${modelMaxTokens}.` }));
+    // 思考开还是关对耗时影响很大，说清楚：尤其是替 DeepSeek 的用户做的那个默认决定。
+    const thinking = resolveThinkingMode(config);
+    const thinkingText = thinking === "disabled" ? t({ zh: "；思考模式：已关闭", en: "; thinking: off" }) : thinking === "enabled" ? t({ zh: "；思考模式：开启", en: "; thinking: on" }) : "";
+    io.stderr(t({
+      zh: `分析模型：${client.displayName ?? config.AI_MODEL}；单次模型请求超时上限：${Number((modelTimeoutMs / 1000).toFixed(1))} 秒；输出 token 上限：${modelMaxTokens}。${thinkingText}`,
+      en: `Analysis model: ${client.displayName ?? config.AI_MODEL}; timeout per model request: ${Number((modelTimeoutMs / 1000).toFixed(1))}s; output token limit: ${modelMaxTokens}.${thinkingText}`,
+    }));
     const result = await produceProposal({
       repositoryRoot: positionals[0],
       product: selected.product,

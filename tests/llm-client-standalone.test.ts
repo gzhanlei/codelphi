@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { AiOutputTruncatedError } from "../lib/ai";
 import { extractPassWithRetry } from "../lib/extraction-pass";
-import { createOpenAICompatibleClient, createStandaloneClientFromEnv } from "../lib/llm-client";
+import { createOpenAICompatibleClient, createStandaloneClientFromEnv, isDeepSeekApi } from "../lib/llm-client";
 
 function gateway(status: number, body: unknown = { choices: [{ message: { content: '{"ok":true}' } }] }) {
   const calls: Array<{ url: string; init: RequestInit }> = [];
@@ -32,6 +32,41 @@ describe("the standalone model client", () => {
       { fetchImpl },
     ).complete(message);
     expect(JSON.parse(String(calls[0].init.body))).toMatchObject({ max_tokens: 65_536 });
+  });
+
+  it("turns thinking off for DeepSeek's own API, where it is on by default, and leaves every other provider alone", async () => {
+    // DeepSeek 官方接口：请求里不带 thinking 就是开启思考（默认强度 high）。一次提取要几分钟，还容易顶到输出上限，所以默认关掉。
+    const deepseek = gateway(200);
+    await createStandaloneClientFromEnv({ AI_BASE_URL: "https://api.deepseek.com", AI_API_KEY: "sk_x", AI_MODEL: "deepseek-flash" }, { fetchImpl: deepseek.fetchImpl }).complete(message);
+    expect(JSON.parse(String(deepseek.calls[0].init.body))).toMatchObject({ thinking: { type: "disabled" } });
+    // 别的服务商：不替用户决定，也不发这个参数——不是每家 OpenAI 兼容接口都认它。
+    for (const baseUrl of ["https://api.kimi.com/coding/v1", "https://llmproxy.codelphi.com/v1", undefined]) {
+      const other = gateway(200);
+      await createStandaloneClientFromEnv({ AI_BASE_URL: baseUrl, AI_API_KEY: "sk_x", AI_MODEL: "m" }, { fetchImpl: other.fetchImpl }).complete(message);
+      expect("thinking" in (JSON.parse(String(other.calls[0].init.body)) as Record<string, unknown>)).toBe(false);
+    }
+  });
+
+  it("lets AI_THINKING say explicitly whether to think, for any provider", async () => {
+    const on = gateway(200);
+    await createStandaloneClientFromEnv({ AI_BASE_URL: "https://api.deepseek.com", AI_API_KEY: "sk_x", AI_MODEL: "deepseek-flash", AI_THINKING: "on" }, { fetchImpl: on.fetchImpl }).complete(message);
+    expect(JSON.parse(String(on.calls[0].init.body))).toMatchObject({ thinking: { type: "enabled" } });
+    const off = gateway(200);
+    await createStandaloneClientFromEnv({ AI_BASE_URL: "https://api.example/v1", AI_API_KEY: "sk_x", AI_MODEL: "m", AI_THINKING: "off" }, { fetchImpl: off.fetchImpl }).complete(message);
+    expect(JSON.parse(String(off.calls[0].init.body))).toMatchObject({ thinking: { type: "disabled" } });
+  });
+
+  it("recognises only DeepSeek's own API address, whatever case or path it is written with", () => {
+    expect(isDeepSeekApi("https://api.deepseek.com")).toBe(true);
+    expect(isDeepSeekApi("HTTPS://API.DEEPSEEK.COM/v1/")).toBe(true);
+    // 别的域名、看起来像的域名、读不出地址的写法，都不算：这个参数不是每家都认，不能发错人。
+    for (const baseUrl of [undefined, "", "not a url", "https://api.deepseek.com.example/v1", "https://deepseek.com", "https://api.kimi.com/coding/v1"]) expect(isDeepSeekApi(baseUrl)).toBe(false);
+  });
+
+  it("refuses a value of AI_THINKING it cannot read instead of guessing", () => {
+    expect(() => createStandaloneClientFromEnv({ AI_BASE_URL: "https://api.deepseek.com", AI_API_KEY: "sk_x", AI_MODEL: "deepseek-flash", AI_THINKING: "maybe" })).toThrow(
+      expect.objectContaining({ code: "invalid_ai_thinking" }),
+    );
   });
 
   it("joins the chat-completions path to whatever form of address was configured", async () => {
