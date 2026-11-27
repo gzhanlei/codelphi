@@ -68,7 +68,7 @@ Use standalone mode only when the user explicitly chooses it or supplies `--env-
 node "<skill-directory>/scripts/snapshot.cjs" <target> --standalone --language <zh-CN|en> --output <report.html>
 ```
 
-Standalone uses `AI_BASE_URL`, `AI_API_KEY`, and `AI_MODEL`; never print those credentials. `AI_TIMEOUT_MS` controls the request timeout. When usage accounting is requested, set `CODELPHI_USAGE_LOG` to a JSONL path to record each successful call's duration, request id, model, and raw gateway usage; the log contains no credentials. Do not silently fall back to standalone when host-native work orders are available.
+Standalone uses `AI_BASE_URL`, `AI_API_KEY`, and `AI_MODEL`; never print those credentials. `AI_TIMEOUT_MS` controls the request timeout. `AI_MAX_TOKENS` controls the output token budget per request (default 16000); increase it when the provider returns `finish_reason=length`, not the request timeout. When usage accounting is requested, set `CODELPHI_USAGE_LOG` to a JSONL path to record each successful call's duration, request id, model, and raw gateway usage; the log contains no credentials. Do not silently fall back to standalone when host-native work orders are available.
 
 ## 6. Publish an analysis to CoDelphi (client-side analysis)
 

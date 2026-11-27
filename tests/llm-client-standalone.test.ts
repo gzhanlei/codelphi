@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { AiOutputTruncatedError } from "../lib/ai";
+import { extractPassWithRetry } from "../lib/extraction-pass";
 import { createOpenAICompatibleClient, createStandaloneClientFromEnv } from "../lib/llm-client";
 
 function gateway(status: number, body: unknown = { choices: [{ message: { content: '{"ok":true}' } }] }) {
@@ -21,6 +23,15 @@ describe("the standalone model client", () => {
     // temperature 不发：用服务商自己的默认值。思考型模型有的只接受固定的值，有的不接受 0，写死哪个都会被拒。
     expect("temperature" in sent).toBe(false);
     expect(calls[0].init.headers).toMatchObject({ Authorization: "Bearer sk_x", "Content-Type": "application/json" });
+  });
+
+  it("uses the configured output token budget", async () => {
+    const { calls, fetchImpl } = gateway(200);
+    await createStandaloneClientFromEnv(
+      { AI_BASE_URL: "https://api.example/v1", AI_API_KEY: "sk_x", AI_MODEL: "deepseek-flash", AI_MAX_TOKENS: "65536" },
+      { fetchImpl },
+    ).complete(message);
+    expect(JSON.parse(String(calls[0].init.body))).toMatchObject({ max_tokens: 65_536 });
   });
 
   it("joins the chat-completions path to whatever form of address was configured", async () => {
@@ -67,6 +78,21 @@ describe("the standalone model client", () => {
     await expect(createOpenAICompatibleClient({ baseUrl: "https://api.example/v1", apiKey: "sk_x", model: "m", fetchImpl }).complete(message)).rejects.toThrow(/^AI gateway returned HTTP 502$/);
     const { fetchImpl: empty } = gateway(200, { choices: [{ message: { content: "" } }] });
     await expect(createOpenAICompatibleClient({ baseUrl: "https://api.example/v1", apiKey: "sk_x", model: "m", fetchImpl: empty }).complete(message)).rejects.toThrow("AI gateway returned empty content");
+  });
+
+  it("does not retry a response the provider truncated", async () => {
+    const { calls, fetchImpl } = gateway(200, {
+      choices: [{ message: { content: '{"product":{},"release":{},"changes":[],"features":[{"name":"partial"}' }, finish_reason: "length" }],
+    });
+    const client = createOpenAICompatibleClient({ baseUrl: "https://api.example/v1", apiKey: "sk_x", model: "deepseek-flash", fetchImpl });
+    await expect(extractPassWithRetry({
+      sources: [],
+      change: { message: "test", committedAt: "2026-11-27T00:00:00Z", url: "", files: [] },
+      context: { client },
+      allowSet: new Set(),
+      label: "test/truncated",
+    })).rejects.toBeInstanceOf(AiOutputTruncatedError);
+    expect(calls).toHaveLength(1);
   });
 
   it("returns the answer's content and names the model", async () => {

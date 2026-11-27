@@ -463,6 +463,23 @@ describe("snapshot entry dispatches the client analysis commands", () => {
       expect(text).toContain("沿用已完成");
     });
 
+    it("explains how to raise the output budget after a truncated partition", async () => {
+      const { root } = await repository();
+      const directory = await workdir();
+      const h = harness({ environment: { AI_API_KEY: "k", AI_MODEL: "m" } });
+      h.io.createClient = () => ({
+        displayName: "deepseek-flash",
+        complete: async () => { throw new Error("AI output truncated (finish_reason=length): raise the model output budget or narrow the analysis scope"); },
+      });
+      expect(await publishMain([root, "--slug", "fixture", "--workdir", directory, "--prepare"], h.io)).toBe(1);
+      const text = h.err.join("\n");
+      expect(text).toContain("提取分区 1/1");
+      expect(text).toContain("16000");
+      expect(text).toContain("AI_MAX_TOKENS");
+      expect(text).toContain("65536");
+      expect(text).toContain("沿用已完成");
+    });
+
     it("says what is wrong instead of finalizing the wrong thing", async () => {
       const { root } = await repository();
       const empty = await workdir();

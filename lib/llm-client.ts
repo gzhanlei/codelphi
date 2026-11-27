@@ -20,6 +20,16 @@ export class SnapshotLlmConfigurationError extends Error {
   }
 }
 
+export class AiOutputTruncatedError extends Error {
+  constructor() {
+    super("AI output truncated (finish_reason=length): raise the model output budget or narrow the analysis scope");
+    this.name = "AiOutputTruncatedError";
+  }
+  static isInstance(error: unknown): boolean {
+    return error instanceof AiOutputTruncatedError || /AI output truncated \(finish_reason=length\)/.test(error instanceof Error ? error.message : String(error));
+  }
+}
+
 export interface CompletionUsageMetadata {
   requestId: string | null;
   durationMs: number;
@@ -33,6 +43,7 @@ export interface OpenAICompatibleClientOptions {
   model: string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  maxTokens?: number;
   onUsage?: CompletionUsageHandler;
 }
 
@@ -73,15 +84,16 @@ export function createOpenAICompatibleClient(options: OpenAICompatibleClientOpti
         },
         // 不发 temperature，用服务商自己的默认值。思考型模型有的只接受某一个固定值，有的不接受 0；
         // 写死任何一个都会被其中一家拒绝（2026-11-27 Kimi 的 coding 接口对 temperature: 0 回 400）。
-        body: JSON.stringify({ model: options.model, messages, max_tokens: 16_000, stream: false }),
+        body: JSON.stringify({ model: options.model, messages, max_tokens: options.maxTokens ?? 16_000, stream: false }),
         cache: "no-store",
         signal: AbortSignal.timeout(options.timeoutMs ?? 180_000),
       });
       if (!response.ok) throw new Error(`AI gateway returned HTTP ${response.status}${await refusalDetail(response, options.apiKey)}`);
-      const payload = await response.json() as { id?: string; choices?: Array<{ message?: { content?: string } }>; usage?: unknown };
+      const payload = await response.json() as { id?: string; choices?: Array<{ message?: { content?: string }; finish_reason?: string | null }>; usage?: unknown };
       const content = payload.choices?.[0]?.message?.content;
       if (!content) throw new Error("AI gateway returned empty content");
       await options.onUsage?.(payload.usage ?? null, { requestId: payload.id ?? null, durationMs: Date.now() - startedAt });
+      if (payload.choices?.[0]?.finish_reason === "length") throw new AiOutputTruncatedError();
       return content;
     },
   };
@@ -92,11 +104,13 @@ export function createStandaloneClientFromEnv(environment: Record<string, string
   if (missing.length > 0) {
     throw new SnapshotLlmConfigurationError("missing_ai_config", `Missing standalone AI configuration: ${missing.join(", ")}`);
   }
+  const configuredMaxTokens = Number(environment.AI_MAX_TOKENS);
   return createOpenAICompatibleClient({
     baseUrl: environment.AI_BASE_URL,
     apiKey: environment.AI_API_KEY!,
     model: environment.AI_MODEL!,
     timeoutMs: Number(environment.AI_TIMEOUT_MS) || 180_000,
+    maxTokens: Number.isInteger(configuredMaxTokens) && configuredMaxTokens > 0 ? configuredMaxTokens : 16_000,
     ...(options.onUsage ? { onUsage: options.onUsage } : {}),
     ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
   });

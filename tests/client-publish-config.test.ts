@@ -46,11 +46,11 @@ describe("env file round trip", () => {
 describe("resolveConfig", () => {
   it("lets the process environment win over --env-file, and --env-file over the credentials file", () => {
     const resolved = resolveConfig({
-      process: { AI_MODEL: "from-process" },
-      envFile: { AI_MODEL: "from-env-file", AI_API_KEY: "key-from-env-file" },
-      credentials: { AI_MODEL: "from-file", AI_API_KEY: "key-from-file", CODELPHI_SERVER_URL: "https://server" },
+      process: { AI_MODEL: "from-process", AI_MAX_TOKENS: "65536" },
+      envFile: { AI_MODEL: "from-env-file", AI_API_KEY: "key-from-env-file", AI_MAX_TOKENS: "32000" },
+      credentials: { AI_MODEL: "from-file", AI_API_KEY: "key-from-file", AI_MAX_TOKENS: "16000", CODELPHI_SERVER_URL: "https://server" },
     });
-    expect(resolved).toMatchObject({ AI_MODEL: "from-process", AI_API_KEY: "key-from-env-file", CODELPHI_SERVER_URL: "https://server" });
+    expect(resolved).toMatchObject({ AI_MODEL: "from-process", AI_API_KEY: "key-from-env-file", AI_MAX_TOKENS: "65536", CODELPHI_SERVER_URL: "https://server" });
   });
 
   it("falls back to the public server address when nothing says otherwise", () => {

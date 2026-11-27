@@ -9,7 +9,7 @@ import { createInterface } from "node:readline";
 import { Writable } from "node:stream";
 import { parseArgs } from "node:util";
 import type { StructuredCompletionClient } from "../llm-client";
-import { createStandaloneClientFromEnv } from "../llm-client";
+import { AiOutputTruncatedError, createStandaloneClientFromEnv } from "../llm-client";
 import { runGit } from "../snapshot/git";
 import { resolveGitSnapshot } from "../snapshot/git-backend";
 import { basename } from "node:path";
@@ -358,6 +358,20 @@ function isTimeout(error: unknown): boolean {
   return candidate.name === "TimeoutError" || typeof candidate.message === "string" && /aborted due to timeout|timed out|timeout/i.test(candidate.message);
 }
 
+function truncationFailureText(error: unknown, progress: ProduceProgress | undefined, maxTokens: number, workdir: string | undefined, language: Language): string | null {
+  if (!AiOutputTruncatedError.isInstance(error) || !progress || !["partition", "presentation", "enumerate", "flows"].includes(progress.stage)) return null;
+  const stage = stageText(progress.stage);
+  const position = progressPosition(progress);
+  const suggested = Math.max(65_536, maxTokens * 2);
+  const resumption = workdir
+    ? say({ zh: `重新运行同一命令会沿用已完成的分区和其他结果。`, en: `Rerunning the same command will reuse completed partitions and other finished work.` }, language)
+    : say({ zh: `可用 --workdir 保存中间结果，便于中断后续跑。`, en: `Use --workdir to save intermediate results for a later resume.` }, language);
+  return say({
+    zh: `发布失败：${stage.zh}${position}的模型输出达到 ${maxTokens} token 上限，JSON 未生成完整。可将 AI_MAX_TOKENS 调大（例如 ${suggested}）后重试；这与 AI_TIMEOUT_MS 请求超时无关。${resumption}原始错误：${errorMessage(error)}`,
+    en: `Publish failed: the model output for ${stage.en}${position} reached the ${maxTokens}-token limit, leaving incomplete JSON. Increase AI_MAX_TOKENS (for example to ${suggested}) and retry; this is unrelated to the AI_TIMEOUT_MS request timeout. ${resumption} Original error: ${errorMessage(error)}`,
+  }, language);
+}
+
 function timeoutFailureText(error: unknown, progress: ProduceProgress | undefined, timeoutMs: number, workdir: string | undefined, language: Language): string | null {
   if (!isTimeout(error) || !progress || !["partition", "presentation", "enumerate", "flows"].includes(progress.stage)) return null;
   const stage = stageText(progress.stage);
@@ -379,6 +393,7 @@ export async function publishMain(argv: string[], io: CliIo): Promise<number> {
   const t = (text: Text) => say(text, language);
   let lastProgress: ProduceProgress | undefined;
   let modelTimeoutMs = 180_000;
+  let modelMaxTokens = 16_000;
   let runWorkdir: string | undefined;
   try {
     const { values, positionals } = parseArgs({
@@ -403,6 +418,8 @@ export async function publishMain(argv: string[], io: CliIo): Promise<number> {
     }
     const config = await loadConfig(io, io.credentialsFile ?? credentialsPath({ env: io.environment }));
     modelTimeoutMs = Number(config.AI_TIMEOUT_MS) || 180_000;
+    const configuredMaxTokens = Number(config.AI_MAX_TOKENS);
+    modelMaxTokens = Number.isInteger(configuredMaxTokens) && configuredMaxTokens > 0 ? configuredMaxTokens : 16_000;
     runWorkdir = values.workdir;
     if (!config.CODELPHI_SNAPSHOT_KEY) {
       io.stderr(t({ zh: "缺少上传 key：请先运行 config，填写 CODELPHI_SNAPSHOT_KEY。", en: "Upload key is missing: run config and fill in CODELPHI_SNAPSHOT_KEY." }));
@@ -456,7 +473,7 @@ export async function publishMain(argv: string[], io: CliIo): Promise<number> {
       return reportUpload(upload.status, upload.body, prepared.proposal.revision.sha, server, selected.product.slug, io, t);
     }
     const client = (io.createClient ?? createStandaloneClientFromEnv)(config);
-    io.stderr(t({ zh: `分析模型：${client.displayName ?? config.AI_MODEL}；单次模型请求超时上限：${Number((modelTimeoutMs / 1000).toFixed(1))} 秒。`, en: `Analysis model: ${client.displayName ?? config.AI_MODEL}; timeout per model request: ${Number((modelTimeoutMs / 1000).toFixed(1))}s.` }));
+    io.stderr(t({ zh: `分析模型：${client.displayName ?? config.AI_MODEL}；单次模型请求超时上限：${Number((modelTimeoutMs / 1000).toFixed(1))} 秒；输出 token 上限：${modelMaxTokens}。`, en: `Analysis model: ${client.displayName ?? config.AI_MODEL}; timeout per model request: ${Number((modelTimeoutMs / 1000).toFixed(1))}s; output token limit: ${modelMaxTokens}.` }));
     const result = await produceProposal({
       repositoryRoot: positionals[0],
       product: selected.product,
@@ -511,8 +528,9 @@ export async function publishMain(argv: string[], io: CliIo): Promise<number> {
       io.stderr(t({ zh: "提案的产品简介或发布信息里有看起来像源码的内容，没法自动剔除。请调整后重新分析。", en: "The product description or release information contains text that looks like source code and cannot be removed automatically. Run the analysis again." }));
       return 5;
     }
-    const timeoutText = timeoutFailureText(error, lastProgress, modelTimeoutMs, runWorkdir, language);
-    io.stderr(timeoutText ?? t({ zh: `发布失败：${errorMessage(error)}`, en: `Publish failed: ${errorMessage(error)}` }));
+    const failureText = truncationFailureText(error, lastProgress, modelMaxTokens, runWorkdir, language)
+      ?? timeoutFailureText(error, lastProgress, modelTimeoutMs, runWorkdir, language);
+    io.stderr(failureText ?? t({ zh: `发布失败：${errorMessage(error)}`, en: `Publish failed: ${errorMessage(error)}` }));
     return 1;
   }
 }

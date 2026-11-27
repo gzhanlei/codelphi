@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { requiredEnv } from "./env";
 import { analyzedChangeFiles } from "./evidence";
-import type { StructuredCompletionClient } from "./llm-client";
+import { AiOutputTruncatedError, type StructuredCompletionClient } from "./llm-client";
+export { AiOutputTruncatedError } from "./llm-client";
 import type { SourceFile } from "./github";
 import { recordLlmCallReceipt, recordRequestScopedReceipt, type ChargeComponent, type LlmCallStage } from "./billing/cost-receipt";
 import type { OutputLanguage } from "./analysis-language";
@@ -211,21 +212,6 @@ const gatewayResponseSchema = z.object({
   })),
   usage: z.unknown().optional(),
 });
-
-/**
- * 输出被 max_tokens 截断（finish_reason=length）：继续 JSON.parse 只会得到难以归因的
- * SyntaxError，并在同输入重试上白烧一次全 prompt 调用。显式错误类型让管线跳过重试、
- * 失败分类给出人话、issue 去重按同一签名收敛。
- */
-export class AiOutputTruncatedError extends Error {
-  constructor() {
-    super("AI output truncated (finish_reason=length): raise the model output budget or narrow the analysis scope");
-    this.name = "AiOutputTruncatedError";
-  }
-  static isInstance(error: unknown): boolean {
-    return error instanceof AiOutputTruncatedError || /AI output truncated \(finish_reason=length\)/.test(error instanceof Error ? error.message : String(error));
-  }
-}
 
 export interface GatewayResponse {
   content: string;
