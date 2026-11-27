@@ -63,6 +63,13 @@ describe("snapshot presentation", () => {
     expect(detailPrompt).toContain("provider-specific");
   });
 
+  it("identifies the failed stage when a large product's domain plan fails", async () => {
+    const many = structuredClone(result);
+    many.features = Array.from({ length: 45 }, (_, index) => ({ name: `Feature ${index + 1}`, summary: `Summary ${index + 1}`, scenarios: result.features[0].scenarios }));
+    const complete = vi.fn(async () => { throw new Error("bad domain plan"); });
+    await expect(createSnapshotPresentation({ result: many, language: "en", client: { complete } })).rejects.toThrow(/domain_plan.*bad domain plan/);
+  });
+
   it("caps excess concept citations without discarding the concept or project map", async () => {
     const complete = vi.fn(async () => JSON.stringify({ tagline: "Explore history", coreCapabilities: [
       { name: "Explore", summary: "Explore", featureNames: ["Interactive map", "Place search"], scenarioRefs: [] },

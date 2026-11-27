@@ -210,7 +210,11 @@ async function generateFlows(result: AnalysisResult, client: StructuredCompletio
         flows.push(entry);
       } catch (error) {
         // 校验不过的图不交；服务端那一栏按现有的空态解释。模型故障同样略过，不让一张图拖垮整次发布。
-        if (!(error instanceof FlowValidationError)) console.warn("[client-publish] flow graph skipped", { feature: feature.name, message: error instanceof Error ? error.message.slice(0, 160) : String(error) });
+        console.warn("[client-publish] flow graph skipped", {
+          feature: feature.name,
+          code: error instanceof FlowValidationError ? error.code : error instanceof Error ? error.name : "unknown",
+          message: error instanceof Error ? error.message.slice(0, 160) : String(error),
+        });
       }
     }
   }));
@@ -257,9 +261,10 @@ export async function produceProposal(options: ProduceOptions): Promise<ProduceS
 
   const remote = await originRemote(repositoryRoot);
   const bound = options.product.repository;
+  const detected = repositoryIdentityOf(remote, basename(repositoryRoot), { ...(options.provider ? { provider: options.provider } : {}) });
   const repository: RepositoryIdentity = bound
-    ? { repositoryId: bound.repositoryId, provider: bound.provider as RepositoryProvider, host: bound.host, owner: bound.owner, name: bound.name as string }
-    : repositoryIdentityOf(remote, basename(repositoryRoot), { ...(options.provider ? { provider: options.provider } : {}) });
+    ? { repositoryId: bound.repositoryId, provider: bound.provider as RepositoryProvider, host: bound.host ?? (bound.provider === "local" ? null : detected.host), owner: bound.owner, name: bound.name as string }
+    : detected;
   const modelName = options.modelName ?? options.client.displayName ?? "unknown";
   const base: ProduceSummary = {
     decision,

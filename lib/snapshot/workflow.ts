@@ -138,8 +138,9 @@ export async function finalizeSnapshotAnalysis(prepared: PreparedSnapshotAnalysi
     try {
       presentation = await createSnapshotPresentation({ result, language: prepared.language, client: options.client, ...(options.noSourceOutput ? { noSourceOutput: true } : {}) });
       prepared.onProgress?.({ stage: "presentation", status: "complete", durationMs: Date.now() - presentationStartedAt });
-    } catch {
+    } catch (error) {
       presentationFallback = true;
+      console.warn("[analysis] presentation generation failed; using feature index", { error: error instanceof Error ? error.message.slice(0, 500) : String(error) });
       prepared.onProgress?.({ stage: "presentation", status: "fallback", durationMs: Date.now() - presentationStartedAt });
     }
   } else {

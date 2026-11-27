@@ -197,6 +197,30 @@ describe("produceProposal", () => {
     expect(keys).toEqual([...keys].sort());
   });
 
+  it("logs the validation code for every skipped flow graph", async () => {
+    const { root } = await repository();
+    const model = fakeModel();
+    const complete = model.client.complete.bind(model.client);
+    const invalid = structuredClone(graph);
+    invalid.nodes[1].scenarioRefs = ["HP-404"];
+    model.client.complete = async (messages) => {
+      const prompt = messages.map((message) => message.content).join("\n");
+      if (prompt.includes("执行图") && prompt.includes("登录守卫")) return JSON.stringify(invalid);
+      return complete(messages);
+    };
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const result = await produceProposal({ repositoryRoot: root, product: product(), full: false, outputLanguage: "zh-CN", client: model.client });
+      expect(result.flows).toEqual({ generated: 1, rejected: 1 });
+      const logged = warning.mock.calls.map((call) => call.map((item) => typeof item === "string" ? item : JSON.stringify(item)).join(" ")).join("\n");
+      expect(logged).toContain("flow graph skipped");
+      expect(logged).toContain("登录");
+      expect(logged).toContain("UNKNOWN_SCENARIO_REFERENCE");
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
   it("does not call the model at all when the ledger already sits on the target commit", async () => {
     const { root, head } = await repository();
     const model = fakeModel();
@@ -268,6 +292,14 @@ describe("produceProposal", () => {
     const bound = product({ repository: { repositoryId: 57, provider: "gitlab", host: "gitlab.corp.com", owner: "team", name: "api" } });
     const result = await produceProposal({ repositoryRoot: root, product: bound, full: false, outputLanguage: "zh-CN", client: fakeModel().client });
     expect(result.proposal!.repository).toEqual({ repositoryId: 57, provider: "gitlab", host: "gitlab.corp.com", owner: "team", name: "api" });
+  });
+
+  it("fills a missing host on the server's binding from the origin remote", async () => {
+    const { root } = await repository();
+    await git(root, "remote", "add", "origin", "https://github.com/acme/api.git");
+    const bound = product({ repository: { repositoryId: 57, provider: "github", host: null, owner: "acme", name: "api" } });
+    const result = await produceProposal({ repositoryRoot: root, product: bound, full: false, outputLanguage: "zh-CN", client: fakeModel().client });
+    expect(result.proposal!.repository).toEqual({ repositoryId: 57, provider: "github", host: "github.com", owner: "acme", name: "api" });
   });
 
   it("takes the repository identity from the origin remote and lets the caller correct the provider", async () => {

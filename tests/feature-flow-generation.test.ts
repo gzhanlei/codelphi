@@ -104,6 +104,25 @@ describe("feature flow generation", () => {
     expect(bodies[1]).toContain("EXCLUDED_SCENARIO_IN_GRAPH");
   });
 
+  it("retries once when the first response is not valid JSON", async () => {
+    const { generateFeatureFlowGraph } = await import("../lib/feature-flow-generation");
+    const responses = [jsonResponse(candidate), jsonResponse(candidate)];
+    const bodies: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      bodies.push(String(init.body));
+      if (bodies.length === 1) {
+        return new Response(JSON.stringify({ choices: [{ message: { content: `${JSON.stringify(candidate)}\n{}` } }], usage: {} }), { status: 200 });
+      }
+      return responses.shift()!;
+    }));
+
+    const graph = await generateFeatureFlowGraph(feature);
+    expect(graph).toEqual(candidate);
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]).toContain("上次输出未通过校验");
+    expect(bodies[1]).toContain("Unexpected non-whitespace character");
+  });
+
   it("rejects unknown references returned by the gateway", async () => {
     const { generateFeatureFlowGraph } = await import("../lib/feature-flow-generation");
     const invalid = structuredClone(candidate);

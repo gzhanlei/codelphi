@@ -70,7 +70,7 @@ export async function generateFeatureFlowGraph(feature: SpecFeature, billing?: L
   try {
     return validateFeatureFlowGraph(normalizeEmptyLabels(parseContent(content)), feature.scenarios);
   } catch (error) {
-    if (!(error instanceof FlowValidationError)) throw error;
+    if (!(error instanceof FlowValidationError) && !(error instanceof SyntaxError)) throw error;
     const correction = await complete([
       ...messages,
       { role: "assistant", content },
