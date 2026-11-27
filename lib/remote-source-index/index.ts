@@ -33,27 +33,83 @@ function hasSegment(path: string, value: string) {
   return path.split("/").includes(value);
 }
 
-const baseSignalRules: Array<{ match: (path: string, name: string) => boolean; signals: SourceSignal[] }> = [
-  { match: (_path, name) => ["package.json", "go.mod", "cargo.toml", "pom.xml", "build.gradle", "androidmanifest.xml", "dockerfile", "docker-compose.yml", "cmakelists.txt", "readme.md", "agents.md"].includes(name), signals: ["manifest"] },
-  { match: (_path, name) => ["main.go", "main.ts", "main.js", "index.ts", "index.js", "server.ts", "server.js", "app.ts", "app.js", "application.java"].includes(name) || /(?:page|route|activity|service)\.(?:tsx|ts|js|java)$/.test(name), signals: ["entrypoint"] },
-  { match: (_path, name) => /(?:route|controller|handler|endpoint)/.test(name), signals: ["route"] },
-  { match: (_path, name) => /(?:repository|model|entity)/.test(name), signals: ["repository"] },
-  { match: (_path, name) => /(?:database|db|postgres|mysql|sqlite)/.test(name) || /\.sql$/.test(name), signals: ["database", "migration"] },
-  { match: (_path, name) => /(?:queue|worker|job)/.test(name), signals: ["queue", "worker"] },
-  { match: (path, name) => /(?:^|\/)(?:oauth|auth)(?:\/|\.)/.test(path) || /(?:auth|oauth)/.test(name), signals: ["auth"] },
-  // `.js` 必须在列：纯 JS 仓库（如 express）的源码此前零信号、永远进不了窗口
-  { match: (path) => /\.(?:java|kt|py|cs|php|go|rs|rb|ts|tsx|jsx|js|mjs|cjs)$/.test(path), signals: ["service"] },
-  { match: (_path, name) => /(?:dockerfile|docker-compose|deploy|k8s|kubernetes)/.test(name), signals: ["deployment"] },
-  { match: (path, name) => /\.(?:tsx|jsx)$/.test(name) || hasSegment(path, "app") && /\.tsx$/.test(name), signals: ["frontend"] },
-  { match: (_path, name) => /\.(?:java|kt|swift|m|mm|c|cc|cpp|h|hpp)$/.test(name), signals: ["native"] },
-  { match: (_path, name) => /(?:\.test\.|\.spec\.|__tests__)/.test(name), signals: ["test"] },
-  { match: (_path, name) => /(?:generated|\.pb\.go|\.g\.dart|\.next)/.test(name), signals: ["generated"] },
+/**
+ * 主流语言的源文件后缀。有这些后缀的文件本身就是「代码」，不需要文件名再带什么关键词。
+ * 2026-11-27 补齐了后面那一半：之前只认最早支持的那几种技术栈，Dart、Vue、Svelte、Lua、Elixir、
+ * Erlang、Haskell、Clojure、Scala、Groovy、Zig、Nim、R、Julia、F#、VB 的文件只有在文件名碰巧
+ * 带关键词时才会被选中。
+ */
+const SERVICE_SOURCE = /\.(?:java|kt|py|cs|php|go|rs|rb|ts|tsx|jsx|js|mjs|cjs|dart|vue|svelte|lua|ex|exs|erl|hs|clj|cljs|scala|groovy|swift|zig|nim|r|jl|fs|vb|sh|bash|zsh|ps1)$/i;
+const FRONTEND_SOURCE = /\.(?:tsx|jsx|vue|svelte)$/i;
+const NATIVE_SOURCE = /\.(?:java|kt|swift|m|mm|c|cc|cpp|h|hpp)$/i;
+
+/** 一组关键词对应一组信号。短词（db、job）和长词一样按整词匹配，不做子串匹配。 */
+interface KeywordRule {
+  signals: SourceSignal[];
+  words: string[];
+}
+
+/** 只认整词、不认前后缀的关键词：identity 的结尾是 entity，但它是身份，不是实体。 */
+const EXACT_ONLY: ReadonlySet<string> = new Set(["entity", "entities"]);
+
+const KEYWORD_RULES: ReadonlyArray<KeywordRule> = [
+  { signals: ["route"], words: ["route", "router", "controller", "handler", "endpoint"] },
+  { signals: ["repository"], words: ["repositor", "entities", "entity"] },
+  { signals: ["database", "migration"], words: ["database", "postgres", "mysql", "sqlite", "db"] },
+  { signals: ["queue"], words: ["queue"] },
+  { signals: ["queue", "worker"], words: ["worker", "job"] },
+  { signals: ["auth"], words: ["auth"] },
+  { signals: ["deployment"], words: ["dockerfile", "docker", "compose", "deploy", "k8s", "kubernetes"] },
 ];
+
+/**
+ * 把文件名（不含后缀）切成词：驼峰、连字符、下划线、点和数字之间都是边界。
+ * `APIKeysStore` → api, keys, store；`order-repository.v2` → order, repository, v, 2。
+ */
+export function nameTokens(name: string): string[] {
+  const dot = name.lastIndexOf(".");
+  const stem = (dot > 0 ? name.slice(0, dot) : name).replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2");
+  return stem.toLowerCase().split(/[^a-z0-9]+/).filter((token) => token !== "");
+}
+
+/**
+ * 关键词按整词匹配：一个词等于它、以它开头、或以它结尾。`orders` 认 route？不认——routine 也不是；
+ * `dbClient`、`mongodb`、`wpdb` 都认 db；`sandbox` 不认（db 在中间）。
+ * `author`、`authors`、`authority` 不认 auth：那是作者，不是鉴权。
+ */
+function keywordMatches(word: string, token: string): boolean {
+  if (EXACT_ONLY.has(word)) return token === word;
+  if (word === "auth" && /^author/.test(token)) return false;
+  return token === word || token.startsWith(word) || token.endsWith(word);
+}
 
 export function baseSignals(path: string): SourceSignal[] {
   const name = basename(path).toLowerCase();
-  return baseSignalRules.filter((rule) => rule.match(path, name)).flatMap((rule) => rule.signals);
+  // 切词要用原样的大小写：驼峰的边界靠大写字母认。
+  const tokens = nameTokens(basename(path));
+  const signals: SourceSignal[] = [];
+  if (MANIFEST_NAMES.has(name)) signals.push("manifest");
+  if (ENTRYPOINT_NAMES.has(name) || /(?:page|route|activity|service)\.(?:tsx?|jsx?|kt|java|swift|dart|php|py|rb|go|cs|vue|svelte)$/.test(name)) signals.push("entrypoint");
+  for (const rule of KEYWORD_RULES) {
+    if (tokens.some((token) => rule.words.some((word) => keywordMatches(word, token)))) signals.push(...rule.signals);
+  }
+  if (/\.sql$/.test(name)) signals.push("database", "migration");
+  if (/(?:^|\/)(?:oauth|auth)(?:\/|\.)/.test(path)) signals.push("auth");
+  if (SERVICE_SOURCE.test(path)) signals.push("service");
+  if (FRONTEND_SOURCE.test(name) || hasSegment(path, "app") && /\.tsx$/.test(name)) signals.push("frontend");
+  if (NATIVE_SOURCE.test(name)) signals.push("native");
+  if (/(?:\.test\.|\.spec\.|__tests__)/.test(name)) signals.push("test");
+  if (/(?:generated|\.pb\.go|\.g\.dart|\.next)/.test(name)) signals.push("generated");
+  return [...new Set(signals)];
 }
+
+const MANIFEST_NAMES: ReadonlySet<string> = new Set([
+  "package.json", "go.mod", "cargo.toml", "pom.xml", "build.gradle", "androidmanifest.xml", "dockerfile", "docker-compose.yml", "cmakelists.txt", "readme.md", "agents.md",
+]);
+
+const ENTRYPOINT_NAMES: ReadonlySet<string> = new Set([
+  "main.go", "main.ts", "main.js", "index.ts", "index.js", "server.ts", "server.js", "app.ts", "app.js", "application.java",
+]);
 
 export function dependencyPruneReason(path: string): PruneReason {
   if (path === "third_party" || path.startsWith("third_party/") || path === "vendor" || path.startsWith("vendor/")) return "third_party";

@@ -88,6 +88,44 @@ describe("remote source classification", () => {
     expect(baseSignals("database/migration.sql")).toEqual(["database", "migration"]);
     expect(baseSignals("worker.ts")).toEqual(["queue", "worker", "service"]);
   });
+
+  it("matches signal keywords as whole words, so a hex hash in a file name is not a database", () => {
+    // 以前是子串匹配：f99673dc…ebdb06.txt 里有 db，被当成数据库文件选进了分析（2026-11-27，SalesBuddy 的仓库）。
+    // 同一类的还有 sandbox（db）、author（auth）、identity（entity）、routine（route）——都不是那个意思。
+    expect(baseSignals("data/teleprompter/f99673dcd9954b13af866b7e2aebdb06.txt")).toEqual([]);
+    for (const path of ["lib/sandbox.ts", "lib/author.ts", "lib/authors.ts", "lib/spec-identity.ts", "lib/routine.ts"]) {
+      expect(baseSignals(path), path).toEqual(["service"]);
+    }
+    // 整词、复数、常见的前后缀组合都认。
+    expect(baseSignals("lib/db.ts")).toEqual(["database", "migration", "service"]);
+    expect(baseSignals("lib/db-client.ts")).toEqual(["database", "migration", "service"]);
+    expect(baseSignals("lib/mongodb.ts")).toEqual(["database", "migration", "service"]);
+    expect(baseSignals("lib/OrderRepository.ts")).toEqual(["repository", "service"]);
+    expect(baseSignals("lib/repositories/order_repository.ts")).toEqual(["repository", "service"]);
+    expect(baseSignals("lib/entities/order.entity.ts")).toEqual(["repository", "service"]);
+    expect(baseSignals("src/webhook-routes.ts")).toEqual(["route", "service"]);
+    expect(baseSignals("src/APIController.ts")).toEqual(["route", "service"]);
+    expect(baseSignals("src/job-queue/worker.ts")).toEqual(["queue", "worker", "service"]);
+    expect(baseSignals("src/middleware/auth.ts")).toEqual(["auth", "service"]);
+    expect(baseSignals("src/oauthCallbacks.ts")).toEqual(["auth", "service"]);
+  });
+
+  it("treats every mainstream language's source files as code, not only the first stacks CoDelphi supported", () => {
+    // 整词匹配之后，文件名不再碰巧撞上关键词；这些语言要有自己的「这是代码」的兜底信号，否则会被漏掉。
+    for (const path of [
+      "lib/features/login/login_screen.dart", "src/handlers/thing.erl", "lib/user/user.ex",
+      "lib/user/user.exs", "src/Main.hs", "lib/core.clj", "src/parser.cljs", "app/Payment.scala", "src/Tool.groovy",
+      "src/main.zig", "src/main.nim", "src/plot.r", "src/plot.jl", "src/Program.fs", "src/Program.vb", "install.sh",
+    ]) {
+      expect(baseSignals(path), path).toEqual(["service"]);
+    }
+    expect(baseSignals("src/views/Home.vue")).toEqual(["service", "frontend"]);
+    expect(baseSignals("src/App.svelte")).toEqual(["service", "frontend"]);
+    expect(baseSignals("src/main.swift")).toEqual(["service", "native"]);
+    // 模板、IDL、文档不是这个兜底要管的事：它们是不是分析目标由 lib/analysis-target.ts 说，信不信号另算。
+    expect(baseSignals("templates/index.html")).toEqual([]);
+    expect(baseSignals("api/user.proto")).toEqual([]);
+  });
 });
 
 describe("Remote Source Index", () => {
