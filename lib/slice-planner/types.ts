@@ -204,9 +204,12 @@ export interface PlannerDiagnostic {
 export type SliceExclusionKind = "vendored" | "tooling" | "duplicate" | "generated";
 export interface SliceExclusion {
   kind: SliceExclusionKind;
+  /** 被排除的文件；整棵跳过的第三方目录是目录本身。 */
   path: string;
-  /** 原因：第三方的那个目录、登记它的清单、生成它的工具…… */
+  /** 成块排除时它所在的那个目录：第三方目录、工具目录；内容重复时是保留下来的那份；生成文件是生成工具。 */
   detail?: string;
+  /** 第三方目录的判据：带着别人家的许可证，还是像一个完整的上游项目。 */
+  reason?: string;
 }
 
 export interface SlicePlanResult {

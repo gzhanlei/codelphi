@@ -19,6 +19,7 @@ import { ClientPublishError, produceProposal, type ProduceProgress } from "./pro
 import { loadPreparedPublish, PublishRunError, type PreparedPublish } from "./run-store";
 import type { PrivacyRule } from "../privacy-scan";
 import { repositoryIdentityOf } from "./identity";
+import { exclusionsText } from "./exclusions-text";
 import { REFUSAL_TEXT } from "./state";
 import { fetchContext, ServerRequestError, uploadProposal, type ClientContext, type ClientProduct } from "./server";
 
@@ -348,7 +349,17 @@ function progressText(event: ProduceProgress, language: Language): string {
   if (event.status === "fallback") {
     return say({ zh: `提示：${stage.zh}失败，改用功能索引${duration ? `（${duration}）` : ""}。`, en: `Notice: ${stage.en} failed; using the feature index instead${duration ? ` (${duration})` : ""}.` }, language);
   }
-  if (event.stage === "plan") return say({ zh: `完成：规划出 ${event.total ?? 0} 个分析分区。`, en: `Completed: planned ${event.total ?? 0} analysis partitions.` }, language);
+  if (event.stage === "plan") {
+    // 规划器有意没读的东西（第三方副本、开发工具目录、生成代码、重复内容）说出来，别让人以为是读漏了。
+    const leftOut = exclusionsText(event.excluded ?? []);
+    return say(
+      {
+        zh: `完成：规划出 ${event.total ?? 0} 个分析分区。${leftOut ? leftOut.zh : ""}`,
+        en: `Completed: planned ${event.total ?? 0} analysis partitions. ${leftOut ? leftOut.en : ""}`.trim(),
+      },
+      language,
+    );
+  }
   if (event.stage === "partition" && event.message === "reused") return say({ zh: `完成：${stage.zh}${position}（沿用工作目录结果）。`, en: `Completed: ${stage.en}${position} (reused from the work directory).` }, language);
   const details = [
     ...(duration ? [duration] : []),

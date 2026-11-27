@@ -5,6 +5,7 @@ import { extractPassWithRetry } from "../extraction-pass";
 import type { StructuredCompletionClient } from "../llm-client";
 import { analysisSliceBudgets, getPartitionedAnalysisSources } from "../remote-analysis";
 import { createSlicePlanner } from "../slice-planner";
+import { summarizeExclusions } from "../slice-planner/exclusions";
 import type { SliceExclusion } from "../slice-planner/types";
 import { computeEffectiveSnapshotCoverage } from "./effective-coverage";
 import { createSnapshotPresentation, fallbackSnapshotPresentation, parseSnapshotPresentation } from "./presentation";
@@ -51,7 +52,9 @@ export async function prepareSnapshotAnalysis(options: PrepareSnapshotAnalysisOp
     planner: createSlicePlanner({ now: () => now().getTime() }),
     budgets: analysisSliceBudgets,
   });
-  options.onProgress?.({ stage: "plan", status: "complete", total: partitions.length });
+  const excludedGroups = summarizeExclusions(excluded ?? []);
+  // 没有排除时不带这个字段：事件的形状和以前一样。
+  options.onProgress?.({ stage: "plan", status: "complete", total: partitions.length, ...(excludedGroups.length > 0 ? { excluded: excludedGroups } : {}) });
   const change = {
     message: options.identity.message,
     committedAt: options.identity.committedAt,

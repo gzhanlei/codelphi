@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveSnapshotTarget } from "../lib/snapshot/target";
 import { executeSnapshotWorkOrder, finalizeSnapshotAnalysis, prepareSnapshotAnalysis } from "../lib/snapshot/workflow";
 import type { StructuredCompletionClient } from "../lib/llm-client";
+import type { SnapshotProgressEvent } from "../lib/snapshot/types";
 
 const exec = promisify(execFile);
 const roots: string[] = [];
@@ -70,6 +71,35 @@ describe("snapshot preparation and finalization", () => {
     expect(analysis.warnings.some((warning) => warning.code === "presentation_fallback")).toBe(true);
     expect(analysis.coverage.implFilesAssembled).toBeGreaterThan(0);
     expect(vi.mocked(client.complete).mock.calls[0][0]).toEqual(prepared.workOrders[0].messages);
+    await target.cleanup();
+  });
+
+  it("reports what the planner left out on the plan event, summarised for the person publishing", async () => {
+    const target = await resolveSnapshotTarget(await repository());
+    const events: SnapshotProgressEvent[] = [];
+    const excluded = [
+      { kind: "vendored" as const, path: "jni/libopus", detail: "jni/libopus", reason: "upstream_project" },
+      { kind: "tooling" as const, path: "scripts/seed.ts", detail: "scripts" },
+      { kind: "tooling" as const, path: "scripts/migrate.ts", detail: "scripts" },
+    ];
+    const prepared = await prepareSnapshotAnalysis({
+      backend: target.backend,
+      identity: target.identity,
+      productName: target.identity.name,
+      outputLanguage: "en",
+      onProgress: (event) => events.push(event),
+      loadPartitions: async () => ({ partitions: [], index: target.backend as never, partitionsCapped: false, excluded }),
+    });
+    expect(events).toEqual([{
+      stage: "plan",
+      status: "complete",
+      total: 0,
+      excluded: [
+        { kind: "vendored", count: 1, subjects: ["jni/libopus"] },
+        { kind: "tooling", count: 2, subjects: ["scripts"] },
+      ],
+    }]);
+    expect(prepared.excluded).toEqual(excluded);
     await target.cleanup();
   });
 

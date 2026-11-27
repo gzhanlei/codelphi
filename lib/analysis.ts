@@ -12,6 +12,7 @@ import { resolveAnalysisTarget, type ChangeContext, type CodeHostingProvider } f
 import { analysisSliceBudgets, getPartitionedAnalysisSources, getRemoteAnalysisSources, parseSourceRoots, type AnalysisPartition } from "./remote-analysis";
 import { createSlicePlanner } from "./slice-planner";
 import { summarizeExclusions } from "./slice-planner/exclusions";
+import { analysisWindow } from "./analysis-window";
 import { insertSpecVersion, loadLatestSpecFeatures, loadLatestSpecVersionLanguage, loadPreviousFeatureNames, loadPreviousSpecText } from "./spec-versions";
 import { loadAffectedEvidencePaths, loadAffectedFeatureKeys, rebuildSpecFileIndex } from "./spec-file-index";
 import { resolveAnalysisMode } from "./incremental";
@@ -464,7 +465,7 @@ async function runAnalysisBody(run: RunContext) {
   };
   const executeWrapper = (statement: string, parameters: Array<string | number | null>) => getDb().execute(statement, parameters);
   // W0-8 行为面枚举：patch-scan 行为文件清单（跨模式共享，RC2 与定向枚举共用）
-  const behavioralPaths = [...behavioralChangePaths(change.files)].sort();
+  let behavioralPaths = [...behavioralChangePaths(change.files)].sort();
   // 072 语言切换检测：产品输出语言与上一版规格语言不一致 → 强制全量重建。旧语种锚/
   // 命名连续段禁止逐字沿用（会把旧语言文本永久留在新语种规格里），spec_file_index 按
   // 旧语种功能名建索引也会整体失配；零行为变更沿用通道同样必须绕开（沿用=保留旧语言）。
@@ -618,6 +619,10 @@ async function runAnalysisBody(run: RunContext) {
   const { partitions: planned, index: sourceIndex, partitionsCapped, excluded } = await getPartitionedAnalysisSources(analysisRequest, { planner, budgets: analysisSliceBudgets });
   const excludedPaths = new Set((excluded ?? []).map((exclusion) => exclusion.path));
   if (excludedPaths.size > 0) console.log("[analysis] excluded from the analysis", summarizeExclusions(excluded ?? []));
+  // 规划器排除的文件不进提示词的变更文件清单、证据允许集和行为枚举（见 lib/analysis-window.ts）。
+  const window = analysisWindow({ change, behavioralPaths, unassignedBehavioralPaths, excludedPaths });
+  behavioralPaths = window.behavioralPaths;
+  unassignedBehavioralPaths = window.unassignedBehavioralPaths;
   partitions = planned;
   console.log("[analysis] partitioned extraction", { runId: run.id, partitions: partitions.length, capped: partitionsCapped, mode: affectedKeys === null ? "full" : "incremental-carry", requiredPaths: requiredPaths?.length ?? null });
   // B1 覆盖披露回执：全量按全树实现面，增量按 diff 与受影响证据的实现面，
@@ -637,7 +642,7 @@ async function runAnalysisBody(run: RunContext) {
     singleWindowSources = single.sources;
     const extracted = await extractPassWithRetry({
       sources: single.sources,
-      change,
+      change: window.change,
       context: {
         previousFeatureNames,
         previousSpec: previousSpecText,
@@ -645,7 +650,7 @@ async function runAnalysisBody(run: RunContext) {
         outputLanguage: run.outputLanguage,
         billing: { runId: run.id, accountId: run.accountId ?? null, chargeComponent: "main" },
       },
-      allowSet: evidenceAllowSet(single, change),
+      allowSet: evidenceAllowSet(single, window.change),
       label: `single/${run.id}`,
     });
     result = extracted.result;
@@ -656,7 +661,7 @@ async function runAnalysisBody(run: RunContext) {
     for (const [index, partition] of partitions.entries()) {
       const extracted = await extractPassWithRetry({
         sources: partition.sources,
-        change,
+        change: window.change,
         context: {
           previousFeatureNames: [...knownFeatureNames],
           previousSpec: previousSpecText,
@@ -665,7 +670,7 @@ async function runAnalysisBody(run: RunContext) {
           outputLanguage: run.outputLanguage,
           billing: { runId: run.id, accountId: run.accountId ?? null, chargeComponent: "main" },
         },
-        allowSet: evidenceAllowSet(partition, change),
+        allowSet: evidenceAllowSet(partition, window.change),
         label: `pass${index + 1}/${run.id}`,
       });
       for (const feature of extracted.result.features) knownFeatureNames.add(feature.name);
@@ -685,7 +690,7 @@ async function runAnalysisBody(run: RunContext) {
         for (const [index, partition] of partitions.entries()) {
           const extracted = await extractPassWithRetry({
             sources: partition.sources,
-            change,
+            change: window.change,
             context: {
               previousFeatureNames: [...knownFeatureNames],
               previousSpec: previousSpecText,
@@ -693,7 +698,7 @@ async function runAnalysisBody(run: RunContext) {
               outputLanguage: run.outputLanguage,
               billing: { runId: run.id, accountId: run.accountId ?? null, chargeComponent: "main" },
             },
-            allowSet: evidenceAllowSet(partition, change),
+            allowSet: evidenceAllowSet(partition, window.change),
             label: `converge${round}-${index + 1}/${run.id}`,
           });
           for (const feature of extracted.result.features) knownFeatureNames.add(feature.name);
@@ -714,9 +719,9 @@ async function runAnalysisBody(run: RunContext) {
   if (behavioralEnumerationEnabled() && behavioralPaths.length > 0) {
     const { chunks: enumeratedChunks, metrics } = await enumerateBehavioralChunks({
       behavioralPaths,
-      files: change.files,
+      files: window.change.files,
       index: sourceIndex,
-      change,
+      change: window.change,
       knownFeatureNames: [...knownFeatureNames],
       outputLanguage: run.outputLanguage,
       billing: { runId: run.id, accountId: run.accountId ?? null, chargeComponent: "main" },

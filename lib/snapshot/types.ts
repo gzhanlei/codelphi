@@ -1,4 +1,5 @@
 import type { OutputLanguage } from "../analysis-language";
+import type { ExclusionGroup } from "../slice-planner/exclusions";
 import type { AnalysisResult } from "../ai";
 import type { AnalysisCoverageReceipt } from "../analysis-coverage";
 import type { EvidenceSanitizeSummary } from "../completeness-ledger";
@@ -33,6 +34,8 @@ export interface SnapshotProgressEvent {
   status: "start" | "complete" | "retry" | "fallback";
   current?: number;
   total?: number;
+  /** 规划阶段结束时：规划器排除在分析之外的东西，按类别汇总。 */
+  excluded?: ExclusionGroup[];
   durationMs?: number;
   retries?: number;
   message?: string;

@@ -424,7 +424,7 @@ class DeterministicSlicePlanner implements SlicePlanner {
       // 目录里是一份原样拷进来的上游项目（看它带着的许可证、AUTHORS、NEWS、configure.ac……）：整棵子树不进分析。
       const verdict = await detector.inspect(path, listing.entries);
       if (verdict.vendored) {
-        state.excluded.push({ kind: "vendored", path, detail: verdict.reason });
+        state.excluded.push({ kind: "vendored", path, detail: path, reason: verdict.reason });
         continue;
       }
       // 开发工具目录（scripts、hack、bin……）：只留启动文件点到的入口，其余不进分析。范围里只有工具目录时它们就是产品。

@@ -170,7 +170,7 @@ describe("planner selection policy", () => {
     expect(result.slice?.files.map((file) => file.path)).toEqual(["package.json", "lib/service.ts"]);
     expect(listed).not.toContain("jni/libopus/src");
     // 根目录的许可证是 MIT，这里是 BSD：判据是「带着一份别人家的许可证」。
-    expect(result.excluded).toEqual([{ kind: "vendored", path: "jni/libopus", detail: "foreign_license" }]);
+    expect(result.excluded).toEqual([{ kind: "vendored", path: "jni/libopus", detail: "jni/libopus", reason: "foreign_license" }]);
   });
 
   it("does not force a changed file into the window when it sits inside a copy of someone else's project", async () => {
@@ -195,7 +195,7 @@ describe("planner selection policy", () => {
     // 两条记录：必选循环里被拦下的那个文件（原因是它所在的目录），和遍历遇到的那个目录本身。
     expect(result.excluded).toEqual([
       { kind: "vendored", path: "jni/libopus/src/opus.c", detail: "jni/libopus" },
-      { kind: "vendored", path: "jni/libopus", detail: "foreign_license" },
+      { kind: "vendored", path: "jni/libopus", detail: "jni/libopus", reason: "foreign_license" },
     ]);
   });
 

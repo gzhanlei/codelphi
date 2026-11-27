@@ -571,6 +571,87 @@ describe("analysis orchestration", () => {
     expect(calledResult.features[0].scenarios.map((scenario) => scenario.reference)).toEqual(["HP-1"]);
   });
 
+  async function runWithPlannerExclusions(partitionCount: 1 | 2) {
+    // 规划器没把 scripts/deploy.sh（开发工具目录）和 lib/db/orders.sql.go（sqlc 生成）装进窗口：
+    // 模型没读过它们，变更文件清单里不该有它们，行为枚举不该逐个问它们，引用它们的证据也进不了规格。
+    runRows = [{ ...run, analyzeMode: "incremental" }];
+    const statPath = vi.fn(async (path: string) => ({ path, blobSha: `blob-${path}`, treeEntrySha: `tree-${path}`, byteSize: 100, cacheState: "cached" }));
+    const partition = { slice: { files: [{ path: "lib/auth.ts" }] }, sources: [{ path: "lib/auth.ts", content: "1: auth" }] };
+    partitionedSourcesMock.mockResolvedValue({
+      partitions: Array.from({ length: partitionCount }, () => partition),
+      index: { readLines, listDir, listRoot, statPath },
+      excluded: [
+        { kind: "tooling", path: "scripts/deploy.sh", detail: "scripts" },
+        { kind: "generated", path: "lib/db/orders.sql.go", detail: "sqlc" },
+      ],
+    });
+    execute.mockImplementation(async (sql: string) => {
+      if (sql.includes("SET status = 'running'")) return [{ affectedRows: 1 }];
+      if (sql.includes("SET status = 'failed'")) return [{ affectedRows: 1 }];
+      if (sql.includes("JOIN repositories repo")) return [runRows];
+      if (sql.includes("source_roots")) return [[]];
+      if (sql.includes("SELECT id FROM analysis_runs WHERE repository_id = ? AND after_sha = ?")) return [existingRunRows];
+      if (sql.includes("INSERT INTO analysis_runs")) return [{ insertId: 55 }];
+      if (sql.includes("SELECT sf.name FROM spec_features")) return [[{ name: "统一登录" }]];
+      if (sql.includes("SELECT DISTINCT i.path")) return [[{ path: "lib/shared.ts" }]];
+      if (sql.includes("FROM spec_file_index i")) return [[{ stableKey: "统一登录", name: "统一登录", path: "lib/auth.ts" }]];
+      return [{}];
+    });
+    adapter.getChangeContext.mockResolvedValue({
+      message: "feat: gift wallet",
+      committedAt: "2026-11-01T00:00:00Z",
+      url: "",
+      files: [
+        { path: "scripts/deploy.sh", status: "modified", patch: "+ echo deploy" },
+        { path: "lib/db/orders.sql.go", status: "modified", patch: "+type Order struct{}" },
+        { path: "lib/auth.ts", status: "modified", patch: "+ const token = sign(payload);" },
+      ],
+    });
+    vi.mocked(analyzeWithAI).mockResolvedValue({
+      product: { description: "d", evidence: [{ path: "lib/auth.ts", startLine: 1 }] },
+      release: { title: "v1", summary: "s" },
+      changes: [],
+      features: [{
+        name: "统一登录",
+        summary: "s1",
+        scenarios: [
+          { reference: "HP-1", context: "c", action: "a", outcome: "o", category: "happy", evidence: [{ path: "scripts/deploy.sh", startLine: 1 }] },
+          { reference: "HP-2", context: "c", action: "a", outcome: "o", category: "happy", evidence: [{ path: "lib/auth.ts", startLine: 1 }] },
+        ],
+      }],
+    } as never);
+
+    const logs: unknown[][] = [];
+    const logSpy = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+      logs.push(args);
+    });
+    try {
+      await runAnalysis(8);
+    } finally {
+      logSpy.mockRestore();
+    }
+
+    const prompts = vi.mocked(analyzeWithAI).mock.calls.slice(0, partitionCount) as unknown as [unknown, { files: Array<{ path: string }> }, { unassignedBehavioralPaths?: string[] }][];
+    for (const [, promptChange, promptContext] of prompts) {
+      expect(promptChange.files.map((file) => file.path)).toEqual(["lib/auth.ts"]);
+      expect(promptContext.unassignedBehavioralPaths).toEqual([]);
+    }
+    // 行为枚举只逐个问剩下的那一个文件。
+    const enumeration = logs.find(([message]) => message === "[analysis] behavioral enumeration")?.[1] as { pathsTotal: number } | undefined;
+    expect(enumeration?.pathsTotal).toBe(1);
+    // 模型还是引用了被排除的文件：那条场景进不了规格。
+    const calledResult = vi.mocked(insertSpecVersion).mock.calls[0][2];
+    expect(calledResult.features[0].scenarios.map((scenario) => scenario.reference)).toEqual(["HP-2"]);
+  }
+
+  it("keeps what the planner left out of a single-window prompt, the evidence allow set and the behavioural paths", async () => {
+    await runWithPlannerExclusions(1);
+  });
+
+  it("keeps what the planner left out of every partition's prompt when there are several", async () => {
+    await runWithPlannerExclusions(2);
+  });
+
   it("retries a failed extraction pass once before failing the run (model-drift resilience)", async () => {
     // 模型侧偶发（证据路径幻觉、JSON 键漂移）按趟重试一次；重试调用的 receipt 照常落库
     partitionedSourcesMock.mockResolvedValue({
