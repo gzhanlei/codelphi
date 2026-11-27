@@ -30,6 +30,8 @@ export function OverviewPublishButton({ slug, releaseId, releaseTitle, features,
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [pending, setPending] = useState(false);
   const [done, setDone] = useState(false);
+  /** 服务端没有做 AI 润色（工作区没有自己的模型）。 */
+  const [copySkipped, setCopySkipped] = useState(false);
   const [error, setError] = useState("");
 
   // 匿名 demo：不渲染发布入口，登录引导集中在顶栏。
@@ -52,14 +54,17 @@ export function OverviewPublishButton({ slug, releaseId, releaseTitle, features,
     if (guard()) return;
     setPending(true);
     setError("");
+    setCopySkipped(false);
     try {
       const response = await fetch(`/api/products/${slug}/releases/${releaseId}/release-notes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ slug, releaseId, features: [...selected] }),
       });
-      const data = await response.json() as { error?: string };
+      const data = await response.json() as { error?: string; copyRewrite?: string };
       if (!response.ok) throw new Error(data.error ?? "生成发布稿失败");
+      // 工作区没有自己的模型时草稿照常生成，只是没有做 AI 润色：说出来，别让人以为润色丢了。
+      setCopySkipped(data.copyRewrite === "skipped");
       setDone(true);
     } catch (cause: unknown) {
       setError(errorMessage(cause, "生成发布稿失败"));
@@ -78,6 +83,7 @@ export function OverviewPublishButton({ slug, releaseId, releaseTitle, features,
           {done ? (
             <div className="publish-done">
               <p>发布稿草稿已生成（{selected.size} 个功能）。</p>
+              {copySkipped ? <p className="overview-note">没有做 AI 润色：工作区还没有配置自己的模型（设置页「模型配置」）。</p> : null}
               <Link className="primary-button" href="?view=notes" onClick={() => setOpen(false)}>去校对并发布 →</Link>
             </div>
           ) : features.length === 0 ? (

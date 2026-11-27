@@ -36,6 +36,14 @@ describe("SpecAnswerView (B2.1 rendering)", () => {
     expect(html).toContain('href="https://github.com/acme/radar/blob/abc1234/src/upload.ts#L42"');
   });
 
+  it("says plainly when the AI answer is missing because the workspace has no model, next to the cards that are there", () => {
+    const html = renderToStaticMarkup(createElement(SpecAnswerView, { answer: { ...matched, aiAnswer: null, aiUnavailableReason: "工作区还没有配置自己的模型，AI 综合回答不可用。" }, productBase: "/p/radar" }));
+    expect(html).toContain("工作区还没有配置自己的模型，AI 综合回答不可用。");
+    expect(html).toContain("文件上传");
+    // 不是「规格缺条目」那种拒答。
+    expect(html).not.toContain("规格里没有能直接回答这个问题的条目");
+  });
+
   it("renders the uncovered notice without result cards", () => {
     const html = renderToStaticMarkup(createElement(SpecAnswerView, { answer: uncovered, productBase: "/p/radar" }));
     expect(html).toContain("当前规格未覆盖此问题");

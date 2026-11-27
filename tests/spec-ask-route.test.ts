@@ -105,13 +105,14 @@ describe("resolveSpecReadProductId (B2.1 read-gate)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getSessionUser.mockResolvedValue({ sub: "user", email: "pm@example.com" });
-    requireAccess.mockResolvedValue({ product: { id: 3 } });
+    requireAccess.mockResolvedValue({ product: { id: 3, organizationId: 7 } });
     resolveDemo.mockResolvedValue(null);
   });
 
   it("returns the workspace product id for a logged-in member with access", async () => {
     const result = await resolveSpecReadProductId("radar");
-    expect(result).toEqual({ ok: true, productId: 3 });
+    // 带上工作区号：AI 综合回答要用这个工作区自己的模型。
+    expect(result).toEqual({ ok: true, productId: 3, organizationId: 7 });
   });
 
   it("falls back to 404 for a logged-in member without access when no demo exists", async () => {
@@ -130,6 +131,6 @@ describe("resolveSpecReadProductId (B2.1 read-gate)", () => {
     getSessionUser.mockResolvedValue(null);
     resolveDemo.mockResolvedValue({ id: 9, slug: "radar", name: "Radar", organizationId: 7, organizationSlug: "team" });
     const result = await resolveSpecReadProductId("radar");
-    expect(result).toEqual({ ok: true, productId: 9 });
+    expect(result).toEqual({ ok: true, productId: 9, organizationId: 7 });
   });
 });

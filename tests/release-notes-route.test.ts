@@ -15,6 +15,19 @@ vi.mock("next/server", async (importOriginal) => ({
   // 测试无请求作用域：after 直接同步执行回调，验证改写链路可跑通
   after: vi.fn(async (work: () => Promise<void>) => { await work(); }),
 }));
+// 改写本身换成替身（这里只验证路由在什么条件下调它、绑的是哪个工作区）；绑定记下工作区号后直接干活。
+const { rewriteReleaseNoteCopy, boundTo } = vi.hoisted(() => ({ rewriteReleaseNoteCopy: vi.fn(), boundTo: [] as number[] }));
+vi.mock("../lib/release-notes-enhance", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../lib/release-notes-enhance")>(),
+  rewriteReleaseNoteCopy,
+}));
+vi.mock("../lib/organization-model", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../lib/organization-model")>(),
+  withOrganizationModel: vi.fn(async (organizationId: number, work: () => unknown) => {
+    boundTo.push(organizationId);
+    return work();
+  }),
+}));
 
 import { GET, POST } from "../app/api/products/[slug]/releases/[id]/release-notes/route";
 import { GET as markdownGET } from "../app/api/products/[slug]/releases/[id]/release-notes/markdown/route";
@@ -43,9 +56,11 @@ const blockRows = [
 ];
 
 /** 按 SQL 形状分发 mock 返回值：releaseOwned → note（按 release 或按 id）→ changes → blocks。 */
-function primeDb({ owned = true, note = null as null | typeof noteRow, changes = changeRows as unknown as Array<Record<string, unknown>>, blocks = [] as Array<Record<string, unknown>> }) {
+function primeDb({ owned = true, note = null as null | typeof noteRow, changes = changeRows as unknown as Array<Record<string, unknown>>, blocks = [] as Array<Record<string, unknown>>, modelConfigured = true }) {
   dbExecute.mockImplementation(async (sql: string) => {
     if (sql.includes("SELECT id FROM releases WHERE id = ? AND product_id")) return [owned ? [{ id: 9 }] : [], []];
+    // 工作区有没有自己的模型配置。
+    if (sql.includes("FROM organization_models WHERE organization_id")) return [modelConfigured ? [{ organization_id: 7 }] : []];
     if (sql.includes("FROM release_notes WHERE release_id")) return [note ? [note] : [], []];
     if (sql.includes("FROM release_notes WHERE id = ? AND product_id")) return [note ? [note] : [], []];
     if (sql.includes("FROM release_note_blocks b")) return [blocks, []];
@@ -124,6 +139,29 @@ describe("release notes routes", () => {
     const blockInsert = conn.execute.mock.calls.find(([sql]) => String(sql).includes("INSERT INTO release_note_blocks"));
     expect(String(blockInsert?.[0])).toContain("summary_override");
     expect(conn.release).toHaveBeenCalled();
+  });
+
+  it("POST rewrites the draft's copy inside the workspace's own model and says the rewrite is on its way", async () => {
+    boundTo.length = 0;
+    primeDb({ note: noteRow, blocks: blockRows, modelConfigured: true });
+    rewriteReleaseNoteCopy.mockResolvedValue({ rewritten: 1 });
+    const response = await POST(releaseRequest("POST", { slug: "salesbuddy", releaseId: 9, selectedIds: [11] }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ status: "draft", copyRewrite: "scheduled" });
+    expect(rewriteReleaseNoteCopy).toHaveBeenCalledTimes(1);
+    expect(boundTo).toEqual([7]);
+  });
+
+  it("POST still creates the draft but rewrites nothing when the workspace has no model of its own, and says so", async () => {
+    boundTo.length = 0;
+    primeDb({ note: noteRow, blocks: blockRows, modelConfigured: false });
+    const response = await POST(releaseRequest("POST", { slug: "salesbuddy", releaseId: 9, selectedIds: [11] }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ status: "draft", copyRewrite: "skipped" });
+    // 草稿照常落库；模型一次都不调。
+    expect(conn.commit).toHaveBeenCalled();
+    expect(rewriteReleaseNoteCopy).not.toHaveBeenCalled();
+    expect(boundTo).toEqual([]);
   });
 
   it("PATCH rejects editing a published note and saves draft block overrides", async () => {

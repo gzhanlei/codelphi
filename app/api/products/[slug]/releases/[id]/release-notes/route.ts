@@ -10,6 +10,7 @@ import { rewriteReleaseNoteCopy } from "@/lib/release-notes-enhance";
 import { requestStructuredCompletion } from "@/lib/ai";
 import { loadProductOutputLanguage } from "@/lib/analysis-language";
 import { appUrl } from "@/lib/env";
+import { organizationModelConfigured, withOrganizationModel } from "@/lib/organization-model";
 
 /**
  * A2 Release notes 草稿与发布（docs/specsight-gap-improvement-plan.md §4.3）。
@@ -85,6 +86,9 @@ export async function POST(request: NextRequest) {
   if (publishGate) return NextResponse.json({ error: publishGate }, { status: 400 });
 
   const shareToken = existing?.shareToken ?? randomBytes(16).toString("hex");
+  // 草稿的文案润色要用产品所属工作区自己的模型（CoDelphi 不替用户付模型费用）。工作区没配模型时草稿照常生成，
+  // 只是不做润色，并且在应答里说明；应答先于润色返回，所以这里先问一句，不等到 after() 里才发现。
+  const modelConfigured = await organizationModelConfigured((sql: string, params?: unknown[]) => db.execute(sql, params as never), access.product.organizationId);
   const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
@@ -110,6 +114,10 @@ export async function POST(request: NextRequest) {
     // 锚定/证据不变（feature_copy_json + summary_override 承载），失败保留原文。
     after(async () => {
       try {
+        if (!modelConfigured) {
+          console.warn("[release-notes] draft copy rewrite skipped: the workspace has no model of its own", { releaseId });
+          return;
+        }
         const blocks = await loadBlockViews(db.execute.bind(db), noteId);
         if (blocks.length === 0) return;
         const groups = [...new Set(blocks.map((block) => block.featureName))].map((featureName) => ({
@@ -120,11 +128,13 @@ export async function POST(request: NextRequest) {
         const releaseRows = (Array.isArray(releaseResult) ? releaseResult[0] : releaseResult) as Array<{ summary: string }>;
         const releaseSummary = releaseRows?.[0]?.summary ?? "";
         const outputLanguage = await loadProductOutputLanguage(access.product.id, db.execute.bind(db));
-        const outcome = await rewriteReleaseNoteCopy(
-          { execute: (sql: string, params?: unknown[]) => db.execute(sql, params as never) },
-          { completion: (messages, billing) => requestStructuredCompletion(messages, billing) },
-          { noteId, releaseTitle: changes[0]?.featureName ?? "", emphasis: String(body.emphasis ?? ""), releaseSummary, groups },
-          outputLanguage,
+        const outcome = await withOrganizationModel(access.product.organizationId, () =>
+          rewriteReleaseNoteCopy(
+            { execute: (sql: string, params?: unknown[]) => db.execute(sql, params as never) },
+            { completion: (messages, billing) => requestStructuredCompletion(messages, billing) },
+            { noteId, releaseTitle: changes[0]?.featureName ?? "", emphasis: String(body.emphasis ?? ""), releaseSummary, groups },
+            outputLanguage,
+          ),
         );
         console.log("[release-notes] manual draft copy rewritten", { releaseId, ...outcome });
       } catch (error) {
@@ -132,7 +142,14 @@ export async function POST(request: NextRequest) {
       }
     });
 
-    return NextResponse.json({ noteId, status: "draft", shareToken, publicUrl: releaseNotePublicUrl(appUrl(), shareToken) });
+    return NextResponse.json({
+      noteId,
+      status: "draft",
+      shareToken,
+      publicUrl: releaseNotePublicUrl(appUrl(), shareToken),
+      // 文案润色在应答之后才做；没有工作区模型时不做。
+      copyRewrite: modelConfigured ? "scheduled" : "skipped",
+    });
   } catch (cause) {
     await connection.rollback();
     throw cause;

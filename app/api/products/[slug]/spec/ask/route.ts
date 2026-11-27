@@ -6,6 +6,8 @@ import { resolveSpecReadProductId } from "@/lib/spec-read-access";
 import { getSessionUser } from "@/lib/session";
 import { requestStructuredCompletion } from "@/lib/ai";
 import { enforceExportRateLimit } from "@/lib/rate-limit";
+import { ModelNotConfiguredError } from "@/lib/analysis-executor";
+import { withOrganizationModel } from "@/lib/organization-model";
 
 /**
  * B2.1 检索式问答 + B2.2 AI 综合回答（2026-11-12 真实使用反馈升级）：
@@ -34,6 +36,19 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
     // 语言读取失败不阻塞问答：按缺省中文继续
   }
   const askEditor = askLanguage === "en" ? "You are a product spec Q&A editor: answer only from the given spec entries, never invent; decline honestly when they are insufficient." : "你是产品规格问答编辑：只基于给定规格条目回答，禁止编造；不足时如实拒答。";
+
+  /**
+   * AI 综合回答用的是产品所属工作区自己的模型（CoDelphi 不替用户付模型费用）。工作区没配模型就不调任何模型：
+   * 检索到的规格条目照常返回，并说明为什么没有 AI 回答。计费口径不变（receipt-only，call_kind='spec_ask_answer'）。
+   */
+  const noModelReason = askLanguage === "en"
+    ? "This workspace has not configured a model of its own, so there is no AI answer; the spec entries below are unaffected."
+    : "工作区还没有配置自己的模型，AI 综合回答不可用；下面的规格条目不受影响。";
+  const ask = async (messages: Array<{ role: string; content: string }>) => {
+    if (access.organizationId == null) throw new ModelNotConfiguredError();
+    return withOrganizationModel(access.organizationId, () =>
+      requestStructuredCompletion(messages, { runId: null, accountId: null, chargeComponent: "main", callKind: "spec_ask_answer" }));
+  };
 
   if (decorated.status !== "matched") {
     // B2.2b 词汇鸿沟兜底：词法检索未命中 ≠ 规格没答案（例：问『语言』，条目写的是 Next.js/Go）。
@@ -65,12 +80,11 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
       const productNameForAsk = productRow?.name ?? "";
       const validIds = new Set(catalog.map((item) => item.id));
       const lexicalIds = new Set(matchFeaturesByNameGrams(decorated.question, catalog).map((feature) => feature.id));
-      const selectCall = () => requestStructuredCompletion(
+      const selectCall = () => ask(
         [
           { role: "system", content: askLanguage === "en" ? "You are a retrieval assistant; output only compliant JSON." : "你是检索助手，只输出合规 JSON。" },
           { role: "user", content: buildFeatureSelectPrompt({ question: decorated.question, productName: productNameForAsk, catalog: catalog.map((item) => ({ id: item.id, name: item.name, summary: item.summary ?? "" })) }, askLanguage) },
         ],
-        { runId: null, accountId: null, chargeComponent: "main", callKind: "spec_ask_answer" },
       );
       // 词法命中优先；否则 AI 选功能。模型输出非确定：选择为空重试两次；
       // 仍空时兜底退化为"名称含问句任一 2-gram 的功能"（宁多勿漏——综合层对不足部分如实拒答）
@@ -116,7 +130,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
       });
       const scenarioExcerpts = excerpts.map((scenario) => ({ id: scenario.id, featureName: scenario.featureName, reference: scenario.reference, context: scenario.context, action: scenario.action, outcome: scenario.outcome }));
       const featureExcerpts = pickedFeatures.map((feature) => ({ id: feature.id, name: feature.name, summary: feature.summary }));
-      const synthesisContent = await requestStructuredCompletion(
+      const synthesisContent = await ask(
         [
           { role: "system", content: askEditor },
           { role: "user", content: buildAnswerSynthesisPrompt({
@@ -126,7 +140,6 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
             scenarios: scenarioExcerpts,
           }, askLanguage) },
         ],
-        { runId: null, accountId: null, chargeComponent: "main", callKind: "spec_ask_answer" },
       );
       const synthesis = parseAnswerSynthesis(synthesisContent);
       if (!synthesis.answerable) {
@@ -146,6 +159,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
       const fallback = decorateSpecAnswer(fallbackAnswer as SpecAnswer, { specVersionId: context_.specVersionId, repo: repo ?? null, sha: context_.sha });
       return NextResponse.json({ ...fallback, aiAnswer: { answer: synthesis.answer, used: [] } });
     } catch (error) {
+      if (error instanceof ModelNotConfiguredError) return NextResponse.json({ ...decorated, aiAnswer: null, aiUnavailableReason: noModelReason });
       console.warn("[spec-ask] fallback feature selection failed", { slug, error: error instanceof Error ? error.message.slice(0, 160) : String(error) });
       return NextResponse.json({ ...decorated, aiAnswer: null });
     }
@@ -153,7 +167,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
 
   // B2.2：AI 综合回答（best-effort——失败时 aiAnswer 缺省，前端回退为纯卡片，不阻塞检索结果）
   try {
-    const content = await requestStructuredCompletion(
+    const content = await ask(
       [
         { role: "system", content: askEditor },
         { role: "user", content: buildAnswerSynthesisPrompt({
@@ -163,7 +177,6 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
           scenarios: decorated.scenarios.map((scenario) => ({ id: scenario.id, featureName: scenario.featureName, reference: scenario.reference, context: scenario.context, action: scenario.action, outcome: scenario.outcome })),
         }, askLanguage) },
       ],
-      { runId: null, accountId: null, chargeComponent: "main", callKind: "spec_ask_answer" },
     );
     const synthesis = parseAnswerSynthesis(content);
     if (synthesis.answerable) {
@@ -172,6 +185,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
     // 模型如实拒答：条目不足以成文
     return NextResponse.json({ ...decorated, aiAnswer: null, answerInsufficient: true, insufficientReason: synthesis.reason || "规格未包含可回答该问题的条目" });
   } catch (error) {
+    if (error instanceof ModelNotConfiguredError) return NextResponse.json({ ...decorated, aiAnswer: null, aiUnavailableReason: noModelReason });
     console.warn("[spec-ask] answer synthesis failed; falling back to raw cards", { slug, error: error instanceof Error ? error.message.slice(0, 160) : String(error) });
     return NextResponse.json(decorated);
   }

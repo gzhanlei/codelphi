@@ -3,7 +3,7 @@ import { lookup as dnsLookup, type LookupAddress } from "node:dns";
 import { request as httpsRequest } from "node:https";
 import { BlockList, isIP, type LookupFunction } from "node:net";
 import { ModelNotConfiguredError, serverAnalysedProducts } from "./analysis-executor";
-import { defaultExecute, type Execute } from "./db";
+import { getDb, type Execute } from "./db";
 import { requiredEnv } from "./env";
 import { completionsUrl } from "./llm-client";
 import { decryptSecret, encryptSecret } from "./secret-box";
@@ -183,6 +183,12 @@ export async function postToModel(target: string, outgoing: { headers: Record<st
   });
 }
 
+/**
+ * 仓库的连接池。默认参数用它，而不是 db 模块里的那个默认执行器：替换了 getDb 的测试替身（它们多半只给出 getDb）
+ * 也就自动成了这里的默认连接，不用每个替身再补一个导出。
+ */
+const poolExecute: Execute = (statement, parameters) => getDb().execute(statement, parameters);
+
 function secret(): string {
   return requiredEnv("SESSION_SECRET");
 }
@@ -211,7 +217,7 @@ export async function saveOrganizationModel(
 }
 
 /** 解密后的配置。没有就返回 null；库里的密文读不出来就报错，不拿别的顶上。 */
-export async function loadOrganizationModel(organizationId: number, execute: Execute = defaultExecute): Promise<OrganizationModel | null> {
+export async function loadOrganizationModel(organizationId: number, execute: Execute = poolExecute): Promise<OrganizationModel | null> {
   const rows = (await execute("SELECT base_url, api_key_encrypted, model FROM organization_models WHERE organization_id = ? LIMIT 1", [organizationId])) as unknown as [Array<{ base_url: string; api_key_encrypted: string; model: string }>, unknown];
   const row = (Array.isArray(rows) ? rows[0] : rows)?.[0] ?? undefined;
   if (!row) return null;
@@ -226,7 +232,7 @@ export interface OrganizationModelDescription {
   updatedAt: string | Date | null;
 }
 
-export async function describeOrganizationModel(organizationId: number, execute: Execute = defaultExecute): Promise<OrganizationModelDescription | null> {
+export async function describeOrganizationModel(organizationId: number, execute: Execute = poolExecute): Promise<OrganizationModelDescription | null> {
   const result = (await execute("SELECT base_url, model, verified_at, updated_at FROM organization_models WHERE organization_id = ? LIMIT 1", [organizationId])) as unknown as [
     Array<{ base_url: string; model: string; verified_at: string | Date | null; updated_at: string | Date | null }>,
     unknown,
@@ -257,7 +263,7 @@ export class ModelInUseError extends Error {
  * 删除一个工作区的模型配置。这个工作区还有产品由服务端分析时拒绝，并说出是哪些产品。
  * 这一问不是原子的：问完之后有人把产品切到服务端分析，这一行照样被删。所以入队和执行各自还有一道闸门。
  */
-export async function deleteOrganizationModel(organizationId: number, execute: Execute = defaultExecute): Promise<boolean> {
+export async function deleteOrganizationModel(organizationId: number, execute: Execute = poolExecute): Promise<boolean> {
   const inUse = await serverAnalysedProducts(organizationId, execute);
   if (inUse.length > 0) throw new ModelInUseError(inUse);
   const result = (await execute("DELETE FROM organization_models WHERE organization_id = ?", [organizationId])) as { affectedRows?: number } | undefined;
@@ -277,7 +283,7 @@ export function bindOrganizationModel<T>(model: BoundOrganizationModel, work: ()
 }
 
 /** 为工作区干活：读一次它的模型配置，带在 work 的整个范围里。工作区没有配置时不干活。 */
-export async function withOrganizationModel<T>(organizationId: number, work: () => T, execute: Execute = defaultExecute): Promise<T> {
+export async function withOrganizationModel<T>(organizationId: number, work: () => T, execute: Execute = poolExecute): Promise<T> {
   const model = await loadOrganizationModel(organizationId, execute);
   if (!model) throw new ModelNotConfiguredError(`model_not_configured: workspace ${organizationId} has no model configuration of its own`);
   return scope.run({ ...model, organizationId }, work);

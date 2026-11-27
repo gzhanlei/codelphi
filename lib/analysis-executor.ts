@@ -61,6 +61,9 @@ const MODEL_NOT_CONFIGURED_MESSAGE = "model_not_configured: this product is anal
 /** 接口拒绝时给用户看的一句话。 */
 export const MODEL_NOT_CONFIGURED_RESPONSE_MESSAGE = "这个产品由服务端分析，分析要用工作区自己的模型。请先在设置页的「模型配置」里填写模型服务地址、API Key 和模型名。";
 
+/** 网站上要用模型的功能（发布稿润色、理解层刷新）在工作区没配模型时拒绝的话。 */
+export const MODEL_REQUIRED_RESPONSE_MESSAGE = "这个功能要用工作区自己的模型，CoDelphi 不替用户付模型费用。请先在设置页的「模型配置」里填写模型服务地址、API Key 和模型名。";
+
 /** 服务端因为工作区没有模型而拒绝执行时写进 run 的原因。 */
 export function modelRunRefusal(): string {
   return MODEL_NOT_CONFIGURED_MESSAGE;

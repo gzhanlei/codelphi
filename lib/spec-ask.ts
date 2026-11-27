@@ -292,6 +292,8 @@ export type DecoratedSpecAnswer = SpecAnswer & {
   aiAnswer?: { answer: string; used: Array<{ kind: "feature" | "scenario"; id: number }> } | null;
   /** B2.2 拒答原因（模型判条目不足时给出的『规格缺什么』）；insufficient 时可能有值。 */
   insufficientReason?: string | null;
+  /** B2.2 没有做 AI 综合回答的原因，和规格够不够无关：比如产品所属的工作区没有配置自己的模型。条目照常返回。 */
+  aiUnavailableReason?: string | null;
 };
 
 /** IO：答案所属的规格版本，以及把证据变成 blob 链接所需的仓库坐标。verification loader 可注入，便于在隔离环境中测试。 */

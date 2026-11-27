@@ -1,5 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { Execute } from "../lib/db";
+import { currentOrganizationModel } from "../lib/organization-model";
+import { encryptSecret } from "../lib/secret-box";
 import type { StructuredCompletionClient, StructuredCompletionMessage } from "../lib/llm-client";
 import {
   generateProductPresentation,
@@ -555,6 +557,9 @@ describe("journey mining prompt", () => {
 interface FakeDb {
   /** 产品由谁来分析。client：理解层随客户端的提案一起交上来，服务端不重生成。 */
   analysisExecutor?: "server" | "client";
+  /** 产品所属的工作区，和它有没有自己的模型配置。没有模型，服务端不替它调模型。 */
+  organizationId?: number;
+  modelConfigured?: boolean;
   /** never_generated=1 表示从未成功过；缺省字段按「已有内容」补齐。 */
   state: { fingerprint: string; pending: number; interval_elapsed: number; never_generated?: number; failure_count?: number; retry_due?: number } | null;
   leaseAffected: number;
@@ -567,12 +572,18 @@ interface FakeDb {
   cleared: number;
 }
 
+const WORKSPACE_MODEL = { baseUrl: "https://api.example/v1", apiKey: "sk-workspace", model: "k3-256k" };
+
+beforeAll(() => vi.stubEnv("SESSION_SECRET", "presentation-test-secret"));
+
 /** 按语句片段路由的假执行器：覆盖调度器会发出的每一条 SQL。 */
 function fakeDb(db: Partial<FakeDb> = {}): FakeDb & { execute: Execute & ReturnType<typeof vi.fn> } {
   const ledger = leafLedger();
   const state: FakeDb = {
     state: { fingerprint: "", pending: 0, interval_elapsed: 1, never_generated: 1 },
     analysisExecutor: "server",
+    organizationId: 7,
+    modelConfigured: true,
     leaseAffected: 1,
     due: [],
     previous: null,
@@ -584,7 +595,14 @@ function fakeDb(db: Partial<FakeDb> = {}): FakeDb & { execute: Execute & ReturnT
   };
   // 带类型的 mock 直接当 Execute 用会被 TS 拒（mock 实例带构造签名），显式标注为二者交集。
   const execute = vi.fn(async (sql: string, params: Array<string | number | null> = []) => {
-    if (sql.includes("FROM products WHERE id")) return [[{ name: ledger.name, description: ledger.description, output_language: "zh-CN", analysis_executor: state.analysisExecutor }]];
+    // 读账本的那一条（扫描的候选查询里也提到 products p，按 SELECT 的开头区分）。
+    if (sql.includes("SELECT p.name, p.description")) {
+      return [[{ name: ledger.name, description: ledger.description, output_language: "zh-CN", analysis_executor: state.analysisExecutor, organization_id: state.organizationId, modelConfigured: state.modelConfigured ? 1 : 0 }]];
+    }
+    // 工作区自己的模型配置（库里是密文）。没配就是没有这一行。
+    if (sql.includes("FROM organization_models WHERE organization_id")) {
+      return [state.modelConfigured ? [{ base_url: WORKSPACE_MODEL.baseUrl, api_key_encrypted: encryptSecret(WORKSPACE_MODEL.apiKey, "presentation-test-secret"), model: WORKSPACE_MODEL.model }] : []];
+    }
     if (sql.includes("FROM features WHERE product_id")) return [ledger.features];
     if (sql.includes("FROM scenarios WHERE active")) return [ledger.scenarios];
     if (sql.includes("FROM releases WHERE product_id")) return [[{ spec_version_id: 7 }]];
@@ -607,12 +625,17 @@ describe("presentation refresh scheduling", () => {
     const db = fakeDb();
     const ledger = await loadPresentationLedger(db.execute, 1);
     expect(ledger).not.toBeNull();
-    expect(ledger).toMatchObject({ productId: 1, language: "zh-CN", specVersionId: 7 });
+    expect(ledger).toMatchObject({ productId: 1, language: "zh-CN", specVersionId: 7, organizationId: 7, modelConfigured: true });
     expect(ledger!.features.map((feature) => feature.name)).toEqual(["A", "B", "C", "D"]);
     expect(ledger!.scenarios).toHaveLength(9);
     expect(presentationLedgerFingerprint(ledger!)).toMatch(/^[0-9a-f]{64}$/);
     db.execute.mockResolvedValue([[]]);
     expect(await loadPresentationLedger(db.execute, 1)).toBeNull();
+    // 读不到「有没有模型」这一列时按没有算：宁可不让生成，也不替工作区用 CoDelphi 的模型。
+    db.execute.mockResolvedValueOnce([[{ name: "x", description: "", output_language: "zh-CN", analysis_executor: "server", organization_id: 7 }]]);
+    expect(await loadPresentationLedger(db.execute, 1)).toMatchObject({ modelConfigured: false });
+    // SQL 里就带着「工作区有没有自己的模型」。
+    expect(String(db.execute.mock.calls.find(([sql]) => String(sql).includes("SELECT p.name, p.description"))?.[0])).toContain("FROM organization_models m WHERE m.organization_id = p.organization_id");
   });
 
   it("generates on first sight and persists fingerprint, payload and metadata", async () => {
@@ -834,6 +857,39 @@ describe("presentation refresh scheduling", () => {
     expect(sweepQuery[0]).toContain("lease_until <= CURRENT_TIMESTAMP(3)");
     expect(sweepQuery[1]).toEqual([2]);
     expect(db.execute.mock.calls.filter(([sql]) => String(sql).includes("INSERT INTO product_presentations (product_id, spec_version_id"))).toHaveLength(2);
+  });
+
+  it("never generates for a workspace that has no model of its own: the sweep leaves the product out and a forced refresh is skipped", async () => {
+    const db = fakeDb({ modelConfigured: false, state: { fingerprint: "old", pending: 1, interval_elapsed: 1 }, due: [1] });
+    const model = client(() => miningAnswer([oneJourney]));
+    const forced = await schedulePresentationRefresh({ productId: 1, force: true, background: false, execute: db.execute, client: model });
+    const summary = await runPresentationRefreshSweepOnce({ execute: db.execute, client: model });
+    expect(forced).toEqual({ outcome: "skipped", reason: "model_not_configured" });
+    // 扫描的候选查询就把它排除了；即使别的路径把它送进来，上面那一关也会拦住，模型一次都不调。
+    expect(db.execute.mock.calls.find(([sql]) => sql.includes("SELECT product_id FROM product_presentations"))![0]).toContain("FROM organization_models");
+    expect(summary.generated).toBe(0);
+    expect(model.complete).not.toHaveBeenCalled();
+    expect(db.execute.mock.calls.filter(([sql]) => String(sql).includes("INSERT INTO product_presentations"))).toHaveLength(0);
+  });
+
+  it("generates inside the workspace's own model and records that model with the result", async () => {
+    const db = fakeDb();
+    const restore = silenceConsole();
+    const seen: unknown[] = [];
+    const model = client(() => {
+      seen.push(currentOrganizationModel());
+      return miningAnswer([oneJourney]);
+    });
+    const result = await schedulePresentationRefresh({ productId: 1, force: true, background: false, execute: db.execute, client: model });
+    restore();
+    expect(result.outcome).toBe("generated");
+    // 每一次模型调用的时候，范围内绑着的都是这个工作区自己的地址、key 和模型。
+    expect(seen.length).toBeGreaterThan(0);
+    for (const bound of seen) expect(bound).toMatchObject({ organizationId: 7, ...WORKSPACE_MODEL });
+    // 落库记的是实际用的模型，不是服务器自己的 AI_MODEL。
+    expect(db.saved![10]).toBe(WORKSPACE_MODEL.model);
+    // 出了生成的范围，绑定也就没有了。
+    expect(currentOrganizationModel()).toBeNull();
   });
 
   it("never regenerates the presentation of a client-analysed product: the client supplies it with each proposal", async () => {
