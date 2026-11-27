@@ -453,6 +453,41 @@ describe("unbounded partition planning", () => {
     expect(result.excluded).toEqual([{ kind: "duplicate", path: "lib/copy.ts", detail: "lib/a.ts" }]);
   });
 
+  function repositoryOf(files: Map<string, string>): RemoteSourceBackend {
+    const entry = (path: string, type: "blob" | "tree") => ({ path, type, sha: type === "blob" ? gitBlobSha(files.get(path)!) : `tree-${path}`, size: type === "blob" ? files.get(path)!.length : undefined });
+    const entries = [entry("lib", "tree"), ...[...files.keys()].map((path) => entry(path, "blob"))];
+    return {
+      kind: "github_api",
+      resolveRevision: async () => ({ rootTreeSha: "tree-root" }),
+      listTree: async () => {
+        throw new Error("unexpected per-directory tree expansion");
+      },
+      listWholeTree: async () => ({ entries, truncated: false }),
+      fetchBlob: async (_source, path) => new TextEncoder().encode(files.get(path)!),
+    };
+  }
+
+  it("goes on planning when a pass holds only a file too big for the prompt, and does not retry that file", async () => {
+    // OpenMAIC（2026-11-27 实测）：第 62 趟选中的 10 个文件都是几百 KB 的资源文件，装不进提示词，
+    // 分区循环按「没有新候选」停了，后面 170 个正常大小的源码文件再没被分析，也没有任何报错。
+    const huge = `export const huge = "${"x".repeat(400)}";\n`;
+    // 一开始就遇到：之前第一趟就直接报「没有可分析的源码」。
+    const early = new Map([["lib/a-huge.ts", huge], ["lib/b.ts", "export const b = 1;\n"], ["lib/c.ts", "export const c = 1;\n"]]);
+    const first = await getPartitionedAnalysisSources({ ...request, backend: repositoryOf(early) }, { planner: createSlicePlanner({ now: Date.now }), budgets: { ...analysisSliceBudgets, maxAiContextSourceBytes: 200, maxSelectedFiles: 1 } });
+    expect(first.partitions.map((partition) => partition.sources.map((source) => source.path))).toEqual([["lib/b.ts"], ["lib/c.ts"]]);
+    // 中途遇到：之前循环在这里停了，后面的文件丢了。
+    const late = new Map([["lib/a.ts", "export const a = 1;\n"], ["lib/b-huge.ts", huge], ["lib/c.ts", "export const c = 1;\n"]]);
+    const second = await getPartitionedAnalysisSources({ ...request, backend: repositoryOf(late) }, { planner: createSlicePlanner({ now: Date.now }), budgets: { ...analysisSliceBudgets, maxAiContextSourceBytes: 200, maxSelectedFiles: 1 } });
+    expect(second.partitions.map((partition) => partition.sources.map((source) => source.path))).toEqual([["lib/a.ts"], ["lib/c.ts"]]);
+  });
+
+  it("still retries a file that did not fit only because the pass was already full", async () => {
+    // 装得下、只是这一趟装不下的文件，下一趟照常入选：它没有被当成「太大」永久排除。
+    const files = new Map([["lib/a.ts", `export const a = "${"x".repeat(150)}";\n`], ["lib/b.ts", `export const b = "${"y".repeat(150)}";\n`]]);
+    const result = await getPartitionedAnalysisSources({ ...request, backend: repositoryOf(files) }, { planner: createSlicePlanner({ now: Date.now }), budgets: { ...analysisSliceBudgets, maxAiContextSourceBytes: 200, maxSelectedFiles: 2 } });
+    expect(result.partitions.map((partition) => partition.sources.map((source) => source.path))).toEqual([["lib/a.ts"], ["lib/b.ts"]]);
+  });
+
   it("stops when a pass brings nothing new, whatever the planner does", async () => {
     // 分区数默认不设上限，循环靠「规划器不重选已选路径」才能停。2026-11-27 工具目录的入口每一趟都被重选，
     // 真实运行里就是每个分区调一次模型、无限调下去。这里不依赖规划器守规矩：没有新文件就停。

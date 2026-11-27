@@ -70,9 +70,8 @@ export function parseSourceRoots(value: unknown): SourceScopeRoot[] {
   throw new Error("Product source roots must be an array of path objects or strings");
 }
 
-export function sliceToSourceFiles(slice: SourceSlice, index: OpenedRemoteSourceRevision, maxBytes = Number.POSITIVE_INFINITY): Promise<SourceFile[]> {
-  // F3 硬顶（生产实测 4/5 仓库超预算 10–22%）：贪心按规划顺序整文件包含，超预算即停。
-  // 返回的文件集就是真实窗口——调用方须以它为准（assertEvidence 允许集 = 实际进 prompt 的内容）。
+/** 分区的源码：规划器选中的、进提示词的文件，带行号；还没按提示词的预算截。 */
+export function readSliceSources(slice: SourceSlice, index: OpenedRemoteSourceRevision): Promise<SourceFile[]> {
   // 规划器为认技术栈选进来的清单（package.json、go.mod 等）不进提示词：它们不是产品行为，
   // 留在提示词里只会让模型写出「依赖了某个库」这样的功能，还能被引成证据。
   return Promise.all(slice.files.filter((file) => isModelContextFile(file.path)).map(async (file) => {
@@ -88,17 +87,31 @@ export function sliceToSourceFiles(slice: SourceSlice, index: OpenedRemoteSource
       numbered.push(...read.lines.map((line, offset) => `${range.startLine + offset}: ${line}`));
     }
     return { path: file.path, content: numbered.join("\n") };
-  })).then((files) => {
-    const included: SourceFile[] = [];
-    let total = 0;
-    for (const file of files) {
-      const size = Buffer.byteLength(file.content, "utf8");
-      if (total + size > maxBytes) continue;
+  }));
+}
+
+/**
+ * F3 硬顶（生产实测 4/5 仓库超预算 10–22%）：贪心按规划顺序整文件包含，超预算即停。
+ * 返回的文件集就是真实窗口——调用方须以它为准（assertEvidence 允许集 = 实际进 prompt 的内容）。
+ * 单独一个就超过上限的文件单独报出来：它们哪一趟都装不下。
+ */
+export function fitSources(files: readonly SourceFile[], maxBytes = Number.POSITIVE_INFINITY): { included: SourceFile[]; oversized: string[] } {
+  const included: SourceFile[] = [];
+  const oversized: string[] = [];
+  let total = 0;
+  for (const file of files) {
+    const size = Buffer.byteLength(file.content, "utf8");
+    if (size > maxBytes) oversized.push(file.path);
+    else if (total + size <= maxBytes) {
       included.push(file);
       total += size;
     }
-    return included;
-  });
+  }
+  return { included, oversized };
+}
+
+export function sliceToSourceFiles(slice: SourceSlice, index: OpenedRemoteSourceRevision, maxBytes = Number.POSITIVE_INFINITY): Promise<SourceFile[]> {
+  return readSliceSources(slice, index).then((files) => fitSources(files, maxBytes).included);
 }
 
 async function loadExplicitArchitectureSources(index: OpenedRemoteSourceRevision, sources: SourceFile[], paths: string[], reason: string) {
@@ -191,8 +204,14 @@ export async function getPartitionedAnalysisSources(request: RemoteAnalysisReque
       if (partitions.length === 0) throw new Error("No supported source files found");
       break;
     }
-    const sources = await sliceToSourceFiles(result.slice, index, runtime.budgets.maxAiContextSourceBytes);
+    const { included: sources, oversized } = fitSources(await readSliceSources(result.slice, index), runtime.budgets.maxAiContextSourceBytes);
+    // 单独一个就超过提示词上限的文件哪一趟都装不下：记下不再重试。之前它们每一趟都被重新选中、再被截掉，
+    // 轮到只剩它们的那一趟就没有来源，循环按「分区耗尽」停了，后面还没轮到的文件丢掉了
+    // （OpenMAIC 2026-11-27 实测：第 62 趟停，170 个正常大小的源码文件没被分析，没有任何报错）。
+    for (const path of oversized) excludePaths.add(path);
     if (sources.length === 0) {
+      if (oversized.length > 0) continue;
+      // 首趟无候选 = 仓库没有可分析源码；后续趟无候选 = 分区耗尽（正常结束）
       if (partitions.length === 0) throw new Error("No supported source files found");
       break;
     }
