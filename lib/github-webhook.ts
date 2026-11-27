@@ -6,7 +6,7 @@ import { getDb } from "./db";
 import { verifyGitHubSignature } from "./github";
 import { getLatestGitHubApp } from "./github-integrations";
 import { requiredEnv } from "./env";
-import { CLIENT_MODE_ERROR, ClientAnalysisError } from "./analysis-executor";
+import { CLIENT_MODE_ERROR, ClientAnalysisError, MODEL_CONFIGURED_SQL, MODEL_NOT_CONFIGURED, ModelNotConfiguredError } from "./analysis-executor";
 import { BillingError, enqueueRunWithReservationInTransaction } from "./billing/core";
 import { enqueueBillingNotification } from "./billing/notifications";
 
@@ -231,15 +231,20 @@ async function deliverStagedPush(
     const [triggerRows] = await conn.execute(
       `SELECT r.analysis_trigger AS mode, COALESCE(r.analysis_trigger_n, ?) AS triggerN, r.pending_push_count AS pendingPushCount,
               EXISTS(SELECT 1 FROM analysis_runs ar WHERE ar.repository_id = r.id AND ar.status = 'succeeded') AS hasSucceededAnalysis,
-              p.analysis_executor AS analysisExecutor
+              p.analysis_executor AS analysisExecutor, ${MODEL_CONFIGURED_SQL} AS hasModel
        FROM repositories r JOIN products p ON p.id = r.product_id
        WHERE r.id = ? LIMIT 1`,
       [DEFAULT_TRIGGER_N, input.repositoryId],
     );
-    const triggerState = (triggerRows as Array<{ mode: string; triggerN: number; pendingPushCount: number; hasSucceededAnalysis: number; analysisExecutor?: string }>)[0];
+    const triggerState = (triggerRows as Array<{ mode: string; triggerN: number; pendingPushCount: number; hasSucceededAnalysis: number; hasModel: number; analysisExecutor?: string }>)[0];
     if (triggerState?.analysisExecutor === "client") {
       // 产品由客户端分析：服务端不跑、不读源码。记成跳过，不入队、不预留、不发额度的通知。
       return skipStagedDelivery(conn, input, CLIENT_MODE_ERROR);
+    }
+    if (triggerState && Number(triggerState.hasModel) !== 1) {
+      // 产品由服务端分析，但它的工作区没有自己的模型：CoDelphi 不替用户付模型费用，所以不跑。
+      // 记成跳过，不入队、不预留、也不累加待处理的推送数；配好模型之后用「补分析最新提交」追上。
+      return skipStagedDelivery(conn, input, MODEL_NOT_CONFIGURED);
     }
     if (triggerState) {
       const action = resolvePushTriggerAction({
@@ -367,8 +372,8 @@ export async function processGitHubWebhook(input: WebhookInput, dependencies: We
     try {
       runId = await dependencies.queue(repository.id, payload.before, payload.after);
     } catch (error) {
-      // 产品由客户端分析：这不是故障，投递方不必重试。
-      if (!(error instanceof ClientAnalysisError)) throw error;
+      // 产品由客户端分析，或者它的工作区没有自己的模型：这不是故障，投递方不必重试。
+      if (!(error instanceof ClientAnalysisError) && !(error instanceof ModelNotConfiguredError)) throw error;
       return { status: 202, body: { accepted: false, skipped: true, reason: error.code } };
     }
     return { status: 202, body: { accepted: true, runId }, runId };

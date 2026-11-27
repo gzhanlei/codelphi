@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { PoolConnection } from "mysql2/promise";
 import { getDb, type Execute } from "./db";
-import { clientRunRefusal, serverMayExecute, type AnalysisExecutor } from "./analysis-executor";
+import { clientRunRefusal, modelRunRefusal, MODEL_CONFIGURED_SQL, serverMayExecute, type AnalysisExecutor } from "./analysis-executor";
+import { withOrganizationModel } from "./organization-model";
 import { analyzeWithAI, type AnalysisResult } from "./ai";
 import { recordRunFailureFeedback } from "./feedback";
 import { BillingError, capture, enqueueRunWithReservation, hasActiveReservation, heartbeat, release, reserveForNewRun } from "./billing/core";
@@ -66,6 +67,8 @@ export interface RunContext {
   /** 这个 run 该不该由服务端执行（lib/analysis-executor）。loadRun 读出来；自己构造 run 的调用方不填就是托管。 */
   triggerType?: string;
   analysisExecutor?: AnalysisExecutor;
+  /** 产品所属的工作区有没有自己的模型配置。服务端只为配了自己的模型的工作区调模型。 */
+  analysisModelConfigured?: boolean;
 }
 
 async function loadLatestRunId(connection: PoolConnection, run: RunContext) {
@@ -362,7 +365,7 @@ async function loadRun(runId: number) {
             repo.owner, repo.name, r.before_sha AS beforeSha, r.after_sha AS afterSha, repo.connection_id AS connectionId,
             r.base_spec_version_id AS baseSpecVersionId, r.base_captured_at AS baseCapturedAt,
             repo.provider, p.organization_id AS organizationId, r.account_id AS accountId, p.analyze_mode AS analyzeMode, p.output_language AS outputLanguage,
-            r.trigger_type AS triggerType, p.analysis_executor AS analysisExecutor
+            r.trigger_type AS triggerType, p.analysis_executor AS analysisExecutor, ${MODEL_CONFIGURED_SQL} AS analysisModelConfigured
      FROM analysis_runs r
      JOIN repositories repo ON repo.id = r.repository_id
      JOIN products p ON p.id = repo.product_id
@@ -945,7 +948,18 @@ async function runAnalysisSafely(runId: number) {
     );
     return;
   }
-  await performAnalysis(run);
+  // 产品由服务端分析，但它的工作区没有自己的模型：CoDelphi 不替用户付模型费用，所以不跑（入队时的闸门是第一道）。
+  if (!run.analysisModelConfigured) {
+    console.warn("[analysis] run refused: the workspace has no model of its own", { runId, organizationId: run.organizationId });
+    await getDb().execute(
+      "UPDATE analysis_runs SET status = 'failed', error_message = ?, finished_at = CURRENT_TIMESTAMP(3) WHERE id = ? AND status <> 'succeeded'",
+      [modelRunRefusal(), runId],
+    );
+    return;
+  }
+  // 整个分析都在这个工作区自己的模型里跑：出口（lib/ai.ts）据此用它的地址和 key。配置在这之后被人删掉，
+  // 这里读不到就会抛出，run 照常标失败，不会退回 CoDelphi 自己的模型。
+  await withOrganizationModel(run.organizationId, () => performAnalysis(run));
 }
 
 export async function runAnalysis(runId: number) {

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { processGitHubWebhook, resolveGitHubWebhookSecrets } from "../lib/github-webhook";
-import { ClientAnalysisError } from "../lib/analysis-executor";
+import { ClientAnalysisError, ModelNotConfiguredError } from "../lib/analysis-executor";
 
 const payload = JSON.stringify({ ref: "refs/heads/main", before: "before", after: "after", repository: { full_name: "gzhanlei/codelphi" } });
 
@@ -61,6 +61,13 @@ describe("GitHub webhook processing", () => {
     deps.queue.mockRejectedValue(new ClientAnalysisError());
     const result = await processGitHubWebhook({ rawBody: payload, event: "push", signature: "sig", secret: "secret" }, deps);
     expect(result).toEqual({ status: 202, body: { accepted: false, skipped: true, reason: "analysis_mode_is_client" } });
+  });
+
+  it("answers 202 skipped instead of failing when the product is analysed on the server but its workspace has no model of its own", async () => {
+    const deps = dependencies();
+    deps.queue.mockRejectedValue(new ModelNotConfiguredError());
+    const result = await processGitHubWebhook({ rawBody: payload, event: "push", signature: "sig", secret: "secret" }, deps);
+    expect(result).toEqual({ status: 202, body: { accepted: false, skipped: true, reason: "model_not_configured" } });
   });
 
   it("rejects a push payload whose repository full_name is not owner/name at the entry schema", async () => {

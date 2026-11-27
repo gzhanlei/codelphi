@@ -25,11 +25,13 @@ const SECRET = "test-secret-for-the-model-key";
 const stored = { base_url: "https://api.example/v1", api_key_encrypted: "", model: "k3-256k", verified_at: new Date("2026-11-27T10:00:00.000Z") };
 
 /** 按语句片段回答的 execute 替身：记下每条语句，让测试断言顺序、参数，以及「密文进了库、明文没有」。 */
-function database(row: Record<string, unknown> | null = null) {
+function database(row: Record<string, unknown> | null = null, serverAnalysed: string[] = []) {
   const statements: Array<[string, unknown[]]> = [];
   const execute = vi.fn(async (sql: string, params: unknown[] = []) => {
     statements.push([sql, params]);
     if (sql.includes("SELECT") && sql.includes("FROM organization_models")) return [row ? [row] : []];
+    // 删除之前问「这个工作区还有哪些产品由服务端分析」：serverAnalysed 是它们的 slug。
+    if (sql.includes("FROM products")) return [serverAnalysed.map((slug) => ({ slug }))];
     // 删除时：有这一行才删得掉。
     if (sql.includes("DELETE")) return [{ affectedRows: row ? 1 : 0 }];
     return [{ affectedRows: 1 }];
@@ -393,12 +395,33 @@ describe("keeping a workspace's model configuration", () => {
     await expect(loadOrganizationModel(3, broken.execute)).rejects.toThrow();
   });
 
-  it("deletes the configuration", async () => {
+  it("deletes the configuration once no product of the workspace is analysed on the server", async () => {
     const { execute, statements } = database(stored);
     expect(await deleteOrganizationModel(3, execute)).toBe(true);
-    expect(statements[0][0]).toContain("DELETE FROM organization_models");
+    expect(statements).toHaveLength(2);
+    expect(statements[0][0]).toContain("analysis_executor = 'server'");
     expect(statements[0][1]).toEqual([3]);
+    expect(statements[1][0]).toContain("DELETE FROM organization_models");
+    expect(statements[1][1]).toEqual([3]);
     expect(await deleteOrganizationModel(3, database().execute)).toBe(false);
+  });
+
+  it("refuses to delete it while a product is still analysed on the server, names those products, and deletes nothing", async () => {
+    const { execute, statements } = database(stored, ["airecord", "shop"]);
+    const error = await deleteOrganizationModel(3, execute).then(
+      () => null,
+      (caught: unknown) => caught,
+    );
+    expect(error).toMatchObject({ code: "model_in_use", products: ["airecord", "shop"] });
+    expect((error as Error).message).toMatch(/^model_in_use: .*airecord.*shop/);
+    expect(statements).toHaveLength(1);
+    expect(statements[0][1]).toEqual([3]);
+  });
+
+  it("refuses to delete it when exactly one product is still analysed on the server", async () => {
+    const { execute, statements } = database(stored, ["airecord"]);
+    await expect(deleteOrganizationModel(3, execute)).rejects.toMatchObject({ code: "model_in_use", products: ["airecord"] });
+    expect(statements.map(([sql]) => sql)).toEqual([expect.stringContaining("analysis_executor = 'server'")]);
   });
 });
 

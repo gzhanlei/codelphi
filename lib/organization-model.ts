@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { lookup as dnsLookup, type LookupAddress } from "node:dns";
 import { request as httpsRequest } from "node:https";
 import { BlockList, isIP, type LookupFunction } from "node:net";
+import { ModelNotConfiguredError, serverAnalysedProducts } from "./analysis-executor";
 import { defaultExecute, type Execute } from "./db";
 import { requiredEnv } from "./env";
 import { completionsUrl } from "./llm-client";
@@ -54,15 +55,7 @@ export class ModelUrlError extends Error {
   }
 }
 
-/** 工作区没有模型配置。服务端不为它干活，也不退回 CoDelphi 的 key。 */
-export class ModelNotConfiguredError extends Error {
-  readonly code = "model_not_configured";
-
-  constructor(organizationId: number) {
-    super(`model_not_configured: workspace ${organizationId} has no model configuration of its own`);
-    this.name = "ModelNotConfiguredError";
-  }
-}
+export { ModelNotConfiguredError };
 
 /** 不该让服务器连过去的地址段。公网地址不在其中任何一段里。 */
 const NOT_PUBLIC = new BlockList();
@@ -239,7 +232,24 @@ export async function organizationModelConfigured(execute: Execute, organization
   return ((Array.isArray(result) ? result[0] : result) as unknown[]).length > 0;
 }
 
+/** 工作区还有产品由服务端分析时不能删它的模型配置：删了这些产品就再也分析不了。先把它们改成客户端分析。 */
+export class ModelInUseError extends Error {
+  readonly code = "model_in_use";
+
+  /** 还在用服务端分析的产品的 slug。 */
+  constructor(readonly products: string[]) {
+    super(`model_in_use: still analysed on the server in this workspace: ${products.join(", ")}; switch them to client analysis first`);
+    this.name = "ModelInUseError";
+  }
+}
+
+/**
+ * 删除一个工作区的模型配置。这个工作区还有产品由服务端分析时拒绝，并说出是哪些产品。
+ * 这一问不是原子的：问完之后有人把产品切到服务端分析，这一行照样被删。所以入队和执行各自还有一道闸门。
+ */
 export async function deleteOrganizationModel(organizationId: number, execute: Execute = defaultExecute): Promise<boolean> {
+  const inUse = await serverAnalysedProducts(organizationId, execute);
+  if (inUse.length > 0) throw new ModelInUseError(inUse);
   const result = (await execute("DELETE FROM organization_models WHERE organization_id = ?", [organizationId])) as { affectedRows?: number } | undefined;
   return Number(Array.isArray(result) ? (result[0] as { affectedRows?: number })?.affectedRows : result?.affectedRows) > 0;
 }
@@ -259,7 +269,7 @@ export function bindOrganizationModel<T>(model: BoundOrganizationModel, work: ()
 /** 为工作区干活：读一次它的模型配置，带在 work 的整个范围里。工作区没有配置时不干活。 */
 export async function withOrganizationModel<T>(organizationId: number, work: () => T, execute: Execute = defaultExecute): Promise<T> {
   const model = await loadOrganizationModel(organizationId, execute);
-  if (!model) throw new ModelNotConfiguredError(organizationId);
+  if (!model) throw new ModelNotConfiguredError(`model_not_configured: workspace ${organizationId} has no model configuration of its own`);
   return scope.run({ ...model, organizationId }, work);
 }
 

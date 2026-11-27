@@ -1,5 +1,6 @@
 import { getCodeHostingAdapter, type CodeHostingAdapter, type CodeHostingProvider } from "./code-hosting";
 import { queueAnalysis } from "./analysis";
+import { MODEL_CONFIGURED_SQL } from "./analysis-executor";
 import { defaultExecute, type Execute } from "./db";
 
 /**
@@ -7,6 +8,8 @@ import { defaultExecute, type Execute } from "./db";
  *   push        每次默认分支 push 立即分析（默认，保持现状）；
  *   daily       每天低峰期至多一次，当天有 push 才分析；
  *   push_count  每 N 次 push 立即分析，并由 daily sweep 当天兜底一次（先到先触发）。
+ * 工作区没有自己的模型配置的仓库不进这个扫描：服务端不替用户付模型费用，入队会被拒；待处理的计数留着，
+ * 配好模型之后的下一次扫描把它带上。
  * 三种模式共享同一执行路径：触发时 queueAnalysis(before = 上次成功分析 SHA, after = 当前 HEAD)，
  * 一个 run 覆盖窗口内的全部 commit——分析层不感知触发模式。
  */
@@ -77,7 +80,8 @@ export async function runAnalysisTriggerSweepOnce(dependencies: TriggerSweepDepe
      FROM repositories r JOIN products p ON p.id = r.product_id
      WHERE r.analysis_trigger IN ('daily', 'push_count') AND r.pending_push_count > 0
        AND HOUR(CURRENT_TIMESTAMP) = COALESCE(r.analysis_trigger_hour, ?)
-       AND p.analysis_executor <> 'client'`,
+       AND p.analysis_executor <> 'client'
+       AND ${MODEL_CONFIGURED_SQL}`,
     [DEFAULT_TRIGGER_HOUR],
   ) as [Array<{ repositoryId: number; provider: CodeHostingProvider; owner: string; name: string; defaultBranch: string; connectionId: number | null; organizationId: number }>, unknown];
 
