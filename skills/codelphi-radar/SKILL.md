@@ -99,6 +99,7 @@ node "<skill-directory>/scripts/snapshot.cjs" publish <local-repo> --slug <produ
 `--prepare` analyses and saves the proposal without uploading. If it is interrupted, run it again: finished work is reused. `--finalize` uploads the saved proposal and does not call a model. The work directory holds intermediate results, including raw model output. Do not commit it and do not read it into the conversation.
 
 - `status <local-repo> --slug <product-slug>` shows the binding and whether the local commit is ahead of the ledger.
+- The analysis reads only the source roots configured for the product on the server (and says which ones before it starts); with none configured it reads the whole repository. Test suites, docs, migrations, build and deployment files, development tooling directories, copies of third-party projects, duplicate content and generated files are left out by design; publish prints one line saying what was left out, so a gap in the ledger can be told apart from a file nobody got to.
 - Text that looks like source code is removed before upload and listed on the terminal; the command reports how many items were removed.
 
 Do not call the CoDelphi API yourself, do not upload anything on the user's behalf outside `publish`, and do not paste the proposal into the conversation.

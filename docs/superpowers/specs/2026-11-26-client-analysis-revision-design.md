@@ -1118,3 +1118,44 @@ Node 22 单文件 `snapshot.cjs`，打包方式不变。
 - **DeepSeek 官方文档**：请求里不带 `thinking` 就是开启思考，默认强度 high；思考模式下 `max_tokens` 不设时是 64K（客户端发的是 16,000）。文档没有明说 `max_tokens` 是否包含思考 token，所以「思考占掉了额度」是推断，没有那次调用的用量作证。
 - **处理**：客户端对 DeepSeek 官方接口默认关掉思考，`AI_THINKING` 可以显式指定（见 §5.2）。思考开关属于一次续跑的身份：换了它，做完的分区不再沿用。旧的运行目录里没有这一项的，不带这个参数的客户端照旧接得上。
 - **没有做的**：客户端在分析之前不核对「这个仓库的身份属于哪个产品」。对着 AIRecord 目录用 `--slug codelphi`，跑完几小时也会在上传时被拒（仓库身份属于 `salesbuddy`）。这一条等产品负责人定。
+
+### 13.10 分析目标收紧：认不出的一律不读（2026-11-27/28）
+
+产品负责人问「现在的源代码分析目标都有哪些类型？测试文件不应该纳入分析吧？还有哪些也许应当不纳入？」，听完清单后说「**都要做，但要注意，不能只对 AIRecord 有用，得是普适的方法，放到其他技术栈的仓库也要适用。**」全部九条都做完了，规则只有一处定义。
+
+**规则（跨技术栈的通用约定，不针对任何仓库）。**
+
+| 类别 | 判定 | 在哪 |
+| --- | --- | --- |
+| schema、test、doc、example、bench、ci、config、build、deployment、generated（按后缀）、types、vendored（按目录名） | 只看路径；目录规则先于清单；测试命名只认工具链强制的约定（`foo.test.ts`、`_test.go`、`FooTest.kt`……），A/B 测试（abtest 等）永不误判 | `lib/analysis-target.ts`（cf10097） |
+| 文件名信号（route/db/auth/worker…） | 整词匹配，不再是子串；主流语言的扩展名补全 | `lib/remote-source-index`（5b9db56） |
+| 拷进来的上游项目 | 目录里有一份和仓库自己不一样的许可证（按去掉数字和空白的文本比，年份不同不算不同），或者没有包描述文件却带着三种以上上游标记（许可证、AUTHORS、NEWS、autotools、自己的 CI）；仓库根、源码根和它们的祖先永不算 | `lib/slice-planner/vendored-directory.ts`（b16e47c） |
+| 开发工具目录 | scripts、script、tooling、devtools、dev-tools、hack、hacks、bin，直接在源码根（或仓库根）下，或上一级带着包描述文件；只有启动文件（package.json 的 bin 和 start 类命令、Dockerfile、compose、Procfile、systemd 单元）点到的文件留下；范围里只有工具目录时它们就是产品。tools 故意不列（Python/Django 里常是产品自己的模块） | `lib/slice-planner/tooling-directory.ts`（1c8ee6d） |
+| 内容相同 | git blob 相同的文件只分析一次，跨分区也算；清单不去重（它们不进提示词） | `lib/slice-planner/index.ts`（0ab8b7c） |
+| 文件头写着生成 | 注释行里 `@generated`，或同一行既说 generated 又说 do not edit；只说「生成」的不算（审计里三处产品代码会误伤；手写代码也常带 AI 署名） | `lib/slice-planner/generated-file.ts`（0ab8b7c） |
+| 排除的文件不进提示词 | 变更文件清单、证据允许集、行为枚举、覆盖率分母都问同一份排除记录 | `lib/analysis-window.ts`（bab0da0） |
+| 源码根目录 | 上下文接口返回产品的 `sourceRoots`，publish 只在它里面规划并先说出来；进续跑身份，换了就重来 | `0283cd4` |
+
+**顺带发现并修复的两个旧缺陷**（都是量效果时 Offline 对比抓到的）：
+
+1. 分区循环跑不完：ANALYSIS_MAX_PARTITIONS 默认不设上限，循环靠规划器不重选已选路径才能停。工具目录的注册入口每一趟都被重选，fongmi-tv 的 `website/scripts/preview.mjs` 让循环永不停（真实运行=每趟一次模型调用）。修了两层：循环本身在某趟没有新文件时停（dcd7699，不依赖规划器守规矩），工具分支不再重选（1c8ee6d）。
+2. 装不进提示词的文件堵死循环：单独就超过提示词预算的文件每趟都被选中再被截掉，轮到只剩它们的那趟就没有来源，循环按「分区耗尽」停掉，后面的文件不再分析也没有任何报错。OpenMAIC 第 62 趟停（170 个文件丢了）；clashmi 只分析了 90/279 个实现面文件。修后记下这些文件不再重试、循环继续（6bca469）。
+
+**实测（本地工作树，零模型调用；同一棵树、九个不同技术栈的仓库）。**
+
+| 仓库 | 之前（95fec0d） | 之后（0283cd4） | 排除了什么 |
+| --- | --- | --- | --- |
+| AIRecord（Kotlin 多平台 + Python） | 117 分区 / 2,237 文件 | 50 / 822 | Kotlin 测试源码集、重复的 `pnote-decoder-test/`、`jni/libopus` 整棵、scripts + server/scripts 48 个、3 个重复 |
+| codelphi（Next.js + TS） | 24 分区 / 553 文件 | 22 / 494 | scripts/ 69 个（无一被点到）、迁移文件 |
+| OpenMAIC（monorepo） | 61 / 1,234（循环 62 趟停） | 68 / 1,400 | 第三方副本、5 个包的 scripts 23 个、15 个包间重复、4 个生成的资源 |
+| Chandler（Go + sqlc） | 21 / 374 | 18 / 323 | sqlc 生成的 51 个、scripts 6 个 |
+| agentportal（Go + sqlc） | 6 / 98 | 5 / 87 | sqlc 的 11 个、scripts 9 个 |
+| clashmi（Flutter 多端） | 6 / 97（只到 90/279） | 9 / 183 | 3 份相同的 PacketTunnelProvider、5 个 Flutter 注册文件 |
+| uxplay-android（C + Android） | 5 / 75 | 5 / 75 | lib/llhttp、lib/playfair 两份第三方副本 |
+| fongmi-tv（Android 多模块） | 2 / 44 | 2 / 37 | 7 份相同的 AndroidManifest；`website/scripts/preview.mjs` 被 package.json 的 preview 点到，留下 |
+
+约 35 个本地仓库逐个核对过排除清单，没有发现误伤；审计还纠正了生成标记的宽规则（`internal/otp/service.go`、`kling-adapter.ts`、`fonts.config.mjs` 都是产品代码，保留）。核对用的脚本在会话临时目录（`plan-excluded.ts`、`plan-why.ts`、`audit-3c.ts`、`diag-passes-*.ts`），没有入库。
+
+**客户端发布输出的两处变化**：规划完成后多一行「不进分析：……」（第三方副本按目录、工具目录按文件、生成代码按工具名列出）；模型信息行多了「源码根目录：……」（没配置不说）。SKILL.md §6 补了对应的说明。雷达 skill 要发 v1.1.3 才带上这两处。
+
+**账本影响与没做的**：现有账本里引用测试（433 条）、迁移脚本（159 条）、scripts/（844 条）的旧场景不动——自动分析不回改，等每个产品下次 `publish` 全量重建时自然换掉。账本清理（carry-forward 语义先查清）仍待产品负责人定。分析前核对仓库身份属于哪个产品也仍待定（§13.9 的「没有做的」）。库存编排模式（`FULL_ANALYSIS_MODE=inventory`，非默认）按实现面逐文件读，只受益于目录级的两条，内容级的两条不适用，这次没有动它。测试 377 个文件，typecheck、build 全过；变异测试：新增模块 40 个位点杀 38 个（余 2 个等价）、生成标记 7/7、排除汇总和各接线处手工变异全部被抓。
