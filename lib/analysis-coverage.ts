@@ -2,7 +2,9 @@ import type { PoolConnection } from "mysql2/promise";
 import { isImplementationSurfaceFile } from "./evidence";
 import { isModelContextFile } from "./analysis-target";
 import type { AnalysisPartition } from "./remote-analysis";
-import type { OpenedRemoteSourceRevision } from "./remote-source-index";
+import type { OpenedRemoteSourceRevision, SourceScopeRoot } from "./remote-source-index";
+import { VendoredDirectoryDetector } from "./slice-planner/vendored-directory";
+import type { SliceExclusion } from "./slice-planner/types";
 
 /**
  * B1 覆盖披露（docs/specsight-gap-improvement-plan.md §5.1）。
@@ -44,16 +46,19 @@ function isFileWithinScope(path: string, scopeRoots: OpenedRemoteSourceRevision[
   return scopeRoots.some((scope) => scope.path === "" || path === scope.path || path.startsWith(`${scope.path}/`));
 }
 
-/** 全树实现面枚举：BFS listDir，元数据级（不读文件内容），受索引预算约束。 */
-export async function enumerateImplementationSurface(index: OpenedRemoteSourceRevision, maxDirs = Number.POSITIVE_INFINITY): Promise<Array<{ path: string; size: number }>> {
-  // scopeRoots 缺省按「无 scope 配置」处理（与索引 assertAllowed 同语义；测试 mock 可能不带该字段）
-  const scopeRoots = index.scopeRoots ?? [];
+/**
+ * 全树实现面枚举：BFS listDir，元数据级（不读文件内容），受索引预算约束。
+ * 装着一份拷进来的上游项目的目录整棵跳过——和规划器问的是同一个判定器，两边对同一个目录的答案一致。
+ */
+export async function enumerateImplementationSurface(index: OpenedRemoteSourceRevision, maxDirs = Number.POSITIVE_INFINITY, scopeRoots: SourceScopeRoot[] = index.scopeRoots ?? []): Promise<Array<{ path: string; size: number }>> {
+  const detector = new VendoredDirectoryDetector(index, scopeRoots);
   const impl: Array<{ path: string; size: number }> = [];
   const queue: string[] = [""];
   const seenDirs = new Set<string>([""]);
   while (queue.length > 0 && seenDirs.size < maxDirs) {
     const current = queue.shift()!;
     const listing = current === "" ? await index.listRoot() : await index.listDir(current);
+    if (current !== "" && (await detector.isVendored(current))) continue;
     for (const item of listing.entries) {
       // prune 条目（third_party / 构建产物 / 二进制等）不进实现面；scope 边界须在每一层
       // 自查——索引只在根层把 scope 外条目标记 pruned，scope 根祖先目录内的 scope 外
@@ -74,6 +79,10 @@ export async function enumerateImplementationSurface(index: OpenedRemoteSourceRe
   return impl;
 }
 
+/**
+ * 只 stat 必选路径，不列任何目录：增量分析的实现面限于 diff 与受影响证据。
+ * 规划器排除的路径（落在拷进来的上游项目里的必选文件）由调用方从 paths 里去掉——列目录判断的事规划器已经做过。
+ */
 export async function enumerateRequiredImplementationSurface(index: OpenedRemoteSourceRevision, paths: readonly string[]): Promise<Array<{ path: string; size: number }>> {
   const surface: Array<{ path: string; size: number }> = [];
   for (const path of [...new Set(paths)].sort()) {
@@ -104,6 +113,8 @@ export function computeCoverageReceipt(input: {
   diffPaths?: readonly string[];
   /** 分区被 ANALYSIS_MAX_PARTITIONS 截断（remote-analysis 返回的披露信号）。 */
   partitionsCapped?: boolean;
+  /** 规划器排除在分析之外的路径：落在拷进来的上游项目里的必选文件、内容重复的文件…… */
+  excluded?: readonly SliceExclusion[];
 }): AnalysisCoverageReceipt {
   const assembledPaths = new Set<string>();
   for (const partition of input.partitions) {
@@ -124,7 +135,9 @@ export function computeCoverageReceipt(input: {
   // 6 分区帽或不可读导致的遗漏必须可见（「优先选择」不等于「实际覆盖」）。
   // 迁移脚本已移出分析目标：它既不会被装配，也不该被算成遗漏。
   // 2026-11-27 起不只是迁移脚本：所有不在分析目标里的文件都既不会被装配，也不该被算成遗漏。
-  const diffPaths = (input.diffPaths ?? []).filter((path) => isModelContextFile(path));
+  // 规划器排除的文件同理：它不会被装配，可它也不是遗漏。
+  const excludedPaths = new Set((input.excluded ?? []).map((exclusion) => exclusion.path));
+  const diffPaths = (input.diffPaths ?? []).filter((path) => isModelContextFile(path) && !excludedPaths.has(path));
   const diffSelectedPaths = new Set<string>();
   for (const path of new Set(diffPaths)) {
     if (assembledAll.has(path)) diffSelectedPaths.add(path);

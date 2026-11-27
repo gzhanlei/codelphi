@@ -6,6 +6,7 @@ import { SourceIndexError, type SourceLineSlice, type SourceSignal, type SourceT
 import type { EvidenceClaim, PlannerDiagnostic, ProductSliceInput, ScopeResolution, SelectedSourceFile, SelectedSourceReason, SliceConfidence, SlicePlanResult, SlicePlanningState, SlicePlanner, StackProfileId, StackProfileMatch, TargetedReadApproval, TargetedReadDecision, TargetedReadRequest } from "./types";
 import type { OpenedRemoteSourceRevision } from "../remote-source-index/types";
 import { isWalkNoiseDirectory, selectionNoiseKind } from "./selection-policy";
+import { VendoredDirectoryDetector } from "./vendored-directory";
 
 const interestingSignals = new Set<SourceSignal>(["manifest", "entrypoint", "route", "service", "database", "migration", "queue", "worker", "auth", "deployment", "frontend", "native"]);
 
@@ -250,6 +251,7 @@ class DeterministicSlicePlanner implements SlicePlanner {
         profileMatches: [],
         unresolved: [],
         diagnostics: [],
+        excluded: [],
         budgetsRemaining: {
           selectedFiles: input.budgets.maxSelectedFiles,
           selectedLineRanges: input.budgets.maxSelectedLineRanges,
@@ -264,12 +266,19 @@ class DeterministicSlicePlanner implements SlicePlanner {
       // 本身就是入选理由），仍尊重文件数 / 行数 / 字节预算；路径序保证跨分区稳定分片。
       // 这个循环不走遍历那套噪声过滤，所以要自己问一遍：不在分析目标里的文件（测试、文档、迁移脚本、
       // 构建和部署文件、生成的代码、第三方副本）即使这个窗口改过，也不是行为证据。
+      const detector = new VendoredDirectoryDetector(index, scope.scopeRoots);
       const diffPaths = [...new Set(input.requiredPaths ?? input.diffPaths ?? [])]
         .filter((path) => !state.input.excludePaths?.has(path))
         .filter((path) => isModelContextFile(path))
         .sort();
       for (const path of diffPaths) {
         if (state.budgetsRemaining.selectedFiles <= 0 || state.budgetsRemaining.selectedLineRanges <= 0 || state.budgetsRemaining.plannerContentBytes <= 0) break;
+        // 窗口改过的文件落在一份拷进来的上游项目里：那个项目的产品行为不是这个产品的。
+        const vendoredDirectory = await detector.vendoredAncestorOf(path);
+        if (vendoredDirectory !== null) {
+          state.excluded.push({ kind: "vendored", path, detail: vendoredDirectory });
+          continue;
+        }
         try {
           await this.selectFile(index, state, path, [], "window_diff", "", { ignoreShareCap: true });
         } catch (error) {
@@ -279,7 +288,7 @@ class DeterministicSlicePlanner implements SlicePlanner {
       }
       if ((input.discovery ?? "full") === "full") {
         for (const scopeRoot of scope.scopeRoots) {
-          await this.walkScopeDirectories(index, state, scopeRoot.path);
+          await this.walkScopeDirectories(index, state, detector, scopeRoot.path);
         }
       }
       return this.completePlan(index, state);
@@ -302,8 +311,8 @@ class DeterministicSlicePlanner implements SlicePlanner {
     const slice = this.createSourceSlice(state, sliceConfidence);
     state.phase = "done";
     return sliceConfidence === "low"
-      ? { status: "underdetermined", slice, missing: ["supported stack profile was not identified"], diagnostics: state.diagnostics }
-      : { status: "completed", slice, missing: [], diagnostics: state.diagnostics };
+      ? { status: "underdetermined", slice, missing: ["supported stack profile was not identified"], diagnostics: state.diagnostics, excluded: state.excluded }
+      : { status: "completed", slice, missing: [], diagnostics: state.diagnostics, excluded: state.excluded };
   }
 
   private createSourceSlice(state: SlicePlanningState, sliceConfidence: SliceConfidence) {
@@ -388,7 +397,7 @@ class DeterministicSlicePlanner implements SlicePlanner {
   // listing is local, and on the per-directory fallback path the index tree-expansion budget
   // still bounds API calls. BFS（替代原 DFS）让顶层目录公平地先于深层子树获得预算；
   // 噪声目录（tests/examples/bench/docs/隐藏目录）在入队前整树跳过。
-  private async walkScopeDirectories(index: OpenedRemoteSourceRevision, state: SlicePlanningState, rootPath: string) {
+  private async walkScopeDirectories(index: OpenedRemoteSourceRevision, state: SlicePlanningState, detector: VendoredDirectoryDetector, rootPath: string) {
     const pending = [rootPath];
     const visited = new Set<string>();
     while (pending.length > 0) {
@@ -400,6 +409,12 @@ class DeterministicSlicePlanner implements SlicePlanner {
       const subtreeKey = subtreeKeyOf(rootPath, path);
       // 记账表按首次见到登记子树（含 0），供份额上限判断「是否存在多子树竞争」
       if (!state.subtreeSelections.has(subtreeKey)) state.subtreeSelections.set(subtreeKey, 0);
+      // 目录里是一份原样拷进来的上游项目（看它带着的许可证、AUTHORS、NEWS、configure.ac……）：整棵子树不进分析。
+      const verdict = await detector.inspect(path, listing.entries);
+      if (verdict.vendored) {
+        state.excluded.push({ kind: "vendored", path, detail: verdict.reason });
+        continue;
+      }
       await this.selectListedFiles(index, state, listing.entries, subtreeKey);
       for (const entry of listing.entries) {
         if (entry.pruned || entry.type !== "tree") continue;

@@ -386,6 +386,24 @@ describe("unbounded partition planning", () => {
     expect(result.partitionsCapped).toBe(false);
   });
 
+  it("reports what the planner left out once, however many passes report it again", async () => {
+    const { planner } = plannerReturningSevenPartitions();
+    const plan = planner.plan.bind(planner);
+    planner.plan = async (input, index) => {
+      const result = await plan(input, index);
+      // 每一趟都重新遇到同一个第三方目录；必选循环每一趟也重新拦下同一个改过的文件。
+      return { ...result, excluded: [
+        { kind: "vendored" as const, path: "jni/libopus", detail: "foreign_license" },
+        { kind: "vendored" as const, path: "jni/libopus/src/opus.c", detail: "jni/libopus" },
+      ] };
+    };
+    const result = await getPartitionedAnalysisSources(request, { planner, budgets: analysisSliceBudgets });
+    expect(result.excluded).toEqual([
+      { kind: "vendored", path: "jni/libopus", detail: "foreign_license" },
+      { kind: "vendored", path: "jni/libopus/src/opus.c", detail: "jni/libopus" },
+    ]);
+  });
+
   it("stops at the configured partition cap and discloses it (ANALYSIS_MAX_PARTITIONS)", async () => {
     vi.stubEnv("ANALYSIS_MAX_PARTITIONS", "3");
     const { planner, calls } = plannerReturningSevenPartitions();

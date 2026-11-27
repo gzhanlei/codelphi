@@ -2,6 +2,8 @@ import { z } from "zod";
 import { analysisAiContextBudgetOverride, analysisMaxPartitions } from "./env";
 import { createRemoteSourceIndex, type OpenedRemoteSourceRevision, type RemoteSourceBudgets, type SourceRevisionRef, type SourceScopeRoot } from "./remote-source-index";
 import { createSlicePlanner, type SliceBudgets, type SlicePlanner, type SourceSlice } from "./slice-planner";
+import { mergeExclusions } from "./slice-planner/exclusions";
+import type { SliceExclusion } from "./slice-planner/types";
 import type { CodeHostingProvider, RepositoryAccess, SourceFile } from "./code-hosting/types";
 import { radarArchitectureEvidencePaths } from "./architecture-draft";
 import { isModelContextFile } from "./analysis-target";
@@ -138,6 +140,11 @@ export interface PartitionedAnalysisResult {
   index: OpenedRemoteSourceRevision;
   /** 分区被 ANALYSIS_MAX_PARTITIONS 截断（覆盖率披露口径：实现面被成本帽收窄）。 */
   partitionsCapped: boolean;
+  /**
+   * 规划时排除在分析之外的路径（拷进来的上游项目……），各趟合并去重。
+   * 测试替身和别的加载器可以不给：没有排除记录就按没有算。
+   */
+  excluded?: readonly SliceExclusion[];
 }
 
 /**
@@ -155,6 +162,7 @@ export async function getPartitionedAnalysisSources(request: RemoteAnalysisReque
   const excludePaths = new Set<string>();
   const maxPartitions = analysisMaxPartitions();
   let partitionsCapped = false;
+  const excluded = new Map<string, SliceExclusion>();
   while (!options.singleWindow || partitions.length === 0) {
     if (maxPartitions !== null && partitions.length >= maxPartitions) {
       partitionsCapped = true;
@@ -173,6 +181,7 @@ export async function getPartitionedAnalysisSources(request: RemoteAnalysisReque
       discovery: request.discovery,
       requiredPaths: request.requiredPaths,
     }, index);
+    mergeExclusions(excluded, result.excluded);
     if (!result.slice) throw new Error(`Remote source slice failed: ${result.missing.join("; ") || "unknown planner failure"}`);
     if (result.slice.files.length === 0) {
       // 首趟无候选 = 仓库没有可分析源码；后续趟无候选 = 分区耗尽（正常结束）
@@ -191,5 +200,5 @@ export async function getPartitionedAnalysisSources(request: RemoteAnalysisReque
     partitions.push({ slice: trimmedSlice, sources });
     for (const source of sources) excludePaths.add(source.path);
   }
-  return { partitions, index, partitionsCapped };
+  return { partitions, index, partitionsCapped, excluded: [...excluded.values()] };
 }

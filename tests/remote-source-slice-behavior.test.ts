@@ -338,6 +338,7 @@ describe("Slice Planner behavior", () => {
       profileMatches: [],
       unresolved: [],
       diagnostics: [],
+      excluded: [],
       budgetsRemaining: { selectedFiles: 10, selectedLineRanges: 100, plannerContentBytes: 10_000, aiReadCalls: 1, startedAt: Date.now() },
     };
 

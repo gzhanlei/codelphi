@@ -7,14 +7,14 @@ import type { OpenedRemoteSourceRevision, SourceTreeListing } from "../lib/remot
 
 const entry = (path: string, size: number, type: "blob" | "tree" = "blob") => ({ path, type, sha: path, size: type === "blob" ? size : undefined });
 
-function fakeIndex(files: Array<{ path: string; size: number }>): OpenedRemoteSourceRevision {
+function fakeIndex(files: Array<{ path: string; size: number }>, trees?: Record<string, Array<{ path: string; type: "blob" | "tree"; sha: string; size?: number }>>): OpenedRemoteSourceRevision {
   const dirs = new Set(files.map((file) => file.path.split("/").slice(0, -1).join("/")).filter(Boolean));
   const listing = (path: string): SourceTreeListing => ({
     path,
     truncated: false,
     status: "indexed" as const,
     metrics: { entryCount: 0, prunedCount: 0 },
-    entries: [
+    entries: trees ? trees[path] ?? [] : [
       ...files.filter((file) => file.path.split("/").slice(0, -1).join("/") === path).map((file) => entry(file.path, file.size)),
       ...[...dirs].filter((dir) => dir.split("/").slice(0, -1).join("/") === path).map((dir) => entry(dir, 0, "tree")),
     ],
@@ -36,6 +36,59 @@ const partition = (paths: Array<{ path: string; content: string }>): AnalysisPar
   slice: { files: paths.map((file) => ({ path: file.path })) },
   sources: paths,
 } as unknown as AnalysisPartition);
+
+describe("third-party directories in the implementation surface", () => {
+  // 真实形状（SalesBuddy 仓库，2026-11-27）：jni/libopus 是一个完整的 libopus 源码树，目录名看不出来。
+  const blob = (path: string, size = 10) => ({ path, type: "blob" as const, sha: `sha-${path}`, size });
+  const tree = (path: string) => ({ path, type: "tree" as const, sha: `tree-${path}` });
+  const libopus = [blob("jni/libopus/COPYING", 30), blob("jni/libopus/AUTHORS"), blob("jni/libopus/NEWS"), blob("jni/libopus/configure.ac"), tree("jni/libopus/src")];
+  const source = [blob("jni/libopus/src/opus.c", 900_000)];
+
+  it("does not count a directory that carries a copy of someone else's project", async () => {
+    const trees = { "": [blob("LICENSE"), blob("lib/service.ts", 100), tree("jni")], jni: [tree("jni/libopus")], "jni/libopus": libopus, "jni/libopus/src": source };
+    expect((await enumerateImplementationSurface(fakeIndex([], trees))).map((file) => file.path)).toEqual(["lib/service.ts"]);
+  });
+
+  it("does not count a required path or a diff path the planner left inside a third-party copy", async () => {
+    // 增量分析只 stat 必选路径、不列目录（tests/analysis-run.test.ts 钉着这条）：规划器排除的路径由调用方去掉。
+    const index = {
+      ...fakeIndex([]),
+      listRoot: vi.fn(async () => { throw new Error("must not list the tree"); }),
+      listDir: vi.fn(async () => { throw new Error("must not list the tree"); }),
+      statPath: async (path: string) => ({ path, blobSha: `blob-${path}`, treeEntrySha: `tree-${path}`, byteSize: 10, cacheState: "cached" as const }),
+    };
+    const required = ["lib/service.ts", "jni/libopus/src/opus.c"];
+    const excluded = [{ kind: "vendored" as const, path: "jni/libopus/src/opus.c", detail: "jni/libopus" }];
+    expect((await enumerateRequiredImplementationSurface(index, required.filter((path) => path !== "jni/libopus/src/opus.c"))).map((file) => file.path)).toEqual(["lib/service.ts"]);
+    // 规划器拦下了这个文件：它不会被装配，可它也不是遗漏。
+    const assembled = [partition([{ path: "lib/service.ts", content: "x" }])];
+    const receipt = computeCoverageReceipt({ index, partitions: assembled, implSurface: [{ path: "lib/service.ts", size: 10 }], diffPaths: required, excluded });
+    expect(receipt).toMatchObject({ implFilesTotal: 1, implFilesAssembled: 1, diffTotalPaths: 1, diffSelectedPaths: 1, diffOmittedPaths: 0 });
+  });
+
+  it("keeps a scope root and everything under it, whatever the directory looks like", async () => {
+    // 用户明确把产品指到了这个目录：它就是这个产品的代码。
+    const trees = { "": [blob("LICENSE"), blob("lib/service.ts", 100), tree("jni")], jni: [tree("jni/libopus")], "jni/libopus": libopus, "jni/libopus/src": source };
+    const index = { ...fakeIndex([], trees), scopeRoots: [{ path: "jni/libopus" }] };
+    const surface = await enumerateImplementationSurface(index, Number.POSITIVE_INFINITY, index.scopeRoots);
+    // 许可证、作者、更新日志本来就是文档，不在实现面里；源码留下了。scope 外的目录照旧不算。
+    expect(surface.map((file) => file.path)).toEqual(["jni/libopus/src/opus.c"]);
+  });
+
+  it("needs three markers when the repository has no licence to compare with, and keeps a first-party package", async () => {
+    // packages/api 带着 README + LICENSE + CHANGELOG + 自己的 CI，可它有构建清单：是一个包，不是拷进来的上游项目。
+    const trees = {
+      "": [blob("package.json"), blob("lib/service.ts", 100), tree("jni"), tree("packages")],
+      jni: [tree("jni/libopus")],
+      "jni/libopus": libopus,
+      "jni/libopus/src": source,
+      packages: [tree("packages/api")],
+      "packages/api": [blob("packages/api/LICENSE"), blob("packages/api/CHANGELOG.md"), blob("packages/api/README.md"), blob("packages/api/package.json"), tree("packages/api/.github"), tree("packages/api/src")],
+      "packages/api/src": [blob("packages/api/src/index.ts", 50)],
+    };
+    expect((await enumerateImplementationSurface(fakeIndex([], trees))).map((file) => file.path)).toEqual(["lib/service.ts", "packages/api/src/index.ts"]);
+  });
+});
 
 describe("required implementation surface", () => {
   it("stats only required paths and excludes missing or non-implementation entries", async () => {

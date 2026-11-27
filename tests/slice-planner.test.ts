@@ -291,6 +291,7 @@ describe("Slice Planner", () => {
       profileMatches: [],
       unresolved: [],
       diagnostics: [],
+      excluded: [],
       budgetsRemaining: { selectedFiles: 10, selectedLineRanges: 100, plannerContentBytes: 10_000, aiReadCalls: 0, startedAt: Date.now() },
     };
     expect(planner.evaluateTargetedRead(state, { path: "outside.ts", startLine: 1, endLine: 1, requestedBy: "ai_explorer", reason: "outside" }).allowed).toBe(false);

@@ -144,6 +144,60 @@ describe("planner selection policy", () => {
     expect(listed).not.toContain("bench");
   });
 
+  it("never walks into a directory that carries a copy of someone else's project; its files stay unselected and the exclusion is reported", async () => {
+    // 真实形状（SalesBuddy 仓库，2026-11-27）：jni/libopus 是一个完整的 libopus 源码树，目录名看不出来。
+    const files = new Map([
+      ["LICENSE", "MIT\n"],
+      ["package.json", "{\"dependencies\":{\"express\":\"4.0.0\"}}\n"],
+      ["lib/service.ts", "export const service = 1;\n"],
+      ["jni/libopus/COPYING", "BSD 3-Clause\n"],
+      ["jni/libopus/AUTHORS", "Jean-Marc Valin\n"],
+      ["jni/libopus/NEWS", "1.5\n"],
+      ["jni/libopus/configure.ac", "AC_INIT\n"],
+      ["jni/libopus/src/opus.c", "int opus_encode(void) { return 0; }\n"],
+    ]);
+    const trees = new Map<string, SourceTreeApiEntry[]>([
+      ["", [blob("LICENSE"), blob("package.json"), tree("lib"), tree("jni")]],
+      ["lib", [blob("lib/service.ts")]],
+      ["jni", [tree("jni/libopus")]],
+      ["jni/libopus", [blob("jni/libopus/COPYING"), blob("jni/libopus/AUTHORS"), blob("jni/libopus/NEWS"), blob("jni/libopus/configure.ac"), tree("jni/libopus/src")]],
+      ["jni/libopus/src", [blob("jni/libopus/src/opus.c")]],
+    ]);
+    const listed: string[] = [];
+    const result = await planSelection({}, files, trees, [{ path: "" }], (path) => listed.push(path));
+    expect(result.status).toBe("completed");
+    expect(result.slice?.files.map((file) => file.path)).toEqual(["package.json", "lib/service.ts"]);
+    expect(listed).not.toContain("jni/libopus/src");
+    // 根目录的许可证是 MIT，这里是 BSD：判据是「带着一份别人家的许可证」。
+    expect(result.excluded).toEqual([{ kind: "vendored", path: "jni/libopus", detail: "foreign_license" }]);
+  });
+
+  it("does not force a changed file into the window when it sits inside a copy of someone else's project", async () => {
+    const files = new Map([
+      ["LICENSE", "MIT\n"],
+      ["package.json", "{\"dependencies\":{\"express\":\"4.0.0\"}}\n"],
+      ["src/main.ts", "export const main = 1;\n"],
+      ["jni/libopus/COPYING", "BSD 3-Clause\n"],
+      ["jni/libopus/AUTHORS", "x\n"],
+      ["jni/libopus/NEWS", "x\n"],
+      ["jni/libopus/src/opus.c", "int opus_encode(void) { return 0; }\n"],
+    ]);
+    const trees = new Map<string, SourceTreeApiEntry[]>([
+      ["", [blob("LICENSE"), blob("package.json"), tree("src"), tree("jni")]],
+      ["src", [blob("src/main.ts")]],
+      ["jni", [tree("jni/libopus")]],
+      ["jni/libopus", [blob("jni/libopus/COPYING"), blob("jni/libopus/AUTHORS"), blob("jni/libopus/NEWS"), tree("jni/libopus/src")]],
+      ["jni/libopus/src", [blob("jni/libopus/src/opus.c")]],
+    ]);
+    const result = await planSelection({}, files, trees, [{ path: "" }], undefined, ["jni/libopus/src/opus.c", "src/main.ts"]);
+    expect(result.slice?.files.map((file) => file.path)).toEqual(["src/main.ts", "package.json"]);
+    // 两条记录：必选循环里被拦下的那个文件（原因是它所在的目录），和遍历遇到的那个目录本身。
+    expect(result.excluded).toEqual([
+      { kind: "vendored", path: "jni/libopus/src/opus.c", detail: "jni/libopus" },
+      { kind: "vendored", path: "jni/libopus", detail: "foreign_license" },
+    ]);
+  });
+
   it("filters noise files sitting beside real source (filename-signal decoys)", async () => {
     const files = new Map([
       ["package.json", "{\"dependencies\":{\"express\":\"4.0.0\"}}\n"],
@@ -315,10 +369,12 @@ describe("planner selection policy", () => {
       ["lib/change.ts", "export const change = 1;\n"],
       ["lib/context.ts", "export const context = 1;\n"],
       ["lib/unrelated.ts", "export const unrelated = 1;\n"],
+      ["other/thing.ts", "export const thing = 1;\n"],
     ]);
     const trees = new Map<string, SourceTreeApiEntry[]>([
-      ["", [blob("lib/change.ts"), blob("lib/context.ts"), blob("lib/unrelated.ts"), tree("lib")]],
+      ["", [blob("lib/change.ts"), blob("lib/context.ts"), blob("lib/unrelated.ts"), tree("lib"), tree("other")]],
       ["lib", [blob("lib/change.ts"), blob("lib/context.ts"), blob("lib/unrelated.ts")]],
+      ["other", [blob("other/thing.ts")]],
     ]);
     const listed: string[] = [];
     const result = await planSelection({}, files, trees, [{ path: "" }], (path) => listed.push(path), ["lib/change.ts"], undefined, {
@@ -327,7 +383,9 @@ describe("planner selection policy", () => {
     });
 
     expect(result.slice?.files.map((file) => file.path)).toEqual(["lib/change.ts", "lib/context.ts"]);
-    expect(listed).not.toContain("lib");
+    // 不做全树发现：和必选路径无关的目录一个都不列。必选路径的祖先目录会看一眼是不是拷进来的上游项目
+    // （逐目录展开时读文件本来就要逐层列出这些祖先，这里不多花一次）。
+    expect(listed).not.toContain("other");
   });
 
   it("falls back to diff paths in required-only mode and walks scope by default", async () => {

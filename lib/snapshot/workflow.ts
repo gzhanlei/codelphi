@@ -5,6 +5,7 @@ import { extractPassWithRetry } from "../extraction-pass";
 import type { StructuredCompletionClient } from "../llm-client";
 import { analysisSliceBudgets, getPartitionedAnalysisSources } from "../remote-analysis";
 import { createSlicePlanner } from "../slice-planner";
+import type { SliceExclusion } from "../slice-planner/types";
 import { computeEffectiveSnapshotCoverage } from "./effective-coverage";
 import { createSnapshotPresentation, fallbackSnapshotPresentation, parseSnapshotPresentation } from "./presentation";
 import type { SnapshotAnalysis, SnapshotAnalysisPass, SnapshotProgressEvent, SnapshotWarning } from "./types";
@@ -18,6 +19,8 @@ export interface PreparedSnapshotAnalysis {
   partitions: Awaited<ReturnType<typeof getPartitionedAnalysisSources>>["partitions"];
   index: Awaited<ReturnType<typeof getPartitionedAnalysisSources>>["index"];
   workOrders: ExtractionWorkOrder[];
+  /** 规划时排除在分析之外的路径，给发布摘要用。分步工作区从清单恢复时不保存这份记录，所以可以没有。 */
+  excluded?: readonly SliceExclusion[];
   enumerateSurface: typeof enumerateImplementationSurface;
   now: () => Date;
   onProgress?: (event: SnapshotProgressEvent) => void;
@@ -34,7 +37,7 @@ export async function prepareSnapshotAnalysis(options: PrepareSnapshotAnalysisOp
   const now = options.now ?? (() => new Date());
   const scopeRoots = options.scopeRoots?.length ? options.scopeRoots : [{ path: "", role: "shared" as const }];
   const loadPartitions = options.loadPartitions ?? getPartitionedAnalysisSources;
-  const { partitions, index } = await loadPartitions({
+  const { partitions, index, excluded } = await loadPartitions({
     product: { id: 0, slug: "snapshot", name: options.productName },
     repository: {
       owner: options.identity.owner ?? "local",
@@ -73,6 +76,7 @@ export async function prepareSnapshotAnalysis(options: PrepareSnapshotAnalysisOp
     partitions,
     index,
     workOrders,
+    excluded: excluded ?? [],
     enumerateSurface: options.enumerateSurface ?? enumerateImplementationSurface,
     now,
     noSourceOutput: options.noSourceOutput === true,
@@ -147,6 +151,7 @@ export async function finalizeSnapshotAnalysis(prepared: PreparedSnapshotAnalysi
     index: prepared.index,
     partitions: prepared.partitions,
     implSurface,
+    excluded: prepared.excluded,
   });
   const effectiveCoverage = computeEffectiveSnapshotCoverage({ partitions: prepared.partitions, implementationSurface: implSurface });
   const warnings: SnapshotWarning[] = [];

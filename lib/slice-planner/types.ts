@@ -5,6 +5,7 @@ export type SliceProfileVersion = string;
 
 export type SliceRunStatus = "completed" | "underdetermined" | "scope_ambiguous" | "failed";
 export type SliceConfidence = "high" | "medium" | "low";
+
 export type SlicePhase =
   | "scope_resolution"
   | "manifest_scan"
@@ -194,12 +195,26 @@ export interface PlannerDiagnostic {
   evidence?: { path: string; startLine?: number; endLine?: number };
 }
 
+/**
+ * 只看路径认不出来、要看目录清单或文件内容才知道的排除。报告给人看，也让覆盖率不把它们算成遗漏。
+ * 测试、文档、迁移脚本这些只看路径就认得的，在 lib/analysis-target.ts 里，不在这里。
+ */
+export type SliceExclusionKind = "vendored" | "tooling" | "duplicate" | "generated";
+export interface SliceExclusion {
+  kind: SliceExclusionKind;
+  path: string;
+  /** 原因：第三方的那个目录、登记它的清单、生成它的工具…… */
+  detail?: string;
+}
+
 export interface SlicePlanResult {
   status: SliceRunStatus;
   slice?: SourceSlice;
   workspaceMap?: WorkspaceMap;
   missing: string[];
   diagnostics: PlannerDiagnostic[];
+  /** 走到选文件那一步才有；scope 没解析、预算耗尽这些提前返回的结果没有。 */
+  excluded?: SliceExclusion[];
 }
 
 export type TargetedReadRequestedBy = "planner" | "profile" | "ai_explorer";
@@ -249,6 +264,7 @@ export interface SlicePlanningState {
   profileMatches: StackProfileMatch[];
   unresolved: string[];
   diagnostics: PlannerDiagnostic[];
+  excluded: SliceExclusion[];
   budgetsRemaining: {
     selectedFiles: number;
     selectedLineRanges: number;

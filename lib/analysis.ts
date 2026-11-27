@@ -11,6 +11,7 @@ import { enqueueBillingNotification } from "./billing/notifications";
 import { resolveAnalysisTarget, type ChangeContext, type CodeHostingProvider } from "./code-hosting";
 import { analysisSliceBudgets, getPartitionedAnalysisSources, getRemoteAnalysisSources, parseSourceRoots, type AnalysisPartition } from "./remote-analysis";
 import { createSlicePlanner } from "./slice-planner";
+import { summarizeExclusions } from "./slice-planner/exclusions";
 import { insertSpecVersion, loadLatestSpecFeatures, loadLatestSpecVersionLanguage, loadPreviousFeatureNames, loadPreviousSpecText } from "./spec-versions";
 import { loadAffectedEvidencePaths, loadAffectedFeatureKeys, rebuildSpecFileIndex } from "./spec-file-index";
 import { resolveAnalysisMode } from "./incremental";
@@ -614,7 +615,9 @@ async function runAnalysisBody(run: RunContext) {
     discovery: "required_only" as const,
     requiredPaths,
   };
-  const { partitions: planned, index: sourceIndex, partitionsCapped } = await getPartitionedAnalysisSources(analysisRequest, { planner, budgets: analysisSliceBudgets });
+  const { partitions: planned, index: sourceIndex, partitionsCapped, excluded } = await getPartitionedAnalysisSources(analysisRequest, { planner, budgets: analysisSliceBudgets });
+  const excludedPaths = new Set((excluded ?? []).map((exclusion) => exclusion.path));
+  if (excludedPaths.size > 0) console.log("[analysis] excluded from the analysis", summarizeExclusions(excluded ?? []));
   partitions = planned;
   console.log("[analysis] partitioned extraction", { runId: run.id, partitions: partitions.length, capped: partitionsCapped, mode: affectedKeys === null ? "full" : "incremental-carry", requiredPaths: requiredPaths?.length ?? null });
   // B1 覆盖披露回执：全量按全树实现面，增量按 diff 与受影响证据的实现面，
@@ -622,9 +625,12 @@ async function runAnalysisBody(run: RunContext) {
   coverage = computeCoverageReceipt({
     index: sourceIndex,
     partitions,
-    implSurface: requiredPaths === null ? await enumerateImplementationSurface(sourceIndex) : await enumerateRequiredImplementationSurface(sourceIndex, requiredPaths),
+    implSurface: requiredPaths === null
+      ? await enumerateImplementationSurface(sourceIndex)
+      : await enumerateRequiredImplementationSurface(sourceIndex, requiredPaths.filter((path) => !excludedPaths.has(path))),
     diffPaths: remoteAnalysisRequest.diffPaths,
     partitionsCapped,
+    excluded,
   });
   if (partitions.length === 1) {
     const single = partitions[0];
