@@ -1,4 +1,5 @@
 import type { Evidence } from "./types";
+import { isModelContextFile } from "./analysis-target";
 
 export function evidenceItems(value: unknown): Evidence[] {
   if (Array.isArray(value)) return value as Evidence[];
@@ -36,6 +37,8 @@ export function isInfrastructureEvidence(path: string): boolean {
  * 数据库迁移脚本（2026-11-25 产品决定：移出分析目标）。它们不进提示词、不能作证据、
  * 变更也不触发重新分析。这是独立的判定，不并入 evidenceKind：isTestOnlyEvidence 把一切
  * 非 implementation 的档位都当弱证据，只引用迁移的场景会被误打「测试佐证」。ORM 模型代码不在此列。
+ *
+ * 2026-11-27 起它只是 lib/analysis-target.ts 里 schema 那一类的一种写法；这里留着，给影响分类单独分档用。
  */
 const SCHEMA_ARTIFACT = /(?:^|\/)migrations?\/|\.sql$/i;
 
@@ -44,20 +47,21 @@ export function isSchemaArtifact(path: string): boolean {
 }
 
 /**
- * 实现面文件：implementation 档位，并且在分析目标内。覆盖率的分母、装配面的分子、库存清单的
- * 入选面都用它——迁移脚本已移出分析目标，这几处必须同进同出，否则带迁移的提交会显示成有遗漏。
+ * 会被拿去分析的文件：在分析目标里，并且进给模型的提示词。覆盖率的分母、装配面的分子、库存清单的
+ * 入选面都用它——这几处必须同进同出，否则不在分析目标里的文件会显示成有遗漏。
+ * 规划器用来认技术栈的清单（package.json 等）算在分析目标里，但不进提示词，所以也不在这里。
  */
 export function isImplementationSurfaceFile(path: string): boolean {
-  return evidenceKind(path) === "implementation" && !isSchemaArtifact(path);
+  return isModelContextFile(path);
 }
 
 /**
- * 改动文件里仍在分析目标内的那部分。提示词的「文件变化」、证据允许集、窗口 diff、覆盖率的 diff 口径
+ * 改动文件里会被分析的那一部分。提示词的「文件变化」、证据允许集、窗口 diff、覆盖率的 diff 口径
  * 都从这里取，四处看到的是同一份清单。只按新路径判断，保持原顺序和重复，由调用方各自去重。
  * 发布页的文件列表不走这里：它照实列出 PR 触碰的每个文件。
  */
 export function analyzedChangeFiles<T extends { path: string }>(files: ReadonlyArray<T>): T[] {
-  return files.filter((file) => !isSchemaArtifact(file.path));
+  return files.filter((file) => isModelContextFile(file.path));
 }
 
 /** 同一份清单，只取路径。 */

@@ -12,13 +12,16 @@ describe("effective snapshot coverage", () => {
     expect(isSnapshotDataFile("data/users.json")).toBe(true);
     expect(isSnapshotDataFile("src/users.json")).toBe(false);
     expect(isSnapshotEffectiveImplementationPath("src/users.json")).toBe(true);
-    expect(isSnapshotEffectiveImplementationPath("package.json")).toBe(true);
+    // 2026-11-27 起：清单只留给规划器认技术栈，部署文件不承载产品行为，都不在分析目标里。
+    expect(isSnapshotEffectiveImplementationPath("package.json")).toBe(false);
+    expect(isSnapshotEffectiveImplementationPath("apps/api/go.mod")).toBe(false);
     expect(isSnapshotEffectiveImplementationPath("src/feature.ts")).toBe(true);
     expect(isSnapshotEffectiveImplementationPath("data/atlas/tang/map.geojson")).toBe(false);
     expect(isSnapshotEffectiveImplementationPath("data/users.json")).toBe(false);
     expect(isSnapshotEffectiveImplementationPath(".github/workflows/ci.yml")).toBe(false);
     expect(isSnapshotEffectiveImplementationPath("package-lock.json")).toBe(false);
-    expect(isSnapshotEffectiveImplementationPath("Dockerfile")).toBe(true);
+    expect(isSnapshotEffectiveImplementationPath("Dockerfile")).toBe(false);
+    expect(isSnapshotEffectiveImplementationPath("androidApp/src/main/AndroidManifest.xml")).toBe(true);
     expect(isSnapshotEffectiveImplementationPath("README.md")).toBe(false);
     expect(isSnapshotEffectiveImplementationPath("src/feature.test.ts")).toBe(false);
     // 迁移脚本已移出分析目标；ORM 模型定义仍在目标内。
@@ -42,12 +45,13 @@ describe("effective snapshot coverage", () => {
         { path: "db/schema.sql", size: 50 },
       ],
     });
-    expect(result.filesAssembled).toBe(2);
-    expect(result.filesTotal).toBe(3);
-    expect(result.ratio).toBeCloseTo(2 / 3);
+    // 相关文件是 src/app.ts 和 src/config.json；package.json 是清单，不算在内。
+    expect(result.filesAssembled).toBe(1);
+    expect(result.filesTotal).toBe(2);
+    expect(result.ratio).toBeCloseTo(1 / 2);
     expect(result.dataFilesAssembled).toBe(1);
     expect(result.excludedDataFiles).toBe(2);
-    expect(result.excludedOtherFiles).toBe(4);
+    expect(result.excludedOtherFiles).toBe(5);
     expect(result.rawFilesTotal).toBe(9);
   });
 

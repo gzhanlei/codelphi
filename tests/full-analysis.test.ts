@@ -559,8 +559,8 @@ function inventoryOutcome(overrides: Partial<InventoryFullAnalysisOutcome> = {})
 describe("diffPathCoverage", () => {
   it("counts only the changed files inside the analysis target", () => {
     const files = [{ path: "src/orders.ts" }, { path: "README.md" }, { path: "migrations/001_init.sql" }, { path: "db/schema.sql" }, { path: "src/extra.ts" }];
-    // 进了单元的算覆盖；文档本来就不需要覆盖；没进单元的实现文件才是遗漏。
-    expect(diffPathCoverage(files, ["src/orders.ts"])).toEqual({ diffTotalPaths: 3, diffSelectedPaths: 2, diffOmittedPaths: 1 });
+    // 进了单元的算覆盖；文档和迁移脚本不在分析目标里，既不算覆盖也不算遗漏；没进单元的实现文件才是遗漏。
+    expect(diffPathCoverage(files, ["src/orders.ts"])).toEqual({ diffTotalPaths: 2, diffSelectedPaths: 1, diffOmittedPaths: 1 });
     // 窗口里只有迁移脚本：分析目标内没有任何改动。
     expect(diffPathCoverage([{ path: "migrations/001_init.sql" }], [])).toEqual({ diffTotalPaths: 0, diffSelectedPaths: 0, diffOmittedPaths: 0 });
   });

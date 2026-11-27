@@ -1,5 +1,6 @@
 import type { PoolConnection } from "mysql2/promise";
-import { isImplementationSurfaceFile, isSchemaArtifact } from "./evidence";
+import { isImplementationSurfaceFile } from "./evidence";
+import { isModelContextFile } from "./analysis-target";
 import type { AnalysisPartition } from "./remote-analysis";
 import type { OpenedRemoteSourceRevision } from "./remote-source-index";
 
@@ -122,7 +123,8 @@ export function computeCoverageReceipt(input: {
   // W0-9 评审采纳：diff 必选 ≠ diff 全覆盖——diff 面自身的入选/遗漏单独计数，
   // 6 分区帽或不可读导致的遗漏必须可见（「优先选择」不等于「实际覆盖」）。
   // 迁移脚本已移出分析目标：它既不会被装配，也不该被算成遗漏。
-  const diffPaths = (input.diffPaths ?? []).filter((path) => !isSchemaArtifact(path));
+  // 2026-11-27 起不只是迁移脚本：所有不在分析目标里的文件都既不会被装配，也不该被算成遗漏。
+  const diffPaths = (input.diffPaths ?? []).filter((path) => isModelContextFile(path));
   const diffSelectedPaths = new Set<string>();
   for (const path of new Set(diffPaths)) {
     if (assembledAll.has(path)) diffSelectedPaths.add(path);

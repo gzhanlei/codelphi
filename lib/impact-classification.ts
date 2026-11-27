@@ -1,3 +1,4 @@
+import { analysisNoiseKind } from "./analysis-target";
 import { evidenceKind, isInfrastructureEvidence, isSchemaArtifact } from "./evidence";
 import { behavioralChangePaths } from "./patch-scan";
 
@@ -41,7 +42,14 @@ export type FileIndex = ReadonlyMap<string, readonly string[]>;
 export type GlobalReason = "assembly_point" | "schema_migration" | "runtime_config" | "dependency_manifest" | "shared_module" | "symlink" | "submodule";
 export type UnknownReason = "binary_content";
 export type NoBehaviorReason = "document" | "comment_or_format_only" | "content_unchanged";
-export type NoDetectedReason = "test_code" | "ci_config" | "editor_or_vcs_config" | "static_asset" | "mode_change" | "schema_artifact";
+export type NoDetectedReason =
+  | "test_code"
+  | "ci_config"
+  | "editor_or_vcs_config"
+  | "static_asset"
+  | "mode_change"
+  | "schema_artifact"
+  | "outside_analysis_target";
 export type DirectReason = "indexed_implementation" | "unindexed_implementation_file";
 
 interface ChangedPaths {
@@ -203,6 +211,9 @@ const PATH_TIERS: ReadonlyArray<{ matches: (path: string) => boolean; impact: (b
   { matches: (path) => EDITOR_OR_VCS_CONFIG.test(path), impact: (base) => noDetected(base, "editor_or_vcs_config") },
   { matches: (path) => STATIC_ASSET.test(path), impact: (base) => noDetected(base, "static_asset") },
   { matches: (path) => evidenceKind(path) === "document", impact: (base) => noBehavior(base, "document") },
+  // 其余不在分析目标里的文件（构建和部署文件、生成的代码、第三方副本、示例和基准……）：
+  // 服务端不读它们，里面发生什么都不会改变账本。清单有自己的全局规则（dependency_manifest），轮不到这里。
+  { matches: (path) => analysisNoiseKind(path) !== null, impact: (base) => noDetected(base, "outside_analysis_target") },
 ];
 
 /** 不依赖索引与补丁内容的归类；返回 null 表示要按实现文件处理。 */

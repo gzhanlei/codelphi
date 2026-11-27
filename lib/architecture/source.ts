@@ -1,3 +1,4 @@
+import { analysisNoiseKind } from "../analysis-target";
 import type { ArchitectureEvidence, NodeFact } from "./facts";
 import type { ArchitectureSignal } from "./signals";
 
@@ -7,11 +8,16 @@ export interface ArchitectureSource {
 }
 
 const runtimeSourcePattern = /\.(?:go|ts|tsx|js|jsx|php|json|sql|java|kt|kts|py|rs|cs|csproj|xml|ya?ml|toml|gradle|properties)$/i;
-/** 测试/fixture/mock 路径判定（架构与切片选择共用口径，避免两处漂移）。 */
-export const nonRuntimePathPattern = /(?:^|\/)(?:__tests__|tests?|fixtures?|mocks?)(?:\/|\.)|\.(?:test|spec|d)\.[a-z]+$|_test\.(?:go|py)$/i;
+/**
+ * 架构提取不读的文件：测试、生成的代码、类型声明、第三方副本。口径和切片选择共用（lib/analysis-target.ts），避免两处漂移。
+ * 迁移脚本和部署配置架构提取照读：表结构和编排文件本身就是架构事实。
+ */
+const NOISE_FOR_ARCHITECTURE: ReadonlySet<string> = new Set(["test", "generated", "types", "vendored"]);
 
 export function isArchitectureSourcePath(path: string) {
-  return (path.endsWith("go.mod") || runtimeSourcePattern.test(path)) && !nonRuntimePathPattern.test(path) && !path.endsWith(".min.js");
+  if (!(path.endsWith("go.mod") || runtimeSourcePattern.test(path))) return false;
+  const kind = analysisNoiseKind(path);
+  return kind === null || !NOISE_FOR_ARCHITECTURE.has(kind);
 }
 
 export function architectureLineNumber(line: string, index: number) {

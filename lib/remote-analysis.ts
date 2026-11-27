@@ -4,6 +4,7 @@ import { createRemoteSourceIndex, type OpenedRemoteSourceRevision, type RemoteSo
 import { createSlicePlanner, type SliceBudgets, type SlicePlanner, type SourceSlice } from "./slice-planner";
 import type { CodeHostingProvider, RepositoryAccess, SourceFile } from "./code-hosting/types";
 import { radarArchitectureEvidencePaths } from "./architecture-draft";
+import { isModelContextFile } from "./analysis-target";
 import { aivlogArchitectureEvidencePaths } from "./architecture-aivlog";
 import type { RemoteSourceBackend } from "./remote-source-index";
 
@@ -70,7 +71,9 @@ export function parseSourceRoots(value: unknown): SourceScopeRoot[] {
 export function sliceToSourceFiles(slice: SourceSlice, index: OpenedRemoteSourceRevision, maxBytes = Number.POSITIVE_INFINITY): Promise<SourceFile[]> {
   // F3 硬顶（生产实测 4/5 仓库超预算 10–22%）：贪心按规划顺序整文件包含，超预算即停。
   // 返回的文件集就是真实窗口——调用方须以它为准（assertEvidence 允许集 = 实际进 prompt 的内容）。
-  return Promise.all(slice.files.map(async (file) => {
+  // 规划器为认技术栈选进来的清单（package.json、go.mod 等）不进提示词：它们不是产品行为，
+  // 留在提示词里只会让模型写出「依赖了某个库」这样的功能，还能被引成证据。
+  return Promise.all(slice.files.filter((file) => isModelContextFile(file.path)).map(async (file) => {
     const numbered: string[] = [];
     for (const range of file.lineRanges) {
       const read = await index.readLines({

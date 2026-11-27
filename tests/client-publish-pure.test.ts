@@ -164,7 +164,9 @@ describe("parseUnifiedDiff", () => {
   it("computes the behavioural set and the hunks with the same functions the hosted path uses", () => {
     const window = windowOf(parseUnifiedDiff(diff));
     // 和托管路径同一套判定：二进制、shell 脚本不在能识别注释的语言里，一律算行为变更；文档、只有注释的改动不算。
-    expect([...window.behavioralPaths].sort()).toEqual(["assets/logo.png", "lib/auth.ts", "lib/new.ts", "lib/old.ts", "scripts/run.sh", "with space.txt"]);
+    // 纯文本文件从 2026-11-27 起也是文档（lib/analysis-target.ts）：`with space.txt` 不再算行为变更。
+    expect([...window.behavioralPaths].sort()).toEqual(["assets/logo.png", "lib/auth.ts", "lib/new.ts", "lib/old.ts", "scripts/run.sh"]);
+    expect(window.files.find((file) => file.path === "with space.txt")).toMatchObject({ behavioral: false });
     expect(window.files.find((file) => file.path === "lib/auth.ts")).toMatchObject({ status: "modified", behavioral: true, hunks: [{ oldStart: 10, oldCount: 3, newStart: 12, newCount: 4 }] });
     expect(window.files.find((file) => file.path === "docs/guide.md")).toMatchObject({ behavioral: false, hunks: [{ oldStart: 1, oldCount: 2, newStart: 1, newCount: 2 }] });
     // 纯改名没有行号区间；二进制文件没有区间但算行为变更。

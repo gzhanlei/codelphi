@@ -23,7 +23,7 @@ import type { AnchorScenarioLink } from "./behavior-unit-state";
 import { behavioralEnumerationEnabled, analysisConvergenceEpsilon, analysisConvergenceRounds, fullAnalysisMode } from "./env";
 import { runInventoryFullAnalysis } from "./full-analysis";
 import { behavioralChangePaths, behavioralPathsOf } from "./patch-scan";
-import { analyzedChangePaths, isSchemaArtifact } from "./evidence";
+import { analyzedChangePaths, isImplementationSurfaceFile } from "./evidence";
 import { featureIdentityColumn, scenarioIdentityColumn, type VersionIdentityPlan } from "./spec-identity";
 import { parsePatchHunks } from "./spec-diff";
 import { enumerateBehavioralChunks } from "./behavioral-enumeration";
@@ -603,10 +603,11 @@ async function runAnalysisBody(run: RunContext) {
     behaviorLinks = outcome.behaviorLinks;
     console.log("[analysis] inventory full analysis activated", { runId: run.id, tasks: outcome.tasks, units: outcome.unitStatuses.length, productDescriptionStatus: outcome.productDescriptionStatus });
   } else {
-  // 迁移脚本不进必选路径：既不装配，也不进定向覆盖面的分母（否则每次带迁移的提交都会显示有遗漏）。
+  // 不在分析目标里的文件不进必选路径：既不装配，也不进定向覆盖面的分母（否则会显示有遗漏）。
+  // 索引里留着旧的测试、迁移证据（历史）：那些路径改了也不算碰到相关功能。
   const requiredPaths = affectedKeys === null ? null : [...new Set([
     ...analyzedChangePaths(change.files),
-    ...(await loadAffectedEvidencePaths(run.repositoryId, affectedKeys, executeWrapper)).filter((path) => !isSchemaArtifact(path)),
+    ...(await loadAffectedEvidencePaths(run.repositoryId, affectedKeys, executeWrapper)).filter((path) => isImplementationSurfaceFile(path)),
   ])].sort();
   const analysisRequest = requiredPaths === null ? remoteAnalysisRequest : {
     ...remoteAnalysisRequest,

@@ -185,7 +185,8 @@ const zeroSanitize = (empty: boolean): EvidenceSanitizeSummary => ({
 export function diffPathCoverage(changeFiles: ReadonlyArray<{ path: string }>, unitPaths: readonly string[]) {
   const diffPaths = analyzedChangePaths(changeFiles);
   const unitPathSet = new Set(unitPaths);
-  const diffSelectedPaths = diffPaths.filter((path) => unitPathSet.has(path) || evidenceKind(path) !== "implementation").length;
+  // analyzedChangePaths 只留会被分析的文件：文档、测试、迁移脚本不在里面，既不算覆盖也不算遗漏。
+  const diffSelectedPaths = diffPaths.filter((path) => unitPathSet.has(path)).length;
   return { diffTotalPaths: diffPaths.length, diffSelectedPaths, diffOmittedPaths: diffPaths.length - diffSelectedPaths };
 }
 

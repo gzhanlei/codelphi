@@ -1001,7 +1001,9 @@ describe("analysis orchestration", () => {
     await runAnalysis(8);
 
     const saved = connection.execute.mock.calls.find(([sql]) => String(sql).includes("INSERT INTO analysis_coverage_receipts"));
-    expect(saved?.[1]).toEqual([44, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1]);
+    // 文档和迁移脚本都不在分析目标里：窗口在分析目标内一个文件都没有，diff 面三项都是 0
+    // （2026-11-27 之前文档还算在分析目标里：diff 总数 1、遗漏 1，看起来像漏分析了一个文件）。
+    expect(saved?.[1]).toEqual([44, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
   });
 
   it("records a readable failure when loading the run fails", async () => {

@@ -1,4 +1,4 @@
-import { evidenceKind, isSchemaArtifact } from "./evidence";
+import { isImplementationSurfaceFile } from "./evidence";
 import type { FileImpact, GlobalReason, WindowImpact, WindowOutcome } from "./impact-classification";
 
 /**
@@ -57,7 +57,7 @@ export function incrementalReadPaths(baseline: BaselineIndex, impact: WindowImpa
 }
 
 function readableEvidence(baseline: BaselineIndex, featureKey: string): readonly string[] {
-  return (baseline.featurePaths.get(featureKey) ?? []).filter((path) => !isSchemaArtifact(path));
+  return (baseline.featurePaths.get(featureKey) ?? []).filter((path) => isImplementationSurfaceFile(path));
 }
 
 export function reanalysisLoad(baseline: BaselineIndex, impact: WindowImpact): { reanalyzedFeatures: number; featureShare: number; newImplementationFiles: number } {
@@ -90,7 +90,7 @@ function changeFor(path: string, impact: WindowImpact): FileImpact | undefined {
 function fateOf(anchor: Anchor, entry: FileImpact | undefined, removedLines: LineRanges): AnchorFate {
   if (!entry) return "untouched";
   if (entry.reason === "pure_rename") return "reanchored";
-  if (evidenceKind(anchor.path) === "implementation" && !isSchemaArtifact(anchor.path)) return "nonbehavioral";
+  if (isImplementationSurfaceFile(anchor.path)) return "nonbehavioral";
   if (entry.status === "deleted") return "stale";
   const ranges = removedLines.get(anchor.path) ?? [];
   return ranges.length === 0 ? "remapped" : lineFate(anchor, ranges);

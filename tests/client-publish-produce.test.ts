@@ -153,8 +153,9 @@ describe("produceProposal", () => {
       ["lib/auth.ts", "modified", false],
       ["lib/billing.ts", "added", true],
     ]);
-    expect(proposal.window!.analyzedPaths).toEqual(["README.md", "lib/auth.ts", "lib/billing.ts"]);
-    expect(proposal.window!.skipped).toEqual([]);
+    // 文档不在分析目标里（lib/analysis-target.ts）：不进已分析路径，带着原因列进跳过的那一份。
+    expect(proposal.window!.analyzedPaths).toEqual(["lib/auth.ts", "lib/billing.ts"]);
+    expect(proposal.window!.skipped).toEqual([{ path: "README.md", reason: "doc" }]);
     // 行为面枚举只针对含行为变更的文件，这里只有计费。
     expect(model.prompts.some((prompt) => prompt.includes("你在向一位不了解此变更的工程师转述"))).toBe(true);
     expect(model.prompts.find((prompt) => prompt.includes("你在向一位不了解此变更的工程师转述"))).toContain("lib/billing.ts");

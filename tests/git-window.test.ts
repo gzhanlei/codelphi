@@ -168,7 +168,11 @@ describe("git-window 读窗口", () => {
     expect(forcedBinaryText).toMatchObject({ status: "modified", binary: false });
     // git 对它只能给出“Binary files differ”。读窗口如实保留这段输出，由分类器判定它不构成证据。
     expect(forcedBinaryText?.patch).toContain("Binary files");
-    expect(classifyFile(forcedBinaryText!, new Map()).classification).toBe("direct");
+    // 纯文本文件不在分析目标里（2026-11-27 起）：分类器判定它不构成证据。这不是因为它被判成了二进制——
+    // binary 仍是 false，见上。
+    const impact = classifyFile(forcedBinaryText!, new Map());
+    expect(impact.classification).toBe("no_detected_behavior_change");
+    expect(impact).toMatchObject({ reason: "outside_analysis_target" });
     expect(byPath.get("img/logo.png")).toMatchObject({ binary: true });
   });
 

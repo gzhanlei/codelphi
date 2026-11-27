@@ -22,7 +22,7 @@ import type { AnalysisResult, analyzeWithAI } from "../ai";
 import { enumerateBehavioralChunks, type BehavioralEnumerationMetrics, type BehavioralEnumerationOutcome } from "../behavioral-enumeration";
 import type { RepositoryIdentity, RepositoryProvider } from "../client-proposal/contract";
 import { sealProposal, type Proposal } from "../client-proposal/contract";
-import { isSchemaArtifact } from "../evidence";
+import { analysisNoiseKind, isModelContextFile } from "../analysis-target";
 import { generateFeatureFlowGraph } from "../feature-flow-generation";
 import { behavioralChangePaths } from "../patch-scan";
 import type { PrivacyHit, PrivacyRule, SourceText } from "../privacy-scan";
@@ -406,8 +406,12 @@ export async function produceProposal(options: ProduceOptions): Promise<ProduceS
     base: ledgerBase,
     window: {
       files: window.files,
-      analyzedPaths: files.map((file) => file.path).filter((path) => !isSchemaArtifact(path)),
-      skipped: files.filter((file) => isSchemaArtifact(file.path)).map((file) => ({ path: file.path, reason: "schema_artifact" })),
+      analyzedPaths: files.map((file) => file.path).filter((path) => isModelContextFile(path)),
+      // 不在分析目标里的窗口文件（测试、文档、迁移脚本、构建和部署文件……）和原因，口径和服务端是同一个。
+      skipped: files.flatMap((file) => {
+        const kind = analysisNoiseKind(file.path);
+        return kind === null ? [] : [{ path: file.path, reason: kind === "schema" ? "schema_artifact" : kind }];
+      }),
       affectedFeatureKeys: [],
     },
     proposal: result,

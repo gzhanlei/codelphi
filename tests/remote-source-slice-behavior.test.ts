@@ -289,10 +289,10 @@ describe("Slice Planner behavior", () => {
       plannerVersion: "v1-test",
       profileVersion: "profiles-v1",
     }, index);
+    // Dockerfile 从 2026-11-27 起不在分析目标里（部署文件不承载产品行为，lib/analysis-target.ts）；其余按信号定理由。
     expect(result.slice?.files.map((file) => [file.path, file.reason])).toEqual([
       ["apps/api/package.json", "manifest"],
       ["apps/api/auth.ts", "auth"],
-      ["apps/api/Dockerfile", "manifest"],
       ["apps/api/orders.db.ts", "database"],
       ["apps/api/queue.ts", "queue"],
       ["apps/api/routes.ts", "route"],

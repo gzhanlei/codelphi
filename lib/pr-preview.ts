@@ -5,7 +5,7 @@ import type { RepositoryRef } from "./code-hosting/types";
 import { listIssueComments, getPullRequestFiles, upsertIssueComment } from "./github";
 import type { GitHubAccess } from "./github-access";
 import type { PrPreviewJob } from "./github-webhook";
-import { isSchemaArtifact } from "./evidence";
+import { isImplementationSurfaceFile } from "./evidence";
 
 export interface AffectedSpecEntry {
   featureName: string;
@@ -119,7 +119,8 @@ export async function runPrPreview(job: PrPreviewJob) {
     if (paths.length === 0) return;
 
     // 迁移脚本已移出分析目标：索引里即使还留着旧的迁移证据（历史，不批量清理），也不拿它反查。
-    const affected = await loadAffectedEntries(job.repositoryId, paths.filter((path) => !isSchemaArtifact(path)));
+    // 2026-11-27 起不只是迁移脚本：凡是还在分析目标里的路径才拿去反查。
+    const affected = await loadAffectedEntries(job.repositoryId, paths.filter((path) => isImplementationSurfaceFile(path)));
 
     if (affected.length === 0) {
       await adapter.createCheckRun?.(

@@ -36,13 +36,30 @@ describe("selection policy classification", () => {
     expect(selectionNoiseKind("apps/web/app/page.tsx")).toBeNull();
     // 迁移脚本不在分析目标里（2026-11-25 产品决定）：目录下的文件与 .sql 一律按 schema 噪声处理
     expect(selectionNoiseKind("migrations/001_init.sql")).toBe("schema");
-    expect(selectionNoiseKind("alembic/versions/x.py")).toBeNull();
+    // Python 的 alembic、Rails 的 db/migrate 也是迁移脚本（2026-11-27 并入同一条规则）
+    expect(selectionNoiseKind("alembic/versions/x.py")).toBe("schema");
+    expect(selectionNoiseKind("db/migrate/20240101000000_create_users.rb")).toBe("schema");
+    // 其它语言和框架的测试约定
+    expect(selectionNoiseKind("src/commonTest/kotlin/FooTest.kt")).toBe("test");
+    expect(selectionNoiseKind("internal/service/user_test.go")).toBe("test");
+    expect(selectionNoiseKind("iosApp/AppTests/AppTests.swift")).toBe("test");
+    expect(selectionNoiseKind("src/Acme.Tests/OrderServiceTests.cs")).toBe("test");
+    expect(selectionNoiseKind("tests/test_login.py")).toBe("test");
+    // 部署和构建文件、生成的代码
+    expect(selectionNoiseKind("deploy/Dockerfile")).toBe("deployment");
+    expect(selectionNoiseKind("docker-compose.prod.yml")).toBe("deployment");
+    expect(selectionNoiseKind("app/build.gradle.kts")).toBeNull();
+    expect(selectionNoiseKind("app/project.pbxproj")).toBe("build");
+    expect(selectionNoiseKind("yarn.lock")).toBe("build");
+    expect(selectionNoiseKind("api/user.pb.go")).toBe("generated");
     expect(selectionNoiseKind("db/schema.sql")).toBe("schema");
     expect(selectionNoiseKind("lib/migration-planner.ts")).toBeNull();
   });
 
-  it("exempts build manifests even in noise-looking locations", () => {
-    expect(selectionNoiseKind("packages/bench/package.json")).toBeNull();
+  it("exempts build manifests, except inside a noise directory", () => {
+    // 噪声目录里的清单是那个示例、基准或测试夹具自己的，不是这个产品的
+    expect(selectionNoiseKind("packages/bench/package.json")).toBe("bench");
+    expect(selectionNoiseKind("packages/api/package.json")).toBeNull();
     expect(isSelectionManifest("apps/api/go.mod")).toBe(true);
     expect(isSelectionManifest("README.md")).toBe(false);
   });
@@ -145,9 +162,10 @@ describe("planner selection policy", () => {
     expect(result.slice?.files.map((file) => file.path)).toEqual(["package.json", "lib/router.js", "scripts/play.ts"]);
   });
 
-  it("selects window diff files first, overriding noise classification (W0-7)", async () => {
-    // W0-2 solo 重跑残余根因：窗口 diff 是行为证据的一手面，装配必须保证入选——
-    // 即使路径命中噪声分类（被本窗口修改本身就是入选理由）
+  it("selects the window's diff files first, but only those inside the analysis target (W0-7)", async () => {
+    // W0-2 solo 重跑残余根因：窗口 diff 是行为证据的一手面，分析目标内的 diff 文件必须保证入选。
+    // 2026-11-27 之前这个循环不看噪声分类，于是和代码一起改的测试、CI 文件每次都被塞进提示词，
+    // 账本里引用测试的场景越积越多（codelphi 四天里从 19 条涨到 433 条）。现在噪声文件改了也不进。
     const files = new Map([
       ["package.json", "{\"dependencies\":{\"express\":\"4.0.0\"}}\n"],
       [".github/labeler.yml", "python:\\n  - any: []\\n"],
@@ -162,10 +180,9 @@ describe("planner selection policy", () => {
     ]);
     const result = await planSelection({ maxSelectedFiles: 5 }, files, trees, [{ path: "" }], undefined, [".github/labeler.yml", "test/foo.spec.ts", "src/main.ts"]);
     expect(result.status).toBe("completed");
-    // diff 文件先于遍历入选（路径序），噪声分类不再排除窗口 diff 面；剩余预算归遍历
+    // 分析目标内的 diff 文件先于遍历入选；CI 文件和测试文件即使在窗口里改过也不选
     const paths = result.slice?.files.map((file) => file.path) ?? [];
-    expect(paths.slice(0, 3)).toEqual([".github/labeler.yml", "src/main.ts", "test/foo.spec.ts"]);
-    expect(paths).toContain("package.json");
+    expect(paths).toEqual(["src/main.ts", "package.json"]);
   });
 
   it("spreads diff files across partitions before walking (W0-7)", async () => {

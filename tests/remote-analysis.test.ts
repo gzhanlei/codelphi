@@ -245,15 +245,13 @@ describe("remote analysis adapter", () => {
       planner: createSlicePlanner({ now: Date.now }),
       budgets: analysisSliceBudgets,
     });
-    expect(result.sources.map((source) => source.path)).toEqual([
-      "apps/checkout/package.json",
-      "apps/checkout/app/page.tsx",
-      "apps/checkout/src/server.ts",
-    ]);
-    expect(result.sources[0].content).toContain("1: {");
-    expect(result.sources[1].content).toBe("1: export default function Page() {}");
-    expect(result.sources[2].content).toBe("1: const server = 1;\n2: start(server);");
+    // 清单留给规划器认技术栈（next-web），但不进给模型的提示词（2026-11-27，lib/analysis-target.ts）。
+    expect(result.sources.map((source) => source.path)).toEqual(["apps/checkout/app/page.tsx", "apps/checkout/src/server.ts"]);
+    expect(result.sources[0].content).toBe("1: export default function Page() {}");
+    expect(result.sources[1].content).toBe("1: const server = 1;\n2: start(server);");
+    expect(result.slice.files.map((file) => file.path)).toEqual(["apps/checkout/app/page.tsx", "apps/checkout/src/server.ts"]);
     expect(result.slice.confidence).toBe("high");
+    expect(result.slice.metrics.profileMatches[0]?.profileId).toBe("next-web");
 
   });
 
@@ -265,6 +263,8 @@ describe("remote analysis adapter", () => {
       { path: "package.json", type: "blob", sha: packageSha, size: packageJson.length },
     ];
     for (let index = 0; index < directories; index += 1) rootEntries.push({ path: `module-${index}`, type: "tree", sha: `tree-${index}` });
+    // 目录里只有纯文本：走完 401 个目录也选不出一个源码文件，所以文件预算不会让遍历提前停下。
+    let expanded = 0;
     const backend: RemoteSourceBackend = {
       kind: "github_api",
       async resolveRevision() {
@@ -272,21 +272,23 @@ describe("remote analysis adapter", () => {
       },
       async listTree(_source, _treeSha, path) {
         if (!path) return { entries: rootEntries, truncated: false };
+        expanded += 1;
         return { entries: [{ path: `${path}/notes.txt`, type: "blob", sha: "blob-notes", size: 12 }], truncated: false };
       },
       async fetchBlob(_source, path) {
         return new TextEncoder().encode(path === "package.json" ? packageJson : "plain text\n");
       },
     };
-    const result = await getRemoteAnalysisSources({
+    // 树扩展不受 400 的上限约束：401 个目录都走了一遍。仓库里除了清单（认出了 node-api）只有文档，
+    // 清单不进提示词，所以最后没有可分析的源码。
+    await expect(getRemoteAnalysisSources({
       product: { id: 1, slug: "salesbuddy", name: "SalesBuddy" },
       repository: { owner: "gzhanlei", repo: "salesbuddy", revision },
       access: { token: "test-token" },
       scopeRoots: [{ path: "" }],
       backend,
-    }, { planner: createSlicePlanner({ now: Date.now }), budgets: analysisSliceBudgets });
-    expect(result.slice.metrics.treeExpansions).toBe(directories);
-    expect(result.sources.map((source) => source.path)).toEqual(["package.json"]);
+    }, { planner: createSlicePlanner({ now: Date.now }), budgets: analysisSliceBudgets })).rejects.toThrow("No supported source files found");
+    expect(expanded).toBe(directories);
   });
 
   it("plans whole-repository slices from one recursive listing without per-directory expansion", async () => {
@@ -326,7 +328,8 @@ describe("remote analysis adapter", () => {
       backend,
     }, { planner: createSlicePlanner({ now: Date.now }), budgets: analysisSliceBudgets });
     expect(result.slice.metrics.treeExpansions).toBe(0);
-    expect(result.sources.map((source) => source.path)).toEqual(["package.json", deepPath]);
+    expect(result.sources.map((source) => source.path)).toEqual([deepPath]);
+    expect(result.slice.metrics.profileMatches[0]?.profileId).toBe("node-api");
   });
 });
 

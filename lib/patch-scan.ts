@@ -1,4 +1,4 @@
-import { evidenceKind, isInfrastructureEvidence, isSchemaArtifact } from "./evidence";
+import { isImplementationSurfaceFile, isInfrastructureEvidence } from "./evidence";
 import type { ChangeFile } from "./code-hosting/types";
 
 /**
@@ -126,8 +126,9 @@ export function behavioralPathsOf(change: ChangeWithBehavioralPaths): ReadonlySe
 
 
 /** 路径层级：只有实现证据才进入行为判定。测试、文档、CI/基础设施与迁移脚本在此排除。 */
+// 2026-11-27 起口径在 lib/analysis-target.ts：测试、文档、迁移脚本、构建和部署文件、生成的代码、第三方副本都不承载行为。
 function carriesBehavior(path: string): boolean {
-  return evidenceKind(path) === "implementation" && !isInfrastructureEvidence(path) && !isSchemaArtifact(path);
+  return isImplementationSurfaceFile(path) && !isInfrastructureEvidence(path);
 }
 
 /** 内容层级：补丁里有注释、空白与格式重排以外的代码变动，才算行为变更。 */
