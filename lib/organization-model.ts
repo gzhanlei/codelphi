@@ -4,6 +4,7 @@ import { request as httpsRequest } from "node:https";
 import { BlockList, isIP, type LookupFunction } from "node:net";
 import { defaultExecute, type Execute } from "./db";
 import { requiredEnv } from "./env";
+import { completionsUrl } from "./llm-client";
 import { decryptSecret, encryptSecret } from "./secret-box";
 
 /**
@@ -26,10 +27,21 @@ import { decryptSecret, encryptSecret } from "./secret-box";
 /** 模型名最长 64 个字符：llm_call_receipts.model 就这么长，回执里记的是它。 */
 export const MODEL_NAME_MAX_LENGTH = 64;
 
+/**
+ * 同一个工作区的模型同时在途的请求数上限。租户自己的套餐常限制并发（比如按套餐档位给几个并发），
+ * 而分析管线的并发度是按 CoDelphi 自己的网关调的；多出来的请求排队等，不失败。
+ */
+export const ORGANIZATION_MODEL_CONCURRENCY = 2;
+
 export interface OrganizationModel {
   baseUrl: string;
   apiKey: string;
   model: string;
+}
+
+/** 绑定在一次干活范围里的配置：多带工作区号，在途上限按工作区算。 */
+export interface BoundOrganizationModel extends OrganizationModel {
+  organizationId: number;
 }
 
 export class ModelUrlError extends Error {
@@ -146,6 +158,11 @@ export function pinnedLookup(checked: readonly string[]): LookupFunction {
   };
 }
 
+/** 名字用出口的分类认得的那一个：超时和别的失败在回执里分开记。 */
+function timeoutError(timeoutMs: number): Error {
+  return Object.assign(new Error(`the model provider did not answer within ${timeoutMs} ms (timed out)`), { name: "TimeoutError" });
+}
+
 export interface TransportDeps {
   /** 测试注入。生产用 dns.lookup。 */
   lookup?: LookupFunction;
@@ -167,7 +184,7 @@ export async function postToModel(target: string, outgoing: { headers: Record<st
       response.on("end", () => resolve({ status: response.statusCode ?? 0, body: Buffer.concat(chunks).toString("utf8") }));
       response.on("error", reject);
     });
-    req.setTimeout(timeoutMs, () => req.destroy(new Error(`the model provider did not answer within ${timeoutMs} ms (timed out)`)));
+    req.setTimeout(timeoutMs, () => req.destroy(timeoutError(timeoutMs)));
     req.on("error", reject);
     req.end(outgoing.body);
   });
@@ -227,15 +244,15 @@ export async function deleteOrganizationModel(organizationId: number, execute: E
   return Number(Array.isArray(result) ? (result[0] as { affectedRows?: number })?.affectedRows : result?.affectedRows) > 0;
 }
 
-const scope = new AsyncLocalStorage<OrganizationModel>();
+const scope = new AsyncLocalStorage<BoundOrganizationModel>();
 
 /** 当前这次干活绑定的工作区模型。没有绑定就是 null。 */
-export function currentOrganizationModel(): OrganizationModel | null {
+export function currentOrganizationModel(): BoundOrganizationModel | null {
   return scope.getStore() ?? null;
 }
 
 /** 手里已经有解密后的配置时直接绑定（比如正在验证用户刚填的那一份）。 */
-export function bindOrganizationModel<T>(model: OrganizationModel, work: () => T): T {
+export function bindOrganizationModel<T>(model: BoundOrganizationModel, work: () => T): T {
   return scope.run(model, work);
 }
 
@@ -243,5 +260,50 @@ export function bindOrganizationModel<T>(model: OrganizationModel, work: () => T
 export async function withOrganizationModel<T>(organizationId: number, work: () => T, execute: Execute = defaultExecute): Promise<T> {
   const model = await loadOrganizationModel(organizationId, execute);
   if (!model) throw new ModelNotConfiguredError(organizationId);
-  return scope.run(model, work);
+  return scope.run({ ...model, organizationId }, work);
+}
+
+/** 配置里的服务地址拼成 chat-completions 的完整地址。和客户端用的是同一条规则。 */
+export function chatCompletionsUrlFor(baseUrl: string): string {
+  return completionsUrl(baseUrl);
+}
+
+/** 每个工作区一条队列：在途的到了上限，后来的等到有人完成。 */
+const inFlight = new Map<number, { active: number; waiting: Array<() => void> }>();
+
+function acquire(organizationId: number): Promise<void> | null {
+  const lane = inFlight.get(organizationId) ?? { active: 0, waiting: [] };
+  inFlight.set(organizationId, lane);
+  if (lane.active < ORGANIZATION_MODEL_CONCURRENCY) {
+    lane.active += 1;
+    return null;
+  }
+  return new Promise((resolve) => {
+    lane.waiting.push(resolve);
+  });
+}
+
+function release(organizationId: number): void {
+  const lane = inFlight.get(organizationId);
+  if (!lane) return;
+  const next = lane.waiting.shift();
+  if (next) next();
+  else {
+    lane.active -= 1;
+    if (lane.active <= 0) inFlight.delete(organizationId);
+  }
+}
+
+/**
+ * 服务端替工作区调它的模型：出口（lib/ai.ts）只经这里发请求。三道地址防护都在 postToModel 里，
+ * 这里加的是同一个工作区的在途上限。
+ */
+export async function callOrganizationModel(bound: BoundOrganizationModel, outgoing: { headers: Record<string, string>; body: string; timeoutMs?: number }, deps: TransportDeps = {}): Promise<{ status: number; body: string }> {
+  const waiting = acquire(bound.organizationId);
+  if (waiting) await waiting;
+  try {
+    return await postToModel(chatCompletionsUrlFor(bound.baseUrl), outgoing, deps);
+  } finally {
+    release(bound.organizationId);
+  }
 }

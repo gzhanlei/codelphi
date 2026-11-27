@@ -7,6 +7,7 @@ import { recordLlmCallReceipt, recordRequestScopedReceipt, type ChargeComponent,
 import type { OutputLanguage } from "./analysis-language";
 import type { PatchHunk } from "./spec-diff";
 import { withNoSourceOutput } from "./prompt-policy";
+import { callOrganizationModel, currentOrganizationModel, type BoundOrganizationModel } from "./organization-model";
 
 const evidenceSchema = z.object({
   path: z.string().min(1).max(500),
@@ -506,6 +507,10 @@ export interface StructuredCompletionDetails {
 }
 
 /**
+ * 服务端所有模型调用的唯一出口。两把 key 里选一把：
+ *   - 这次干活绑定了一个工作区自己的模型（lib/organization-model.ts），就用它的地址、key 和模型名。
+ *     产品负责人 2026-11-27 的决定：CoDelphi 不替用户付模型费用。
+ *   - 没有绑定，就用服务器自己的环境变量，发出的请求和以前逐字节相同。
  * 网关调用 + 回执记账的共享体（契约 M0-T2 → Task 4 扩展）：超时/失败/截断各落一条记录；
  * 详细版额外返回 usage/providerRequestId/finishReason 并实测 duration_ms（新增观测，不回填历史）。
  * batch/repair 请求经 billing.requestKey 携带实际请求身份 → 回执走 insert-or-reconcile（冲突上报）；
@@ -513,7 +518,8 @@ export interface StructuredCompletionDetails {
  * 再解析（§23.3 C3.4）；legacy wrapper 保持抛 AiOutputTruncatedError 的既有契约。
  */
 export async function requestStructuredCompletionDetailed(messages: Array<{ role: string; content: string }>, billing?: LlmBillingContext): Promise<StructuredCompletionDetails> {
-  const model = requiredEnv("AI_MODEL");
+  const bound = currentOrganizationModel();
+  const model = bound?.model ?? requiredEnv("AI_MODEL");
   const startedAtMs = Date.now();
   const recordReceipt = async (outcome: "success" | "failed" | "timeout", usageRaw: unknown | null, providerRequestId: string | null): Promise<void> => {
     if (!billing) return;
@@ -527,6 +533,8 @@ export async function requestStructuredCompletionDetailed(messages: Array<{ role
       attemptId: billing.attemptId ?? null,
       callStage: billing.callStage ?? null,
       model,
+      // 用的是工作区自己的 key 时回执里写明，报表才分得清是谁的费用。
+      ...(bound ? { modelSource: "organization" as const } : {}),
       outcome,
       usageRaw,
       providerRequestId,
@@ -542,7 +550,9 @@ export async function requestStructuredCompletionDetailed(messages: Array<{ role
   };
   let response: Response;
   try {
-    response = await fetch(chatCompletionsUrl(), {
+    response = bound
+      ? await workspaceModelResponse(bound, model, messages)
+      : await fetch(chatCompletionsUrl(), {
       method: "POST",
       headers: {
         Authorization: `Bearer ${requiredEnv("AI_API_KEY")}`,
@@ -587,6 +597,19 @@ export async function requestStructuredCompletionDetailed(messages: Array<{ role
   }
   await recordReceipt("success", usage, requestId);
   return { content, usageRaw: usage, providerRequestId: requestId, finishReason };
+}
+
+/**
+ * 工作区自己的模型的应答，包成和 fetch 一样的形状：后面的处理、报错和回执都走同一段代码。
+ * 不发 temperature：思考型模型常拒绝它（2026-11-27 Kimi 的 coding 接口对 0 回 400）。CoDelphi 自己的网关照旧写 0。
+ */
+async function workspaceModelResponse(bound: BoundOrganizationModel, model: string, messages: Array<{ role: string; content: string }>): Promise<Response> {
+  const answer = await callOrganizationModel(bound, {
+    headers: { Authorization: `Bearer ${bound.apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ model, messages, max_tokens: 16_000, stream: false }),
+    timeoutMs: Number(process.env.AI_TIMEOUT_MS ?? 180_000),
+  });
+  return new Response(answer.body, { status: answer.status });
 }
 
 /** legacy 契约保持不变：只返回 content，length 抛 AiOutputTruncatedError（回执已由详细版落库）。 */

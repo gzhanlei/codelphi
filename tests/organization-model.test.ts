@@ -3,8 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { decryptSecret, encryptSecret } from "../lib/secret-box";
 import {
   ModelUrlError,
+  ORGANIZATION_MODEL_CONCURRENCY,
   assertPublicModelUrl,
   bindOrganizationModel,
+  callOrganizationModel,
+  chatCompletionsUrlFor,
   currentOrganizationModel,
   deleteOrganizationModel,
   describeOrganizationModel,
@@ -213,7 +216,135 @@ describe("sending a request to a workspace's model", () => {
       });
       return req;
     }) as never;
-    await expect(postToModel(target, { ...payload, timeoutMs: 10 }, { lookup: lookupAnswering([["8.8.8.8", 4]]), request })).rejects.toThrow(/timed out/);
+    await expect(postToModel(target, { ...payload, timeoutMs: 10 }, { lookup: lookupAnswering([["8.8.8.8", 4]]), request })).rejects.toMatchObject({ name: "TimeoutError", message: expect.stringContaining("timed out") });
+  });
+});
+
+describe("calling a workspace's model from the server's single exit", () => {
+  const bound = { organizationId: 3, baseUrl: "https://api.kimi.com/coding/v1", apiKey: "sk-kimi", model: "k3-256k" };
+  const outgoing = { headers: { Authorization: "Bearer sk-kimi" }, body: '{"model":"k3-256k"}', timeoutMs: 5_000 };
+
+  it("joins the chat-completions path the same way the client does", () => {
+    expect(chatCompletionsUrlFor("https://api.kimi.com/coding/v1")).toBe("https://api.kimi.com/coding/v1/chat/completions");
+    expect(chatCompletionsUrlFor("https://gateway.example/v1/")).toBe("https://gateway.example/v1/chat/completions");
+    expect(chatCompletionsUrlFor("https://gateway.example")).toBe("https://gateway.example/v1/chat/completions");
+    expect(chatCompletionsUrlFor("https://gateway.example/v1/chat/completions")).toBe("https://gateway.example/v1/chat/completions");
+  });
+
+  it("keeps at most two calls to one workspace's model in flight and makes the rest wait", async () => {
+    expect(ORGANIZATION_MODEL_CONCURRENCY).toBe(2);
+    // 每个请求由测试手动放行：放行一个，排着的下一个才发出去。
+    const respond: Array<() => void> = [];
+    const request = vi.fn((_url: URL, _options: Record<string, unknown>, onResponse: (response: unknown) => void) => {
+      const req = Object.assign(new EventEmitter(), {
+        setTimeout: () => req,
+        destroy: () => req,
+        end: () => {
+          respond.push(() => {
+            queueMicrotask(() => {
+              const response = Object.assign(new EventEmitter(), { statusCode: 200, headers: {} });
+              onResponse(response);
+              response.emit("data", Buffer.from("{}"));
+              response.emit("end");
+            });
+          });
+          return req;
+        },
+      });
+      return req;
+    }) as never;
+    const deps = { lookup: lookupAnswering([["8.8.8.8", 4]]), request };
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
+    const pending = [1, 2, 3, 4].map((index) => callOrganizationModel(bound, outgoing, deps).then(() => index));
+    await tick();
+    expect(request).toHaveBeenCalledTimes(2);
+    respond.shift()!();
+    await tick();
+    expect(request).toHaveBeenCalledTimes(3);
+    respond.shift()!();
+    respond.shift()!();
+    await tick();
+    // 前两个完成后，第四个才发出去；放行它，四个全部结束。
+    expect(request).toHaveBeenCalledTimes(4);
+    respond.shift()!();
+    expect(await Promise.all(pending)).toEqual([1, 2, 3, 4]);
+    // 队列空了之后不留状态：下一次调用直接发出。
+    respond.length = 0;
+    const next = callOrganizationModel(bound, outgoing, deps);
+    await tick();
+    expect(request).toHaveBeenCalledTimes(5);
+    respond.shift()!();
+    await next;
+  });
+
+  it("keeps counting the call that is still in flight when the queue has emptied", async () => {
+    const respond: Array<() => void> = [];
+    const request = vi.fn((_url: URL, _options: Record<string, unknown>, onResponse: (response: unknown) => void) => {
+      const req = Object.assign(new EventEmitter(), {
+        setTimeout: () => req,
+        destroy: () => req,
+        end: () => {
+          respond.push(() => {
+            queueMicrotask(() => {
+              const response = Object.assign(new EventEmitter(), { statusCode: 200, headers: {} });
+              onResponse(response);
+              response.emit("data", Buffer.from("{}"));
+              response.emit("end");
+            });
+          });
+          return req;
+        },
+      });
+      return req;
+    }) as never;
+    const deps = { lookup: lookupAnswering([["8.8.8.8", 4]]), request };
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
+    const first = [1, 2].map((index) => callOrganizationModel(bound, outgoing, deps).then(() => index));
+    await tick();
+    // 第一个完成、没有人排队：在途从 2 变成 1，第二个还在路上。
+    respond.shift()!();
+    await tick();
+    // 这时再来三个：只能再发一个，另外两个要等第二个和第三个完成。
+    const later = [3, 4, 5].map((index) => callOrganizationModel(bound, outgoing, deps).then(() => index));
+    await tick();
+    expect(request).toHaveBeenCalledTimes(3);
+    // 依次放行第二个、第三个、第四个、第五个：每放行一个，排着的下一个才发出去。
+    for (let index = 0; index < 4; index += 1) {
+      respond.shift()!();
+      await tick();
+    }
+    expect(request).toHaveBeenCalledTimes(5);
+    expect(await Promise.all([...first, ...later])).toEqual([1, 2, 3, 4, 5]);
+    expect(request).toHaveBeenCalledTimes(5);
+  });
+
+  it("lets a failure free the slot it held", async () => {
+    const request = vi.fn(() => {
+      const req = Object.assign(new EventEmitter(), {
+        setTimeout: (_ms: number, callback: () => void) => {
+          queueMicrotask(callback);
+          return req;
+        },
+        destroy: (error: Error) => {
+          queueMicrotask(() => req.emit("error", error));
+          return req;
+        },
+        end: () => req,
+      });
+      return req;
+    }) as never;
+    const deps = { lookup: lookupAnswering([["8.8.8.8", 4]]), request };
+    const failing = () => callOrganizationModel({ ...bound, baseUrl: "http://10.0.0.5/v1" }, outgoing, deps).catch(() => "refused");
+    for (let index = 0; index < ORGANIZATION_MODEL_CONCURRENCY + 2; index += 1) expect(await failing()).toBe("refused");
+    const timeout = callOrganizationModel({ ...bound, baseUrl: "https://api.example/v1" }, { ...outgoing, timeoutMs: 5 }, deps).catch((error: unknown) => (error as Error).name);
+    expect(await timeout).toBe("TimeoutError");
+  });
+
+  it("does the same three checks as postToModel, so a bad address never reaches the network", async () => {
+    const { request } = { request: vi.fn() as never };
+    await expect(callOrganizationModel({ ...bound, baseUrl: "http://10.0.0.5/v1" }, outgoing, { lookup: lookupAnswering([["8.8.8.8", 4]]), request })).rejects.toThrow(ModelUrlError);
+    await expect(callOrganizationModel({ ...bound, baseUrl: "https://api.example/v1" }, outgoing, { lookup: lookupAnswering([["10.0.0.5", 4]]), request })).rejects.toThrow(/^private_address/);
+    expect(request).not.toHaveBeenCalled();
   });
 });
 
@@ -272,7 +403,7 @@ describe("keeping a workspace's model configuration", () => {
 });
 
 describe("binding a workspace's model to the work the server does for it", () => {
-  const model = { baseUrl: "https://api.example/v1", apiKey: "sk-kimi-secret", model: "k3-256k" };
+  const model = { organizationId: 3, baseUrl: "https://api.example/v1", apiKey: "sk-kimi-secret", model: "k3-256k" };
 
   it("makes the workspace's model visible inside the work, across awaits, and not outside it", async () => {
     const db = database({ ...stored, api_key_encrypted: encryptedOf("sk-kimi-secret") });
