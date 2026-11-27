@@ -1,6 +1,6 @@
 import type { StructuredCompletionMessage } from "../lib/llm-client";
 import { describe, expect, it, vi } from "vitest";
-import { analyzeBehavioralGroup, analyzeWithAI, behavioralDescribePrompt, behavioralJudgmentPrompt, buildAnalysisMessages, capEvidence, featureContinuitySection, incrementalScopeSection, capScenariosPerFeature, parseAnalysisContent, parseBehavioralDescriptions, specAnchoringSection } from "../lib/ai";
+import { analyzeBehavioralGroup, analyzeWithAI, behavioralDescribePrompt, behavioralJudgmentPrompt, buildAnalysisMessages, capEvidence, featureContinuitySection, incrementalScopeSection, capScenariosPerFeature, parseAnalysisContent, parseBehavioralContent, parseBehavioralDescriptions, specAnchoringSection } from "../lib/ai";
 
 const result = {
   product: { description: "统一认证与产品知识中心。", evidence: [{ path: "app/auth/login/route.ts", startLine: 1 }] },
@@ -316,6 +316,12 @@ describe("behavioral enumeration two-step extraction (W0-9)", () => {
     expect(parsed.changes[0].evidence[0].path).toBe("superset/utils/oauth2.py");
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
+  });
+
+  it("fills an empty release title with the behavioral placeholder", () => {
+    const parsed = parseBehavioralContent(JSON.stringify({ release: { title: "", summary: "行为面枚举补充" }, features: [], changes: [] }), targets);
+    expect(parsed.release.title).toBe("行为面枚举");
+    expect(parsed.features).toEqual([]);
   });
 });
 

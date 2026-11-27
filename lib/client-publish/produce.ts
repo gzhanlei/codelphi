@@ -210,7 +210,11 @@ async function generateFlows(result: AnalysisResult, client: StructuredCompletio
         flows.push(entry);
       } catch (error) {
         // 校验不过的图不交；服务端那一栏按现有的空态解释。模型故障同样略过，不让一张图拖垮整次发布。
-        if (!(error instanceof FlowValidationError)) console.warn("[client-publish] flow graph skipped", { feature: feature.name, message: error instanceof Error ? error.message.slice(0, 160) : String(error) });
+        console.warn("[client-publish] flow graph skipped", {
+          feature: feature.name,
+          code: error instanceof FlowValidationError ? error.code : error instanceof Error ? error.name : "unknown",
+          message: error instanceof Error ? error.message.slice(0, 160) : String(error),
+        });
       }
     }
   }));

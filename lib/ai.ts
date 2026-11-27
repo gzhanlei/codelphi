@@ -806,6 +806,8 @@ export function parseBehavioralContent(content: string, targets: BehavioralTarge
     };
   }
   if (!json.release || typeof json.release !== "object") json.release = { title: "行为面枚举", summary: "行为面枚举补充（合并层只取分区首趟的 release，占位不进规格）。" };
+  const release = json.release as { title?: unknown };
+  if (typeof release.title !== "string" || release.title.trim() === "") release.title = "行为面枚举";
   if (!Array.isArray(json.features)) json.features = [];
   if (!Array.isArray(json.changes)) json.changes = [];
   const behavioralSchema = analysisSchema.extend({ features: z.array(analysisSchema.shape.features.element).max(50) });

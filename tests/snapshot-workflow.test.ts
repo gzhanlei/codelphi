@@ -73,6 +73,31 @@ describe("snapshot preparation and finalization", () => {
     await target.cleanup();
   });
 
+  it("logs the presentation stage and error before falling back", async () => {
+    const target = await resolveSnapshotTarget(await repository());
+    const prepared = await prepareSnapshotAnalysis({
+      backend: target.backend,
+      identity: target.identity,
+      productName: target.identity.name,
+      outputLanguage: "en",
+    });
+    const execution = await executeSnapshotWorkOrder(prepared.workOrders[0], { client: { complete: vi.fn(async () => content) }, previousFeatureNames: [] });
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const analysis = await finalizeSnapshotAnalysis(prepared, [execution], {
+        modelName: "Host current model",
+        client: { complete: vi.fn(async () => { throw new Error("model returned malformed JSON"); }) },
+      });
+      expect(analysis.presentation?.status).toBe("fallback");
+      const logged = warning.mock.calls.map((call) => call.map((item) => typeof item === "string" ? item : JSON.stringify(item)).join(" ")).join("\n");
+      expect(logged).toContain("single_pass");
+      expect(logged).toContain("model returned malformed JSON");
+    } finally {
+      warning.mockRestore();
+      await target.cleanup();
+    }
+  });
+
   it("rejects missing or invalid results instead of producing a report", async () => {
     const target = await resolveSnapshotTarget(await repository());
     const prepared = await prepareSnapshotAnalysis({ backend: target.backend, identity: target.identity, productName: target.identity.name, outputLanguage: "en" });
